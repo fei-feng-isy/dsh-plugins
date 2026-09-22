@@ -123,17 +123,18 @@ pnpm build:dsh base       # 只构建 base（tsc；不出插件产物、不跑�
   自己的脚本）。
 - 根 `scripts/release-check.mjs` 的**可发布集合**加一行。那里刻意写死包名：可发布面是要被审查的，
   不该被自动发现悄悄放大。
-- 根 `scripts/boundary-guard.mjs` 的 `HALVES` / `ALLOWED`（目前按 mem/work 两半写死；新插件要么加
-  进去，要么先把这道门禁也改成发现式 —— 后者是更彻底的做法，但那是另一个改动）。
 - 插件自己那一份：`packages/plugin/package.json` 里 base 是 required peer（`^0.1.0`）+ 同版本
   `devDependencies`、自己的 `build:dsh`、`scripts/mount-smoke.mjs`（`proof:base-swap --mount` 要求）。
 - 依赖版本一律写进根 `pnpm-workspace.yaml` 的 `catalog:`，各 `package.json` 只写 `"catalog:"`。
+
+`pnpm guard` **不在**这个清单里：它按同一份发现结果扫每一棵树，新插件自动适用四条规则（不许 import
+别棵树的包、相对路径不许出树、产物里不许按值 import base、`@avantf/*` 只能是本树的包）。
 
 ## 要跑的门禁
 
 | 命令 | 它证明什么 |
 | --- | --- |
-| `pnpm guard`（`scripts/boundary-guard.mjs`） | `mem/` 与 `work/` 从不互相 import（也不许经相对路径探进另一半）；只有 base 和各自半边的包可达。`base/plugin-base/test/boundary.spec.ts` 是权威的 vitest 镜像 —— 规则变了**两处**都要改 |
+| `pnpm guard`（`scripts/boundary-guard.mjs`） | 每个**被发现**的插件树只够得到 base 与自己的包：①不许 import 别棵树的包；②相对路径不许走出本树（唯一例外是 `scripts/lib/`）；③会被打进产物的文件不许**按值** import base（只能 `import type` / `typeof import(…)`，测试不受此限）；④其余 `@avantf/*` 必须是本树的包。**实现只有一份**：`base/plugin-base/test/boundary.spec.ts` 直接 spawn 这个脚本并断言它扫到了每一棵树，不再各写一份规则 |
 | `pnpm release:check`（`scripts/release-check.mjs`） | 可发布集合恰好是那三个、其余都是 private；peer 是 required 且范围够宽；base peer 的 zod 是 `>=4.4.3 <5`；`catalog.zod` 是 4.6.5；没有 `link:`/`file:`；registry 上已有兼容的 base |
 | `pnpm proof:base-swap`（`scripts/prove-base-swap.mjs`） | 构建出的插件产物里既没有静态 base import 也没有内联的 kit 声明，且插件**构建产物**的 bootstrap 能加载一份**被替换**的 base 并从它取提示词读写与根解析，产物字节一致 |
 | `pnpm proof:base-swap:mount` | 同上，外加两个插件针对构建产物 + 工作区 base 的完整 Cordis 挂载冒烟 |
