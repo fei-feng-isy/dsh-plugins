@@ -1,185 +1,172 @@
-# AGENTS.md — the merged `dsh-plugins` workspace
+# AGENTS.md — 合并后的 `dsh-plugins` 工作区
 
-`base/`, `mem/` and `work/` are ONE repository. They used to be four (`dsh-envinit`, `dsh-compat`,
-`avantf-mem`, `avantf-work`); this file states what the merge guarantees and what a change here must
-not break. Each subtree keeps its own `AGENTS.md`/`DESIGN.md` for its own domain — read this one first.
+`base/`、`mem/`、`work/` 是**一个**仓库。它们从前是四个（`dsh-envinit`、`dsh-compat`、
+`avantf-mem`、`avantf-work`）；这份文件说明合并保证了什么、以及这里的改动**不能**破坏什么。
+每个子树仍保留自己的 `AGENTS.md`/`DESIGN.md` 管自己的领域 —— 先读这一份。
 
-## The publish surface: exactly three packages
+## 发布面：恰好三个包
 
-| directory | package | what it is |
+| 目录 | 包 | 是什么 |
 | --- | --- | --- |
-| `base/plugin-base` | `@avantf/dsh-plugin-base` | envinit (startup environment initialisation) **+** the host compatibility gate **+** the shared kit — ONE package, ONE release |
-| `mem/packages/plugin` | `@avantf/dsh-mem` | the memory/knowledge DSH plugin |
-| `work/packages/plugin` | `@avantf/dsh-work` | the work-tree DSH plugin |
+| `base/plugin-base` | `@avantf/dsh-plugin-base` | envinit（启动期环境初始化）**+** 宿主兼容性门禁 **+** 共享 kit —— 一个包、一次发版 |
+| `mem/packages/plugin` | `@avantf/dsh-mem` | 记忆/知识 DSH 插件 |
+| `work/packages/plugin` | `@avantf/dsh-work` | 工作树 DSH 插件 |
 
-Every other workspace package (`@avantf/mem-*`, `@avantf/work-core`, the CLI/MCP) is `private: true`
-and is inlined into the plugin that uses it. `scripts/release-check.mjs` fails if the publishable set
-is anything other than those three.
+其余所有工作区包（`@avantf/mem-*`、`@avantf/work-core`、CLI/MCP）都是 `private: true`，会被内联进
+使用它的那个插件。`scripts/release-check.mjs` 会在可发布集合不是这三个时失败。
 
-- The **old** packages `@avantf/dsh-envinit` and `@avantf/dsh-compat` are dead: their code lives in
-  the base, they receive no new versions, and nothing may name them.
-- A plugin depends on the base as a **REQUIRED peer** with a range wide enough to take a base patch or
-  minor release (`^0.1.0`). It also declares the same base in `devDependencies` (`^0.1.3`) so
-  `pnpm install` gives the build something to resolve; `linkWorkspacePackages: true` in the root
-  `pnpm-workspace.yaml` makes that a link to `base/`, never a download.
-- The host/profile installs `@avantf/dsh-plugin-base` **and** the two plugins explicitly
-  (`autoInstallPeers: false`). An npm-style installer that auto-installs peers gets the base
-  automatically.
-- **`zod` resolves exactly once.** One root `catalog: zod: 4.6.5` (the version the installed dsh
-  ships). The base's own peer stays `>=4.4.3 <5`, so the same base serves this workspace and the
-  host's 4.6.5. Bump the catalog line, never a `package.json`.
-- **Publish order: base → plugins.** A plugin's required peer must already exist on the registry;
-  `scripts/release-check.mjs` asserts a published base version inside each plugin's peer range (use
-  `--allow-missing-base` only for a pre-publication dry run). No tarball may carry a `link:`/`file:`
-  specifier.
+- **旧**包 `@avantf/dsh-envinit` 与 `@avantf/dsh-compat` 已死：代码住在 base 里，不再有新版本，
+  任何地方都不许再提它们的名字。
+- 插件把 base 当作 **REQUIRED peer** 依赖，范围要宽到能吃下一个 base 的 patch 或 minor
+  （`^0.1.0`）。它同时在 `devDependencies` 里声明同一个 base（`^0.1.3`），好让 `pnpm install`
+  有东西可解析；根 `pnpm-workspace.yaml` 里的 `linkWorkspacePackages: true` 让这一条指向
+  `base/`，绝不会变成下载。
+- 宿主/profile **显式**安装 `@avantf/dsh-plugin-base` **和**两个插件
+  （`autoInstallPeers: false`）。会自动装 peer 的 npm 式安装器则会顺带把 base 装上。
+- **`zod` 只解析出一份。** 根 catalog 一行 `zod: 4.6.5`（已安装 dsh 自带的版本）。base 自己的
+  peer 保持 `>=4.4.3 <5`，于是同一份 base 既服务本工作区、也服务宿主的 4.6.5。改 catalog 那一行，
+  永远不要改 `package.json`。
+- **发布顺序：base → 插件。** 插件的 required peer 必须已经在 registry 上；
+  `scripts/release-check.mjs` 会断言插件 peer 范围内存在一个已发布的 base 版本
+  （只在发布前试跑时用 `--allow-missing-base`）。任何 tarball 都不许带 `link:`/`file:` 说明符。
 
-## The three family hard constraints
+## 家族的三条硬约束
 
-1. **Provisioned code is never bundled and never statically imported.** A plugin's only static
-   reference to the base is the zero-dependency bootstrap vendored into
-   `packages/plugin/src/envinit-bootstrap.js` and INLINED into the bundle. A static
-   `import ... from '@avantf/dsh-plugin-base'` — or a literal dynamic `import('@avantf/dsh-plugin-base')`
-   — would make the plugin module fail to load whenever the base is absent, which is exactly the
-   failure a plugin must never have.
-2. **The base is provided by the framework/host and loaded dynamically by file URL.** At startup the
-   inlined bootstrap resolves it with
-   `createRequire(import.meta.url).resolve('@avantf/dsh-plugin-base/package.json')` and `import()`s the
-   result, then checks the version against the inlined `supportedRange`. Absent or out-of-range → one
-   `envinit: WARNING` and the plugin mounts anyway.
-3. **Publishing is ordered and path-free.** base first, then the plugins; `link:`/`file:` never appears
-   in a published manifest.
+1. **被 provision 的代码既不打包、也不静态 import。** 插件对 base 的唯一静态引用，是 vendor 进
+   `packages/plugin/src/envinit-bootstrap.js` 并**内联**进产物的零依赖 bootstrap。一句静态的
+   `import ... from '@avantf/dsh-plugin-base'` —— 或者字面量的动态
+   `import('@avantf/dsh-plugin-base')` —— 都会让 base 缺席时插件模块加载失败，而那正是插件
+   **绝不能**有的失败。
+2. **base 由框架/宿主提供，并按 file URL 动态加载。** 启动时内联的 bootstrap 用
+   `createRequire(import.meta.url).resolve('@avantf/dsh-plugin-base/package.json')` 解析出它，再
+   `import()` 结果，然后拿内联的 `supportedRange` 校验版本。缺失或超出范围 → 一条
+   `envinit: WARNING`，插件照常挂载。
+3. **发布有序、路径干净。** 先 base，后插件；已发布的 manifest 里永远不出现 `link:`/`file:`。
 
-## The one judgement rule: can ONE base release fix this?
+## 唯一的判断准则：这条知识能不能靠一次 base 发版修好？
 
-Every time you decide whether a piece of knowledge goes into `base/` (consumed at runtime) or stays in
-a plugin, ask exactly this: **"must this knowledge be fixable by one base release?"**
+每次你要决定一块知识放 `base/`（运行时消费）还是留在插件里，就问这一句：
+**“这条知识必须能靠一次 base 发版修好吗？”**
 
-- **Yes → the base owns it and the plugin takes it off the loaded base module at RUNTIME.** This is why
-  the kit is not a private package and plugins must not inline it. Runtime-from-base today:
-  - the compatibility gate: rules, probes, verdict, report, post-registration verification
-    (`runtimeFromCompat(framework)`),
-  - the envinit provisioner: `createProvisioner`, the three provider factories,
-    `ITEM_SCHEMA_VERSION` and the item kinds,
-  - the prompt-file layer `PromptFiles` (both plugins construct `kit.PromptFiles` off the loaded base).
-- **A deliberate mirror, pinned by a test.** Family/data path resolution has TWO copies and must keep
-  both: `base/plugin-base/src/kit/family.ts` is the canonical one and work's `promptDir` takes
-  `kit.resolveDataHome` off the loaded base, while `@avantf/mem-contract`'s `family.ts` keeps its own
-  dependency-free copy because the CLI and MCP server have no DSH host and never load the base. A test
-  pins the copies together. This is the ONE place "a single base release is enough" does not hold —
-  changing the convention is a base release **and** a mem-engine change — and it is deliberate: the
-  base-less paths must work.
-- **No → it may stay in the plugin, but say so here and accept that changing it needs a plugin
-  release.** The documented plugin-local knowledge:
-  - the Typert `strict` codec envelope and the `<pkg>#<namespace>/<method>:<field>` type-symbol
-    helpers (`mem/packages/plugin/src/remote.ts`, `work/packages/plugin/src/wire.ts`). They are a few
-    lines mirroring the generator's convention and are assembled at module load; the descriptor
-    assembly genuinely differs per plugin (work adds `stream`/cancellation; mem has an
-    `acceptsUndefined` parameter helper). **The base kit also exposes `strictCodec` / `endpointId` /
-    `fieldSymbol` / `resultSymbol` as the canonical copies, so a plugin MAY take them off the loaded
-    module — but today these two keep their own, and changing THEM needs a plugin release.**
-  - the plugin logger. It is built in `apply` BEFORE the base is resolved (the base loader itself
-    needs a sink to report into), so it cannot come off the loaded module; `base/kit` still exports
-    `createPluginLogger` as the canonical copy for new plugins.
-  - each plugin's compat SPEC and envinit item list: which services/methods it calls, which dsh
-    packages identify the host, its wire schema names, its events, its Chinese report strings, and its
-    `mem:pandoc` / `mem:model` / `work:*` items. Only that plugin knows them.
-  - each plugin's built-in default prompt bodies and its client/UI half, and the base-less fallbacks
-    (the `resolveDataHome` default parameter in work's `prompt.ts`, the default section texts in mem's
-    `prompt.ts`). A fallback is not a second implementation of record: it only runs when the base is
-    absent.
+- **能 → base 拥有它，插件在运行时从加载到的 base 模块上取。** 这就是 kit 不是一个私有包、
+  插件也不许内联它的原因。今天从 base 运行时取得的有：
+  - 兼容性门禁：规则、探针、裁决、报告、注册后校验（`runtimeFromCompat(framework)`），
+  - envinit provisioner：`createProvisioner`、三个 provider 工厂、`ITEM_SCHEMA_VERSION`
+    以及各 item 种类，
+  - 提示词文件层 `PromptFiles`（两个插件都从加载到的 base 上构造 `kit.PromptFiles`）。
+- **一处刻意的镜像，由测试钉住。** 家族/数据路径解析有**两份**副本，且必须都留着：
+  `base/plugin-base/src/kit/family.ts` 是正本，work 的 `promptDir` 从加载到的 base 上取
+  `kit.resolveDataHome`；而 `@avantf/mem-contract` 的 `family.ts` 保留自己那份无依赖副本，
+  因为 CLI 与 MCP server 没有 DSH 宿主、从不加载 base。有一个测试把两份副本钉在一起。
+  这是“一次 base 发版就够了”**唯一**不成立的地方 —— 改这个约定等于一次 base 发版**加**一次
+  mem 引擎改动 —— 而这是刻意的：无 base 的路径必须能用。
+- **不能 → 它可以留在插件里，但要在这里写明，并接受改动它需要一次插件发版。** 已记录的
+  插件本地知识：
+  - Typert 的 `strict` codec 信封，以及 `<pkg>#<namespace>/<method>:<field>` 类型符号辅助
+    （`mem/packages/plugin/src/remote.ts`、`work/packages/plugin/src/wire.ts`）。它们只是镜像
+    生成器约定的几行，且在模块加载时组装；描述符组装本身两个插件确实不同（work 多出
+    `stream`/取消；mem 多出 `acceptsUndefined` 参数辅助）。**base kit 也导出了
+    `strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol` 作为正本副本，所以插件
+    *可以*从加载到的模块上取 —— 但今天这两处各留各的，改**它们**需要一次插件发版。**
+  - 插件 logger。它在 `apply` 里、base 解析**之前**就建好了（base 加载器自己需要一个 sink 来
+    上报），所以它不可能来自加载到的模块；`base/kit` 仍然导出 `createPluginLogger` 作为新插件
+    的正本副本。
+  - 各插件的 compat SPEC 与 envinit item 清单：它调用哪些 service/方法、哪些 dsh 包标识宿主、
+    它的 wire schema 名、它的事件、它的中文报告字符串，以及它的
+    `mem:pandoc` / `mem:model` / `work:*` item。只有那个插件自己知道。
+  - 各插件内置的默认提示词正文与其 client/UI 半边，以及无 base 时的兜底（work `prompt.ts` 里
+    `resolveDataHome` 的默认参数、mem `prompt.ts` 里的默认 section 文本）。兜底不是第二份权威
+    实现：它只在 base 缺席时运行。
 
-## Degradation when the base is missing (never a refusal)
+## base 缺失时的降级（绝不拒绝挂载）
 
-| capability | base absent |
+| 能力 | base 缺席时 |
 | --- | --- |
-| prompt-file layer | the plugin uses its OWN built-in default bodies (its content, not a copy of the kit) |
-| compatibility gate | a `compat:` WARNING, the gate is skipped. Judgement semantics never change: only a PROVEN incompatibility refuses the mount, "cannot tell" is a note, a version difference is only a warning, nothing throws |
-| resource provisioning (pandoc/model) | the legacy `@avantf/mem-provision` / legacy-tools-dir path |
-| tools, service, Remote, UI faces | unaffected — the plugin mounts in full |
+| 提示词文件层 | 插件用**自己**内置的默认正文（是它的内容，不是 kit 的副本） |
+| 兼容性门禁 | 一条 `compat:` WARNING，门禁跳过。裁决语义永不变：只有**被证实**的不兼容才拒绝挂载，“说不清”只是一条备注，版本差异只是警告，什么都不抛 |
+| 资源 provision（pandoc/model） | 旧的 `@avantf/mem-provision` / legacy-tools-dir 路径 |
+| 工具、service、Remote、UI 各个面 | 不受影响 —— 插件完整挂载 |
 
-## Gates to run
+## 要跑的门禁
 
-| command | what it proves |
+| 命令 | 它证明什么 |
 | --- | --- |
-| `pnpm guard` (`scripts/boundary-guard.mjs`) | `mem/` and `work/` never import each other (or a relative path into the other half); only base and each half's own packages are reachable. `base/plugin-base/test/boundary.spec.ts` is the authoritative vitest mirror — change BOTH when a rule changes |
-| `pnpm release:check` (`scripts/release-check.mjs`) | publishable set is exactly the three, the others private; peer ranges are required and wide enough; base peer zod `>=4.4.3 <5`; `catalog.zod` 4.6.5; no `link:`/`file:`; the registry already carries a compatible base |
-| `pnpm proof:base-swap` (`scripts/prove-base-swap.mjs`) | the built plugin bundle contains neither a static base import nor an inlined kit declaration, and the plugin's BUILT bootstrap loads a SWAPPED base and takes prompt read/write + root resolution from it, with the artifact byte-identical |
-| `pnpm proof:base-swap:mount` | the same, plus both plugins' full Cordis mount smokes against the built plugin + workspace base |
-| `pnpm release:check:base` / `:mem` / `:work` | each package's own typecheck → build → test → pack gate |
+| `pnpm guard`（`scripts/boundary-guard.mjs`） | `mem/` 与 `work/` 从不互相 import（也不许经相对路径探进另一半）；只有 base 和各自半边的包可达。`base/plugin-base/test/boundary.spec.ts` 是权威的 vitest 镜像 —— 规则变了**两处**都要改 |
+| `pnpm release:check`（`scripts/release-check.mjs`） | 可发布集合恰好是那三个、其余都是 private；peer 是 required 且范围够宽；base peer 的 zod 是 `>=4.4.3 <5`；`catalog.zod` 是 4.6.5；没有 `link:`/`file:`；registry 上已有兼容的 base |
+| `pnpm proof:base-swap`（`scripts/prove-base-swap.mjs`） | 构建出的插件产物里既没有静态 base import 也没有内联的 kit 声明，且插件**构建产物**的 bootstrap 能加载一份**被替换**的 base 并从它取提示词读写与根解析，产物字节一致 |
+| `pnpm proof:base-swap:mount` | 同上，外加两个插件针对构建产物 + 工作区 base 的完整 Cordis 挂载冒烟 |
+| `pnpm release:check:base` / `:mem` / `:work` | 各包自己的 typecheck → build → test → pack 门禁 |
 
-### After changing ANY shared code under `base/**`
+### 改动 `base/**` 下任何共享代码之后
 
-Regress **both** plugins, because a base change can break either one and nothing in the base's own
-tests exercises a plugin's mount:
+要把**两个**插件都回归一遍，因为 base 的改动可能弄坏任意一个，而 base 自己的测试里没有任何一项
+会走到插件的挂载：
 
 ```
-# mem (inside mem/)
+# mem（在 mem/ 里）
 pnpm build:dsh && node scripts/mount-smoke.mjs
-# work (inside work/)
+# work（在 work/ 里）
 pnpm release:check && node scripts/mount-smoke.mjs
 ```
 
-From the repository root the same two lines are
-`pnpm build:dsh:mem && node mem/scripts/mount-smoke.mjs` and
-`pnpm release:check:work && node work/scripts/mount-smoke.mjs`.
-`pnpm proof:base-swap:mount` runs both mount smokes as one gate; the commands above are what to run
-when iterating on a single plugin.
+从仓库根看，同样两行是
+`pnpm build:dsh:mem && node mem/scripts/mount-smoke.mjs` 与
+`pnpm release:check:work && node work/scripts/mount-smoke.mjs`。
+`pnpm proof:base-swap:mount` 把两个挂载冒烟当作一个门禁一起跑；上面那两行是只迭代单个插件时用的。
 
-### Where the scripts live, and why some were NOT merged
+### 脚本住在哪里，以及为什么有些脚本**没有**被合并
 
-- `scripts/` (repo root) owns everything that is about the WORKSPACE: `release-check.mjs` (the
-  publishable set, the base-before-plugins order, one `zod`), `boundary-guard.mjs`, `prove-base-swap.mjs`,
-  `clean.mjs`, and `scripts/lib/{harness-path,bootstrap-version}.mjs`.
-- The two genuinely identical helpers were hoisted to `scripts/lib/` and the per-plugin copies were
-  DELETED; `mem/scripts/*` and `work/scripts/*` import the root copies (no duplicate file remains).
-- The plugin pipelines stay per plugin **on purpose** — `link-dsh` / `link-envinit` / `mount-smoke` /
-  `pack-plugin` / `release-check` / `make-release-tree` are 80 %+ different implementations
-  parameterised by each plugin's own package set, its own bundle pipeline (mem: `tsc` + the pinned
-  tsdown client preset; work: `tsc` + esbuild + core-type relocation) and its own item list. A single
-  parameterised script would need a switch per difference, which is exactly the "fake abstraction"
-  this repository refuses. The shared SKELETON lives in `scripts/lib/` and in `base/`; a script that is
-  truly identical gets hoisted, like the two above.
-- `mem/scripts/release-check.mjs` remains the mem-scoped gate (it asserts only `mem/packages/plugin`
-  is publishable there); the REPO-WIDE assertion — exactly `@avantf/dsh-plugin-base`, `@avantf/dsh-mem`
-  and `@avantf/dsh-work`, everything else private — is `scripts/release-check.mjs`.
-- There is exactly ONE `pnpm-workspace.yaml` and ONE catalog: the root one. The per-subtree workspace
-  files (`mem/pnpm-workspace.yaml`, `work/pnpm-workspace.yaml`, `base/*/pnpm-workspace.yaml`) were
-  deleted, so `pnpm -C work …` resolves through the merged workspace (verify with
-  `pnpm -C work list`).
-- **Known leftover (needs work before the RC tree flow is used again).** The per-subtree release-tree
-  scripts (`mem/scripts/make-release-tree.mjs`, `work/scripts/make-release-tree.mjs`) and
-  `*/scripts/sync-release-repo.sh` still expect their OLD per-subtree `pnpm-workspace.yaml`, which no
-  longer exists. They are not part of the acceptance gates and were left per-subtree on purpose (their
-  projections are 80 % different), but `pnpm release:tree` / `pnpm sync:rc` must be re-parameterised
-  onto the merged root workspace before the next RC. The tarball `link:`/`file:` rule they enforce is
-  already covered by `scripts/release-check.mjs` and both `pack-plugin.mjs` gates.
+- 根 `scripts/` 拥有所有关于**工作区**的东西：`release-check.mjs`（可发布集合、base 先于插件的
+  顺序、只有一份 `zod`）、`boundary-guard.mjs`、`prove-base-swap.mjs`、`clean.mjs`，以及
+  `scripts/lib/{harness-path,bootstrap-version}.mjs`。
+- 两个真正一模一样的辅助被提到 `scripts/lib/`，各自的副本已**删除**；`mem/scripts/*` 与
+  `work/scripts/*` import 根上那两份（不再有重复文件留存）。
+- 插件的流水线**刻意**留在各自插件里 —— `link-dsh` / `link-envinit` / `mount-smoke` /
+  `pack-plugin` / `release-check` / `make-release-tree` 有 80 %+ 是不同的实现，参数是各插件自己
+  的包集合、自己的打包流水线（mem：`tsc` + 钉住的 tsdown client preset；work：`tsc` + esbuild
+  + core 类型搬迁）和自己的 item 清单。把脚本合成一个参数化的，就得为每处差异加一个 switch，
+  而那正是本仓库拒绝的“假抽象”。共享的**骨架**住在 `scripts/lib/` 和 `base/` 里；真正一模一样
+  的脚本才会被提上去，比如上面那两个。
+- `mem/scripts/release-check.mjs` 仍然是 mem 范围内的门禁（它只断言那里的
+  `mem/packages/plugin` 可发布）；**全仓库**的断言 —— 恰好
+  `@avantf/dsh-plugin-base`、`@avantf/dsh-mem`、`@avantf/dsh-work`，其余 private —— 在
+  `scripts/release-check.mjs`。
+- 有且只有**一个** `pnpm-workspace.yaml` 和一个 catalog：根上那份。按子树的 workspace 文件
+  （`mem/pnpm-workspace.yaml`、`work/pnpm-workspace.yaml`、`base/*/pnpm-workspace.yaml`）已删除，
+  所以 `pnpm -C work …` 走的是合并后的工作区（用 `pnpm -C work list` 验证）。
+- **已知遗留（再次使用 RC 树流程之前需要处理）。** 按子树的 release-tree 脚本
+  （`mem/scripts/make-release-tree.mjs`、`work/scripts/make-release-tree.mjs`）与
+  `*/scripts/sync-release-repo.sh` 仍然期待各自**旧的**子树 `pnpm-workspace.yaml`，而它已经不存在。
+  它们不属于验收门禁，且由于投影有 80 % 不同而被刻意留在各子树；但
+  `pnpm release:tree` / `pnpm sync:rc` 必须在下一次 RC 之前重新参数化到合并后的根工作区。
+  它们所强制的 tarball `link:`/`file:` 规则，已经由 `scripts/release-check.mjs` 与两个
+  `pack-plugin.mjs` 门禁覆盖。
 
-## The four working principles
+## 四条工作原则
 
-1. **Reuse code and business logic.** If two plugins need the same behaviour, it belongs in `base/` (or
-   in a shared private engine package, inlined) — not copied. The kit and the compat gate exist
-   because these were copied once and drifted.
-2. **Do not reuse for reuse's sake.** Sharing is not a goal by itself; a wrong abstraction is worse
-   than a duplicate. Deliberate non-reuse, and why:
-   - **two cores**: `@avantf/mem` (retrieval/knowledge engine) and `@avantf/work-core` (work-tree state
-     machine) share no domain model. Merging them would couple two unrelated lifecycles.
-   - **two client halves**: the browser bundles are different UIs driven by different remotes; only
-     their build ABI (the pinned harness preset) is shared.
-   - **each plugin's envinit item list and compat SPEC**: only a plugin knows what it registers.
-3. **After changing shared code, regress every plugin.** See the commands above. A base change is not
-   done when the base's own tests pass.
-4. **Plugins are independent products.** Own package name, version, bundling and release; never import
-   each other (not even relatively); either can be installed, upgraded or removed without the other.
+1. **复用代码与业务逻辑。** 两个插件需要同一行为，它就属于 `base/`（或属于一个被内联的共享私有
+   引擎包）—— 不是复制一份。kit 与兼容性门禁之所以存在，正是因为这些东西被复制过一次、然后
+   漂移了。
+2. **不为复用而复用。** 共享本身不是目的；错误的抽象比重复更糟。刻意不复用之处，以及原因：
+   - **两个内核**：`@avantf/mem`（检索/知识引擎）与 `@avantf/work-core`（工作树状态机）不共享
+     任何领域模型。把它们合并会把两条无关的生命周期耦合在一起。
+   - **两个 client 半边**：浏览器产物是两套不同的 UI、由不同的 remote 驱动；只有它们的构建
+     ABI（钉住的 harness preset）是共享的。
+   - **各插件的 envinit item 清单与 compat SPEC**：只有插件自己知道它注册了什么。
+3. **改完共享代码，回归每一个插件。** 见上面的命令。base 自己的测试过了，不代表这次改动做完
+   了。
+4. **插件是彼此独立的产品。** 各自拥有包名、版本、打包与发布；绝不互相 import（连相对路径也
+   不行）；任一个都能在另一个缺席时装上、升级或卸掉。
 
-## Boundaries and paths
+## 边界与路径
 
-- Keep `mem/` ↔ `work/` at zero imports (guarded). Shared code goes through `base/`.
-- `AVANTF_HOME` sets the **family/managed root** (`$AVANTF_HOME`, else `~/.avantf/env`; resources under
-  `<root>/tools`, `<root>/models`). The **data root** is an explicit `common.dataHome` → `$AVANTF_HOME`
-  → config → `~/.avantf`; user data and editable text live there (`memory/`, `knowledge/`,
-  `configs/*.yaml`, `prompts/*.md`). The two roots are deliberately different — do not conflate them.
-- The compatibility gate is part of the base now: there is **no** `mem:compat`/`work:compat` item and
-  no managed `~/.avantf/env/compat/**` download any more. A machine that still has `~/.avantf/env/compat/`
-  (or an old `<dataHome>/dsh-compat/`) can delete it by hand — nothing reads it.
-- Data files never move outside `~/.avantf/{memory,knowledge}`; everything a user EDITS lives in
-  `~/.avantf/configs/*.yaml` and `~/.avantf/prompts/*.md`, never next to the databases.
+- 保持 `mem/` ↔ `work/` 零 import（有门禁把守）。共享代码一律走 `base/`。
+- `AVANTF_HOME` 设的是**家族/受管根**（`$AVANTF_HOME`，否则 `~/.avantf/env`；资源在
+  `<root>/tools`、`<root>/models`）。**数据根**是显式 `common.dataHome` → `$AVANTF_HOME`
+  → 配置 → `~/.avantf`；用户数据与可编辑文本住在那里（`memory/`、`knowledge/`、
+  `configs/*.yaml`、`prompts/*.md`）。这两个根刻意不同 —— 不要混为一谈。
+- 兼容性门禁现在属于 base：不再有 `mem:compat`/`work:compat` item，也没有受管的
+  `~/.avantf/env/compat/**` 下载了。机器上如果还留着 `~/.avantf/env/compat/`（或旧的
+  `<dataHome>/dsh-compat/`），可以手工删掉 —— 没有任何东西读它。
+- 数据文件永不搬出 `~/.avantf/{memory,knowledge}`；用户**编辑**的一切都住在
+  `~/.avantf/configs/*.yaml` 与 `~/.avantf/prompts/*.md`，绝不放在数据库旁边。
