@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# The merged workspace: base/ (one published package), mem/ and work/ (one published plugin each).
+# This workflow runs everything that needs NO installed DSH harness. The plugin host gates
+# (`pnpm build:dsh:mem`, `pnpm release:check:work`, `pnpm pack:plugin:*`, the mount smokes and
+# `pnpm proof:base-swap:mount`) need a global `npm i -g @deepseek-ai/dsh`, so they are LOCAL gates —
+# run them by hand before releasing; see AGENTS.md §"After changing ANY shared code under base/**".
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build (all workspace packages)
+        run: pnpm -r build
+      # AFTER the build, not before: mem's `typecheck` reads its dependencies through their emitted
+      # `lib/*.d.ts`, and the plugin typechecks resolve `@avantf/dsh-plugin-base` through `base/`'s
+      # built `dist/*.d.ts`. The test tsconfigs (`tsconfig.test.json`) are the reason this is a gate
+      # at all — `build` only covers `src`, so without this step a spec can reference a type that does
+      # not exist and pass.
+      - name: Typecheck (src + tests, all packages)
+        run: pnpm -r typecheck
+      - name: Test (all packages)
+        run: pnpm -r test
+      - name: Boundary guard (mem/ and work/ never import each other)
+        run: pnpm guard
+      # Static publish-surface checks only: `--offline` skips the registry probe that proves the base
+      # is already published (that probe belongs to a release machine).
+      - name: Release surface (publishable set, peer ranges, one zod, no link:/file:)
+        run: pnpm release:check --offline
+      # The base-swap proof is static here (built artifacts + a swapped base module); `--mount` needs
+      # the installed harness and stays local.
+      - name: Base-swap proof (no plugin rebuild required)
+        run: pnpm proof:base-swap

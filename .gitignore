@@ -1,0 +1,18 @@
+# Dependencies and install links
+node_modules/
+.pnpm-store/
+
+# Build output
+lib/
+dist/
+*.tsbuildinfo
+
+# Release tarballs (the release/README.md files are tracked source)
+release/*.tgz
+mem/release/*.tgz
+work/release/*.tgz
+
+# Test / tool caches
+.vitest/
+coverage/
+*.log

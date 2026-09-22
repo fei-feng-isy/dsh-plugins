@@ -1,0 +1,43 @@
+{
+  "name": "@avantf/mem-cli",
+  "version": "0.1.1",
+  "private": true,
+  "description": "avantf-mem CLI: memory / knowledge / cross-query operations (add, search, ask, probe, kb, query, vectors, maintenance)",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "avantf-mem": "lib/index.js"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@avantf/mem": "workspace:*",
+    "@avantf/mem-contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@gitee.com:ffeng86/avantf-mem.git",
+    "directory": "packages/cli"
+  },
+  "author": "qunqi.ff"
+}

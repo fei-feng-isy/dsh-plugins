@@ -1,0 +1,10 @@
+# avantf-mem → DSH 挂载示例。
+# 原生 Cordis 插件（默认路径：同进程加载，不起 Python 子进程）。
+# 需要已通过 pnpm 把 @avantf/dsh-mem 安装/链接进 DSH 环境。
+- insert:
+    - id: avantf-mem
+      name: '@avantf/dsh-mem'
+      config:
+        mode: cordis            # 进程内插件仅支持 cordis；MCP 请独立运行 @avantf/mem-mcp（配置 mcp 会告警并按 cordis 挂载）
+        # dataHome 建议省略（默认 ~/.avantf）：它是第 ⑤ 层显式配置，写上会覆盖 AVANTF_HOME（第 ④ 层）。
+        # 公共/分库配置见 ~/.avantf/config.yaml 与 ~/.avantf/{memory,knowledge}/config.yaml。

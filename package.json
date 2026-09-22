@@ -1,0 +1,29 @@
+{
+  "name": "dsh-plugins",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The @avantf family of DSH plugins in one workspace: base (compat + envinit + kit), mem (@avantf/dsh-mem) and work (@avantf/dsh-work). Plugins stay independent; only code and business logic are shared.",
+  "type": "module",
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "build:dsh:mem": "pnpm -C mem build:dsh",
+    "build:dsh:work": "pnpm -C work build:dsh",
+    "release:check:base": "pnpm -C base/plugin-base release:check",
+    "release:check:mem": "pnpm -C mem release:check",
+    "release:check:work": "pnpm -C work release:check",
+    "release:check": "node scripts/release-check.mjs",
+    "pack:plugin:mem": "pnpm -C mem pack:plugin",
+    "pack:plugin:work": "pnpm -C work pack:plugin",
+    "guard": "node scripts/boundary-guard.mjs",
+    "proof:base-swap": "node scripts/prove-base-swap.mjs",
+    "proof:base-swap:mount": "node scripts/prove-base-swap.mjs --mount",
+    "clean": "node scripts/clean.mjs"
+  },
+  "license": "MIT"
+}

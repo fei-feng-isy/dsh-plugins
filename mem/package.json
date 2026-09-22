@@ -1,0 +1,31 @@
+{
+  "name": "avantf-mem",
+  "private": true,
+  "version": "0.1.1",
+  "description": "avantf-mem — a DSH-native memory + document knowledge base with cross-retrieval ",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/*\" --filter \"!@avantf/dsh-mem\" run build",
+    "typecheck": "pnpm -r --filter \"./packages/*\" --filter \"!@avantf/dsh-mem\" run typecheck",
+    "typecheck:dsh": "pnpm --filter @avantf/dsh-mem run typecheck",
+    "test": "pnpm -r --filter \"./packages/*\" run test",
+    "test:dsh": "pnpm --filter @avantf/dsh-mem run test:dsh",
+    "build:dsh": "pnpm --filter @avantf/dsh-plugin-base run build && node scripts/build-plugin.mjs",
+    "pack:plugin": "node scripts/pack-plugin.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "bench:vstore": "node scripts/bench-vstore.mjs",
+    "bench:memory": "node scripts/bench-memory.mjs",
+    "bench:ingest": "node scripts/bench-ingest.mjs",
+    "bench:indexes": "node scripts/bench-indexes.mjs",
+    "bench:reinforce": "node scripts/bench-reinforce.mjs",
+    "clean": "rm -rf packages/*/lib packages/*/dist packages/*/node_modules/.cache packages/*/node_modules/.vite node_modules/.cache node_modules/.vite",
+    "rebuild:dsh": "pnpm run build:dsh",
+    "cleanup:dsh": "bash scripts/cleanup.sh",
+    "release:tree": "node scripts/make-release-tree.mjs",
+    "sync:rc": "bash scripts/sync-release-repo.sh"
+  },
+  "license": "MIT"
+}

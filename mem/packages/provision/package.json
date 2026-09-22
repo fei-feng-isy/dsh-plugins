@@ -1,0 +1,36 @@
+{
+  "name": "@avantf/mem-provision",
+  "version": "0.1.1",
+  "private": true,
+  "description": "avantf-mem dependency provisioning: external binaries fetched into ~/.avantf/tools behind an artifact registry",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@gitee.com:ffeng86/avantf-mem.git",
+    "directory": "packages/provision"
+  },
+  "author": "qunqi.ff"
+}

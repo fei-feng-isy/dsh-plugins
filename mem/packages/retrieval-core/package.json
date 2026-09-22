@@ -1,0 +1,43 @@
+{
+  "name": "@avantf/mem-core",
+  "version": "0.1.1",
+  "private": true,
+  "description": "avantf-mem retrieval substrate: pluggable SemanticBackend/Reranker/VectorStore + fusion",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@avantf/mem-contract": "workspace:*"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "catalog:",
+    "hnswlib-node": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@gitee.com:ffeng86/avantf-mem.git",
+    "directory": "packages/retrieval-core"
+  },
+  "author": "qunqi.ff"
+}

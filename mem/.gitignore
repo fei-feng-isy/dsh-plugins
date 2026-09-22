@@ -1,0 +1,30 @@
+# deps & build
+node_modules/
+packages/*/lib/
+packages/*/dist/
+# `pnpm pack:plugin` output (the packed single package)
+/dist/
+*.tsbuildinfo
+# manifest stub `link-dsh.mjs` publishes for the VENDORED client preset: a symlink to
+# packages/plugin/package.json, so the single source of truth stays the real manifest. (Only this
+# stub dir — the rest of the mirrored `packages/client/` tree IS tracked.)
+packages/plugin/vendor/dsh-client-preset/packages/client/avantf-dsh-mem/
+
+# local data (default data_home) — never commit local memory/knowledge stores
+.avantf/
+# …and the same layout when a data home lands in the repo BY ACCIDENT. `dataHome` is
+# resolved against the process cwd when it is relative or an unexpanded shell variable
+# (`$D`), so a stray run drops a data home next to the code: the two store dirs and the
+# two DBs. `**/$D/` catches that directory at any depth (it matches at the repo root too);
+# the rest are ROOT-anchored on purpose, so a legitimately nested `memory/` or `memory.db`
+# (a source directory, say) is never silently hidden by this.
+**/$D/
+/memory/
+/knowledge/
+/memory.db
+/knowledge.db
+
+# logs / scratch
+*.log
+.DS_Store
+.cache/

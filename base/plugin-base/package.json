@@ -1,0 +1,84 @@
+{
+  "name": "@avantf/dsh-plugin-base",
+  "version": "0.1.3",
+  "description": "The @avantf family base for DSH plugins: startup environment initialisation (declare → probe → fetch → verify → report) plus the host compatibility gate (provision / verdictOf / probes / report / post-registration verification). One package, loaded by the plugins through the inlined bootstrap.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "provisioning",
+    "bootstrap",
+    "dependency",
+    "compatibility",
+    "typert"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./bootstrap": {
+      "types": "./dist/bootstrap.d.ts",
+      "default": "./dist/bootstrap.js"
+    },
+    "./preset": {
+      "types": "./dist/preset.d.ts",
+      "default": "./dist/preset.js"
+    },
+    "./conformance": {
+      "types": "./dist/conformance.d.ts",
+      "default": "./dist/conformance.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "default": "./dist/internal.js"
+    },
+    "./compat": {
+      "types": "./dist/compat.d.ts",
+      "default": "./dist/compat.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "dependencies": {},
+  "peerDependencies": {
+    "zod": ">=4.4.3 <5"
+  },
+  "bin": {
+    "provision": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "node scripts/link-dsh.mjs && tsc -p tsconfig.test.json",
+    "test": "node scripts/link-dsh.mjs && vitest run",
+    "check": "pnpm typecheck && pnpm test",
+    "pack": "node scripts/pack.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "prepack": "pnpm build",
+    "prepublishOnly": "pnpm release:check"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@gitee.com:ffeng86/dsh-plugins.git",
+    "directory": "base/plugin-base"
+  },
+  "author": "qunqi.ff"
+}

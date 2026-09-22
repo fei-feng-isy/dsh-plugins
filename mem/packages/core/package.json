@@ -1,0 +1,49 @@
+{
+  "name": "@avantf/mem",
+  "version": "0.1.1",
+  "private": true,
+  "description": "avantf-mem engine: memory store, knowledge store, ingestion, lifecycle, cross-retrieval router",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@avantf/mem-contract": "workspace:*",
+    "@avantf/mem-convert": "workspace:*",
+    "@avantf/mem-core": "workspace:*",
+    "@avantf/mem-provision": "workspace:*",
+    "better-sqlite3": "catalog:",
+    "unpdf": "catalog:",
+    "yaml": "catalog:"
+  },
+  "optionalDependencies": {
+    "nodejieba": "catalog:"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@gitee.com:ffeng86/avantf-mem.git",
+    "directory": "packages/core"
+  },
+  "author": "qunqi.ff"
+}

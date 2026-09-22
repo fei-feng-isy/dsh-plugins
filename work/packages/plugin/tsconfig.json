@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "lib": [
+      "ES2022",
+      "DOM",
+      // `Symbol.dispose`: a session observation is released with it (the harness
+      // types its leases as `Disposable`, and runtime support is Node 20+).
+      "ESNext.Disposable"
+    ],
+    "declarationDir": "lib/types",
+    // The client half is React: the runtime import comes from the platform
+    // module table, and the automatic JSX runtime keeps `React` out of scope.
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src"
+  ]
+}

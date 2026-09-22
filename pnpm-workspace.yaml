@@ -1,0 +1,89 @@
+packages:
+  # The family base: the provisioned compatibility gate, the environment-initialisation framework,
+  # and the private kit both plugins share.
+  - "base/*"
+  # The memory engine workspace (kept in its original shape).
+  - "mem/packages/*"
+  # The work-tree engine workspace (kept in its original shape).
+  - "work/packages/*"
+autoInstallPeers: false
+
+# Link the workspace's own `@avantf/dsh-plugin-base` into the plugins, instead of trying to fetch
+# that range from the registry.
+#
+# The plugins declare the base as a REQUIRED peer (`^0.1.0`) and, because `autoInstallPeers` is off,
+# they also declare it in `devDependencies` so a plain `pnpm install` gives the build something to
+# resolve. That dev range (`^0.1.3`) is NOT a `workspace:` specifier — it has to stay a normal registry
+# range so the published manifest is a real dependency and a host's package manager can install the
+# base from npm. Without this switch pnpm would read `^0.1.3` as "download it from the registry", so a
+# local build would silently run against a published copy (or fail outright before the base is on npm
+# at all) instead of the tree under `base/`. With it, the workspace version is linked, which is what
+# lets the "swap ONLY the base, never rebuild the plugins" proof gate
+# (`scripts/prove-base-swap.mjs`) mean anything.
+linkWorkspacePackages: true
+
+# ONE version per entry, for the WHOLE merged workspace. This is the merge of the two catalogs that
+# used to live in `mem/pnpm-workspace.yaml` and `work/pnpm-workspace.yaml`; a version can no longer
+# differ between two packages that must agree.
+#
+# `zod` is pinned EXACTLY and tracks the version the INSTALLED dsh itself ships (4.6.5). It is the one
+# entry the merge had to reconcile: `mem` was on 4.4.3 and `work` on 4.6.5, and the host's
+# `@deepseek-ai/dsh-storage-domain` types its record schemas with its own zod. Two copies — even of
+# the same major — have incompatible type identities, which is what forced the `TypertSchema['schema']`
+# cast (mem DESIGN §20.11). `pnpm why zod` must keep resolving ONE copy for `@avantf/mem-contract`,
+# `@avantf/dsh-mem` and `@avantf/dsh-work`. Bump this line, never a package.json.
+catalog:
+  zod: 4.6.5
+
+  # Toolchain. These were already identical across the packages of both workspaces; the catalog makes
+  # that a property of the merged workspace instead of a convention, so `tsc` cannot check one package
+  # against a different lib/types surface than another.
+  typescript: ^5.5.0
+  "@types/node": ^22.0.0
+  vitest: ^2.1.0
+  tsdown: 0.22.2
+  "@types/react": ^18.3.12
+  "@types/react-dom": ^18.3.1
+  react: 18.3.1
+  react-dom: 18.3.1
+  # Runtime of the VENDORED harness tsdown client preset
+  # (mem/packages/plugin/vendor/dsh-client-preset): its CSS loaders call `transform()` from
+  # lightningcss. It is a build-only devDependency of the plugin (tsdown's inline surface), never a
+  # runtime dependency of the published package. Version follows the harness pin (`^1.32.0`) so the
+  # two presets compile identical CSS.
+  lightningcss: ^1.32.0
+
+  # Every third-party RUNTIME dependency the project executes, in one list. The engine packages
+  # declare the ones they execute; `@avantf/dsh-mem` declares the same set again, because its
+  # published manifest IS the runtime surface of the inlined engine (a runtime dep it fails to
+  # declare gets bundled instead of imported, and a bundled native module does not load). The
+  # duplication is the point — it keeps "what does this run on" to a single answer, and keeps the
+  # native ones next to the `allowBuilds` entries they must stay in step with.
+  better-sqlite3: ^11.3.0
+  yaml: ^2.5.0
+  # PDF text extraction (`kb_manage ingest/import` on a `.pdf`). One self-contained package with a
+  # bundled pdfjs build — 2.1 MB unpacked, no external CMaps/font assets — that reads CJK CID fonts
+  # correctly, which is what the corpus here needs.
+  unpdf: ^1.8.1
+  # Spreadsheet conversion (`kb_manage ingest/import` on a `.xlsx`). Pure JS, so the published plugin
+  # declares it in `dependencies` and the bundle keeps it as an ordinary (lazy) import.
+  exceljs: ^4.4.0
+  nodejieba: ^2.6.0
+  "@huggingface/transformers": ^4.2.0
+  hnswlib-node: ^2.1.1
+  "@modelcontextprotocol/sdk": ^1.11.0
+
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  hnswlib-node: true
+  nodejieba: true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
+  lightningcss: true
+
+# No `minimumReleaseAgeExclude` entries: the two old exemptions covered `@avantf/dsh-compat@0.1.0` and
+# `@avantf/dsh-envinit@0.1.3`, and neither package is installed or published any more — their code is
+# inside `@avantf/dsh-plugin-base`, which `linkWorkspacePackages` links from this tree instead of
+# fetching. Nothing here needs an exemption from the release-age wait.

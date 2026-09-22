@@ -1,0 +1,95 @@
+/**
+ * The guidance section's text is editable on disk: one `.md` under `<data home>/prompts`, the
+ * shared family prompt directory.
+ *
+ * What has to stay true when a user edits it is the BOUNDARY, and that is what these cases pin: the
+ * file name → section mapping owned by code (an edit cannot move the section), the default a missing
+ * file is filled with being the very constant above rather than a copy of it, the whole ensure →
+ * read → inject flow working against a real directory, and the warnings an edited file earns without
+ * being modified. The registration itself is covered by `prompt_files_mount.spec.ts`.
+ *
+ * Harness-free on purpose (no `./mount.js`): this is the half that must hold without a DSH host.
+ */
+import { describe, expect, it } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PromptFiles } from '@avantf/dsh-plugin-base'
+import {
+  GUIDANCE_BUDGET,
+  GUIDANCE_TREE_WORDS,
+  PROMPT_FILES,
+  WORK_TREE_GUIDANCE,
+  buildGuidanceText,
+  guidanceTextWarnings,
+  promptDir,
+  promptFileSpecs,
+} from '../src/prompt.js'
+
+describe('the editable guidance file', () => {
+  it('maps exactly one file, and the identity stays in code', () => {
+    expect(PROMPT_FILES.map((entry) => entry.file)).toEqual(['work-tree-guide.md'])
+    // The default a missing/blank file is filled with IS the constant — not a second copy of it.
+    expect(promptFileSpecs()).toEqual([{ file: 'work-tree-guide.md', fallback: WORK_TREE_GUIDANCE }])
+  })
+
+  it('resolves the shared prompt directory: explicit dataHome, else $AVANTF_HOME, else ~/.avantf', () => {
+    expect(promptDir('/tmp/explicit', { AVANTF_HOME: '/tmp/family' })).toBe('/tmp/explicit/prompts')
+    expect(promptDir(undefined, { AVANTF_HOME: '/tmp/family' })).toBe('/tmp/family/prompts')
+    // A blank value is "unset", not "the filesystem root" — for both layers.
+    expect(promptDir('  ', { AVANTF_HOME: '   ' })).toBe(join(homedir(), '.avantf', 'prompts'))
+    expect(promptDir(undefined, {})).toBe(join(homedir(), '.avantf', 'prompts'))
+    // `~/` is expanded, as it is for every other configured path.
+    expect(promptDir('~/custom')).toBe(join(homedir(), 'custom', 'prompts'))
+  })
+
+  it('uses the BASE\'s data-home resolver at runtime, and its own fallback only without one', () => {
+    // `apply` hands `promptDir` the loaded base's `resolveDataHome`; the local one is the base-less
+    // degradation path. Pinning the wiring here means a prompt layer that silently stopped taking the
+    // base's convention (two resolves could drift) shows up as a failing test, not as text in the
+    // wrong directory.
+    const calls: [string | undefined, Record<string, string | undefined> | undefined][] = []
+    const sentinel = (explicit?: string, env?: Record<string, string | undefined>) => {
+      calls.push([explicit, env])
+      return '/sentinel/base-data-home'
+    }
+    expect(promptDir('/ignored', { AVANTF_HOME: '/ignored' }, sentinel)).toBe('/sentinel/base-data-home/prompts')
+    expect(calls[0]?.[0]).toBe('/ignored')
+    // Without a resolver the local fallback answers, so a base-less mount still finds a directory.
+    expect(promptDir(undefined, {}, undefined)).toBe(join(homedir(), '.avantf', 'prompts'))
+  })
+
+  it('round-trips through a real directory: an edited file wins, a missing one is created', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'avantf-work-prompts-'))
+    try {
+      // No file yet: the default is used and written out.
+      const created = buildGuidanceText(new PromptFiles({ dir }).load(promptFileSpecs()))
+      expect(created).toBe(WORK_TREE_GUIDANCE)
+      expect(readFileSync(join(dir, 'work-tree-guide.md'), 'utf8').trim()).toBe(WORK_TREE_GUIDANCE)
+
+      // Now an edited file: it must be what the section says, byte for byte.
+      const mine = '只讲工作，不讲形状。这条是自定义的。'
+      writeFileSync(join(dir, 'work-tree-guide.md'), `${mine}\n`, 'utf8')
+      const loaded = new PromptFiles({ dir }).load(promptFileSpecs())
+      expect(loaded[0]?.source).toBe('file')
+      expect(buildGuidanceText(loaded)).toBe(mine)
+      expect(readFileSync(join(dir, 'work-tree-guide.md'), 'utf8')).toBe(`${mine}\n`)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('warns about edited text that reproduces a measured regression, without touching it', () => {
+    // The default passes (the cases above index it): this is only about text the USER wrote.
+    expect(guidanceTextWarnings(WORK_TREE_GUIDANCE)).toEqual([])
+
+    // Tree vocabulary is the measured regression: it invites reading a work as a container of nodes.
+    const vocabulary = guidanceTextWarnings(`先看${String(GUIDANCE_TREE_WORDS[0])}长什么样。`)
+    expect(vocabulary).toHaveLength(1)
+    expect(vocabulary[0]).toContain('avantf:work-tree-guide')
+
+    const overBudget = guidanceTextWarnings('x'.repeat(GUIDANCE_BUDGET + 1))
+    expect(overBudget).toHaveLength(1)
+    expect(overBudget[0]).toContain(String(GUIDANCE_BUDGET + 1))
+  })
+})

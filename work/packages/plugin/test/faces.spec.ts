@@ -1,0 +1,134 @@
+/**
+ * The two tool faces: which agent sees which half of the work-tree tools.
+ *
+ * Visibility only — the refusals inside the tool bodies stay the boundary — but the
+ * faces are what keep an owner from carrying executor tools it can never use, and an
+ * executor from reading the tree it is only one node of.
+ */
+import { describe, expect, it } from 'vitest'
+import { OWNER_TOOL_DENY, WORKER_TOOL_DENY, visibleTo } from '../src/faces.js'
+import { agent, callTool, mount } from './mount.js'
+
+/** Every name this plugin registers, as the mount harness saw it. */
+async function registeredNames(): Promise<readonly string[]> {
+  const mounted = await mount()
+  return mounted.registered.map((entry) => entry.name)
+}
+
+describe('the face table', () => {
+  it('classifies every registered tool into exactly one face', async () => {
+    // A new tool must be placed deliberately: this fails until it is named on one side.
+    const names = (await registeredNames()).slice().sort()
+    const hiddenFromWorker = names.filter((name) => WORKER_TOOL_DENY.includes(name))
+    const hiddenFromOwner = names.filter((name) => OWNER_TOOL_DENY.includes(name))
+    expect([...hiddenFromWorker, ...hiddenFromOwner].sort()).toEqual(names)
+    // Disjoint: a name hidden from both faces would be a tool nobody can call.
+    expect(hiddenFromWorker.filter((name) => hiddenFromOwner.includes(name))).toEqual([])
+  })
+
+  it('keeps the owner tools with the owner and the executor tools with the executor', async () => {
+    const names = await registeredNames()
+    const ownerSees = names.filter((name) => !OWNER_TOOL_DENY.includes(name))
+    const workerSees = names.filter((name) => !WORKER_TOOL_DENY.includes(name))
+    expect(ownerSees).toEqual([
+      'create_work',
+      'adjust_work',
+      'work_result',
+      'list_works',
+      'finish_work',
+      'cancel_work',
+    ])
+    expect(workerSees).toEqual(['note_work', 'decompose_work', 'submit_work'])
+  })
+
+  it('filters an assembled tool list without touching anything else', () => {
+    const tools = [{ name: 'bash' }, { name: 'create_work' }, { name: 'submit_work' }]
+    expect(visibleTo(tools, OWNER_TOOL_DENY).map((tool) => tool.name)).toEqual(['bash', 'create_work'])
+    expect(visibleTo(tools, WORKER_TOOL_DENY).map((tool) => tool.name)).toEqual(['bash', 'submit_work'])
+  })
+})
+
+describe('the worker face at dispatch', () => {
+  it('denies the owner tools to every dispatched worker', async () => {
+    const mounted = await mount()
+    await callTool(mounted, 'create_work', { title: 'T', description: 'd', analysis: [] }, mounted.owner)
+    await mounted.flush()
+
+    const deny = mounted.dispatched[0]?.toolFilter?.deny ?? []
+    for (const name of ['create_work', 'work_result', 'list_works', 'finish_work', 'cancel_work']) {
+      expect(deny, `${name} must not reach a worker`).toContain(name)
+    }
+    // The executor's own tools stay — including `note_work`, which `decompose_work`
+    // requires before it will split.
+    expect(deny).not.toContain('note_work')
+    expect(deny).not.toContain('decompose_work')
+    expect(deny).not.toContain('submit_work')
+  })
+})
+
+describe('the owner face', () => {
+  it('restricts the executor tools on the agent when it appears', async () => {
+    const mounted = await mount()
+    mounted.ctx.emit('agent/created', { agent: mounted.owner as never })
+
+    expect(mounted.restrictions).toHaveLength(1)
+    expect(mounted.restrictions[0]?.agentId).toBe('owner')
+    expect(mounted.restrictions[0]?.filter.deny).toEqual(['note_work', 'decompose_work', 'submit_work'])
+  })
+
+  it('applies that face once, not on every event', async () => {
+    const mounted = await mount()
+    mounted.ctx.emit('agent/created', { agent: mounted.owner as never })
+    mounted.ctx.emit('agent/created', { agent: mounted.owner as never })
+    expect(mounted.restrictions).toHaveLength(1)
+  })
+
+  it('leaves a worker alone: its face rides the dispatch request instead', async () => {
+    const mounted = await mount()
+    const worker = agent('work-1', { origin: 'subagent', delegationDepth: 1 })
+    mounted.ctx.emit('agent/created', { agent: worker as never })
+    expect(mounted.restrictions).toEqual([])
+  })
+
+  it('filters the tools out of the owner\'s assembly, which is what the model reads', async () => {
+    // The stateless half: an agent that already existed when this plugin mounted still
+    // cannot see the executor tools, because the assembly itself drops them.
+    const mounted = await mount()
+    const assembly = {
+      sections: [],
+      contexts: [],
+      tools: [
+        { name: 'bash', description: '', parameters: {} },
+        { name: 'create_work', description: '', parameters: {} },
+        { name: 'decompose_work', description: '', parameters: {} },
+        { name: 'submit_work', description: '', parameters: {} },
+      ],
+      variables: {},
+    }
+    const filtered = await mounted.ctx.waterfall(
+      'system-prompt/assemble',
+      assembly,
+      { agent: mounted.owner as never },
+      () => Promise.resolve(assembly as never),
+    )
+    expect(filtered.tools.map((tool) => tool.name)).toEqual(['bash', 'create_work'])
+  })
+
+  it('leaves a worker\'s assembly untouched', async () => {
+    const mounted = await mount()
+    const assembly = {
+      sections: [],
+      contexts: [],
+      tools: [{ name: 'bash', description: '', parameters: {} }, { name: 'decompose_work', description: '', parameters: {} }],
+      variables: {},
+    }
+    const worker = agent('work-1', { origin: 'subagent', delegationDepth: 1 })
+    const filtered = await mounted.ctx.waterfall(
+      'system-prompt/assemble',
+      assembly,
+      { agent: worker as never },
+      () => Promise.resolve(assembly as never),
+    )
+    expect(filtered.tools.map((tool) => tool.name)).toEqual(['bash', 'decompose_work'])
+  })
+})

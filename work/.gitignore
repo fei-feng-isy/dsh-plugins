@@ -1,0 +1,22 @@
+# Build output
+node_modules/
+packages/*/lib/
+# `pnpm pack:plugin` output — the tarballs only, so a tracked source file kept under
+# `release/` (the release README) is not caught by this rule.
+release/*.tgz
+dist/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Test scratch
+*.log
+
+# Review records: kept in the working tree for reference, deliberately not in the
+# repository (they quote internals and go stale as the code moves).
+docs/review/

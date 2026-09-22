@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+coverage/
+*.tsbuildinfo
+*.log
+.DS_Store
+*.bak
+*.bak[0-9]*

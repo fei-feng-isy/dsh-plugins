@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    // `DOM` only for the structural element type turndown hands a custom rule (`node`), which is a
+    // domino node at runtime. No global is read at run time; this package is Node-only.
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
