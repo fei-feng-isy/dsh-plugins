@@ -30,11 +30,13 @@
 | --- | --- | --- |
 | 环境初始化（原 `@avantf/dsh-envinit`） | `.` 上的 `createProvisioner` / 三个内置 provider 工厂 | 插件的 `bootstrap → 声明 item → 等 blocking 集 → 跑门禁` |
 | 兼容门禁（原 `@avantf/dsh-compat`） | `.` 与 `./compat`（同一个模块，`./compat` 复用根导出的那份） | 插件判定"证明不兼容才拒载；测不出来只记一笔；版本差异只警告" |
-| 共用 kit | `.` 上的 `PromptFiles` / `createPluginLogger` / `strictCodec` / `familyHome` 等 | 两个插件在 `apply()` 里从**装载后的 base 模块**取用 |
+| 共用 kit | `.` 上的 `PromptFiles` / `createPluginLogger` / `strictCodec` / `familyHome` 等 | 两个插件在 `apply()` 里从**装载后的 base 模块**取 `PromptFiles`（work 另取 `resolveDataHome`）；`createPluginLogger` / `strictCodec` / `familyHome` 是 base 的**规范副本**，目前两个插件仍各自保留等价实现——判据（"这条知识必须能被一次 base 发布修掉吗？"）与逐项取舍见根 `AGENTS.md`，改它们需要发插件 |
 
 **插件绝不在构建期内联 kit，也绝不静态 import base**：否则 base 缺失时插件模块根本加载不出来，
 正是家族禁止的"整行加载失败"。插件只内联**零依赖的 `./bootstrap`**，它动态 `import()` 出 base；
-`prompt_files` / `logger` / `typert` / `family` 这些源码在 base 里，插件运行时从那个模块上取。
+`prompt_files` / `logger` / `typert` / `family` 的源码都在 base 里，插件在 `apply()` 里从那个模块上
+取用（当前实际取用的是 `PromptFiles`，以及 work 的 `resolveDataHome`；其余规范副本为何暂留插件，
+见根 `AGENTS.md`）。
 base 缺失或版本不被接受时插件**照常挂载**（WARN + 降级）：prompt 文件层不可用 → 用插件**自带的默认正文**；
 兼容门禁不可用 → 走既有的 `compat:` WARNING 路径。
 

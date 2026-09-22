@@ -77,7 +77,9 @@ a plugin, ask exactly this: **"must this knowledge be fixable by one base releas
     `acceptsUndefined` parameter helper). **The base kit also exposes `strictCodec` / `endpointId` /
     `fieldSymbol` / `resultSymbol` as the canonical copies, so a plugin MAY take them off the loaded
     module — but today these two keep their own, and changing THEM needs a plugin release.**
-  - the plugin logger,
+  - the plugin logger. It is built in `apply` BEFORE the base is resolved (the base loader itself
+    needs a sink to report into), so it cannot come off the loaded module; `base/kit` still exports
+    `createPluginLogger` as the canonical copy for new plugins.
   - each plugin's compat SPEC and envinit item list: which services/methods it calls, which dsh
     packages identify the host, its wire schema names, its events, its Chinese report strings, and its
     `mem:pandoc` / `mem:model` / `work:*` items. Only that plugin knows them.
