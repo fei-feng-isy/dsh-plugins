@@ -6,6 +6,11 @@ node_modules/
 lib/
 dist/
 *.tsbuildinfo
+# …except the workspace scripts' SOURCE directory: the `lib/` rule above is about build output, and it
+# silently swallowed new files under `scripts/lib/` (the tracked ones predate the rule). Keep the
+# negation AFTER the rule, and add a matching one if a future build-output pattern can cover source.
+!scripts/lib/
+!scripts/lib/**
 
 # Release tarballs (the release/README.md files are tracked source)
 release/*.tgz

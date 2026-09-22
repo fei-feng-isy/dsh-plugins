@@ -35,12 +35,19 @@
 import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
+import { BOOTSTRAP_CANDIDATES, discoverBase, discoverPlugins, repoRoot as repo } from './lib/plugins.mjs'
 
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const BASE_DIR = join(repo, 'base/plugin-base')
+/** The plugin set is DISCOVERED, so a new plugin tree is proven without editing this script. */
+const PLUGINS = discoverPlugins()
+const BASE = discoverBase()
+if (BASE === undefined) {
+  console.error('prove-base-swap: no package named @avantf/dsh-plugin-base under base/')
+  process.exit(1)
+}
+const BASE_DIR = BASE.dir
 const BASE_DIST = join(BASE_DIR, 'dist', 'index.js')
 
 const argv = process.argv.slice(2)
@@ -63,28 +70,10 @@ const notes = []
 const fail = (message) => problems.push(message)
 const note = (message) => notes.push(message)
 
-/** The two plugins, and where each build puts the vendored bootstrap it inlined. */
-const PLUGINS = [
-  {
-    name: '@avantf/dsh-mem',
-    tree: join(repo, 'mem'),
-    dir: join(repo, 'mem/packages/plugin'),
-    bootstraps: ['lib/types/envinit-bootstrap.js', 'lib/envinit-bootstrap.js'],
-    smoke: join(repo, 'mem/scripts/mount-smoke.mjs'),
-  },
-  {
-    name: '@avantf/dsh-work',
-    tree: join(repo, 'work'),
-    dir: join(repo, 'work/packages/plugin'),
-    bootstraps: ['lib/envinit-bootstrap.js', 'lib/types/envinit-bootstrap.js'],
-    smoke: join(repo, 'work/scripts/mount-smoke.mjs'),
-  },
-]
-
 // ── inputs ───────────────────────────────────────────────────────────────────────────────────────
 if (!existsSync(BASE_DIST)) {
   console.error('prove-base-swap: the base is not built.')
-  console.error('  fix: pnpm -C base/plugin-base build')
+  console.error('  fix: pnpm build:dsh base')
   process.exit(1)
 }
 const baseManifest = JSON.parse(readFileSync(join(BASE_DIR, 'package.json'), 'utf8'))
@@ -143,13 +132,17 @@ function inlinedKitMarkers(plugin) {
 // ── A. the bundle cannot contain the shared logic ────────────────────────────────────────────────
 const bundles = new Map()
 for (const plugin of PLUGINS) {
-  const bundle = join(plugin.dir, 'lib/index.js')
+  if (plugin.packageDir === undefined) {
+    fail(`${plugin.id}: no packages/plugin/package.json — the family layout expects one publishable plugin package per tree; nothing to prove for it`)
+    continue
+  }
+  const bundle = join(plugin.packageDir, 'lib/index.js')
   if (!existsSync(bundle)) {
     if (allowUnbuilt) {
       note(`${plugin.name}: lib/index.js is not built (--allow-unbuilt) — static checks skipped`)
       continue
     }
-    fail(`${plugin.name} is not built (${relative(repo, bundle)} is missing)\n    fix: pnpm build:dsh:${plugin.name === '@avantf/dsh-mem' ? 'mem' : 'work'}`)
+    fail(`${plugin.name} is not built (${relative(repo, bundle)} is missing)\n    fix: pnpm build:dsh ${plugin.id}`)
     continue
   }
   const text = readFileSync(bundle, 'utf8')
@@ -184,10 +177,12 @@ for (const plugin of PLUGINS) {
 const scratch = mkdtempSync(join(tmpdir(), 'avantf-base-swap-'))
 try {
   for (const plugin of PLUGINS) {
+    // Already reported in A: a tree that does not follow the family layout has nothing to prove here.
+    if (plugin.packageDir === undefined) continue
     let bootstrap
     let bootstrapOrigin
-    for (const relativeBootstrap of plugin.bootstraps) {
-      const candidate = join(plugin.dir, relativeBootstrap)
+    for (const relativeBootstrap of BOOTSTRAP_CANDIDATES) {
+      const candidate = join(plugin.packageDir, relativeBootstrap)
       if (existsSync(candidate)) {
         bootstrap = candidate
         bootstrapOrigin = 'built artifact'
@@ -195,19 +190,19 @@ try {
       }
     }
     if (bootstrap === undefined && allowUnbuilt) {
-      const candidate = join(plugin.dir, 'src/envinit-bootstrap.js')
+      const candidate = join(plugin.packageDir, 'src/envinit-bootstrap.js')
       if (existsSync(candidate)) {
         bootstrap = candidate
         bootstrapOrigin = 'src (--allow-unbuilt)'
       }
     }
     if (bootstrap === undefined) {
-      fail(`${plugin.name}: no built bootstrap found (looked for ${plugin.bootstraps.join(', ')})\n    fix: pnpm build:dsh:${plugin.name === '@avantf/dsh-mem' ? 'mem' : 'work'}`)
+      fail(`${plugin.name}: no built bootstrap found (looked for ${BOOTSTRAP_CANDIDATES.join(', ')})\n    fix: pnpm build:dsh ${plugin.id}`)
       continue
     }
 
     const root = join(scratch, plugin.name.replace(/[@/]/gu, '_'))
-    const bootstrapCopy = join(root, plugin.bootstraps.find((b) => bootstrap.endsWith(b)) ?? 'lib/envinit-bootstrap.js')
+    const bootstrapCopy = join(root, BOOTSTRAP_CANDIDATES.find((b) => bootstrap.endsWith(b)) ?? BOOTSTRAP_CANDIDATES[1])
     mkdirSync(dirname(bootstrapCopy), { recursive: true })
     writeFileSync(bootstrapCopy, readFileSync(bootstrap))
 
@@ -301,16 +296,19 @@ try {
 // ── C. the full mount, on demand ─────────────────────────────────────────────────────────────────
 if (runMount) {
   for (const plugin of PLUGINS) {
-    if (!existsSync(plugin.smoke)) {
-      fail(`${plugin.name}: mount smoke not found at ${relative(repo, plugin.smoke)}`)
+    // Family layout: each tree owns its mount smoke. A tree without one is a REPORTED gap, never a
+    // silent skip — the smoke is what proves the plugin mounts in a real Cordis context.
+    const smoke = join(plugin.tree, 'scripts/mount-smoke.mjs')
+    if (!existsSync(smoke)) {
+      fail(`${plugin.name}: mount smoke not found at ${relative(repo, smoke)}`)
       continue
     }
     console.log(`\n▶ ${plugin.name}: mount smoke (built plugin + workspace base)`)
-    const result = spawnSync(process.execPath, [plugin.smoke], { cwd: repo, stdio: 'inherit', env: process.env })
+    const result = spawnSync(process.execPath, [smoke], { cwd: repo, stdio: 'inherit', env: process.env })
     if (result.status !== 0) fail(`${plugin.name}: mount smoke failed (exit ${String(result.status)})`)
   }
 } else {
-  note('mount smoke skipped — re-run with --mount for the full Cordis mount of both plugins')
+  note(`mount smoke skipped — re-run with --mount for the full Cordis mount of every discovered plugin (${PLUGINS.map((plugin) => plugin.id).join(', ')})`)
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────

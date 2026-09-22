@@ -87,6 +87,48 @@
 | 资源 provision（pandoc/model） | 旧的 `@avantf/mem-provision` / legacy-tools-dir 路径 |
 | 工具、service、Remote、UI 各个面 | 不受影响 —— 插件完整挂载 |
 
+## 构建入口：一条命令，插件自动发现
+
+```
+pnpm build:dsh            # 全部插件，按目录名字典序（当前 mem、work；每个都会先构建 base）
+pnpm build:dsh mem        # 只构建记忆插件
+pnpm build:dsh work       # 只构建任务插件
+pnpm build:dsh base       # 只构建 base（tsc；不出插件产物、不跑挂载冒烟）
+```
+
+**插件集合是发现出来的，不是列出来的**：一个**插件树** = 顶层目录，其 `package.json` 里有一个
+`build:dsh` 脚本。所以新增插件（比如 `notes/` + `@avantf/dsh-notes`）只要自己带上构建脚本，
+`pnpm build:dsh notes` 立刻可用 —— `scripts/build-dsh.mjs` 和 `scripts/lib/plugins.mjs` **一个字都
+不用改**，也没有第二份清单会忘记更新。`scripts/lib/plugins.mjs` 里的 `discoverPlugins()` 做这件事，
+`prove-base-swap.mjs` 读同一个集合，因此新插件不会被任一门禁漏掉。目标名就是目录名；`base` 是唯一的
+非插件目标（它按包名 `@avantf/dsh-plugin-base` 在 `base/` 下被发现）。
+
+`scripts/build-dsh.mjs` **只做路由**：真正的构建仍在各子树（`mem/scripts/build-plugin.mjs`、
+`work/scripts/build-plugin.mjs`、base 的 `tsc`），因为各条流水线确实不同 —— 合并的只是“该进哪棵树”
+这条记忆。目标之后的旗标原样转给该插件自己的 `build:dsh`（`pnpm build:dsh mem --fresh`、
+`pnpm build:dsh work --skip-link`，各插件认什么用 `pnpm build:dsh <目标> --help` 问它自己）；**不带
+目标时任何旗标都会被拒绝**，因为旗标是插件私有的：`--fresh` 只属于 mem，转给别的插件只会在前一个插件
+已经重建完之后把整轮跑挂。
+
+### 新增一个插件时要动什么
+
+**不用动**（发现式）：`pnpm build:dsh <目录名>`；`pnpm proof:base-swap` 读同一份发现结果，所以新插件
+自动进入它的检查 —— 还没跟上家族布局（缺 `packages/plugin`）或还没构建时，它会把这一项**报出来**，
+不会静默跳过。
+
+**要动，而且都是刻意的**：
+
+- 根 `pnpm-workspace.yaml` 的 `packages:` 加一条 `<tree>/packages/*`。不加以外，它的包不进工作区：
+  `pnpm install` 不装、`pnpm -r build|test` 不覆盖（`pnpm build:dsh <tree>` 仍然能跑，因为那是该目录
+  自己的脚本）。
+- 根 `scripts/release-check.mjs` 的**可发布集合**加一行。那里刻意写死包名：可发布面是要被审查的，
+  不该被自动发现悄悄放大。
+- 根 `scripts/boundary-guard.mjs` 的 `HALVES` / `ALLOWED`（目前按 mem/work 两半写死；新插件要么加
+  进去，要么先把这道门禁也改成发现式 —— 后者是更彻底的做法，但那是另一个改动）。
+- 插件自己那一份：`packages/plugin/package.json` 里 base 是 required peer（`^0.1.0`）+ 同版本
+  `devDependencies`、自己的 `build:dsh`、`scripts/mount-smoke.mjs`（`proof:base-swap --mount` 要求）。
+- 依赖版本一律写进根 `pnpm-workspace.yaml` 的 `catalog:`，各 `package.json` 只写 `"catalog:"`。
+
 ## 要跑的门禁
 
 | 命令 | 它证明什么 |
@@ -110,15 +152,22 @@ pnpm release:check && node scripts/mount-smoke.mjs
 ```
 
 从仓库根看，同样两行是
-`pnpm build:dsh:mem && node mem/scripts/mount-smoke.mjs` 与
-`pnpm release:check:work && node work/scripts/mount-smoke.mjs`。
-`pnpm proof:base-swap:mount` 把两个挂载冒烟当作一个门禁一起跑；上面那两行是只迭代单个插件时用的。
+`pnpm build:dsh mem && node mem/scripts/mount-smoke.mjs` 与
+`pnpm build:dsh work && node work/scripts/mount-smoke.mjs`（两条命令末尾的挂载冒烟其实已经在插件
+自己的 `build:dsh` 里跑过一遍）。`pnpm proof:base-swap:mount` 把两个挂载冒烟当作一个门禁一起跑；
+上面那两行是只迭代单个插件时用的。
 
 ### 脚本住在哪里，以及为什么有些脚本**没有**被合并
 
 - 根 `scripts/` 拥有所有关于**工作区**的东西：`release-check.mjs`（可发布集合、base 先于插件的
-  顺序、只有一份 `zod`）、`boundary-guard.mjs`、`prove-base-swap.mjs`、`clean.mjs`，以及
-  `scripts/lib/{harness-path,bootstrap-version}.mjs`。
+  顺序、只有一份 `zod`）、`boundary-guard.mjs`、`prove-base-swap.mjs`、`build-dsh.mjs`（统一的
+  `pnpm build:dsh [<插件目录>|base]` 入口）、`clean.mjs`，以及
+  `scripts/lib/{harness-path,bootstrap-version,plugins}.mjs`。`plugins.mjs` **不登记任何插件**：
+  它按“顶层目录 + `build:dsh` 脚本”发现插件集合（外加按包名发现 base），所以新增插件不碰它；
+  `build-dsh.mjs` 与 `prove-base-swap.mjs` 读的是同一个发现结果。（踩过的坑：`.gitignore`
+  里那条构建产物规则 `lib/` 会连 `scripts/lib/` 下的**新**文件一起吞掉 —— 加它之后新文件不会出现在
+  `git status` 里，`harness-path.mjs` / `bootstrap-version.mjs` 就这样长期没进仓库，克隆出来的树根本
+  构建不了。已用 `!scripts/lib/**` 反制，且反制必须排在规则**之后**。）
 - 两个真正一模一样的辅助被提到 `scripts/lib/`，各自的副本已**删除**；`mem/scripts/*` 与
   `work/scripts/*` import 根上那两份（不再有重复文件留存）。
 - 插件的流水线**刻意**留在各自插件里 —— `link-dsh` / `link-envinit` / `mount-smoke` /

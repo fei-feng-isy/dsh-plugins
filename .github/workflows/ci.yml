@@ -7,7 +7,7 @@ on:
 
 # The merged workspace: base/ (one published package), mem/ and work/ (one published plugin each).
 # This workflow runs everything that needs NO installed DSH harness. The plugin host gates
-# (`pnpm build:dsh:mem`, `pnpm release:check:work`, `pnpm pack:plugin:*`, the mount smokes and
+# (`pnpm build:dsh mem`, `pnpm release:check:work`, `pnpm pack:plugin:*`, the mount smokes and
 # `pnpm proof:base-swap:mount`) need a global `npm i -g @deepseek-ai/dsh`, so they are LOCAL gates —
 # run them by hand before releasing; see AGENTS.md §"After changing ANY shared code under base/**".
 jobs:
