@@ -89,6 +89,40 @@ describe('the parked session is woken, not replaced', () => {
     expect(rootDispatches).toHaveLength(1)
   })
 
+  it('lets no sweep reclaim the binding the wake is delivering into', async () => {
+    // The regression this exists for (real run, 2026-09-22): the last child's own `subagent/end`
+    // triggers a sweep in the SAME moment as the owner's wake. The parked session is IDLE — that is
+    // what parking means — so the sweep read the just-adopted binding as "executor vanished",
+    // reclaimed it (charging `failures`) and re-dispatched the node, while the cold resume still
+    // landed: two executors for one node, one whole extra LLM round, and a `not-owner` refusal.
+    const mounted = await mount({ deferSend: true })
+    const { root, rootWorker } = await parkedRoot(mounted)
+
+    // The owner's step adopts the parked session and starts delivering; the delivery is held open,
+    // which is exactly the window the sweep used to win.
+    const waking = mounted.wake()
+    for (let tick = 0; tick < 20 && mounted.host.nodeFor(root)?.claimedBy !== rootWorker.id; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(mounted.host.nodeFor(root)?.claimedBy).toBe(rootWorker.id)
+
+    // The sweep runs inside that window and must leave the binding alone.
+    await mounted.host.sweep()
+    expect(mounted.host.nodeFor(root)?.claimedBy).toBe(rootWorker.id)
+    expect(mounted.host.nodeFor(root)?.status).toBe('running')
+    expect(mounted.host.nodeFor(root)?.failures).toBe(0)
+    expect(mounted.host.nodeFor(root)?.parkedWorker).toBeNull()
+
+    mounted.releaseSends()
+    await waking
+
+    // One session, one adoption: the guard charges nothing and starts nobody.
+    expect(executorFor(mounted, root).id).toBe(rootWorker.id)
+    expect(mounted.host.nodeFor(root)?.attempts).toBe(2)
+    const rootDispatches = mounted.dispatched.filter((entry) => entry.prompt.includes(`id: ${root}\n`))
+    expect(rootDispatches).toHaveLength(1)
+  })
+
   it('degrades to a fresh session when the parked one cannot be resumed', async () => {
     const mounted = await mount({ failSend: true })
     const { root, rootWorker } = await parkedRoot(mounted)

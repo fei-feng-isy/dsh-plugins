@@ -211,6 +211,8 @@ export interface Mounted {
   makeLive: (sessionId: string) => StubAgent
   /** Let every start held by `deferStart` finish (the child accepts its prompt). */
   releaseStarts: () => void
+  /** Let every delivery held by `deferSend` finish (the message reaches the child). */
+  releaseSends: () => void
   /** Host-facing Typert contributions the plugin registered. */
   typertContributions: unknown[]
   /** How many times the storage domain was opened — one per successful mount. */
@@ -253,6 +255,13 @@ export async function mount(
      * session, never fail the tree.
      */
     failSend?: boolean
+    /**
+     * Hold every `subagents.sendMessage` open until `releaseSends()`.
+     *
+     * A wake is ADOPT-then-DELIVER, and the sweep triggered by the last child's own
+     * `subagent/end` runs inside that gap: proving the guard needs a test that can stop there.
+     */
+    deferSend?: boolean
   } = {},
 ): Promise<Mounted> {
   const records: Records = new Map()
@@ -270,6 +279,8 @@ export async function mount(
   const sent: Mounted['sent'] = []
   /** Starts held open by `deferStart`, released by the returned `releaseStarts`. */
   const pendingStarts: (() => void)[] = []
+  /** Deliveries held open by `deferSend`, released by the returned `releaseSends`. */
+  const pendingSends: (() => void)[] = []
   const registered: Mounted['registered'] = []
   const contexts: Mounted['contexts'] = []
   const sections: Mounted['sections'] = []
@@ -375,6 +386,11 @@ export async function mount(
       sent.push({ from: sender.id, targetId, text })
       const wokenNode = nodeIdOfPrompt(text)
       if (wokenNode !== undefined) executorOf.set(wokenNode, { sessionId: targetId, prompt: text })
+      if (options.deferSend === true) {
+        return new Promise<string>((resolve) => {
+          pendingSends.push(() => { resolve('m1') })
+        })
+      }
       return Promise.resolve('m1')
     },
     startContinuable: (spec: {
@@ -587,6 +603,9 @@ export async function mount(
     },
     releaseStarts: () => {
       for (const release of pendingStarts.splice(0)) release()
+    },
+    releaseSends: () => {
+      for (const release of pendingSends.splice(0)) release()
     },
   }
 }

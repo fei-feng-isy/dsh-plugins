@@ -160,6 +160,21 @@ export class AvantfWorkHost extends TypertRemoteService {
   /** Claims bound but not yet accepted by the child. A worker is "live" from reservation: a sweep in
    *  that gap would otherwise reclaim a starting worker and pay for a duplicate run per node. */
   private readonly startingClaims = new Set<string>()
+  /**
+   * Parked sessions whose WAKE is in flight: live from the adoption that binds them until the resumed
+   * agent is observed, the delivery reports a failure, or the engine gives up on the binding.
+   *
+   * A parked session is IDLE by definition — `decompose_work` ends the executor's turn, which is
+   * exactly what "parked" means — so the liveness check alone reads a freshly adopted binding as
+   * vanished. The sweep triggered by the LAST CHILD's own `subagent/end` runs in the same moment as
+   * the owner's wake, so without this guard it reclaims the binding the wake is delivering into: the
+   * cold resume still lands, the old executor burns a whole extra round, and its `submit_work` is
+   * refused because the node was already re-dispatched to a fresh claim. Measured in a real run
+   * (2026-09-22): 8 wasted minutes, two `not-owner` refusals, and `attempts`/`failures` charged an
+   * extra time each — the failures are the dangerous half, because they spend the budget that ends a
+   * node.
+   */
+  private readonly wakingClaims = new Set<string>()
   /** Per-owner change counters and the open `watch` streams waiting on them: how "the tree changed"
    *  reaches the browser without polling or session-log writes. */
   private readonly revisions = new Map<string, number>()
@@ -345,6 +360,7 @@ export class AvantfWorkHost extends TypertRemoteService {
     this.workerAborts.clear()
     this.issuedClaims.clear()
     this.startingClaims.clear()
+    this.wakingClaims.clear()
     this.dispatchedFor.clear()
     this.ownerChecks.clear()
     await this.domain?.close().catch(() => undefined)
@@ -395,14 +411,22 @@ export class AvantfWorkHost extends TypertRemoteService {
   }
 
   /**
-   * Whether a claim resolves to a worker that is alive OR still starting. A continuable child
-   * materializes asynchronously, and treating that window as "vanished" made a sweep reclaim the
+   * Whether a claim resolves to a worker that is alive, still starting, or being WOKEN. A continuable
+   * child materializes asynchronously, and treating that window as "vanished" made a sweep reclaim the
    * starting worker, re-dispatch, and leave the first with every `submit_work` refused — two LLM runs
    * for one attempt. A claim is live from reservation until the child accepts its prompt.
+   *
+   * The parked case is the same window with a different cause: the session is idle (that is what
+   * parking means) while the wake is being delivered, so a claim is live from the adoption until the
+   * resumed agent shows up. Seeing the agent ends the guard — it must not outlive the evidence.
    */
   workerLive(sessionId: string): boolean {
     if (this.startingClaims.has(sessionId)) return true
-    return this.ctx.agents.get(SessionId(sessionId)) !== undefined
+    if (this.ctx.agents.get(SessionId(sessionId)) !== undefined) {
+      this.wakingClaims.delete(sessionId)
+      return true
+    }
+    return this.wakingClaims.has(sessionId)
   }
 
   /**
@@ -1053,32 +1077,47 @@ export class AvantfWorkHost extends TypertRemoteService {
       if (this.ctx.agents.get(SessionId(tree.treeOf(node.rootId)?.ownerSessionId ?? '')) === undefined) {
         continue
       }
-      const adopted = await tree.adoptParked(node.id, workerId)
-      if (!adopted.ok) {
-        this.trace(`wake refused ${node.id}: ${adopted.code}`)
-        continue
+      // The node is about to be owned by an IDLE session, so it must count as live BEFORE the adoption
+      // lands: the sweep that the last child's own `subagent/end` triggers runs concurrently with this
+      // loop, and `heldByLiveWorkers` cannot see an idle parked session (see `workerLive`).
+      this.wakingClaims.add(workerId)
+      let handedOff = false
+      try {
+        const adopted = await tree.adoptParked(node.id, workerId)
+        if (!adopted.ok) {
+          this.trace(`wake refused ${node.id}: ${adopted.code}`)
+          continue
+        }
+        this.parkedSignaled.delete(node.id)
+        if (await this.wakeParkedWorker(adopted.value.node, workerId)) {
+          woken += 1
+          // The guard stays until `workerLive` observes the resumed agent: the delivery resolving is
+          // not the same event as the agent being registered, and the sweep may land in between.
+          handedOff = true
+          this.dispatchedFor.add(tree.treeOf(node.rootId)?.ownerSessionId ?? '')
+          this.announceTree(node.rootId)
+          continue
+        }
+        // Delivery failed: give the node back. A fresh claim is reserved here so a cleaned-up session
+        // costs one round trip, not one pass.
+        await tree.reclaim(node.id, 'wake-failed').catch(() => undefined)
+        const claimId = newClaimId()
+        this.issuedClaims.add(claimId)
+        this.startingClaims.add(claimId)
+        const dispatched = await tree.dispatch(node.id, claimId)
+        if (!dispatched.ok) {
+          this.endStartAttempt(claimId)
+          continue
+        }
+        void this.startWorker(dispatched.value.node, claimId).catch((error: unknown) => {
+          this.log.warn(`dispatch of ${node.id} failed: ${String(error)}`)
+        })
+      } finally {
+        // Every exit but a successful hand-off drops the guard here. A successful one is kept until the
+        // agent is observed (or the engine gives up on the binding and interrupts it) — dropping it on
+        // the delivery's own resolution would reopen exactly the window it exists to close.
+        if (!handedOff) this.wakingClaims.delete(workerId)
       }
-      this.parkedSignaled.delete(node.id)
-      if (await this.wakeParkedWorker(adopted.value.node, workerId)) {
-        woken += 1
-        this.dispatchedFor.add(tree.treeOf(node.rootId)?.ownerSessionId ?? '')
-        this.announceTree(node.rootId)
-        continue
-      }
-      // Delivery failed: give the node back. A fresh claim is reserved here so a cleaned-up session
-      // costs one round trip, not one pass.
-      await tree.reclaim(node.id, 'wake-failed').catch(() => undefined)
-      const claimId = newClaimId()
-      this.issuedClaims.add(claimId)
-      this.startingClaims.add(claimId)
-      const dispatched = await tree.dispatch(node.id, claimId)
-      if (!dispatched.ok) {
-        this.endStartAttempt(claimId)
-        continue
-      }
-      void this.startWorker(dispatched.value.node, claimId).catch((error: unknown) => {
-        this.log.warn(`dispatch of ${node.id} failed: ${String(error)}`)
-      })
     }
     return woken
   }
@@ -1217,6 +1256,9 @@ export class AvantfWorkHost extends TypertRemoteService {
   }
 
   private async interruptWorker(sessionId: string, ownerSessionId?: string): Promise<void> {
+    // The engine is giving up on this binding (stalled or cancelled), so a wake guard outliving it
+    // would be a ghost that keeps answering "live" for an id no node holds.
+    this.wakingClaims.delete(sessionId)
     this.workerAborts.get(sessionId)?.abort(new Error('avantf-work: worker reclaimed'))
     this.workerAborts.delete(sessionId)
     // Interruption is authorized by the exact direct parent, so the owning session is the credential;
