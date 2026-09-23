@@ -58,7 +58,7 @@ pnpm approve-builds --all     # 至少勾选 better-sqlite3；nodejieba / hnswli
       name: '@avantf/dsh-mem'
       config:
         mode: cordis          # 进程内插件
-        # dataHome 建议省略（默认 ~/.avantf）。写上它会覆盖 AVANTF_HOME。
+        # dataHome 建议省略（默认 ~/.avantf）。它是配置值，会被 AVANTF_HOME 压过。
 ```
 
 ```bash
@@ -72,8 +72,8 @@ dsh web
 
 ## 配置、数据与提示词
 
-- **数据目录**：默认 `~/.avantf`；按家族分层 ⑤ 显式 → ④ `AVANTF_HOME` → ② `configs/common.yaml` 的
-  `dataHome` → `~/.avantf` 解析（见 INSTALL：profile 里写的那条 `dataHome` 属 ⑤，会压过 `AVANTF_HOME`）。
+- **数据目录**：默认 `~/.avantf`；按家族分层 **⑤ 显式实参 → ④ `AVANTF_HOME` → ② profile 里的
+  `dataHome`（配置值）→ `~/.avantf`** 解析（见 INSTALL：设了 `AVANTF_HOME` 时它会压过 profile 那条）。
   记忆库、知识库（含 `knowledge/docs` 下的受管文档副本）与模型缓存都在其中。
 - **配置**：`~/.avantf/configs/` 下的三份 YAML——`common.yaml`（公共项，缺失时按注释模板自动创建）、
   `memory.yaml`、`knowledge.yaml`；都只写你要改的项，其余取内置默认。

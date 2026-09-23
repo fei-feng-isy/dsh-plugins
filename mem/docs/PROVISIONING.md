@@ -91,7 +91,7 @@ bootstrap（内联；解析底座 → 动态 import() → 校验 supportedRange�
 
 - **族根 / 受管根（family root）** = `$AVANTF_HOME`（若已设置），否则 `~/.avantf/env`。**受管资源**在它
   下面：`<root>/tools`、`<root>/models`（以及控制面 `<root>/.envinit`）。
-- **数据根（data root）** = ⑤ 显式实参 → ④ `$AVANTF_HOME` → ② `configs/common.yaml` 里的 `dataHome` → `~/.avantf`。注意两层的区别：插件 profile 里写的 `dataHome` 是**调用方给的显式实参**（⑤，因此压过环境变量，见 INSTALL），而 `configs/common.yaml` 里那条是配置层（②，被环境变量压过）。
+- **数据根（data root）** = ⑤ 显式实参（CLI `--data-home`、`buildRuntime` 的 `dataHome`）→ ④ `$AVANTF_HOME` → ② 插件 profile 里的 `dataHome`（**配置值**，被环境变量压过，见 INSTALL）→ `~/.avantf`。`configs/common.yaml` 里那条 `dataHome` **不参与**这一步：那个文件在数据根**之内**，解析根时还没读到它（`DESIGN.md` §3）。
   **用户数据与可编辑文本**在它下面：`memory/`、`knowledge/`、`configs/*.yaml`、`prompts/*.md`。
 
 ```

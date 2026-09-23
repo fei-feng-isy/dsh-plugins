@@ -28,6 +28,13 @@
 
 ## 3. 数据目录布局（`data_home` 默认 `~/.avantf`）
 
+**数据根怎么定**（⑤→④→②→默认，与「配置分层」同序）：⑤ 调用方的显式实参（CLI 的 `--data-home`、
+`buildRuntime({ dataHome })`）→ ④ `$AVANTF_HOME` → ② 插件 profile 里的 `config.dataHome`（**配置值**，
+所以环境变量压得过它）→ `~/.avantf`。两个插件的 profile `dataHome` 现在给同一个答案：mem 与 work 都把它
+当配置层（work 早先把它塞进显式槽，等于把 ② 提到 ④ 之上，同一个 profile 在两边解析出不同目录，而
+`<data home>/prompts` 是两边共享的）。**`configs/common.yaml` 里的 `dataHome` 不参与这一步**：那个文件
+就在数据根**之内**，解析根的时候还没读到它，所以它对数据根无效（它是历史遗留的键，见 CHANGELOG）。
+
 ```
 ~/.avantf/                          # data_home（默认）
 ├─ configs/                         # 全部可编辑配置；缺失或空白时写入全注释默认（见 §10）
@@ -57,7 +64,7 @@
   git 操作抽成**与具体 store 无关的复用库** `packages/core/src/git.ts` 的 `GitRepo({ root, mode, ignore, identity, logger })`：知识库只是它的第一个使用方（`root` 默认取 `knowledge.docs.dir`）。`root` 可配置正是为了"共享一整个 store"——把它指向 `~/.avantf/knowledge` 甚至 `~/.avantf`，再用 `ignore`（默认已含 `*.db` / `*.db-wal` / `*.db-shm`）把数据库挡在历史之外；`ignore` 只在**建仓时**写入 `.gitignore`，绝不覆盖用户自己写的那份。API 只有 `init` / `commit` / `history` / `branch` / `enabled`，全部不抛错。
   **共享能力的前提是文本表示**：知识库有（`docs/**/*.md`，`kb import <目录>` 就能在新机器上重建）；**记忆库没有** —— `~/.avantf/memory/` 下只有 `memory.db`（+ WAL/SHM），事实只存在于 SQLite 里，提交它等于每次写入都产生一个二进制大对象的变更（不可 diff、不可合并）。要让记忆库可共享，先得有类似受管文档副本那样的**文本导出**（每条事实一行、带 id/时间/来源），那是另一件事，尚未实现。
 
-配置分层（低→高覆盖）：①内建默认 → ②`.avantf/configs/common.yaml`（公共）→ ③`.avantf/configs/*.yaml`（分库覆盖）→ ④环境变量 → ⑤插件/CLI 显式配置。
+配置分层（低→高覆盖）：①内建默认 → ②`.avantf/configs/common.yaml`（公共）→ ③`.avantf/configs/*.yaml`（分库覆盖）→ ④环境变量 → ⑤CLI/调用方的显式实参（`--data-home`、`buildRuntime` 的 `dataHome`）。插件 profile 里的 `config.dataHome` 算**配置值**（②），所以 `$AVANTF_HOME` 压得过它 —— 数据根的完整次序见 §3 开头。
 
 - YAML 键名与 zod schema 一致（`semantic`/`rerank`/`vectorStore`/`retriever`/`lifecycle`/`tools`，`vectorStore` 为 camelCase）；段内做一级深合并。
 - ④环境变量：`AVANTF_HOME`、`AVANTF_MEM_DB`、`AVANTF_KNOWLEDGE_DB`、`AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`）、`AVANTF_MEM_MODEL_CACHE`、`AVANTF_MEM_AUTO_DOWNLOAD`（`0/false` 禁用一切下载——模型与外部二进制，测试与离线环境用；作为全局 kill-switch 同时作用于适配器构造与 provision 的每个安装路径，优先于显式传参）、`AVANTF_TOOLS_DIR`（受管工具目录覆盖）、`AVANTF_PANDOC`（显式指定 pandoc 可执行文件，优先于受管目录与 PATH）。

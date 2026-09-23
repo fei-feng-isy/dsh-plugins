@@ -263,12 +263,15 @@ pnpm release:check && node scripts/mount-smoke.mjs
 - 保持 `mem/` ↔ `work/` 零 import（有门禁把守）。共享代码一律走 `base/`。
 - `AVANTF_HOME` 设的是**家族/受管根**（`$AVANTF_HOME`，否则 `~/.avantf/env`；资源在
   `<root>/tools`、`<root>/models`）。**数据根**按家族的分层来（`mem/AGENTS.md`「配置分层」：
-  内置默认 → `common.yaml` → 存储配置 → **环境** → 显式），即 `~/.avantf` → 配置的
-  `common.dataHome` → `$AVANTF_HOME` → 显式实参；用户数据与可编辑文本住在那里（`memory/`、
-  `knowledge/`、`configs/*.yaml`、`prompts/*.md`）。两个半边必须给出同一个答案：base kit 的
-  `resolveDataHome(explicit, env, common)` 与 mem 引擎那份是同一条规则，由
-  `mem/packages/plugin/test/family_pin.spec.ts` 跨树钉住（配置值走**配置层**参数，不是显式层 ——
-  否则 ② 会压过 ④，`$AVANTF_HOME` 在其中一半静默失效）。这两个根刻意不同 —— 不要混为一谈。
+  内置默认 → `common.yaml` → 存储配置 → **环境** → 显式），即 `~/.avantf` → 插件 profile 的
+  `dataHome`（**配置值**）→ `$AVANTF_HOME` → 显式实参（CLI `--data-home`）；用户数据与可编辑文本住在
+  那里（`memory/`、`knowledge/`、`configs/*.yaml`、`prompts/*.md`）。`configs/common.yaml` 里那条
+  `dataHome` **不参与**：它在数据根**之内**，解析根时还没读到它（`mem/DESIGN.md` §3）。两个半边必须
+  给出同一个答案：base kit 的 `resolveDataHome(explicit, env, common)` 与 mem 引擎那份是同一条规则，
+  由 `mem/packages/plugin/test/family_pin.spec.ts` 跨树钉住；两个插件对**自己的** profile `dataHome`
+  也必须同层 —— 都走配置层（②），mem 侧由 `mem/packages/plugin/test/data_home.spec.ts` 钉住（把它塞进
+  显式层会让 ② 压过 ④，同一个 profile 在两边解析出两个目录，而 `<data home>/prompts` 是共享的）。
+  这两个根刻意不同 —— 不要混为一谈。
 - 兼容性门禁现在属于 base：不再有 `mem:compat`/`work:compat` item，也没有受管的
   `~/.avantf/env/compat/**` 下载了。机器上如果还留着 `~/.avantf/env/compat/`（或旧的
   `<dataHome>/dsh-compat/`），可以手工删掉 —— 没有任何东西读它。

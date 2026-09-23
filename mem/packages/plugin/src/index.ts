@@ -61,6 +61,7 @@ import {
   type ToolSpec,
 } from '@avantf/mem-contract'
 import { hostContribution } from './remote.js'
+import { configDataHome } from './data_home.js'
 import { provision, registerCompatMegaphone, verifyRegisteredFaces, type CompatVerdict } from './provision.js'
 import {
   managedModelSpec,
@@ -88,10 +89,10 @@ export interface Config {
 }
 export const Config: z<Config> = z.object({
   mode: z.union([z.const('cordis'), z.const('mcp')]).default('cordis'),
-  // Deliberately NO default: a literal `~/.avantf` here would be passed to the
-  // runtime as an EXPLICIT data home (layer ⑤) and would then outrank
-  // `AVANTF_HOME` (layer ④) for everyone who never configured this field.
-  // Left unset, the runtime applies ⑤ → ④ → default itself.
+  // Deliberately NO default: this is a CONFIGURED value (layer ②), so `$AVANTF_HOME` (④) has to be
+  // able to outrank it — and a literal `~/.avantf` default would make "unset" indistinguishable from
+  // "configured as the default", which is how merely having a default used to kill the env var. Left
+  // unset, resolution falls through ④ to the default (see `configDataHome`).
   dataHome: z.string(),
 })
 
@@ -493,17 +494,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // DSH plugin cannot own the host's stdio. Warn and mount the cordis toolset.
     logger.warn('config mode=mcp is not served in-process — mounting the cordis toolset; run @avantf/mem-mcp standalone for MCP')
   }
-  // The RESOLVED home is logged by the runtime init line; here we only report what
-  // this plugin was configured with, so "unset" reads as unset rather than as a value.
+  // Resolved through the CONFIG layer, not used as an explicit value: `$AVANTF_HOME` outranks the
+  // profile's `dataHome`, the same way it outranks the work plugin's (see `data_home.ts`).
+  const dataHome = configDataHome(config.dataHome)
+  // Both halves are logged: what was configured, and where it actually landed — the runtime's own
+  // init line repeats the latter, but a reader of this line should not have to join two log lines to
+  // find out that a configured value was overridden by the environment.
   logger.info(
-    `plugin mount: mode=${config.mode ?? 'cordis'} `
-    + `dataHome=${config.dataHome ?? '(unset → AVANTF_HOME, else ~/.avantf)'}`,
+    `plugin mount: mode=${config.mode ?? 'cordis'} dataHome=${dataHome}`
+    + ` (configured ${config.dataHome ?? 'unset'})`,
   )
 
   let rt: AvantfRuntime
   try {
     rt = buildRuntime({
-      dataHome: config.dataHome,
+      dataHome,
       logger,
       // The family framework owns pandoc and the embedding model when it is up: its managed roots
       // become this process's built-in defaults, so the converter and the semantic backend look

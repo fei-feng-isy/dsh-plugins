@@ -16,6 +16,21 @@ All notable changes to `avantf-mem` are documented here.
   `familyHome`/`familyToolsDir`/`familyModelsDir`，`@avantf/provision` 以其零依赖方式镜像一份，
   由 `core/test/family_paths.spec.ts` 钉住两者不漂移。
 
+### Fixed（数据根：profile 的 `dataHome` 归配置层）
+- **插件 profile 里的 `config.dataHome` 是配置值（②），`$AVANTF_HOME`（④）压得过它**：它此前被直接塞进
+  引擎的显式槽（⑤），于是设了 profile `dataHome` 的用户在 mem 这半边环境变量静默失效，而 work 那半边
+  同一条配置被环境变量压过 —— 同一个 profile 解析出两个目录，而 `<data home>/prompts` 是两边**共享**的
+  （一边编辑的提示词另一边读不到）。现在两个半边同层；`mem/packages/plugin/test/data_home.spec.ts` 钉住
+  这一层，`family_pin.spec.ts` 继续钉住两份解析器本身。
+- **文档同步**：`DESIGN.md`（§3 开头与「配置分层」）、`docs/INSTALL.md`、`docs/PROVISIONING.md`、
+  `packages/plugin/README.md` 与根 `AGENTS.md` 都改成 ⑤ 显式实参 → ④ `$AVANTF_HOME` → ② profile 的
+  `dataHome` → `~/.avantf`，并写明 `configs/common.yaml` 里的 `dataHome` **不参与**这一步（那个文件在
+  数据根之内，解析根时还没读到它），所以它对数据根无效。
+- **默认 `common.yaml` 模板不再推荐 `dataHome`**：它在模板里被列成一个可写旋钮，而写在里面永远不会生效
+  （文件在数据根之内）—— 与 `memory.category_values` 同一类"文档教了一个没用的键"。模板改为一句说明数据
+  根由谁决定；schema 里的字段保留（它是解析器那个"配置层"参数的承载体），`config_files.spec.ts` 加一条
+  断言防止它被写回模板。
+
 ### Added（系统提示词改为用户可编辑）
 - 三个 systemPrompt 段落的正文改为**磁盘上的文件**，放在**家族共享**的 `<data_home>/prompts/`：`mem-memory-usage.md` / `mem-knowledge-usage.md` / `mem-kb-edit.md`（同目录下工作引擎用 `work-` 前缀；各插件只动自己前缀的文件）。
   插件 `apply` 时缺失或空白则写入内置默认，有内容则逐字注入（去首尾空白、剥 BOM、CRLF→LF）；段落名与 order 仍由代码

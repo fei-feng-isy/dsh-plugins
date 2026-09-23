@@ -507,8 +507,15 @@ try {
 // written by a NEWER build (migrations are one-way), and a throwing `apply` is a failed loader row
 // — which is enough to fail the whole `dsh web` boot. So the plugin degrades instead: the five tools
 // stay registered and answer with the reason.
+//
+// The scenario is "the RESOLVED data root cannot be opened", so both layers are pointed at the
+// unusable path for the duration: the profile value is layer ②, and `$AVANTF_HOME` (④, set to this
+// run's temp home at the top) outranks it — leaving the env alone would make the plugin resolve a
+// perfectly good root and mount healthily, which tests nothing.
 const blockedHome = join(home, 'not-a-directory')
 writeFileSync(blockedHome, 'x') // a FILE where the runtime needs to create its store directories
+const healthyHome = process.env['AVANTF_HOME']
+process.env['AVANTF_HOME'] = blockedHome
 const degradedCtx = new Context()
 const degradedTools = []
 degradedCtx.provide('tools', { register: (t) => { degradedTools.push(t); return () => {} } })
@@ -520,6 +527,9 @@ try {
 } catch (error) {
   degradedMounted = false
   console.error('degraded mount threw (it must not):', error)
+} finally {
+  if (healthyHome === undefined) delete process.env['AVANTF_HOME']
+  else process.env['AVANTF_HOME'] = healthyHome
 }
 // DSH validates the declared parameters BEFORE `execute`, even here, so the call has to be a legal
 // one for the tool it targets — which is itself part of what this checks.

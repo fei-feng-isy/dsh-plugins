@@ -128,12 +128,13 @@ pnpm add <AVANTF>/packages/plugin
       name: '@avantf/dsh-mem'
       config:
         mode: cordis          # 进程内插件仅支持 cordis；MCP 独立运行 @avantf/mem-mcp
-        # dataHome 建议省略（默认 ~/.avantf）。它属于第 ⑤ 层「显式配置」，
-        # 一旦写上就会覆盖 AVANTF_HOME（第 ④ 层）：想用环境变量改数据目录就别写这一行。
+        # dataHome 建议省略（默认 ~/.avantf）。它是配置值（第 ② 层），
+        # 会被 AVANTF_HOME（第 ④ 层）压过：想用 profile 定住数据目录，就别设 AVANTF_HOME。
 ```
 
-> 数据目录优先级（DESIGN §3）：`.avantf/configs/common.yaml` 的 `dataHome`（②）< `AVANTF_HOME`（④）<
-> 这里显式写的 `dataHome`（⑤）。公共/分库配置放 `~/.avantf/configs/common.yaml` 与
+> 数据目录优先级（DESIGN §3）：这里的 `dataHome`（②，配置值）< `AVANTF_HOME`（④）< CLI 的
+> `--data-home`（⑤）。`~/.avantf/configs/common.yaml` 里那条 `dataHome` **不参与** —— 那个文件就在
+> 数据根里面，解析根时还没读到它。公共/分库配置放 `~/.avantf/configs/common.yaml` 与
 > `~/.avantf/configs/{memory,knowledge}.yaml`。
 
 > 该 profile 需要 `patchReload`（`web`/`headless` 等模板默认 `live`）。

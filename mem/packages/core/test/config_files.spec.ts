@@ -41,6 +41,15 @@ describe('the default common config', () => {
     }
   })
 
+  it('does NOT advertise a dataHome knob, because this file cannot move the data root', () => {
+    // The key IS in the schema, so the "every commented key is a real section" check above would pass
+    // either way — and that is the trap: the file sits INSIDE the data root, so it is read only after
+    // the root is already resolved, and a `dataHome` here has no effect on anything. It is mentioned
+    // in prose (where the root actually comes from) instead of being offered as a knob.
+    expect(DEFAULT_COMMON_CONFIG).not.toMatch(/^# dataHome:/mu)
+    expect(DEFAULT_COMMON_CONFIG).toContain('AVANTF_HOME')
+  })
+
   it('names both managed-key escape hatches and the family root', () => {
     // These are the two things a reader cannot guess, and the reason the file exists at all.
     expect(DEFAULT_COMMON_CONFIG).toContain('AVANTF_MEM_MODEL_CACHE')

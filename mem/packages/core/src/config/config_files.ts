@@ -23,7 +23,8 @@ export const DEFAULT_COMMON_CONFIG = `# avantf-mem 公共配置（分层第②�
 #               → ④ 环境变量 → ⑤ 插件/CLI 显式传参
 # 所有可编辑文本都在 ~/.avantf 下：configs/*.yaml（本目录）与 prompts/*.md（模型提示词）。
 
-# dataHome: ~/.avantf                 # 数据根；记忆/知识/prompts/configs 都在它下面
+# 数据根不在这里配：它由 ④ AVANTF_HOME（或 CLI --data-home、插件 profile 的 dataHome）决定 ——
+# 本文件就在数据根里面，解析根的时候还没读到它，所以写在这里的 dataHome 对数据根无效（DESIGN §3）。
 
 # semantic:                           # 嵌入后端（记忆与知识共用，跨库分数才可比）
 #   backend: local_bge
