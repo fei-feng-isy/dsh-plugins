@@ -244,7 +244,7 @@ pnpm workers:usage -- --strict        # 出现"调了不存在的工具"就非�
 
 ## 环境初始化（`@avantf/dsh-plugin-base`）
 
-插件挂载的第一步不是注册工具，而是**把环境准备好**——交给家族底座 `@avantf/dsh-plugin-base`（peer 区间 `^0.1.0`；本仓另在 `devDependencies` 里声明同一个范围，并由根 `pnpm-workspace.yaml` 的 `linkWorkspacePackages: true` 链到本地 `base/`）。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本）。时序固定为：
+插件挂载的第一步不是注册工具，而是**把环境准备好**——交给家族底座 `@avantf/dsh-plugin-base`（peer 区间 `^0.2.0`；本仓另在 `devDependencies` 里声明同一个范围，并由根 `pnpm-workspace.yaml` 的 `linkWorkspacePackages: true` 链到本地 `base/`）。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本）。时序固定为：
 
 ```
 内联 bootstrap（解析底座 → 动态 import() → 校验 supportedRange）→ 跑挂载前检查（兼容门禁）

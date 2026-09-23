@@ -31,7 +31,7 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "@avantf/dsh-plugin-base": "^0.1.0",
+    "@avantf/dsh-plugin-base": "^0.2.0",
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/cordis-plugin-timer": "^1.1.4",
     "@deepseek-ai/dsh-agent": "^0.1.5-rc.2",
@@ -104,7 +104,7 @@
     }
   },
   "devDependencies": {
-    "@avantf/dsh-plugin-base": "^0.1.0",
+    "@avantf/dsh-plugin-base": "^0.2.0",
     "@avantf/work-core": "workspace:*",
     "@tanstack/react-virtual": "catalog:",
     "@types/node": "catalog:",

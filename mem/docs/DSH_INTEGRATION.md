@@ -22,8 +22,8 @@ pnpm build:dsh   # links harness packages + publishes the manifest stub, then ts
 > `@avantf/dsh-envinit` and `@avantf/dsh-compat` packages were merged into it and are dead — no new
 > versions, nothing depends on them). There is **no `mem:compat` npm-package item**: the gate is the
 > base itself, and there is no download, no integrity verification and no managed `compat` root. Base
-> is a **`peerDependency`** of the plugin (peer range `^0.1.0`) and is also declared in
-> `devDependencies` (`^0.1.0`) so `pnpm install` puts it in the tree; the model-cache `flat` layout
+> is a **`peerDependency`** of the plugin (peer range `^0.2.0`) and is also declared in
+> `devDependencies` (`^0.2.0`) so `pnpm install` puts it in the tree; the model-cache `flat` layout
 > this plugin relies on landed in the framework's `0.1.2` (base is a NEW package, so it restarts its
 > own version line at `0.1.0` — the old framework's numbers do not carry over). It is **never bundled** and
 > **never imported by specifier**: a static import would break the whole plugin module when base is absent.

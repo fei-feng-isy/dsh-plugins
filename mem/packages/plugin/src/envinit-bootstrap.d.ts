@@ -3,9 +3,16 @@
  * @module bootstrap
  */
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export declare const VERSION = "0.1.0";
-/** The framework interval this bootstrap can launch. */
-export declare const supportedRange = "^0.1.0";
+export declare const VERSION = "0.2.0";
+/**
+ * The framework interval this bootstrap can launch.
+ *
+ * Kept equal to the plugins' peer range for the base: the plugin passes no override, so THIS is the
+ * runtime gate, and a range wider than what the plugin was built against would load a base whose kit
+ * it cannot use (0.2.0 is the line whose `resolveDataHome` takes the configured layer as its own
+ * argument — a 0.1.x base would silently resolve the data root to a different directory).
+ */
+export declare const supportedRange = "^0.2.0";
 /** Sink for the warnings that replace a throw. */
 export interface BootstrapLogger {
     warn(message: string): void;

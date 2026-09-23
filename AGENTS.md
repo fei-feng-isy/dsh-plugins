@@ -17,10 +17,13 @@
 
 - **旧**包 `@avantf/dsh-envinit` 与 `@avantf/dsh-compat` 已死：代码住在 base 里，不再有新版本，
   任何地方都不许再提它们的名字。
-- 插件把 base 当作 **REQUIRED peer** 依赖，范围要宽到能吃下一个 base 的 patch 或 minor
-  （`^0.1.0`）。它同时在 `devDependencies` 里声明同一个 base（`^0.1.0`），好让 `pnpm install`
-  有东西可解析；根 `pnpm-workspace.yaml` 里的 `linkWorkspacePackages: true` 让这一条指向
-  `base/`，绝不会变成下载。
+- 插件把 base 当作 **REQUIRED peer** 依赖（`^0.2.0`）。注意 0.x 的 caret **不跨 minor**：它只吃同一条
+  minor 的 patch，所以"只发 base 就能修好共享代码"对 patch 成立，而 base 换 minor 时必须**同批**放宽两个
+  插件的 peer 与 `devDependencies`（`scripts/release-check.mjs` 会拦住一个吃不下 workspace base 的区间），
+  且 `base/plugin-base/src/bootstrap.ts` 的 `supportedRange` 要一起走 —— 它是**运行期**的门，比 peer 更硬：
+  插件不给 `loadFramework` 传 override，超出区间的 base 只会得到一条降级告警。根
+  `pnpm-workspace.yaml` 里的 `linkWorkspacePackages: true` 让 `devDependencies` 那一条指向 `base/`，
+  绝不会变成下载。
 - 宿主/profile **显式**安装 `@avantf/dsh-plugin-base` **和**两个插件
   （`autoInstallPeers: false`）。会自动装 peer 的 npm 式安装器则会顺带把 base 装上。
 - **`zod` 只解析出一份。** 根 catalog 一行 `zod: 4.6.5`（已安装 dsh 自带的版本）。base 自己的
@@ -123,7 +126,7 @@ pnpm build:dsh base       # 只构建 base（tsc；不出插件产物、不跑�
   自己的脚本）。
 - 根 `scripts/release-check.mjs` 的**可发布集合**加一行。那里刻意写死包名：可发布面是要被审查的，
   不该被自动发现悄悄放大。
-- 插件自己那一份：`packages/plugin/package.json` 里 base 是 required peer（`^0.1.0`）+ 同版本
+- 插件自己那一份：`packages/plugin/package.json` 里 base 是 required peer（`^0.2.0`）+ 同版本
   `devDependencies`、自己的 `build:dsh`、`scripts/mount-smoke.mjs`（`proof:base-swap --mount` 要求）。
 - 依赖版本一律写进根 `pnpm-workspace.yaml` 的 `catalog:`，各 `package.json` 只写 `"catalog:"`。
 

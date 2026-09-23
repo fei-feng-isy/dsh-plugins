@@ -54,21 +54,23 @@ base 缺失或版本不被接受时插件**照常挂载**（WARN + 降级）：p
 ### 1. 声明依赖
 
 插件把 base 声明为 **peer**（不要放 `dependencies`，否则会装出多份 base 副本）。peer 区间要**足够宽**
-以接受 base 的补丁/小版本——`^0.1.0`——否则"只发 base"会被 peer 区间卡死；`devDependencies` 里再声明
-同一条区间（本仓是 `^0.1.0`，并由根 workspace 的 `linkWorkspacePackages` 指向 `base/`），供
+以接受 base 的补丁——`^0.2.0`（0.x 的 caret 不跨 minor：base 换 minor 时要同批放宽这一行，并同步
+`src/bootstrap.ts` 的 `supportedRange`，那才是运行期的门）——否则"只发 base"会被 peer 区间卡死；
+`devDependencies` 里再声明
+同一条区间（本仓是 `^0.2.0`，并由根 workspace 的 `linkWorkspacePackages` 指向 `base/`），供
 `pnpm install` 装上：
 
 ```jsonc
 {
-  "peerDependencies": { "@avantf/dsh-plugin-base": "^0.1.0" },
-  "devDependencies":  { "@avantf/dsh-plugin-base": "^0.1.0" }
+  "peerDependencies": { "@avantf/dsh-plugin-base": "^0.2.0" },
+  "devDependencies":  { "@avantf/dsh-plugin-base": "^0.2.0" }
 }
 ```
 
 base 从**插件自己所在的树**往上解析，所以它必须由那棵树提供，而它**保持 required peer**：npm（以及默认
 `autoInstallPeers: true` 的 pnpm）在装插件时会自动把它一起装上，多个插件共用提升到顶层的那一份；
 pnpm 关掉 `autoInstallPeers` 或 yarn 不会自动装，那时要在宿主/profile 的 `dependencies` 里显式写一条
-`"@avantf/dsh-plugin-base": "^0.1.0"`。宿主自己提供的 peer（宿主内部包）才标
+`"@avantf/dsh-plugin-base": "^0.2.0"`。宿主自己提供的 peer（宿主内部包）才标
 `peerDependenciesMeta.optional`，避免包管理器跑去 registry 拉一份宿主内部实现；缺 base 时插件仍降级挂载。
 
 ### 2. 内联 bootstrap

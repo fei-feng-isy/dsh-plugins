@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { VERSION, ensureFramework, loadFramework, readDependencyRange, supportedRange } from '../src/bootstrap.js'
+import { satisfiesRange } from '../src/semver.js'
 import { removeHome } from './helpers/tmp.js'
 
 const PACKAGE = '@avantf/dsh-plugin-base'
@@ -79,8 +80,10 @@ describe('bootstrap（零依赖自包含）', () => {
 
   it('版本常量与 supportedRange 自洽', () => {
     expect(VERSION).toMatch(/^\d+\.\d+\.\d+/)
-    expect(supportedRange).toMatch(/^\^\d+/)
-    expect(supportedRange).toContain(VERSION)
+    // A REAL semver check. `expect(supportedRange).toContain(VERSION)` reads like one but is string
+    // containment, so it would pass for any range that merely reuses the digits — and it says nothing
+    // about the rule that matters: the range this bootstrap ships with must admit its own version.
+    expect(satisfiesRange(VERSION, supportedRange), `${supportedRange} must admit ${VERSION}`).toBe(true)
   })
 
   it('解析调用方依赖树里的安装副本，且不写任何东西', async () => {

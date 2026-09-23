@@ -213,7 +213,8 @@ type ResourceState =
 框架本包只作为插件的 **peer**：放进 `dependencies` 会得到多份副本，跨副本的 registry 与
 identity 会分叉。**发布顺序是 base 先于两个插件**：同仓的发布脚本在发布插件前断言 registry 上已有兼容
 区间内的 base 版本。kit 与兼容门禁都在这一个包里，所以"改共用逻辑"等于"发一版 base"——插件的 peer 区间
-（`^0.1.0`）要足够宽以接受 base 的补丁/小版本，否则这条会被 peer 区间卡死。
+（`^0.2.0`）要足够宽以接受 base 的补丁（0.x 的 caret 不跨 minor，换 minor 要同批放宽它），否则这条会被
+peer 区间卡死。
 
 ## 8. 公共 API
 

@@ -43,7 +43,7 @@
 > [`@avantf/dsh-plugin-base`](../base/plugin-base)（`base/plugin-base`，合并后的唯一底座；
 > 从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，两个旧包不再发新版本、已死）
 > 负责——它把资源预装到受管族根（默认 `~/.avantf/env`），并在启动时跑兼容门禁。本仓把底座声明为插件的
-> **peerDependency**（peer 区间 `^0.1.0`，已发布到 registry；另在 `devDependencies` 里声明同一条 `^0.1.0`，
+> **peerDependency**（peer 区间 `^0.2.0`，已发布到 registry；另在 `devDependencies` 里声明同一条 `^0.2.0`，
 > `pnpm install` 即装上一份）：**不内联、也不按 specifier import**——插件唯一的静态引用是内联的零依赖
 > `bootstrap`（`packages/plugin/src/envinit-bootstrap.js`），它按
 > `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从插件自己的依赖树解析底座、
@@ -192,8 +192,8 @@ trust:
 pnpm release:check
 ```
 
-家族底座 `@avantf/dsh-plugin-base` 是插件的 **peerDependency**（peer 区间 `^0.1.0`，已发布到 registry）；
-插件同时把它声明进 `devDependencies`（同一条 `^0.1.0`），`pnpm install` 即装上：
+家族底座 `@avantf/dsh-plugin-base` 是插件的 **peerDependency**（peer 区间 `^0.2.0`，已发布到 registry）；
+插件同时把它声明进 `devDependencies`（同一条 `^0.2.0`），`pnpm install` 即装上：
 `pnpm build:dsh` 会先跑 `scripts/link-envinit.mjs`，从**安装副本** vendor 它零依赖的 bootstrap；底座
 **绝不内联、也绝不按 specifier import**，所以本地开发**不需要任何 checkout**（只有要就地改底座时才用
 `DSH_ENVINIT=<checkout>` 显式指定）。**作为可安装包部署时**，底座由 npm 这类会自动安装 peer 的包管理器
@@ -203,7 +203,7 @@ pnpm release:check
 ```jsonc
 // ~/.dsh/profiles/<profile>/package.json
 "dependencies": {
-  "@avantf/dsh-plugin-base": "^0.1.0",
+  "@avantf/dsh-plugin-base": "^0.2.0",
   "@avantf/dsh-mem": "^0.1.1"
 }
 ```
