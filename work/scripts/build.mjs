@@ -6,7 +6,7 @@
  * for the plugin.
  */
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,6 +26,21 @@ function compile(dir, project, noEmit) {
   }
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
+
+/**
+ * Stale output is not cosmetic. `lib/types` and `lib/work-core` are inside the tarball's `files`, and
+ * `tsc` never removes a file whose source is gone — so a renamed declaration would ship forever. Only
+ * what this build regenerates is removed: NOT the whole `lib/`, which also holds `lib/client.js` (the
+ * browser half, built separately) and the previous host bundle that `bundleHost` replaces.
+ */
+function cleanGenerated() {
+  const lib = join(repo, 'packages', 'plugin', 'lib')
+  for (const entry of ['types', 'work-core', 'index.js.map']) {
+    rmSync(join(lib, entry), { recursive: true, force: true })
+  }
+}
+
+if (!check) cleanGenerated()
 
 for (const name of packages) {
   const dir = join(repo, 'packages', name)
@@ -129,16 +144,31 @@ function inlineCoreTypes() {
   const pluginTypes = join(repo, 'packages', 'plugin', 'lib', 'types')
   const target = join(repo, 'packages', 'plugin', 'lib', 'work-core')
   console.log('\n▶ carry @avantf/work-core types into the plugin (it is not published)')
+  // Rebuilt from scratch: `tsc` never cleans its outDir, so a renamed/removed declaration would
+  // otherwise stay here and ship.
+  rmSync(target, { recursive: true, force: true })
   mkdirSync(target, { recursive: true })
   let copied = 0
-  for (const entry of readdirSync(coreTypes)) {
-    if (!entry.endsWith('.d.ts')) continue
-    // The source-map comment points at a `.map` this step does not carry; a dangling reference is noise, so it goes.
-    const text = readFileSync(join(coreTypes, entry), 'utf8')
-      .replace(/\n?\/\/# sourceMappingURL=\S*\s*$/u, '\n')
-    writeFileSync(join(target, entry), text)
-    copied += 1
+  // RECURSIVE, mirroring the repoint walk below: a copy that only took the top level while the
+  // repointing was recursive would leave a new `lib/types/<sub>/` pointing at files that never ship —
+  // and nothing noticed, because the pack gate skips relative specifiers on purpose.
+  const copy = (from, to) => {
+    for (const entry of readdirSync(from, { withFileTypes: true })) {
+      const source = join(from, entry.name)
+      const destination = join(to, entry.name)
+      if (entry.isDirectory()) {
+        mkdirSync(destination, { recursive: true })
+        copy(source, destination)
+        continue
+      }
+      if (!entry.name.endsWith('.d.ts')) continue
+      // The source-map comment points at a `.map` this step does not carry; a dangling reference is noise, so it goes.
+      const text = readFileSync(source, 'utf8').replace(/\n?\/\/# sourceMappingURL=\S*\s*$/u, '\n')
+      writeFileSync(destination, text)
+      copied += 1
+    }
   }
+  copy(coreTypes, target)
   // Repoint only specifiers that NAMED the package, leaving prose comments that mention it by name untouched.
   let rewritten = 0
   const walk = (dir) => {

@@ -79,23 +79,39 @@ function readJson(relative) {
   return JSON.parse(readFileSync(join(repo, relative), 'utf8'))
 }
 
-/** Every directory a workspace pattern matches that carries a `package.json`. */
-function workspacePackages() {
-  const found = []
-  for (const pattern of WORKSPACE_PATTERNS) {
-    const parent = pattern.slice(0, pattern.indexOf('*')).replace(/\/+$/, '')
-    const base = join(repo, parent)
-    if (!existsSync(base)) {
-      fail(`workspace pattern ${pattern} matches no directory (${parent}/ is missing)`)
-      continue
-    }
-    for (const entry of readdirSync(base, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const dir = `${parent}/${entry.name}`
-      if (existsSync(join(repo, dir, 'package.json'))) found.push(dir)
-    }
+/**
+ * The `packages:` globs `pnpm-workspace.yaml` actually declares.
+ *
+ * Read, not assumed: this list used to be hardcoded, and `workspacePackages()` only ever expanded it —
+ * so adding `notes/packages/*` to the workspace put a whole subtree OUTSIDE the "the rest stay private"
+ * check, silently. The declared set is compared for EQUALITY with {@link WORKSPACE_PATTERNS}: widening
+ * the workspace is a deliberate act, and it must come with a decision about the publishable set below.
+ */
+function declaredWorkspacePatterns(text) {
+  // The block runs from `packages:` up to the next line that starts at column 0 (the next top-level
+  // key) or the end of the file; comments inside it are ignored by the item pattern below.
+  const list = /^packages:[ \t]*\n([\s\S]*?)(?=^[^\s#]|$(?![\s\S]))/mu.exec(text)
+  if (list === null) return []
+  return [...list[1].matchAll(/^[ \t]+-\s*['"]?([^'"\s#]+)['"]?\s*$/gmu)].map((match) => match[1])
+}
+
+/** Every directory a workspace glob matches that carries a `package.json`. */
+function expandWorkspacePattern(pattern) {
+  const star = pattern.indexOf('*')
+  const parent = (star === -1 ? pattern : pattern.slice(0, star)).replace(/\/+$/, '')
+  const base = join(repo, parent)
+  if (!existsSync(base)) {
+    fail(`workspace pattern ${pattern} matches no directory (${parent}/ is missing)`)
+    return []
   }
-  return found.sort()
+  if (star === -1) return existsSync(join(base, 'package.json')) ? [parent] : []
+  const found = []
+  for (const entry of readdirSync(base, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const dir = `${parent}/${entry.name}`
+    if (existsSync(join(repo, dir, 'package.json'))) found.push(dir)
+  }
+  return found
 }
 
 // ── 1. the pnpm workspace itself: coverage, one zod, workspace linking ───────────────────────────
@@ -105,10 +121,23 @@ const workspaceText = existsSync(join(repo, 'pnpm-workspace.yaml'))
 if (workspaceText === undefined) {
   fail('pnpm-workspace.yaml is missing — this is not the merged workspace')
 } else {
-  for (const pattern of WORKSPACE_PATTERNS) {
-    if (!workspaceText.includes(`"${pattern}"`) && !workspaceText.includes(`'${pattern}'`)) {
-      fail(`pnpm-workspace.yaml does not list packages: ${pattern}`)
-    }
+  const declared = declaredWorkspacePatterns(workspaceText)
+  if (declared.length === 0) {
+    fail('pnpm-workspace.yaml declares no `packages:` globs — the workspace has nothing to scan')
+  }
+  // EQUALITY, not coverage: a new glob adds a subtree this gate would otherwise never look at, and a
+  // publishable package inside it would escape "the rest stay private" without a trace.
+  const unexpected = declared.filter((pattern) => !WORKSPACE_PATTERNS.includes(pattern))
+  const missing = WORKSPACE_PATTERNS.filter((pattern) => !declared.includes(pattern))
+  if (unexpected.length > 0) {
+    fail(
+      `pnpm-workspace.yaml lists workspace pattern(s) ${unexpected.join(', ')} that this gate does not know — `
+      + 'add them to WORKSPACE_PATTERNS (and, if they carry a publishable package, to PUBLISHABLE): the release '
+      + 'surface is reviewed, never discovered',
+    )
+  }
+  if (missing.length > 0) {
+    fail(`pnpm-workspace.yaml does not list packages: ${missing.join(', ')}`)
   }
   const zod = /^\s+zod:\s*(\S+)\s*$/mu.exec(workspaceText)
   if (zod === null) {
@@ -130,7 +159,9 @@ if (workspaceText === undefined) {
 }
 
 // ── 2. the publishable set is exactly the three ─────────────────────────────────────────────────
-const packages = workspacePackages()
+// Expanded from the DECLARED globs (section 1 already proved they are the expected set), so no subtree
+// can sit outside this scan.
+const packages = [...new Set(declaredWorkspacePatterns(workspaceText ?? '').flatMap(expandWorkspacePattern))].sort()
 const seen = new Map()
 for (const dir of packages) {
   let manifest

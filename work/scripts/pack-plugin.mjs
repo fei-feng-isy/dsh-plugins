@@ -205,6 +205,44 @@ for (const name of packages) {
     }
   }
 
+  // ── 2b. the relative-import closure of the shipped tree is complete ────────
+  // `build.mjs` carries `@avantf/work-core`'s declarations into `lib/work-core/` and repoints every
+  // `from '@avantf/work-core'` to a relative specifier. Nothing checked the other end: a partial copy
+  // (the copy step was NOT recursive while the repointing was) ships a specifier that resolves to
+  // nothing, and the peer scan above skips relative specifiers on purpose. So: every relative
+  // specifier in the shipped tree must land on a file the tarball also carries.
+  const shipped = new Set(shippedFiles(dir, manifest))
+  const dangling = []
+  let relativeSpecifiers = 0
+  for (const file of shipped) {
+    if (!/\.(?:js|d\.ts)$/u.test(file) || isBrowserHalf(dir, file)) continue
+    for (const specifier of importSpecifiers(readFileSync(file, 'utf8'))) {
+      if (!specifier.startsWith('.')) continue
+      relativeSpecifiers += 1
+      const base = resolve(dirname(file), specifier)
+      // `tsc` emits NodeNext specifiers: `./x.js` from a declaration file means `x.d.ts` on disk.
+      const candidates = specifier.endsWith('.js')
+        ? [base, base.replace(/\.js$/u, '.d.ts'), `${base}.d.ts`]
+        : [base, `${base}.d.ts`, join(base, 'index.js'), join(base, 'index.d.ts')]
+      if (!candidates.some((candidate) => shipped.has(candidate))) {
+        dangling.push(`${relative(dir, file)} → ${specifier}`)
+      }
+    }
+  }
+  // Non-vacuity: this tree carries the core's declarations, which reference each other by path, so a
+  // scan that finds no relative specifier at all is broken.
+  if (relativeSpecifiers === 0 && shipped.some((file) => relative(dir, file).startsWith('lib/work-core/'))) {
+    failures.push(`${manifest.name}: the shipped tree carries lib/work-core/ but no relative specifier was found — the closure scan is broken`)
+  }
+  if (dangling.length > 0) {
+    failures.push(
+      `${manifest.name}: ${String(dangling.length)} dangling relative import(s) in the shipped tree — `
+      + `a partial copy would ship a specifier that resolves to nothing: ${dangling.slice(0, 5).join(', ')}`,
+    )
+  } else if (relativeSpecifiers > 0) {
+    console.log(`  ok   ${manifest.name}: relative-import closure complete (${String(relativeSpecifiers)} specifier(s) checked)`)
+  }
+
   // ── 3. the framework: a peer, never bundled, with the bootstrap inlined ─────
   // The FRAMEWORK must be a peer: a bundled copy is a second orchestrator, and a static value
   // import would throw before the inlined bootstrap could run. The zero-dependency BOOTSTRAP is
@@ -319,6 +357,15 @@ for (const name of packages) {
         for (const pkg of Object.keys(baked)) {
           if (!listed.has(pkg)) {
             failures.push(`${manifest.name}: dsh-build.json bakes ${pkg} but VERSION_PACKAGES does not name it — the compatibility gate would not notice it drifting`)
+          }
+        }
+        // …and the REVERSE. One-way coverage let a package the gate names fall out of the bake: the
+        // gate then read no baked version and silently fell back to the peer range's lower bound, i.e.
+        // it vouched for a build whose "compiled against" side had quietly degraded. Two-way, or it is
+        // not an assertion about agreement.
+        for (const pkg of listed) {
+          if (baked[pkg] === undefined) {
+            failures.push(`${manifest.name}: VERSION_PACKAGES names ${pkg} but dsh-build.json does not bake it — the gate would fall back to the peer range's lower bound instead of this build's version`)
           }
         }
       }

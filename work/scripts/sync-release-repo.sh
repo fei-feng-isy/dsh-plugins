@@ -108,7 +108,7 @@ node "$GENERATOR" --into "$RC_DIR" "${VERSION_ARGS[@]}" || PLAN_RC=$?
 case "$PLAN_RC" in
   0) ;;
   1) echo "  (drift above; a sync would apply it)" ;;
-  *) echo "  the generator failed (exit $PLAN_RC)" >&2; exit "$PLAN_RC" ;;
+  *) echo "  the generator CRASHED (exit $PLAN_RC) — this is not drift; fix the generator before syncing" >&2; exit "$PLAN_RC" ;;
 esac
 
 if [[ "$DRY_RUN" == 1 ]]; then

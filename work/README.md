@@ -98,8 +98,8 @@ node scripts/mount-smoke.mjs --runtime
 
 | 验证 | 内容 |
 |---|---|
-| `@avantf/work-core` 104 项单测 | 状态机、终态工具双向互斥、配额、聚合就绪、拆解去重、启动对账、纠偏与子工作取消、拆解分析门禁（`analysis-missing` / `no-analysis`）、prompt 措辞与「执行本工作时写下的分析」一节的渲染次序 |
-| `@avantf/dsh-work` 221 项挂载级测试（24 个文件） | 真实 Cordis Context + 真实事件链；覆盖"递归拆分：root → 子工作 → 孙工作 → 逐层聚合 → 根收敛"整条链路、两张工具面孔（含 `note_work` 对 owner 不可见 / 对 worker 可见）、`note_work` → `decompose_work` 的完整门禁序列与真实聚合 prompt 片段、结构化参数容错（数组 / JSON 文本 / 一行一条）、旧文档缺 `analysisNotes` 仍能 parse 且 `DOMAIN_VERSION` 仍为 1、`typert.register` 抛错时照常挂载、纠偏、复用边的可见性、`/archive` 与 `/clean` 的护栏、环境初始化（envinit）的门禁/拒绝/复查形状、直接挂载 `apply` 的两条环境出口（拒绝挂载、准备期间被卸载）、真实 `@avantf/dsh-plugin-base` 的版本漂移告警，以及工作页无树时的空态 |
+| `@avantf/work-core` 单测（`pnpm test`，数量以门禁为准） | 状态机、终态工具双向互斥、配额、聚合就绪、拆解去重、启动对账、纠偏与子工作取消、拆解分析门禁（`analysis-missing` / `no-analysis`）、prompt 措辞与「执行本工作时写下的分析」一节的渲染次序 |
+| `@avantf/dsh-work` 挂载级测试（`pnpm release:check`，数量以门禁为准） | 真实 Cordis Context + 真实事件链；覆盖"递归拆分：root → 子工作 → 孙工作 → 逐层聚合 → 根收敛"整条链路、两张工具面孔（含 `note_work` 对 owner 不可见 / 对 worker 可见）、`note_work` → `decompose_work` 的完整门禁序列与真实聚合 prompt 片段、结构化参数容错（数组 / JSON 文本 / 一行一条）、旧文档缺 `analysisNotes` 仍能 parse 且 `DOMAIN_VERSION` 仍为 1、`typert.register` 抛错时照常挂载、纠偏、复用边的可见性、`/archive` 与 `/clean` 的护栏、环境初始化（envinit）的门禁/拒绝/复查形状、直接挂载 `apply` 的两条环境出口（拒绝挂载、准备期间被卸载）、真实 `@avantf/dsh-plugin-base` 的版本漂移告警，以及工作页无树时的空态 |
 | 宿主挂载冒烟 | 对**已安装 dsh** 跑（`pnpm build:dsh` 的一部分）：门禁由底座 `@avantf/dsh-plugin-base` 本身提供（没有 `work:compat` item、不下载、没有受管 compat 根）；冒烟会断言门禁走的是哪一侧，走 ABSENT 路径时明说 `ABSENT, as documented`，不是静默。**底座没装进插件会红**（bootstrap 只警告并降级挂载，降级态不许当成绿），所以先 `pnpm install` |
 | 客户端 bundle 冒烟 | 沙箱执行 `lib/client.js`，断言自注册、插件形状、"工作"标签座位与 order、不注入 dotted remote key |
 

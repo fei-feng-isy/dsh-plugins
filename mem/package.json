@@ -21,7 +21,7 @@
     "bench:ingest": "node scripts/bench-ingest.mjs",
     "bench:indexes": "node scripts/bench-indexes.mjs",
     "bench:reinforce": "node scripts/bench-reinforce.mjs",
-    "clean": "rm -rf packages/*/lib packages/*/dist packages/*/node_modules/.cache packages/*/node_modules/.vite node_modules/.cache node_modules/.vite",
+    "clean": "node ../scripts/clean.mjs --group mem",
     "rebuild:dsh": "pnpm run build:dsh",
     "cleanup:dsh": "bash scripts/cleanup.sh",
     "release:tree": "node scripts/make-release-tree.mjs",

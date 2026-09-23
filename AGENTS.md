@@ -186,9 +186,19 @@ pnpm release:check && node scripts/mount-smoke.mjs
   所以 `pnpm -C work …` 走的是合并后的工作区（用 `pnpm -C work list` 验证）。
 - **已知遗留（再次使用 RC 树流程之前需要处理）。** 按子树的 release-tree 脚本
   （`mem/scripts/make-release-tree.mjs`、`work/scripts/make-release-tree.mjs`）与
-  `*/scripts/sync-release-repo.sh` 仍然期待各自**旧的**子树 `pnpm-workspace.yaml`，而它已经不存在。
-  它们不属于验收门禁，且由于投影有 80 % 不同而被刻意留在各子树；但
+  `*/scripts/sync-release-repo.sh` 仍然按**合并前**的布局投影：一个子树一棵、子树自己一份
+  `pnpm-workspace.yaml`。它们不属于验收门禁，且由于投影有 80 % 不同而被刻意留在各子树；
   `pnpm release:tree` / `pnpm sync:rc` 必须在下一次 RC 之前重新参数化到合并后的根工作区。
+  **重参数化时要一起解决的三个具体成因**（2026-09-22 审查实测）：
+  1. 生成器读 `<tree>/pnpm-workspace.yaml`，合并后它只在根上 → ENOENT。现在**优雅退出**：
+     生成器把崩溃/拒绝都归到 exit 70（`CRASH_EXIT`），`sync-release-repo.sh` 只把 exit 1 当
+     「有漂移」——从前崩溃也是 1，于是它打印「a sync would apply it」然后什么都没应用。
+  2. 投影树里没有 workspace 文件，而各包只写 `catalog:` → 生成器结尾的 `regenerateLockfile`
+     必然失败。投影必须**自己合成**一份 `pnpm-workspace.yaml`（含 catalog），并且要决定
+     `base/` 是否随投影一起进去（`<tree>/scripts/release-check.mjs` 会跑 `pnpm -C ../base/plugin-base build`）。
+  3. `git -C <tree> ls-files` 不含根 `scripts/lib/*`，而 `build.mjs` / `link-envinit.mjs` /
+     `mount-smoke.mjs` 已经从根上取那两个助手 → 投影树里 `pnpm release:check` 会 MODULE_NOT_FOUND。
+     投影必须显式带上 `scripts/lib/`。
   它们所强制的 tarball `link:`/`file:` 规则，已经由 `scripts/release-check.mjs` 与两个
   `pack-plugin.mjs` 门禁覆盖。
 

@@ -86,16 +86,27 @@ mkdirSync(target, { recursive: true })
 
 let linked = 0
 let firstLinked
+const missing = []
 for (const pkg of LINKS) {
   const from = join(source, pkg)
   if (!existsSync(from)) {
-    console.warn(`link-dsh: skip @deepseek-ai/${pkg} (not found at ${from})`)
+    // A MISSING peer is a failure, not a skip: the list is the plugin's declared peer set, and a
+    // build that silently drops one compiles against nothing for it. `pack-plugin` would then find
+    // the bake one entry short — but only if that package happens to be in VERSION_PACKAGES.
+    missing.push(pkg)
     continue
   }
   const to = join(target, pkg)
   symlinkSync(from, to, 'dir')
   firstLinked ??= to
   linked += 1
+}
+if (missing.length > 0) {
+  console.error(`link-dsh: ${String(missing.length)} declared peer(s) are missing from ${source}:`)
+  for (const pkg of missing) console.error(`  @deepseek-ai/${pkg}`)
+  console.error('  this dsh install is older or partial than the peer set this plugin declares;')
+  console.error('  install a matching dsh (npm i -g @deepseek-ai/dsh) or fix the declared peers')
+  process.exit(1)
 }
 
 console.log(`link-dsh: linked ${String(linked)} package(s) into packages/plugin/node_modules`)

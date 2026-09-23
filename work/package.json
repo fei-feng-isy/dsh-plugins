@@ -16,7 +16,7 @@
     "link:profile": "node scripts/link-profile.mjs",
     "pack:plugin": "node scripts/pack-plugin.mjs",
     "release:check": "pnpm build:base && node scripts/release-check.mjs",
-    "clean": "rm -rf packages/*/lib packages/*/dist node_modules/.cache",
+    "clean": "node ../scripts/clean.mjs --group work",
     "workers:usage": "node scripts/worker-usage.mjs",
     "workspace:doctor": "node scripts/workspace-doctor.mjs",
     "spike:cold-resume": "node scripts/spike-cold-resume.mjs",

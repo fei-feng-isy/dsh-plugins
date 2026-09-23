@@ -10,7 +10,7 @@
  *   node scripts/build-client.mjs [--check]
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -46,6 +46,7 @@ if (!existsSync(entry)) {
 mkdirSync(dirname(outfile), { recursive: true })
 
 const bundlePath = join(pluginDir, 'lib', 'client.bundle.cjs')
+const metaPath = join(pluginDir, 'lib', 'client.meta.json')
 const esbuild = join(pluginDir, 'node_modules', '.bin', 'esbuild')
 
 const result = spawnSync(
@@ -58,6 +59,9 @@ const result = spawnSync(
     '--target=es2022',
     '--jsx=automatic',
     `--outfile=${bundlePath}`,
+    // A metafile, not a hand-written mirror: it names every file that went INTO the bundle, which is
+    // the only way to see a shell module that should have been external but was inlined instead.
+    `--metafile=${metaPath}`,
     '--log-level=warning',
     ...EXTERNAL.map((name) => `--external:${name}`),
   ],
@@ -77,8 +81,28 @@ const banner = `window.__ModuleLoader__.load({ id: ${JSON.stringify(PLUGIN_ID)},
 const footer = '\nreturn module.exports; } });\n'
 writeFileSync(outfile, `${banner}${body}${footer}`, 'utf8')
 
-// The intermediate keeps the source map honest; it is not shipped.
-spawnSync('rm', ['-f', bundlePath])
+// The intermediate keeps the source map honest; it is not shipped. `rmSync`, not `spawnSync('rm')`:
+// the exit code of that spawn was ignored, so on a machine without `rm` the `.cjs` stayed behind —
+// and `pack-plugin` asserts there are no unreferenced files under `lib/` that the tarball would carry.
+rmSync(bundlePath, { force: true })
+
+// ── the shell modules must all still be EXTERNAL ─────────────────────────────
+// `EXTERNAL` above is a hand-written mirror of the shell's platform module table. If the client imports
+// a shell package that is NOT listed, esbuild inlines it, and the bundle then carries a SECOND React /
+// slot registry / cordis — the module-identity trap, which `client-smoke` cannot see because it only
+// stubs the `require` form. The metafile is the direct evidence, and the rule needs no list: this
+// browser half may never inline a package the shell provides.
+const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
+rmSync(metaPath, { force: true })
+const SHELL_PACKAGE = /node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(@deepseek-ai|react|react-dom)(?:\/|$)/u
+const inlined = Object.keys(meta.inputs ?? {}).filter((input) => SHELL_PACKAGE.test(input))
+if (inlined.length > 0) {
+  console.error('build-client: shell module(s) were INLINED instead of staying external:')
+  for (const input of inlined.slice(0, 10)) console.error(`  ${input}`)
+  console.error('  add the package(s) they belong to to EXTERNAL in this script (a second React or slot')
+  console.error('  registry breaks the running app in ways the smoke cannot catch)')
+  process.exit(1)
+}
 
 const bytes = readFileSync(outfile).length
 console.log(`build-client: ${outfile} (${String(bytes)} bytes, ${String(EXTERNAL.length)} externals)`)

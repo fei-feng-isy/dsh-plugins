@@ -32,6 +32,13 @@ linkWorkspacePackages: true
 # the same major — have incompatible type identities, which is what forced the `TypertSchema['schema']`
 # cast (mem DESIGN §20.11). `pnpm why zod` must keep resolving ONE copy for `@avantf/mem-contract`,
 # `@avantf/dsh-mem` and `@avantf/dsh-work`. Bump this line, never a package.json.
+# ONE version per entry, for the WHOLE merged workspace.
+#
+# Not in this catalog on purpose: `@avantf/dsh-plugin-base`. The plugins depend on it as a REQUIRED
+# peer (`^0.1.0`) AND declare it in `devDependencies` (`^0.1.3`) so a plain `pnpm install` resolves it;
+# a catalog entry holds ONE range, and the peer range must stay a registry range (the published manifest
+# has to be installable by a host's package manager). So this one pair lives in the two manifests, and
+# `scripts/release-check.mjs` asserts both sides.
 catalog:
   zod: 4.6.5
 
@@ -46,6 +53,11 @@ catalog:
   "@types/react-dom": ^18.3.1
   react: 18.3.1
   react-dom: 18.3.1
+  # The browser half's windowing library: inlined into `lib/client.js`, so it is a devDependency of the
+  # plugin and never part of the published surface.
+  "@tanstack/react-virtual": ^3.14.13
+  # The browser-half bundler (work only — mem compiles through the pinned tsdown client preset).
+  esbuild: 0.25.0
   # Runtime of the VENDORED harness tsdown client preset
   # (mem/packages/plugin/vendor/dsh-client-preset): its CSS loaders call `transform()` from
   # lightningcss. It is a build-only devDependency of the plugin (tsdown's inline surface), never a

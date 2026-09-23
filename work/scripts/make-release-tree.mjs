@@ -32,6 +32,31 @@ import { fileURLToPath } from 'node:url'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
+/**
+ * A crash must not look like drift. `sync-release-repo.sh` reads exit 1 as "the projection differs"
+ * and continues to confirm/apply, but an uncaught exception ALSO exits 1 — which is how a broken
+ * generator came to print `(drift above; a sync would apply it)` and then apply nothing. Crashes exit
+ * `CRASH_EXIT` (and say what happened) so the two are distinguishable; the merged-layout refusal below
+ * is the same signal.
+ */
+const CRASH_EXIT = 70
+const crash = (message) => {
+  console.error(`make-release-tree: ${message}`)
+  process.exit(CRASH_EXIT)
+}
+process.on('uncaughtException', (error) => crash(`crashed — ${error?.stack ?? String(error)}`))
+process.on('unhandledRejection', (reason) => crash(`crashed — ${reason instanceof Error ? reason.stack : String(reason)}`))
+
+// The merge moved the ONE workspace file to the repository root; this script still projects a subtree
+// that had its own. Refuse with the reason instead of an ENOENT stack from deep inside `projectTree`.
+if (!existsSync(join(dirname(repo), 'pnpm-workspace.yaml')) && !existsSync(join(repo, 'pnpm-workspace.yaml'))) {
+  crash(
+    'no pnpm-workspace.yaml at the repository root — this script still expects the pre-merge layout '
+    + '(one workspace file per subtree). See AGENTS.md §"Known leftover": release:tree/sync:rc must be '
+    + 're-parameterised onto the merged workspace before the next RC.',
+  )
+}
+
 /** `--version <v>`: the version every manifest is stamped with (a release cut, not a projection). */
 let releaseVersion
 

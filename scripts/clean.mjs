@@ -9,8 +9,13 @@
  * files are tracked source), refuses to follow a symlink, and prints what it removes.
  *
  * Usage:
- *   node scripts/clean.mjs            # remove build output + caches
- *   node scripts/clean.mjs --dry-run  # print, remove nothing
+ *   node scripts/clean.mjs                 # remove build output + caches
+ *   node scripts/clean.mjs --dry-run       # print, remove nothing
+ *   node scripts/clean.mjs --group work    # only one package group (`base` | `mem` | `work`)
+ *
+ * `--group` is what a subtree's own `pnpm clean` uses: a hand-written recursive delete in a manifest
+ * is neither portable nor aware of the release-tarball rule below, and that subtree should not have to
+ * clean its SIBLINGS to get one implementation.
  */
 import { existsSync, lstatSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -18,9 +23,20 @@ import { fileURLToPath } from 'node:url'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dryRun = process.argv.includes('--dry-run')
+const groupIndex = process.argv.indexOf('--group')
+const groupFilter = groupIndex === -1 ? undefined : process.argv[groupIndex + 1]
 
-/** The parent directory of each package group. */
-const GROUP_PARENTS = ['base', 'mem/packages', 'work/packages']
+/** The parent directory of each package group, keyed by the name `--group` takes. */
+const GROUPS = new Map([
+  ['base', 'base'],
+  ['mem', 'mem/packages'],
+  ['work', 'work/packages'],
+])
+if (groupFilter !== undefined && !GROUPS.has(groupFilter)) {
+  console.error(`clean: unknown group '${String(groupFilter)}' (expected ${[...GROUPS.keys()].join(', ')})`)
+  process.exit(2)
+}
+const GROUP_PARENTS = [...GROUPS.entries()].filter(([name]) => groupFilter === undefined || name === groupFilter).map(([, parent]) => parent)
 const OUTPUT_DIRS = ['lib', 'dist']
 const CACHE_DIRS = ['coverage', '.vitest']
 const NODE_CACHE_DIRS = ['.cache', '.vite']

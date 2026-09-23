@@ -12,8 +12,22 @@ export const OWNER_TOOL_DENY: readonly string[] = [
 ]
 
 /**
- * Everything an executor must not hold: the first six spawn work the tree cannot see, and
- * the rest is the owner's face. `note_work` is deliberately absent — `decompose_work` needs it.
+ * Everything an executor must not hold, grouped by WHY it is dangerous here:
+ *
+ * - `subagent` / `subagent_fork` start work the TREE cannot see (no node, no result, no convergence),
+ *   and `send_message` delivers into sessions outside this work — the owner's included, which is how an
+ *   executor would report around the tree instead of through `submit_work`.
+ * - `create_goal` / `get_goal` / `update_goal` are the OWNER's: an executor that can read or rewrite
+ *   the goal it is judged against is answering to a different objective than the one the tree
+ *   dispatched, and `dsh-tool-goal`'s static section rides the owner's preset into the executor
+ *   (the Known limit at the end of `prompt.ts` records that residue).
+ * - the last six are the owner's work-tree face; an executor touches the tree only through
+ *   `note_work` / `decompose_work` / `submit_work`.
+ *
+ * Only `subagent` / `subagent_fork` actually SPAWN a session — the rest are refusals of access, not
+ * of spawning, and the comment here used to claim otherwise for all six.
+ *
+ * `note_work` is deliberately absent — `decompose_work` needs it.
  */
 export const WORKER_TOOL_DENY: readonly string[] = [
   'send_message',

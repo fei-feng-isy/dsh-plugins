@@ -14,7 +14,7 @@ import {
   type ToolDefinition,
   type ToolRunContext,
 } from '@deepseek-ai/dsh-tools'
-import { CAPACITY, spillPointer, type Refusal } from '@avantf/work-core'
+import { CAPACITY, spillPointer, statusLabel, type Refusal } from '@avantf/work-core'
 import type { AvantfWorkHost } from './host.js'
 
 /** The one result shape every tool returns, surfaced as the terminal text block. */
@@ -57,20 +57,6 @@ function present(title: string, args: Record<string, unknown>): ToolCallView {
 
 function fail(refusal: Refusal): WorkToolResult {
   return { ok: false, summary: refusal.message, data: { code: refusal.code } }
-}
-
-const STATUS_ZH: Record<string, string> = {
-  blocked: '等待子工作',
-  ready: '待执行',
-  running: '执行中',
-  interrupted: '已中断',
-  done: '已完成',
-  failed: '已失败',
-}
-
-function statusZh(status: string | undefined): string {
-  if (status === undefined) return '?'
-  return STATUS_ZH[status] ?? status
 }
 
 const NO_CALLER: WorkToolResult = {
@@ -370,7 +356,7 @@ export function defineWorkTools(host: AvantfWorkHost): ToolDefinition[] {
       const lines = works.map((work) => {
         const closed = work.closed ? ' [已归档]' : ''
         const troubled = work.troubled ? '（反复出过问题）' : ''
-        return `[${work.tree.rootId}] ${statusZh(work.root?.status)} — ${work.root?.title ?? '（根工作缺失）'}${closed}${troubled}`
+        return `[${work.tree.rootId}] ${statusLabel(work.root?.status)} — ${work.root?.title ?? '（根工作缺失）'}${closed}${troubled}`
       })
       return Promise.resolve({
         ok: true,
