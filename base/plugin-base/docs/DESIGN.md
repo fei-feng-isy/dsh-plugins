@@ -194,9 +194,10 @@ type ResourceState =
 - **原子落盘不留垃圾**：同目录临时文件要么被改名成完成品，要么在恢复时被清掉（完成标记目录在锁内
   清，其余目录清掉超过年龄阈值的残留）。
 - **状态按 `key × version` 合并**：多进程写入按该身份合并，不整文件覆盖。
-- **base 自身零运行期依赖**：`dependencies` 必须为空，唯一的 peer 是宿主给的 `zod`（兼容门禁的 typert
-  探针要用同一份 schema identity）。`preset/framework-self-contained` 断言这条；多一条依赖或多一个 peer
-  都算基座不再自包含。
+- **base 自身零运行期依赖**：`dependencies` 必须为空，源码里不 import `zod`。唯一的 peer 是宿主给的
+  `zod`，而它服务的是**插件**：插件声明 wire face 时把 schema 断言成 `TypertSchema['schema']`，那要求
+  插件、base 与宿主解析到同一份 zod（两份物理副本的类型身份不同，strict codec 会判不兼容）。
+  `preset/framework-self-contained` 断言这条；多一条依赖或多一个 peer 都算基座不再自包含。
 
 ## 7. 版本与兼容
 

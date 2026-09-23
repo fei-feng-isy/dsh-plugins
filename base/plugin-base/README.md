@@ -55,12 +55,13 @@ base 缺失或版本不被接受时插件**照常挂载**（WARN + 降级）：p
 
 插件把 base 声明为 **peer**（不要放 `dependencies`，否则会装出多份 base 副本）。peer 区间要**足够宽**
 以接受 base 的补丁/小版本——`^0.1.0`——否则"只发 base"会被 peer 区间卡死；`devDependencies` 里再声明
-一条当前开发版本 `^0.1.3`，供 `pnpm install` 装上：
+同一条区间（本仓是 `^0.1.0`，并由根 workspace 的 `linkWorkspacePackages` 指向 `base/`），供
+`pnpm install` 装上：
 
 ```jsonc
 {
   "peerDependencies": { "@avantf/dsh-plugin-base": "^0.1.0" },
-  "devDependencies":  { "@avantf/dsh-plugin-base": "^0.1.3" }
+  "devDependencies":  { "@avantf/dsh-plugin-base": "^0.1.0" }
 }
 ```
 

@@ -72,8 +72,9 @@ dsh web
 
 ## 配置、数据与提示词
 
-- **数据目录**：`~/.avantf`（可用 `AVANTF_HOME` 覆盖）。记忆库、知识库（含 `knowledge/docs` 下的受管
-  文档副本）与模型缓存都在其中。
+- **数据目录**：默认 `~/.avantf`；按家族分层 ⑤ 显式 → ④ `AVANTF_HOME` → ② `configs/common.yaml` 的
+  `dataHome` → `~/.avantf` 解析（见 INSTALL：profile 里写的那条 `dataHome` 属 ⑤，会压过 `AVANTF_HOME`）。
+  记忆库、知识库（含 `knowledge/docs` 下的受管文档副本）与模型缓存都在其中。
 - **配置**：`~/.avantf/configs/` 下的三份 YAML——`common.yaml`（公共项，缺失时按注释模板自动创建）、
   `memory.yaml`、`knowledge.yaml`；都只写你要改的项，其余取内置默认。
 - **提示词文件**：`~/.avantf/prompts/mem-memory-usage.md`、`mem-knowledge-usage.md`、`mem-kb-edit.md`。

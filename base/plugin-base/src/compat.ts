@@ -768,14 +768,28 @@ export function provision(ctx: CompatContext, log: CompatLogger, spec: CompatSpe
  * Build the standard refusal report, so every plugin says the same thing in its own words.
  *
  * The STRUCTURE belongs here (heading, problems, warnings, the fix, where the full log is); the
- * wording belongs to the caller, which passes the four strings in its own language.
+ * wording belongs to the caller, which passes every string in its own language. That includes the
+ * last line — this used to be a hardcoded Chinese sentence, which meant a caller that had translated
+ * everything else still got half a sentence in a language it never chose.
+ *
+ * `logPointer` is OPTIONAL because base is a published package: a plugin compiled against an earlier
+ * base does not pass it, and the honest result for that caller is no tail line at all rather than one
+ * in the wrong language.
  * @param verdict - the refusal to report.
  * @param words - the caller's copy.
+ * @param words.logPointer - the caller's sentence for "the full diagnostics are the log lines that
+ *   start with `<prefix>`"; receive the prefix so the sentence can place it naturally.
  * @returns the report text.
  */
 export function compatReport(
   verdict: CompatVerdict,
-  words: { readonly heading: string; readonly fix: string; readonly warningsLabel: string; readonly warnings: readonly string[] },
+  words: {
+    readonly heading: string
+    readonly fix: string
+    readonly warningsLabel: string
+    readonly warnings: readonly string[]
+    readonly logPointer?: (prefix: string) => string
+  },
 ): string {
   return [
     words.heading,
@@ -784,7 +798,7 @@ export function compatReport(
     '',
     ...(verdict.warnings.length === 0 ? [] : [words.warningsLabel, ...verdict.warnings.map((warning) => `- ${warning}`), '']),
     words.fix,
-    `完整诊断见宿主日志里 ${COMPAT_PREFIX} 开头的行。`,
+    ...(words.logPointer === undefined ? [] : [words.logPointer(COMPAT_PREFIX)]),
   ].join('\n')
 }
 

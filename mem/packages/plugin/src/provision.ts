@@ -225,6 +225,7 @@ export function registerCompatMegaphone(
       warningsLabel: '风险提示：',
       warnings: verdict.warnings,
       fix: '修复：在本仓库重建（`pnpm build:dsh`），或把 `@deepseek-ai/dsh` 换回本构建声明的版本。',
+      logPointer: (prefix) => `完整诊断见宿主日志里 ${prefix} 开头的行。`,
     }),
   })
 }

@@ -137,6 +137,8 @@ export interface CompatModule {
     readonly fix: string
     readonly warningsLabel: string
     readonly warnings: readonly string[]
+    /** Only present when the loaded base is new enough to accept it; see `compatReport`. */
+    readonly logPointer?: (prefix: string) => string
   }): string
   registerMegaphone(input: {
     readonly ctx: CompatContext
@@ -338,6 +340,7 @@ export function registerCompatMegaphone(ctx: CompatContext, verdict: CompatVerdi
         warningsLabel: '风险提示：',
         warnings: verdict.warnings,
         fix: '修复：升级/降级到本构建声明的 dsh 版本，或重建本插件（`pnpm build:dsh`）。',
+        logPointer: (prefix) => `完整诊断见宿主日志里 ${prefix} 开头的行。`,
       }),
     })
   } catch (error) {

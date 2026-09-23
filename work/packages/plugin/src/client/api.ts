@@ -117,14 +117,6 @@ function issueText(error: { issues: readonly { path: readonly PropertyKey[]; mes
   return error.issues.map((issue) => `${issue.path.map(String).join('.') || '(根)'}: ${issue.message}`)
 }
 
-/** Parse a payload against the codec that already travels with this bundle (zod is inlined anyway),
- *  so a field the host stopped sending is one readable error instead of a dead panel. */
-export function asSnapshot(value: unknown): WorkSnapshot | undefined {
-  const parsed = snapshotResultSchema.safeParse(value)
-  if (!parsed.success) return undefined
-  return { trees: parsed.data.trees as WorkSnapshot['trees'] }
-}
-
 function textOf(reason: unknown): string {
   if (typeof reason === 'string') return reason
   if (reason === undefined || reason === null) return '工作树拒绝了这次操作'

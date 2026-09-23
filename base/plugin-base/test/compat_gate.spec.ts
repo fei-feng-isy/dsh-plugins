@@ -214,11 +214,32 @@ describe('the megaphone', () => {
       warningsLabel: '风险提示：',
       warnings: verdict.warnings,
       fix: '重建：pnpm build',
+      logPointer: (prefix) => `完整诊断见宿主日志里 ${prefix} 开头的行。`,
     })
     expect(text).toContain('插件未加载')
     expect(text).toContain('- service "agents" is mounted but exposes no get')
     expect(text).toContain('风险提示：')
     expect(text).toContain('重建：pnpm build')
-    expect(text).toContain(`${COMPAT_PREFIX} 开头的行`)
+    expect(text.endsWith(`完整诊断见宿主日志里 ${COMPAT_PREFIX} 开头的行。`)).toBe(true)
+  })
+
+  it('omits the log tail when the caller does not supply its own wording', () => {
+    // The tail is a SENTENCE, so it belongs to the caller like every other line. Base is published: a
+    // plugin compiled against an older base passes no `logPointer`, and the honest output for it is the
+    // report WITHOUT a tail — not a sentence in a language that plugin never chose.
+    const verdict: CompatVerdict = {
+      load: false,
+      skipped: false,
+      status: 'probe-failed',
+      problems: ['p'],
+      warnings: [],
+      notes: [],
+      lines: [],
+      reason: 'p',
+    }
+    const text = compatReport(verdict, { heading: 'Not loaded', warningsLabel: 'Warnings:', warnings: [], fix: 'Rebuild.' })
+    expect(text).toBe('Not loaded\n\n- p\n\nRebuild.')
+    expect(text).not.toContain(COMPAT_PREFIX)
+    expect(text).not.toContain('宿主日志')
   })
 })
