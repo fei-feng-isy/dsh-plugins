@@ -239,8 +239,10 @@ DSHHARNESS=/nonexistent pnpm build:dsh   # 反证：没有任何编译路径会�
 ```bash
 pnpm sync:rc                       # 预览 → 确认 → 同步 → 复查 rc 已等于投影（推荐入口）
 pnpm sync:rc --dry-run             # 只看漂移，不改任何东西（有漂移则 exit 1）
-pnpm sync:rc --version mem=0.1.2    # 切版本：把 mem 这一组的 manifest 盖成新版本号
-pnpm sync:rc --version 0.1.2       # 不带组名 = 三个组（base/mem/work）一起盖
+pnpm version:set mem=0.1.2         # 切版本：只改 mem/packages/plugin/package.json（组内其余 manifest 不带版本）
+pnpm sync:rc                       # 投影：版本默认就取开发树
+pnpm sync:rc --version mem=0.1.2    # 也可以只给发布树盖一个版本（开发树不动）
+pnpm sync:rc --keep-rc-versions     # 反过来：保留 rc 现有的版本号
 pnpm sync:rc --yes --commit        # 非交互 + 在 rc 里提交 "release: sync from dsh-plugins@<sha>"
 pnpm sync:rc --yes --gate          # 同步后在 rc 里跑三个包的完整发布门禁
 ```
@@ -339,7 +341,8 @@ node packages/cli/lib/index.js query "张伟" --kind all
 | `pnpm pack:plugin --mount` | 再把 tarball 解进临时 profile **真实安装并挂载**（需要已安装的全局 dsh） | `--out <dir>` 换输出目录，`--keep` 失败时保留 scratch |
 | `pnpm release:check` | 发布门禁一条命令：preflight（6 包版本一致 / CHANGELOG 已切 / 只 plugin 可发布 / 声明了 DSH peer）→ frozen-lockfile → build → typecheck → test → 插件 typecheck → `build:dsh`+mount smoke | 打 tag 前必跑；`--allow-uncut` 用于切版本节之前的预跑 |
 | `pnpm release:tree --into <rc>`（**仓库根**） | 把 `dsh-plugins` **整仓**投影成发布树，只报告漂移（有漂移 exit 1） | 只管理 rc 跟踪的文件 |
-| `pnpm release:tree --into <rc> --apply --version mem=0.1.2` | 同步发布树并盖 mem 这一组的版本号（9 个 manifest） | 规则见根 `scripts/make-release-tree.mjs` 顶部 |
+| `pnpm version:set mem X.Y.Z`（**仓库根**） | 切版本：**只改一个文件** `packages/plugin/package.json`（组内其余 manifest 不带版本） | `pnpm version:check` 会拦"私有包又长出版本号"，`pnpm release:check` 也会 |
+| `pnpm release:tree --into <rc> --apply` | 同步发布树（版本默认取开发树，`--version mem=X` 可只给 rc 盖） | 规则见根 `scripts/make-release-tree.mjs` 顶部 |
 | `pnpm release:tree --out <dir>` | 生成一棵全新的发布树（含生成的根 `README.md`） | |
 | `pnpm sync:rc …`（**仓库根**） | 上面的封装：预览 → 确认 → 投影 → 复查（`--dry-run`/`--yes`/`--version <组>=<v>`/`--commit`/`--gate`/`--rc <dir>`） | 默认保留每个组在 rc 里的版本号 |
 | `pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks` | 真正发布（**只这一个包**） | 其余 5 个是 `private: true`，`pnpm -r publish` 碰不到 |

@@ -1,6 +1,5 @@
 {
   "name": "@avantf/mem",
-  "version": "0.1.1",
   "private": true,
   "description": "avantf-mem engine: memory store, knowledge store, ingestion, lifecycle, cross-retrieval router",
   "type": "module",

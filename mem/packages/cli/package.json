@@ -1,6 +1,5 @@
 {
   "name": "@avantf/mem-cli",
-  "version": "0.1.1",
   "private": true,
   "description": "avantf-mem CLI: memory / knowledge / cross-query operations (add, search, ask, probe, kb, query, vectors, maintenance)",
   "type": "module",

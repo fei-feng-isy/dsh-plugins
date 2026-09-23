@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } fr
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { withWorkspaceVersions } from '../../scripts/lib/versions.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(repo, 'release')
@@ -376,11 +377,18 @@ for (const name of packages) {
   console.log(`\n▶ pack ${manifest.name}`)
   // `pnpm pack`, not `npm pack`: rewriting `catalog:` / `workspace:*` into registry ranges is
   // pnpm's work, and npm would pack a tarball nobody can install.
-  const result = spawnSync('pnpm', ['pack', '--pack-destination', outDir], {
-    cwd: dir,
-    stdio: 'inherit',
-    env: process.env,
-  })
+  //
+  // That rewrite is also why the private workspace-protocol targets get their version MATERIALIZED
+  // around this call and lose it again right after: `pnpm pack` substitutes `workspace:*` with the
+  // TARGET's version, and the engines deliberately carry none in the tree (the version is recorded once,
+  // in this package's manifest). Nothing is committed — `version:check` fails on a leftover.
+  // The workspace root, not this subtree: `workspaceTargets` scans every group's manifests.
+  const result = withWorkspaceVersions(resolve(repo, '..'), manifest.version, () =>
+    spawnSync('pnpm', ['pack', '--pack-destination', outDir], {
+      cwd: dir,
+      stdio: 'inherit',
+      env: process.env,
+    }))
   if (result.status !== 0) {
     failures.push(`${manifest.name}: npm pack failed`)
   }

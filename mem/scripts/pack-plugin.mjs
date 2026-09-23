@@ -31,6 +31,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { readBootstrapVersion } from '../../scripts/lib/bootstrap-version.mjs'
+import { withWorkspaceVersions } from '../../scripts/lib/versions.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pluginDir = join(repo, 'packages', 'plugin')
@@ -253,7 +254,13 @@ if (clientCode.includes(KIT_MARKER)) {
 // ── pack ──────────────────────────────────────────────────────────────────────────────────────
 mkdirSync(outDir, { recursive: true })
 console.log(`\n▶ pnpm pack → ${outDir}`)
-if (run('pnpm', ['--filter', manifest.name, 'pack', '--pack-destination', outDir]) !== 0) {
+// `pnpm pack` rewrites `workspace:*` into the TARGET's version, and the engines deliberately carry none
+// in the tree (the version is recorded once, in this package's manifest) — so the private targets get it
+// materialized for the duration of the pack and lose it again right after. Nothing is committed;
+// `version:check` fails on a leftover.
+const packStatus = withWorkspaceVersions(resolve(repo, '..'), manifest.version, () =>
+  run('pnpm', ['--filter', manifest.name, 'pack', '--pack-destination', outDir]))
+if (packStatus !== 0) {
   console.error('pack-plugin: pnpm pack failed')
   process.exit(1)
 }

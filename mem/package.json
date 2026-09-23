@@ -1,7 +1,6 @@
 {
   "name": "avantf-mem",
   "private": true,
-  "version": "0.1.1",
   "description": "avantf-mem — a DSH-native memory + document knowledge base with cross-retrieval ",
   "type": "module",
   "engines": {

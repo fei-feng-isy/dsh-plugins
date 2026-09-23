@@ -15,7 +15,7 @@ pnpm release:check --allow-uncut     # 切版本节之前的预跑：同一批�
 
 | 步骤 | 覆盖 | 备注 |
 |---|---|---|
-| preflight（元数据） | 检出里**所有包**版本一致（开发树 8 个；发布树仍 4 个：contract / retrieval-core / core / plugin——convert 与 provision 都被内联，不单独发布）、CHANGELOG 的**第一个**版本节就是当前版本、`[Unreleased]` 已清空、插件声明了 DSH peer、**可发布的只有 plugin** | 打 tag 前真正会忘的两件事；包清单从 `packages/` 目录派生，发布树少两个包也不会崩 |
+| preflight（元数据） | 版本只记在可发布包的 manifest 里、**私有包不带版本**（开发树 8 个私有包；发布树仍 4 个：contract / retrieval-core / core / plugin——convert 与 provision 都被内联，不单独发布）、CHANGELOG 的**第一个**版本节就是当前版本、`[Unreleased]` 已清空、插件声明了 DSH peer、**可发布的只有 plugin** | 打 tag 前真正会忘的两件事；包清单从 `packages/` 目录派生，发布树少两个包也不会崩 |
 | `pnpm install --frozen-lockfile` | 锁文件与 CI 一致 | CI 用的是同一条命令 |
 | `pnpm build` | 7 个引擎包（contract/retrieval-core/core/convert/provision/cli/mcp） | |
 | `pnpm typecheck` | 引擎包的 **src + test** | 测试类型也是门禁（见 AGENTS.md） |
@@ -62,9 +62,11 @@ git status --short && git pull --ff-only origin master
 # 1) 本轮的功能/修复各自先提交（发布提交只装版本与 CHANGELOG）
 git add -A && git commit
 
-# 2) 版本 + CHANGELOG：9 个 manifest（根 + 8 个包）的 "version" 改成 X.Y.Z；
+# 2) 版本 + CHANGELOG：版本只改一处 —— 本包自己的 package.json（组内其余 manifest 不带版本号）：
+pnpm version:set mem X.Y.Z
 #    CHANGELOG.md 把 [Unreleased] 的条目移进新节 `## [X.Y.Z] - YYYY-MM-DD`，顶部留一个空的 [Unreleased]
-#    （preflight 检查：所有包版本一致 + 第一个版本节 == 包版本 + [Unreleased] 无 `### ` 条目）
+#    （preflight 检查：版本只记在 packages/plugin 的 manifest 里、私有包不带版本 + 第一个版本节 == 包版本
+#      + [Unreleased] 无 `### ` 条目）
 
 # 3) 门禁（严格，不带 --allow-uncut）+ 打包冒烟
 pnpm release:check                 # 必须打印 RELEASE GATE PASSED (X.Y.Z)
@@ -75,8 +77,8 @@ git add -A && git commit -m "chore(release): X.Y.Z"
 git tag -a vX.Y.Z -m "avantf-mem X.Y.Z"
 git push origin master --follow-tags
 
-# 5) 同步发布树（整仓投影 + 盖 mem 这一组的版本 + 提交；--gate 别放这一步，见 §2 的原生依赖说明）
-pnpm sync:rc --version mem=X.Y.Z --yes --commit
+# 5) 同步发布树（整仓投影；版本默认取开发树，第 2 步已经改好；--gate 别放这一步，见 §2 的原生依赖说明）
+pnpm sync:rc --yes --commit
 # 发布树装出原生模块，再单独跑它自己的门禁（含三个包的门禁与 pack --mount）
 ( cd ../dsh-plugins-rc && (pnpm install --frozen-lockfile || pnpm rebuild) \
     && pnpm release:check:base && pnpm release:check:mem && pnpm release:check:work )

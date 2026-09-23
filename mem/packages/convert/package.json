@@ -1,6 +1,5 @@
 {
   "name": "@avantf/mem-convert",
-  "version": "0.1.1",
   "private": true,
   "description": "avantf-mem document conversion: bytes → Markdown (docx/xlsx/html/csv) behind a converter registry",
   "type": "module",

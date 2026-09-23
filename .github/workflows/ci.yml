@@ -39,6 +39,9 @@ jobs:
         run: pnpm -r test
       - name: Boundary guard (mem/ and work/ never import each other)
         run: pnpm guard
+      # The manifests are derived from versions.json; this catches a hand-edited version before a release.
+      - name: Versions (versions.json is the single source)
+        run: pnpm version:check
       # Static publish-surface checks only: `--offline` skips the registry probe that proves the base
       # is already published (that probe belongs to a release machine).
       - name: Release surface (publishable set, peer ranges, one zod, no link:/file:)

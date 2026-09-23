@@ -1,6 +1,5 @@
 {
   "name": "@avantf/mem-mcp",
-  "version": "0.1.1",
   "private": true,
   "description": "avantf-mem optional MCP server entry (retains MCP capability; default is the native Cordis plugin)",
   "type": "module",

@@ -1,6 +1,5 @@
 {
   "name": "@avantf/work-core",
-  "version": "0.1.0",
   "private": true,
   "description": "Work-tree engine for @avantf/work: node model, state machine, dispatch and recovery. Zero DSH imports.",
   "type": "module",

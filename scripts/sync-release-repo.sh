@@ -12,10 +12,11 @@
 #
 # Defaults
 #   --rc        $AVANTF_RC, else <repo>/../dsh-plugins-rc (created + `git init`ed if missing)
-#   --version   per group, the version rc currently carries (so re-syncing never silently moves a
-#               release version). Pass --version <group>=<v> (base | mem | work) to cut one, or a bare
-#               --version <v> to cut all three together. On the FIRST sync rc carries nothing, so each
-#               group keeps the version this checkout already has.
+#   --version   by default the DEV TREE decides: every group is stamped with the version its publishable
+#               manifest records (`pnpm version:set <group> <version>` is the one-file bump). Pass
+#               --version <group>=<v> (base | mem | work) to stamp something else into rc only, or
+#               --keep-rc-versions to keep whatever versions rc already carries (the old default: useful
+#               when rc is ahead of the development tree).
 #
 # What it never does
 #   - touch anything outside the two checkouts;
@@ -27,6 +28,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RC_DIR="${AVANTF_RC:-$REPO/../dsh-plugins-rc}"
 VERSION_ARGS=()
+KEEP_RC_VERSIONS=0
 DRY_RUN=0
 ASSUME_YES=0
 DO_COMMIT=0
@@ -39,6 +41,7 @@ usage: scripts/sync-release-repo.sh [options]
   --rc <dir>              release checkout to sync (default: $AVANTF_RC or ../dsh-plugins-rc)
   --version <group>=<v>   stamp this version into one group: base | mem | work (repeatable)
   --version <v>           stamp this version into all three groups
+  --keep-rc-versions      keep rc's current versions instead of taking them from the development tree
   --dry-run               print the drift and exit (exit 1 when there is any), change nothing
   --yes, -y               do not ask for confirmation
   --commit                commit in rc after a clean sync: "release: sync from dsh-plugins@<sha>"
@@ -54,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --rc=*) RC_DIR="${1#*=}"; shift ;;
     --version) VERSION_ARGS+=(--version "${2:-}"); shift 2 ;;
     --version=*) VERSION_ARGS+=(--version "${1#*=}"); shift ;;
+    --keep-rc-versions) KEEP_RC_VERSIONS=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --commit) DO_COMMIT=1; shift ;;
@@ -88,16 +92,19 @@ if [[ "$RC_DIR" == "$REPO" ]]; then
 fi
 
 # ── 1. which version each group goes in with ─────────────────────────────────────────────────────
-# The generator owns the facts (which manifests belong to a group, whether a group is in lockstep, what
-# rc carries), so the shell never re-derives them. `kept from rc` is the default on purpose: re-syncing
-# must not silently move a release version, and moving one is a release cut — that is what --version is.
+# The generator owns the facts (which manifests belong to a group, whether the tree agrees with
+# its publishable manifest, what rc carries), so the shell never re-derives them. The default is "whatever
+# the development tree records" — bumping a version is `pnpm version:set <group> <version>`, one file — and
+# `--keep-rc-versions` restores the older "rc decides" behaviour for a release checkout that is ahead.
 echo "▶ versions"
+PREFER_RC=()
+[[ "$KEEP_RC_VERSIONS" == 1 ]] && PREFER_RC=(--prefer-rc-versions)
 RESOLVED=()
 while IFS='|' read -r group dev rc effective source; do
   [[ -z "${group:-}" ]] && continue
   printf '  %-5s dev %-8s rc %-8s → %-8s (%s)\n' "$group" "$dev" "$rc" "$effective" "$source"
   RESOLVED+=(--version "$group=$effective")
-done < <(node "$GENERATOR" --print-versions --rc "$RC_DIR" "${VERSION_ARGS[@]+"${VERSION_ARGS[@]}"}")
+done < <(node "$GENERATOR" --print-versions --rc "$RC_DIR" "${PREFER_RC[@]+"${PREFER_RC[@]}"}" "${VERSION_ARGS[@]+"${VERSION_ARGS[@]}"}")
 
 echo "development     : $REPO @ $DEV_SHA"
 echo "release         : $RC_DIR"

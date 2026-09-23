@@ -1,6 +1,5 @@
 {
   "name": "@avantf/mem-core",
-  "version": "0.1.1",
   "private": true,
   "description": "avantf-mem retrieval substrate: pluggable SemanticBackend/Reranker/VectorStore + fusion",
   "type": "module",

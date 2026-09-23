@@ -36,6 +36,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { VERSION_GROUPS, publishableManifest, versionState } from './lib/versions.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -101,22 +102,13 @@ function trackedFiles(dir) {
 }
 
 // ── versions, per group ───────────────────────────────────────────────────────────────────────────
-/** Every tracked `package.json` of one group (`<group>/…/package.json`). */
-function groupManifests(group) {
-  return trackedFiles(repo).filter((path) => path.startsWith(`${group}/`) && path.endsWith('package.json'))
-}
-
-/** The version this checkout carries for a group; a group out of lockstep is a crash, not a guess. */
+/** The version a group records (its publishable manifest), refusing to project a tree that is inconsistent. */
 function devVersion(group) {
-  const versions = new Set()
-  for (const path of groupManifests(group)) {
-    versions.add(JSON.parse(readFileSync(join(repo, path), 'utf8')).version)
-  }
-  if (versions.size === 0) crash(`group ${group} has no tracked package.json`)
-  if (versions.size > 1) {
-    crash(`group ${group} is not in version lockstep (${[...versions].sort().join(', ')}) — the family versions a subtree as one`)
-  }
-  return [...versions][0]
+  const { versions, problems } = versionState(repo)
+  if (problems.length > 0) crash(problems.join('\n  '))
+  const value = versions[group]
+  if (typeof value !== 'string') crash(`group ${group} records no version`)
+  return value
 }
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
@@ -138,15 +130,13 @@ function requestedVersions(argv) {
   return wanted
 }
 
-/** The version the release checkout currently carries for a group (undefined when it has no manifest). */
+/** The version the release checkout currently records for a group (undefined when it has no manifest). */
 function rcVersion(dir, group) {
-  for (const path of groupManifests(group)) {
-    const candidate = join(dir, path)
-    if (!existsSync(candidate)) continue
-    const version = JSON.parse(readFileSync(candidate, 'utf8')).version
-    if (typeof version === 'string' && version !== '') return version
-  }
-  return undefined
+  const file = publishableManifest(repo, group).file
+  const candidate = file === undefined ? undefined : join(dir, file)
+  if (candidate === undefined || !existsSync(candidate)) return undefined
+  const version = JSON.parse(readFileSync(candidate, 'utf8')).version
+  return typeof version === 'string' && version !== '' ? version : undefined
 }
 
 // ── the projection ────────────────────────────────────────────────────────────────────────────────
@@ -220,7 +210,10 @@ function projectTree(stamps) {
       }
       text = `${JSON.stringify(manifest, null, 2)}\n`
     } else if (path.endsWith('package.json')) {
-      const group = GROUPS.find((candidate) => path.startsWith(`${candidate}/`))
+      // A version stamp lands ONLY on the group's version carrier (its publishable manifest): the other
+      // manifests are private and carry no version at all. This is what makes `--version <group>=<v>` an
+      // rc-only cut, and it keeps the release checkout passing its own `pnpm version:check`.
+      const group = VERSION_GROUPS.find((candidate) => publishableManifest(repo, candidate).file === path)
       const stamp = group === undefined ? undefined : stamps.get(group)
       if (stamp !== undefined) {
         const manifest = JSON.parse(text)
@@ -290,6 +283,8 @@ if (flag('--help') || flag('-h')) {
 const outDir = value('--out')
 const intoDir = value('--into')
 const printVersions = flag('--print-versions')
+/** `--print-versions` resolution: the development tree's version wins unless this is set. */
+const preferRcVersions = flag('--prefer-rc-versions')
 const stamps = requestedVersions(argv)
 
 if (printVersions) {
@@ -298,8 +293,12 @@ if (printVersions) {
     const dev = devVersion(group)
     const rc = rcDir === undefined ? undefined : rcVersion(rcDir, group)
     const requested = stamps.get(group)
-    const effective = requested ?? rc ?? dev
-    const source = requested !== undefined ? 'requested' : rc !== undefined ? 'kept from rc' : 'from dev'
+    const effective = requested ?? (preferRcVersions ? (rc ?? dev) : dev)
+    const source = requested !== undefined
+      ? 'requested'
+      : preferRcVersions && rc !== undefined
+        ? 'kept from rc'
+        : 'from the development tree'
     // `|`-separated, not TSV: a tab is IFS *whitespace*, so `read` collapses the empty rc field and
     // every following field lands one column to the left.
     console.log([group, dev, rc ?? '-', effective, source].join('|'))
@@ -317,13 +316,21 @@ if (target === repo) crash('refusing to project the development repository onto 
 
 assertNoWorkspaceLinks()
 const files = projectTree(stamps)
-// Explicit versions are what the sync wrapper always passes (it resolves group → effective version
-// itself), so a plan and an apply can never disagree about the versions they are comparing.
+// The projected tree must satisfy the same rule the development tree does: exactly one manifest per group
+// (its carrier, stamped above) carries a version, and no private manifest carries one.
+const carriers = new Set()
+for (const group of VERSION_GROUPS) {
+  const carrier = publishableManifest(repo, group).file
+  if (carrier === undefined) crash(`group ${group} has no publishable manifest to carry its version`)
+  carriers.add(carrier)
+  const projected = files.get(carrier)
+  const version = projected === undefined ? undefined : JSON.parse(projected.toString('utf8')).version
+  if (typeof version !== 'string' || version === '') crash(`${carrier}: projected carrier has no version`)
+}
 for (const [path, content] of files) {
-  if (path.endsWith('package.json') && path !== ROOT_MANIFEST) {
-    const version = JSON.parse(content.toString('utf8')).version
-    if (typeof version !== 'string' || version === '') crash(`${path}: projected manifest has no version`)
-  }
+  if (path === ROOT_MANIFEST || !path.endsWith('package.json') || carriers.has(path)) continue
+  const version = JSON.parse(content.toString('utf8')).version
+  if (version !== undefined) crash(`${path}: projected private manifest carries version ${JSON.stringify(version)} — only ${[...carriers].join(', ')} may`)
 }
 
 if (outDir !== undefined) {

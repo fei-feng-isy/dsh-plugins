@@ -28,9 +28,12 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findHarness } from '../../scripts/lib/harness-path.mjs'
+import { versionState } from '../../scripts/lib/versions.mjs'
 import { presetDriftWarning } from './check-preset-drift.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+/** The workspace root: `versions.mjs` and the release projection live there, one level above mem/. */
+const workspaceRoot = resolve(repo, '..')
 
 const argv = process.argv.slice(2)
 const known = ['--allow-uncut', '--help', '-h']
@@ -56,10 +59,6 @@ const PACKAGES = readdirSync(join(repo, 'packages'))
 if (!PACKAGES.includes('plugin')) {
   console.error('release-check: packages/plugin is missing from this checkout')
   process.exitCode = 1
-}
-
-function pkgVersion(dir) {
-  return JSON.parse(readFileSync(join(repo, 'packages', dir, 'package.json'), 'utf8')).version
 }
 
 function manifestOf(dir) {
@@ -215,13 +214,14 @@ function typeEntryPointProblems() {
 function preflight(allowUncut) {
   const problems = []
   const warnings = []
-  const versions = new Map(PACKAGES.map((p) => [p, pkgVersion(p)]))  // all of them must agree
-  problems.push(...typeEntryPointProblems())
-  const unique = new Set(versions.values())
-  if (unique.size !== 1) {
-    problems.push(`package versions disagree: ${[...versions].map(([p, v]) => `${p}=${v}`).join(', ')}`)
-  }
-  const version = [...unique][0]
+  // ONE version per group, recorded in exactly one manifest: the publishable package. Every private
+  // manifest must carry NO version (a second copy is a second thing to update) — the rule and the
+  // mapping live in the workspace root's `scripts/lib/versions.mjs`, shared with the root gate and the
+  // release projection, so this checkout cannot disagree with either.
+  const state = versionState(workspaceRoot)
+  problems.push(...state.problems, ...typeEntryPointProblems())
+  const version = state.versions.mem
+  if (version === undefined) problems.push('the mem group records no version (packages/plugin/package.json)')
   // The two "cut the release" checks: at the tag, the FIRST versioned section must be this version
   // and [Unreleased] must be empty ("has a section" is not the property that matters — a stale old
   // section would satisfy it). They only apply where a CHANGELOG exists: the release repository

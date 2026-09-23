@@ -1,7 +1,6 @@
 {
   "name": "avantf-work",
   "private": true,
-  "version": "0.1.0",
   "description": "@avantf/work — a DSH-native work-tree engine: nodes are attempted, decomposed by the executor that hit the blocker, and converged by the engine",
   "type": "module",
   "engines": {

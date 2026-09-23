@@ -34,6 +34,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { VERSION_GROUPS, versionState } from './lib/versions.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -200,6 +201,18 @@ for (const [dir, name] of PUBLISHABLE) {
 }
 if (problems.length === 0) {
   note(`publishable set: ${[...PUBLISHABLE.values()].join(', ')} (${packages.length} workspace packages, the rest private)`)
+}
+
+// ── 2b. one version per group, recorded in exactly ONE manifest ──────────────────────────────────
+// A group's version lives in its publishable package's manifest; every other manifest of the group is
+// private and must carry NO version. `pnpm version:set <group> <version>` edits that one file, and
+// `pnpm version:prune` removes a stray one — see scripts/lib/versions.mjs.
+{
+  const { versions, carriers, problems } = versionState(repo)
+  for (const problem of problems) fail(problem)
+  if (problems.length === 0) {
+    note(`versions: ${VERSION_GROUPS.map((group) => `${group} ${String(versions[group])} (${String(carriers[group])})`).join(', ')}`)
+  }
 }
 
 // ── 3. per-plugin wiring: REQUIRED peer with a real, wide-enough range ───────────────────────────

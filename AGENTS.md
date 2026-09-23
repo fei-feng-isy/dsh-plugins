@@ -130,10 +130,45 @@ pnpm build:dsh base       # 只构建 base（tsc；不出插件产物、不跑�
 `pnpm guard` **不在**这个清单里：它按同一份发现结果扫每一棵树，新插件自动适用四条规则（不许 import
 别棵树的包、相对路径不许出树、产物里不许按值 import base、`@avantf/*` 只能是本树的包）。
 
+## 版本：每个组只记在一个 manifest 里
+
+一个**版本组** = 一个顶层子树（`base` / `mem` / `work`），它的版本**只记录在一处**——该组那个可发布包的
+manifest：
+
+| 组 | 版本记录在 | 组内其余 manifest |
+|---|---|---|
+| `base` | `base/plugin-base/package.json` | 无（就它一个） |
+| `mem` | `mem/packages/plugin/package.json` | `mem/package.json` + `packages/{core,contract,convert,provision,retrieval-core,cli,mcp}` —— **都不带 `version`** |
+| `work` | `work/packages/plugin/package.json` | `work/package.json` + `work/packages/core` —— 都不带 `version` |
+
+私有 manifest **不写版本号**：它们不会被发布（插件把引擎内联进产物，工作区里按路径链接），写一份就是多一处
+要改、多一处会漂。这也意味着**切版本就是改一个文件**，没有任何"同步/派生"步骤：
+
+```bash
+pnpm version:set mem 0.1.2   # 只改 mem/packages/plugin/package.json
+pnpm version:check           # 打印三组版本；私有 manifest 一旦又长出 version 就报错
+pnpm version:prune           # 把私有 manifest 上多余的 version 删掉（唯一可能的漂移）
+```
+
+- 映射与规则只在 `scripts/lib/versions.mjs` 一处（哪个 manifest 是载体、哪些必须没有版本），
+  `scripts/version.mjs`（CLI）、`scripts/release-check.mjs`（门禁 2b 段）、`mem/scripts/release-check.mjs`
+  的 preflight 与 `scripts/make-release-tree.mjs`（投影）都读它。
+- CI 跑 `pnpm version:check`，所以"又给私有包加回版本号"这类回归在评审前就红。
+- **`workspace:*` 指到的私有包，版本只在打包那一刻存在。** `pnpm pack` 会把 `workspace:*` 改写成
+  **目标包的 `version`**，所以那些被引用的包在打包时必须有一个版本可读；但它们不发布，于是版本由
+  `scripts/lib/versions.mjs` 的 `withWorkspaceVersions()` 在 `pnpm pack` 期间临时写进去、`finally` 里逐字
+  还原（mem 的 4 个引擎包 + work 的 core；见两个 `pack-plugin.mjs`）。仓库里不留副本，忘了还原会被
+  `pnpm version:check` 抓住、`pnpm version:prune` 收拾。
+- 投影默认**取开发树的版本**；`pnpm sync:rc --version mem=X` 只给发布树盖章（改的同样是那一个载体），
+  `--keep-rc-versions` 保留发布树现有版本。投影还会断言发布树的形态与开发树同规则（私有 manifest 无版本）。
+- **版本不是发布**：`mem/CHANGELOG.md` 的版本节仍要自己切（mem 自己的 release gate 检查第一个版本节
+  == 当前版本、`[Unreleased]` 为空）。
+
 ## 要跑的门禁
 
 | 命令 | 它证明什么 |
 | --- | --- |
+| `pnpm version:check`（`scripts/version.mjs`） | 每个组的版本只记在它的可发布 manifest 里，私有 manifest 不带版本（回归即红） |
 | `pnpm guard`（`scripts/boundary-guard.mjs`） | 每个**被发现**的插件树只够得到 base 与自己的包：①不许 import 别棵树的包；②相对路径不许走出本树（唯一例外是 `scripts/lib/`）；③会被打进产物的文件不许**按值** import base（只能 `import type` / `typeof import(…)`，测试不受此限）；④其余 `@avantf/*` 必须是本树的包。**实现只有一份**：`base/plugin-base/test/boundary.spec.ts` 直接 spawn 这个脚本并断言它扫到了每一棵树，不再各写一份规则 |
 | `pnpm release:check`（`scripts/release-check.mjs`） | 可发布集合恰好是那三个、其余都是 private；peer 是 required 且范围够宽；base peer 的 zod 是 `>=4.4.3 <5`；`catalog.zod` 是 4.6.5；没有 `link:`/`file:`；registry 上已有兼容的 base |
 | `pnpm proof:base-swap`（`scripts/prove-base-swap.mjs`） | 构建出的插件产物里既没有静态 base import 也没有内联的 kit 声明，且插件**构建产物**的 bootstrap 能加载一份**被替换**的 base 并从它取提示词读写与根解析，产物字节一致 |

@@ -1,6 +1,5 @@
 {
   "name": "@avantf/mem-contract",
-  "version": "0.1.1",
   "private": true,
   "description": "avantf-mem contracts: single source of config + tool schemas (zod)",
   "type": "module",
