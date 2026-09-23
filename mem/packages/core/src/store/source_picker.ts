@@ -13,7 +13,18 @@
 import { readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
+import type { BrowseEntry, BrowseListing, SourceClassification, SourceKind } from '@avantf/mem-contract'
 import { allowedLocalRoots, resolveLocalSource, type IngestLimits } from './ingest_guard.js'
+
+/**
+ * The shapes come from the CONTRACT, and core re-exports them for its own callers.
+ *
+ * The engine owns the behaviour, but the browser half needs the types WITHOUT the engine, so the
+ * contract owns them (see `SourceClassification` / `BrowseListing` there). No hand-mirror left to
+ * drift, which is why the re-export below exists: `export type { X } from '…'` alone does NOT put `X`
+ * in this module's scope, so the separate `import type` above is what the rest of this file uses.
+ */
+export type { BrowseEntry, BrowseListing, SourceClassification, SourceKind }
 
 /**
  * Extensions a directory walk will take. The single source for both the walk and the picker.
@@ -29,22 +40,6 @@ import { allowedLocalRoots, resolveLocalSource, type IngestLimits } from './inge
  * specs and with DESIGN §8; `source_picker.spec.ts` asserts the two never drift apart.
  */
 const INGESTABLE = /\.(md|markdown|txt|text|json|jsonl|yaml|yml|pdf|docx|docm|odt|epub|html|htm|xhtml|tex|latex|ltx|rst|rest|ipynb|csv|tsv|org|textile|fb2|opml|bib|dbk|man|rtf|typ|xlsx)$/i
-
-/** What one source string turned out to be. */
-export type SourceKind = 'url' | 'file' | 'directory' | 'text' | 'missing'
-
-/** The answer the UI needs to label the input and pick the right `kb_manage` action. */
-export interface SourceClassification {
-  kind: SourceKind
-  /** Resolved, boundary-checked absolute paths (when `kind` is `file`/`directory`). */
-  paths: string[]
-  /** Inputs that look like paths but do not resolve, or resolve outside the allowed roots. */
-  missing: string[]
-  /** Why the missing ones are missing (the boundary's own message; they differ per input). */
-  reasons: string[]
-  /** How many files a directory holds that ingestion would actually take. */
-  files: number
-}
 
 /** Split one source string the way `kb import` does: whitespace or comma separated. */
 export function splitSourceInput(raw: string): string[] {
@@ -156,28 +151,11 @@ function describePaths(paths: string[]): SourceClassification {
   return { kind: 'file', paths, missing: [], reasons: [], files: paths.length }
 }
 
-/** One row of a directory listing. */
-export interface BrowseEntry {
-  name: string
-  path: string
-  /** `dir` navigates; `ingestable` can be picked; `other` exists but ingestion would refuse it. */
-  kind: 'dir' | 'ingestable' | 'other'
-}
-
-/** One directory as the picker sees it. */
-export interface BrowseListing {
-  path: string
-  /** The parent directory, or `null` when this is an allowed root (or the filesystem root). */
-  parent: string | null
-  /** The configured roots — what the picker may walk when `unrestricted` is false. */
-  roots: string[]
-  /**
-   * `knowledge.ingest.allow_outside_workspace`: the whole filesystem is fair game, so `roots` is
-   * informational only and the UI must say "不限制" rather than show a boundary it does not honour.
-   */
-  unrestricted: boolean
-  entries: BrowseEntry[]
-}
+/**
+ * The listing shape is the contract's {@link BrowseListing} (re-exported above for this package's
+ * callers). The engine fills it in and the host Remote method declares that same interface as its
+ * payload, so the shape has exactly one definition and one check.
+ */
 
 function insideRoots(path: string, roots: readonly string[], allowAnywhere: boolean): boolean {
   if (allowAnywhere) return true

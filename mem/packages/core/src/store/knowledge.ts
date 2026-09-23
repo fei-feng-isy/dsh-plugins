@@ -30,7 +30,7 @@ import { DocumentsDao } from '../db/dao/documents.js'
 import { contentHash } from '../db/hash.js'
 import { documentText, type DocumentText } from './document_text.js'
 import { classifySource, listTextFiles } from './source_picker.js'
-import { float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
+import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeTerms, type LexicalProbe } from './lexical.js'
 import { hybridSearch, RetrievalInputError, type HybridContext, type HybridDeps, type HybridLeg } from './hybrid.js'
@@ -590,6 +590,10 @@ export class KnowledgeStore {
     const tx = this.db.transaction(() => {
       const docId = this.docs.upsert(domain, source, docTitle, sourceUri)
       const oldChunkIds = this.chunks.idsForDoc(docId)
+      // Read the vectors BEFORE the replace, keyed by content hash: a chunk whose text did not
+      // change keeps its embedding instead of paying the ONNX forward pass again. `--overwrite`, a
+      // repeated ingest and `adoptUnclaimed` (recovering an overwritten file) all take this path.
+      const reusable = this.reusableByHash(docId, this.vectorSpace())
       this.chunks.deleteForDoc(docId) // re-ingest replaces chunks
       this.docs.touch(docId, sourceUri)
       const newChunkIds = this.chunks.insertMany(
@@ -603,11 +607,11 @@ export class KnowledgeStore {
           charEnd: chunk.end,
         })),
       )
-      return { doc_id: docId, oldChunkIds, newChunkIds }
+      return { doc_id: docId, oldChunkIds, newChunkIds, reusable }
     })
     const result = tx()
     this.evictVectors(result.oldChunkIds)
-    const indexed = await this.indexChunks(result.newChunkIds)
+    const indexed = await this.indexChunks(result.newChunkIds, result.reusable)
     return {
       doc_id: result.doc_id,
       chunks: chunks.length,
@@ -716,23 +720,81 @@ export class KnowledgeStore {
    * Extract entities per chunk (persisted) and encode/persist chunk vectors.
    *
    * Returns how many chunks did NOT get a vector, so the caller can put it in the tool result. A
-   * missing model counts every chunk: the document is still searchable by text and entity, but not
-   * semantically, and "入库成功 N 段" must not imply otherwise.
+   * missing model counts every chunk that had no reusable vector: the document is still searchable by
+   * text and entity, but not semantically, and "入库成功 N 段" must not imply otherwise.
    */
-  private async indexChunks(chunkIds: number[]): Promise<{ vectors_failed: number }> {
+  private async indexChunks(chunkIds: number[], reusable?: ReadonlyMap<string, Buffer>): Promise<{ vectors_failed: number }> {
     if (!chunkIds.length) return { vectors_failed: 0 }
     const rows = this.chunks.texts(chunkIds)
     await this.replaceChunkEntities(rows)
     // Record what produced the rows, so a later reindex can tell "already done" from "stale"
     // instead of re-extracting the whole corpus (DESIGN §20).
     this.chunks.setEntitiesVersion(rows.map((r) => r.chunk_id), ENTITY_EXTRACTOR_VERSION)
+    const space = this.vectorSpace()
+    // Reuse FIRST, and before the model is even consulted: the vector of an unchanged chunk is
+    // already in the database AND in hand, so it costs no encode — and when the model is unavailable
+    // this is what keeps a re-ingest from dropping vectors it did not have to drop.
+    const { remaining } = this.writeReusedVectors(rows, space, reusable)
     if (!this.semantic.isAvailable()) {
       // Observing call site: keep a failed bootstrap retryable (see warm_gate.ts).
       this.semantic.ensureWarm?.()
-      return { vectors_failed: rows.length }
+      return { vectors_failed: remaining.length }
     }
-    const { failed } = await this.encodeAndStore(rows, this.vectorSpace())
+    const { failed } = await this.encodeAndStore(remaining, space)
     return { vectors_failed: failed }
+  }
+
+  /**
+   * The doc's stored vectors that still APPLY, keyed by content hash (see {@link vectorReusable}).
+   *
+   * Called inside the ingest transaction, before the replace: two chunks with the same text are one
+   * hash, and the first row wins — the reuse is only a cache lookup, so a duplicate entry cannot be
+   * distinguished from a hit and need not be.
+   */
+  private reusableByHash(docId: number, space: string): Map<string, Buffer> {
+    const out = new Map<string, Buffer>()
+    for (const row of this.chunks.vectorStateForDoc(docId)) {
+      if (row.vec === null || row.content_hash === null) continue
+      if (!this.vectorReusable(row, space)) continue
+      if (!out.has(row.content_hash)) out.set(row.content_hash, row.vec)
+    }
+    return out
+  }
+
+  /**
+   * Write back the vectors a re-ingest can reuse, and report which rows still need the model.
+   *
+   * A row is only reused when the lookup misses nothing: any row whose write fails, or whose text has
+   * no reusable vector, comes back in `remaining` and is encoded as before — so the reuse path cannot
+   * leave a chunk unindexed that the plain path would have indexed.
+   */
+  private writeReusedVectors(
+    rows: readonly { chunk_id: number; text: string }[],
+    space: string,
+    reusable: ReadonlyMap<string, Buffer> | undefined,
+  ): { reused: number; remaining: { chunk_id: number; text: string }[] } {
+    if (reusable === undefined || reusable.size === 0) return { reused: 0, remaining: [...rows] }
+    const remaining: { chunk_id: number; text: string }[] = []
+    const writes: { chunk_id: number; bytes: Buffer; embeddingModel: string; text: string }[] = []
+    for (const r of rows) {
+      const bytes = reusable.get(contentHash(r.text))
+      if (bytes === undefined) remaining.push(r)
+      else writes.push({ chunk_id: r.chunk_id, bytes, embeddingModel: space, text: r.text })
+    }
+    if (writes.length === 0) return { reused: 0, remaining }
+    try {
+      // The DB write is the all-or-nothing one; the live index follows it, and a failure there is
+      // the benign direction (the next process reloads the on-disk vector).
+      this.chunks.setVectors(writes)
+    } catch {
+      // Fall back to encoding: a failed write must not silently drop the chunk's vector.
+      return { reused: 0, remaining: [...remaining, ...writes.map((w) => ({ chunk_id: w.chunk_id, text: w.text }))] }
+    }
+    for (const w of writes) {
+      const vec = bytesToFloat32(w.bytes)
+      if (vec !== null && vec.length === this.vstore.dim) this.vstore.add(w.chunk_id, vec)
+    }
+    return { reused: writes.length, remaining }
   }
 
   /**
@@ -779,6 +841,12 @@ export class KnowledgeStore {
         encoded += writes.length
       } catch {
         failed += writes.length
+        // The live index got these vectors in the loop above and the DB did not (setVectors is one
+        // transaction, so it is all-or-nothing). Leaving them would be the divergence the memory side
+        // calls out as the worse of the two failures: this process ranks chunks the next process
+        // cannot see, and nothing else would ever mention it. Evict, so both sides agree on "the
+        // vectors are missing" — which `kb_reindex` can then fix.
+        this.evictVectors(writes.map((w) => w.chunk_id))
       }
     }
     if (failed > 0) {
@@ -1343,7 +1411,15 @@ export class KnowledgeStore {
       const jaccard = overlap / union.size
       if (jaccard > 0) out.set(id, jaccard)
     }
-    return out
+    // Truncate the UNION, not just each name-batch: `candidatesByEntityNames` limits per batch and
+    // unions, so it can hand back more than `cap` ids. Two consequences, both fixed here. The leg was
+    // handing `fuse` a candidate set unbounded by `cap` (the very thing the cap exists to bound), and
+    // `size === legCap` — the only observable "this leg was cut" signal (DESIGN §20.17) — reported NOT
+    // capped for exactly the legs that overshot, i.e. the heavily-trimmed ones. Sorting by the real
+    // jaccard (the DB ordered each batch, but a union of per-batch tops is not a top-N) and slicing
+    // keeps the best `cap`, so this flag means what the FTS leg's flag means.
+    if (out.size <= cap) return out
+    return new Map([...out].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, cap))
   }
 }
 

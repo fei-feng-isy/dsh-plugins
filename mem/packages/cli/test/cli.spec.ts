@@ -144,7 +144,16 @@ describe('CLI', () => {
     expect(res['entities']).toEqual({ rebuilt: 0, deferred: 0, skipped: false })
     // …and so does the conflict queue's bounded drain (`checked` rows completed, `logged` pairs,
     // `pending` left for the next call). The CLI is the surface that loops it to completion.
-    expect(res['conflicts']).toEqual({ checked: 0, logged: 0, pending: 0 })
+    //
+    // `pending` is the REAL backlog, not "what this call selected": this store has facts with no
+    // `semantic_vector` (no embedder in a test), and the queue predicate requires one, so the
+    // selection is empty while those rows genuinely wait. Reporting 0 here is what made
+    // `maintenance` say "queue empty" on a store whose `trust` said otherwise.
+    const conflicts = res['conflicts'] as { checked: number; logged: number; pending: number }
+    expect(conflicts).toMatchObject({ checked: 0, logged: 0 })
+    // The CLI still terminates its drain loop: a non-zero `pending` whose pass completes nothing
+    // breaks out rather than spinning (that guard is what the loop is for).
+    expect(conflicts.pending).toBeGreaterThan(0)
   })
 
   it('trust / pin / unpin manage permanent memory', () => {

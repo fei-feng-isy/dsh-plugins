@@ -63,7 +63,7 @@
 - ④环境变量：`AVANTF_HOME`、`AVANTF_MEM_DB`、`AVANTF_KNOWLEDGE_DB`、`AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`）、`AVANTF_MEM_MODEL_CACHE`、`AVANTF_MEM_AUTO_DOWNLOAD`（`0/false` 禁用一切下载——模型与外部二进制，测试与离线环境用；作为全局 kill-switch 同时作用于适配器构造与 provision 的每个安装路径，优先于显式传参）、`AVANTF_TOOLS_DIR`（受管工具目录覆盖）、`AVANTF_PANDOC`（显式指定 pandoc 可执行文件，优先于受管目录与 PATH）。
 
 - 公共配置放**共享**项（`semantic`/`rerank`/`vectorStore`/`retriever.weight_*`/`lifecycle`/`trust` 默认，以及 `tools`）——记忆与知识共用同一检索底座与嵌入模型，保证跨库分数可比；`tools`（`dir`/`mirror`/`auto_install`）之所以在**公共**层而不是知识库专属，是因为它管的是"这个进程要装的外部东西"（pandoc 二进制与启动预热的嵌入模型），两者共用同一套机制。
-- 分库配置放**各自**项（`db.path`、`memory.category_values`、`knowledge.domains/chunk_size/chunk_overlap/source_priority`、`knowledge.ingest.*`——摄入边界属知识库专用，见 §8）。
+- 分库配置放**各自**项（`db.path`、`knowledge.domains/chunk_size/chunk_overlap/source_priority`、`knowledge.ingest.*`——摄入边界属知识库专用，见 §8）。`memory.category_values` 曾在这里，但没有任何生产代码读它（改它不改变行为、设它也不改变行为），已删除；分类词表的**建议值**改由 `CATEGORY_VALUES` 在 `mem_remember` 的字段描述里对模型讲清，而不是假装是一个配置项。
 - **`db.path` 解析规则**：`~/` 展开为**用户 home**（与 `dataHome` 同规则）、绝对路径原样使用；留空则回落到数据目录下的 `memory/memory.db`、`knowledge/knowledge.db`（此时 `AVANTF_MEM_DB`/`AVANTF_KNOWLEDGE_DB` 仍可作为环境层覆盖）。`knowledge.docs.dir` 同规则，留空 = `<data_home>/knowledge/docs`（`AVANTF_KNOWLEDGE_DOCS` 可覆盖）。
 - **`knowledge.domains` 是写入侧领域清单**（DESIGN §8）：默认 `['design','api','ops','research','notes']`；显式 `[]` = 不限制；非空时还接受 `documents` 里已有的领域。清单外的**新**领域由 store 拒绝，所以"同一个领域两个名字"不能靠随手输入产生——新增领域是改这一项配置的事。
 
@@ -336,7 +336,7 @@ avantf-mem/
 - **兜底**：连续 `idle_calendar_days`（默认 365）日历日没被使用 → `archived('idle')`，即使活跃日攒不够也终会清理。
 - **永久保护**：`pinned` 不结算、不自动归档、`purge_skips_pinned` 不清理；退出需显式 `admin unpin`。
 - **检测队列在库里，不再在内存里（§20.16）**：`ContradictDetector.changed` 只装"等待**嵌入腿**复检"的事实，而嵌入腿在模型不可用时永远跑不了——于是队列每次写入 +1 且永不排空（实测 30 次写入 → 30 条，`contradict_check` 连跑两次仍是 30，即每次补扫都重跑整个积压），并且**随进程消失**（重启后再也拿不到那次检查）。现在队列是 `facts.conflict_checked`，`MemoryStore.checkContradictions(budget)` 有界排水，`trust_diagnose` 用 `conflict_pending` 报"落后多少"；`lifecycle.contradiction_pending_max` / `contradiction_evicted` 随之删除——不是上界被放宽，而是**不再需要上界**（队列不是内存结构），被丢弃的 id 也不再存在（这正是它要消灭的取舍）。**purge（⑤）也纳入 tick 预算**并报 `purged_deferred`——它是单步最贵的一段（老库上每删一行都有 FK 级联查找）且与他人共享同一个 `IMMEDIATE` 事务。
-- **排序无关**（D9）：trust **不参与**融合/重排，评测集基线是**精确断言**（`eval_zh.spec` 六项数值冻结）。评测集从 29 条扩到 **35 条**（性能审查 §4.4：原集里汉字数 ≤2 的查询为 0，而 `buildFtsQuery` 对 2 字 CJK 直接返回 `null`——最该被守护的形状恰好没被覆盖；新增名字类/术语类/多命中 2 字查询各若干，实测 P@k 0.477→0.567、MRR 0.931→0.943）。**2 字术语里抽取器不认识的那些仍然无腿可用**（如 `缓存`：既可被 trigram 拒绝、也不被 jieba 抽成实体），这是一条**已知缺口**并已被专门测试钉住（`eval_zh.spec.ts` 的 "PINNED GAP"）——修它要引入 LIKE/前缀回退，属于召回语义变更，不在性能审查范围内。
+- **排序无关**（D9）：trust **不参与**融合/重排，评测集基线是**精确断言**（`eval_zh.spec` 六项数值冻结）。评测集从 29 条扩到 **35 条**（性能审查 §4.4：原集里汉字数 ≤2 的查询为 0，而 `buildFtsQuery` 对 2 字 CJK 直接返回 `null`——最该被守护的形状恰好没被覆盖；新增名字类/术语类/多命中 2 字查询各若干，实测 P@k 0.477→0.567、MRR 0.931→0.943；其后融合层去掉 min-max 缩放，35 条基线**再次重冻**为 MRR 0.9714、R@k 0.9571，见 §20.17）。**2 字术语里抽取器不认识的那些仍然无腿可用**（如 `缓存`：既可被 trigram 拒绝、也不被 jieba 抽成实体），这是一条**已知缺口**并已被专门测试钉住（`eval_zh.spec.ts` 的 "PINNED GAP"）——修它要引入 LIKE/前缀回退，属于召回语义变更，不在性能审查范围内。
 - **运维**：`mem_admin {action:'trust_diagnose'|'pin'|'unpin'}`、CLI `avantf-mem trust|pin|unpin`、「记忆」标签页的徽章 / 剩余活跃日 / 永久记忆 / 立即维护。
 - **无迁移**：facts 新列随 DDL 建库生效，改 schema 仍是删库重建（§6）。
 - **schema 升级已改为版本化迁移**（§19）：`PRAGMA user_version` + `schema_migrations` 审计，旧库按 step 逐级升级——上一行的"删库重建"作废（§11 的 open 配对唯一索引就是第一个真正的升级 step）。

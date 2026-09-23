@@ -10,7 +10,7 @@
  * @module fetch
  */
 import { createHash } from 'node:crypto'
-import { createWriteStream, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync, statSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -159,18 +159,50 @@ export async function extractArchive(
  * Atomically publish a fully-built directory as the artifact's version directory.
  *
  * `renameSync` inside one filesystem is atomic, so a reader (another process, or the next `ensure`)
- * sees either the old state or the complete new one — never a half-written tool. A pre-existing
- * target is REPLACED: a retry after a failed verification must not be blocked by the wreckage of the
- * previous attempt.
+ * sees either the old tree or the complete new one — never a half-written tool. A pre-existing target
+ * is REPLACED, and it is moved ASIDE rather than deleted first: `rm -rf` on a real tool tree runs for
+ * hundreds of milliseconds, and for that whole window the version directory did not exist, so a
+ * concurrently started pandoc got ENOENT and retried the install. Two renames shorten that window to
+ * microseconds, and if the second one fails the old tree is moved back — a failed publish leaves the
+ * previous install in place instead of nothing.
+ *
+ * What this does NOT claim: there is no cross-process LOCK. Two processes can install the same
+ * version at once and both pay for the download and the extract; the second publish wins (each
+ * staging tree is complete, so the result is a complete `bin/<binary>` either way). A lock would have
+ * to detect its own stale holders and would have to tell the waiter when the winner is done, which is
+ * a coordination protocol rather than a rename — out of scope here, and recorded instead of implied.
+ *
+ * A crash between the two renames leaves the old tree under `<target>.old-<pid>-<rand>` beside the
+ * version directory. Nothing enumerates that parent, so the residue is inert; the next install of the
+ * same version replaces the target normally.
  */
 export function publishAtomically(staging: string, target: string, artifact: string): void {
   mkdirSync(dirname(target), { recursive: true })
-  rmSync(target, { recursive: true, force: true })
+  const moved = existsSync(target)
+    ? `${target}.old-${String(process.pid)}-${Math.random().toString(36).slice(2, 8)}`
+    : null
+  if (moved !== null) {
+    try {
+      renameSync(target, moved)
+    } catch (error) {
+      throw new ProvisionError('extract', artifact, `替换旧版本失败（${target} → ${moved}）：${describeError(error)}`)
+    }
+  }
   try {
     renameSync(staging, target)
   } catch (error) {
+    // Put the old tree back before reporting: the point of moving it aside is that the previous
+    // install survives a failed publish.
+    if (moved !== null) {
+      try {
+        renameSync(moved, target)
+      } catch {
+        // Best effort. The failure below is the one the caller must see; the residue is inert.
+      }
+    }
     throw new ProvisionError('extract', artifact, `原子落盘失败（${staging} → ${target}）：${describeError(error)}`)
   }
+  if (moved !== null) rmSync(moved, { recursive: true, force: true })
 }
 
 /**

@@ -113,6 +113,25 @@ export class ChunksDao {
   }
 
   /**
+   * The doc's chunks WITH their stored vectors — the reuse index for a re-ingest.
+   *
+   * A re-ingest deletes and re-inserts every chunk (new ids), so without this the only way to keep a
+   * vector is to re-encode the same text; `vectorReusable` already knows how to tell "unchanged", but
+   * only `reindex` could use it. Read BEFORE the replace, inside its transaction.
+   */
+  vectorStateForDoc(docId: number): (ChunkStateRow & { vec: Buffer | null })[] {
+    return this.db
+      .prepare<ChunkStateRow & { vec: Buffer | null }>(
+        `SELECT dc.chunk_id AS chunk_id, dc.text AS text, dc.content_hash AS content_hash,
+                dc.embedding_model AS embedding_model, dc.entities_version AS entities_version,
+                (dc.semantic_vector IS NOT NULL) AS has_vector, dc.semantic_vector AS vec
+           FROM doc_chunks dc
+          WHERE dc.doc_id = ?`,
+      )
+      .all(docId)
+  }
+
+  /**
    * Write a batch of vectors in ONE transaction.
    *
    * `setVector` is autocommit: each chunk costs a commit (measured 14.2 µs/row against 2.2 µs in a
@@ -261,8 +280,11 @@ export class ChunksDao {
    * Entity-overlap candidates, most-shared first and CAPPED (see the memory store's sibling).
    *
    * `limit` is applied per name-batch and the batches are unioned, so the result is bounded by
-   * `limit x ceil(names/batch)` — still corpus-independent, which is the property that matters:
-   * the caller only ever keeps `overFetch` entries after fusion.
+   * `limit x ceil(names/batch)` — corpus-independent, which is what this query can promise. The
+   * caller is expected to enforce the real `cap` on the union AFTER scoring it (it re-computes the
+   * true Jaccard in JS): a union of per-batch tops is not a top-N, and a leg that returns more than
+   * the cap makes `scores.size === legCap` — the "was this leg trimmed" signal — report the opposite
+   * of the truth. (The memory store's sibling does not batch, so its single `LIMIT` is already exact.)
    */
   candidatesByEntityNames(names: readonly string[], domain: string | undefined, source: string | undefined, limit: number): number[] {
     if (limit <= 0) return []

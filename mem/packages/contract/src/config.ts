@@ -231,13 +231,6 @@ export const MemoryConfigSchema = z.object({
   // (`join(home, 'memory', 'memory.db')`). A literal `~/.avantf/...` default would
   // be re-joined onto `home` (already `~/.avantf`) and double the directory.
   db: z.object({ path: z.string().default('') }).prefault({}),
-  category_values: z.array(z.string()).default([
-    'user_pref',
-    'user_env',
-    'project',
-    'tool',
-    'general',
-  ]),
 })
 
 export type MemoryConfig = z.infer<typeof MemoryConfigSchema>

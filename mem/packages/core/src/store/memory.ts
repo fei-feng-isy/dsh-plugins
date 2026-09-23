@@ -683,7 +683,12 @@ export class MemoryStore {
       this.conflictDrainCursor = 0
       rows = this.facts.pendingConflictRows(budget, 0)
     }
-    if (rows.length === 0) return { logged: [], checked: 0, pending: 0 }
+    // Nothing SELECTED is not the same as nothing PENDING, and this line conflated the two: the queue
+    // predicate requires `semantic_vector IS NOT NULL`, so with no embedder (the default shape on a
+    // machine without a model) the selection is always empty — while `trust`, which counts the rows
+    // with no vector ON PURPOSE ("hiding them would report an empty queue while nothing had been
+    // checked"), reports the real backlog. `maintenance` printed "queue empty" beside it.
+    if (rows.length === 0) return { logged: [], checked: 0, pending: this.facts.countPendingConflicts() }
     this.conflictDrainCursor = rows[rows.length - 1]!.fact_id
     const checked = this.contradictions.checkMany(rows.map((r) => r.fact_id))
     if (checked.complete.length > 0) this.facts.markConflictChecked(checked.complete)

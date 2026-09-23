@@ -645,6 +645,20 @@ describe('trust lifecycle in the store (TRUST_MODEL.md §2)', () => {
     expect(factRow(idle.fact_id).status).toBe('active') // idle clock refreshed by restore (R18)
   })
 
+  it('restore refuses an ACTIVE fact instead of quietly extending its life', async () => {
+    // The gate is not cosmetic: this UPDATE settles trust and refreshes the idle clock, so without
+    // `AND status = 'archived'` restoring an active row would lift a fact the next tick was about to
+    // forget back to `recall_floor` — and report success while doing it.
+    const a = await rt.remember({ action: 'add', content: '本来就活跃的事实' })
+    rt.db.prepare('UPDATE facts SET trust_score = 0, last_retrieved_at = NULL WHERE fact_id = ?').run(a.fact_id)
+
+    expect(rt.memory.restore(a.fact_id)).toBe(false)
+    const row = factRow(a.fact_id)
+    expect(row.status).toBe('active')
+    expect(row.trust_score).toBe(0) // not lifted
+    expect(row.last_retrieved_at).toBeNull() // idle clock untouched
+  })
+
   it('R5/R21: ask/chain/reason count as recall; related does not; cross-query only final facts', async () => {
     const a = await rt.remember({ action: 'add', content: '张伟管理李娜' })
     const b = await rt.remember({ action: 'add', content: '李娜管理王强' })

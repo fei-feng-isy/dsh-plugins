@@ -33,7 +33,10 @@ import {
   warmSemanticAsync,
   warmTokenizerAsync,
   type AvantfRuntime,
+  type KnowledgeStore,
+  type MemoryStore,
   type RelevanceHit,
+  type StoreResult,
 } from '@avantf/mem'
 import {
   REMEMBER_TOOL,
@@ -49,8 +52,11 @@ import {
   toolErr,
   validationError,
   remoteErrorText,
+  type BrowseListing,
+  type RecallResult,
   type RemoteEnvelope,
   type RemoteErr,
+  type SourceClassification,
   type AvantfLogger,
   type ToolSpec,
 } from '@avantf/mem-contract'
@@ -66,7 +72,7 @@ import {
 } from './envinit.js'
 import { parseToolsConfig, resolveToolsDir } from '@avantf/mem-provision'
 import { resetPandocResolution, setPandocProvisioning } from '@avantf/mem-convert'
-import { openDocumentPath, type OpenTarget } from './open.js'
+import { openDocumentPath, type OpenOutcome, type OpenTarget } from './open.js'
 import { browseDirectory, classifySource } from '@avantf/mem'
 import { flattenToolSpec } from './tool_schema.js'
 
@@ -157,7 +163,17 @@ export class AvantfMemGateway extends TypertRemoteService {
     this.rt = rt
   }
 
-  private async call(key: string, spec: ToolSpec, payload: WireArgs): Promise<RemoteEnvelope<unknown>> {
+  /**
+   * Run one already-validated tool call and wrap the answer in the contract envelope.
+   *
+   * `T` is the payload the tool key is DECLARED to answer, spelled at each `@Remote` below; this used
+   * to be `unknown` everywhere, which made the host half the one seam in the type chain where nothing
+   * said what crosses the wire. The single `as T` is unavoidable and is the honest part: the dispatch
+   * table is keyed by `ToolSpec.key` (a `string`), so its result is `unknown` by construction. Naming
+   * the type is what turns "the client assumed a shape" into "the engine's own type is what the host
+   * claims to send".
+   */
+  private async call<T>(key: string, spec: ToolSpec, payload: WireArgs): Promise<RemoteEnvelope<T>> {
     const parsed = spec.input.safeParse(payload)
     if (!parsed.success) {
       // Same message + violations format the agent tools return (contract helper).
@@ -165,39 +181,50 @@ export class AvantfMemGateway extends TypertRemoteService {
     }
     try {
       const value = await dispatchToolKey(this.rt, key, parsed.data as WireArgs)
-      return { ok: true, value: value ?? null }
+      return { ok: true, value: (value ?? null) as T }
     } catch (error) {
       return { ok: false, error: remoteErrorText(error) }
     }
   }
 
+  /**
+   * Each payload is written as the ENGINE type that produces it (`StoreResult<…>`, or a contract
+   * interface), never as a hand-copied shape: if a store method's result changes, the declaration
+   * here stops compiling instead of quietly misdescribing the wire.
+   */
   @Remote('remember')
-  remember(args: WireArgs) {
+  remember(args: WireArgs): Promise<RemoteEnvelope<StoreResult<MemoryStore, 'add'>>> {
     const payload = defined(args)
     return this.call('remember', REMEMBER_TOOL, { action: 'add', ...payload })
   }
 
   @Remote('recall')
-  recall(args: WireArgs) {
+  recall(args: WireArgs): Promise<RemoteEnvelope<StoreResult<MemoryStore, 'search'>>> {
     const payload = defined(args)
     return this.call('recall', RECALL_TOOL, { action: 'search', ...payload })
   }
 
   @Remote('admin')
-  admin(args: WireArgs) {
+  admin(args: WireArgs): Promise<RemoteEnvelope<StoreResult<MemoryStore, 'list'>>> {
     const payload = defined(args)
     return this.call('admin', ADMIN_TOOL, { action: 'list', ...payload })
   }
 
+  /**
+   * The one method that keeps `unknown`, and deliberately: its payload is whichever of the seven
+   * corpus actions the caller asked for (a page, one document, an ingest report, a conflict report, a
+   * reindex plan …), so there is no single engine type to name. The engine's `KbDispatch` spells all
+   * seven out; the client names its expectation at each call site (`callRemote<…>(…)`).
+   */
   @Remote('kb')
-  kb(args: WireArgs) {
+  kb(args: WireArgs): Promise<RemoteEnvelope<unknown>> {
     // No safe default action for kb — a missing action fails contract validation
     // with an explicit violation instead of guessing.
     return this.call('kb', KB_TOOL, defined(args))
   }
 
   @Remote('query')
-  query(args: WireArgs) {
+  query(args: WireArgs): Promise<RemoteEnvelope<RecallResult>> {
     return this.call('query', QUERY_TOOL, defined(args))
   }
 
@@ -207,7 +234,7 @@ export class AvantfMemGateway extends TypertRemoteService {
    * text → ingest the string itself, missing → refuse and say why).
    */
   @Remote('classifySource')
-  async classifySource(args: WireArgs): Promise<RemoteEnvelope<unknown>> {
+  async classifySource(args: WireArgs): Promise<RemoteEnvelope<SourceClassification>> {
     try {
       const payload = defined(args)
       const text = typeof payload.text === 'string' ? payload.text : ''
@@ -219,7 +246,7 @@ export class AvantfMemGateway extends TypertRemoteService {
 
   /** UI-only: one directory listing for the 选择 picker (same boundary as ingestion). */
   @Remote('browseDir')
-  async browseDir(args: WireArgs): Promise<RemoteEnvelope<unknown>> {
+  async browseDir(args: WireArgs): Promise<RemoteEnvelope<BrowseListing>> {
     try {
       const payload = defined(args)
       const path = typeof payload.path === 'string' && payload.path !== '' ? payload.path : undefined
@@ -235,7 +262,7 @@ export class AvantfMemGateway extends TypertRemoteService {
    * (non-empty). The host is the only side that knows either half.
    */
   @Remote('kbDomains')
-  async kbDomains(_args: WireArgs): Promise<RemoteEnvelope<unknown>> {
+  async kbDomains(_args: WireArgs): Promise<RemoteEnvelope<StoreResult<KnowledgeStore, 'domainCatalog'>>> {
     try {
       return { ok: true, value: this.rt.knowledge.domainCatalog() }
     } catch (error) {
@@ -249,7 +276,7 @@ export class AvantfMemGateway extends TypertRemoteService {
    * stay bounded by the configured list, while the user can widen it.
    */
   @Remote('kbAddDomain')
-  async kbAddDomain(args: WireArgs): Promise<RemoteEnvelope<unknown>> {
+  async kbAddDomain(args: WireArgs): Promise<RemoteEnvelope<StoreResult<KnowledgeStore, 'addDomain'>>> {
     try {
       const payload = defined(args)
       const domain = typeof payload.domain === 'string' ? payload.domain : ''
@@ -266,7 +293,7 @@ export class AvantfMemGateway extends TypertRemoteService {
    * trusted.
    */
   @Remote('openDoc')
-  async openDoc(args: WireArgs): Promise<RemoteEnvelope<unknown>> {
+  async openDoc(args: WireArgs): Promise<RemoteEnvelope<OpenOutcome>> {
     try {
       const payload = defined(args)
       const docId = typeof payload.doc_id === 'number' ? payload.doc_id : undefined

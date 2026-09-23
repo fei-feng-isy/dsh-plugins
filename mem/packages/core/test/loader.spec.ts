@@ -54,9 +54,12 @@ describe('config layering', () => {
 
   it('merges the per-store memory config.yaml (layer ③) — previously parsed and discarded', () => {
     mkdirSync(join(dir, 'memory'), { recursive: true })
-    writeFileSync(join(dir, 'configs', 'memory.yaml'), 'category_values:\n  - work\n  - play\n')
+    // `db.path` is the memory store's other override, and the only one left: `category_values` used
+    // to sit here as the example, but no production code ever read it (DESIGN §3 records why it is
+    // gone), so this test was asserting a config key with no meaning behind it.
+    writeFileSync(join(dir, 'configs', 'memory.yaml'), 'db:\n  path: /tmp/mem-layer3.db\n')
     const cfg = loadConfig({ dataHome: dir })
-    expect(cfg.memory.category_values).toEqual(['work', 'play'])
+    expect(cfg.memory.db.path).toBe('/tmp/mem-layer3.db')
   })
 
   it('merges the per-store knowledge config.yaml (layer ③)', () => {

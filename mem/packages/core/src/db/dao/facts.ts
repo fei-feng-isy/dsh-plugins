@@ -409,14 +409,22 @@ export class FactsDao {
     this.db.prepare('UPDATE facts SET supersedes_id = ? WHERE fact_id = ? AND supersedes_id IS NULL').run(supersedesId, factId)
   }
 
-  /** Restore an archived fact, settling its trust and refreshing the idle clock (spec §2.6). */
+  /**
+   * Restore an archived fact, settling its trust and refreshing the idle clock (spec §2.6).
+   *
+   * `AND status = 'archived'` is load-bearing, like the guard on every sibling above: this UPDATE
+   * clears the archive bookkeeping and refreshes `last_retrieved_at`, so ungated it would take an
+   * ACTIVE row and (a) push its idle clock forward — silently extending the life of a fact the next
+   * tick was about to re-archive — and (b) reset `trust_score` to the settled value it computed. It
+   * returned `1` either way, so the caller could not tell that a row it never asked about had moved.
+   */
   restore(factId: number, trust: number, clock: number): number {
     return this.db
       .prepare(
         `UPDATE facts
             SET status = 'active', archived_at = NULL, archive_reason = NULL, archived_clock = NULL,
                 trust_score = ?, settle_clock = ?, last_retrieved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-          WHERE fact_id = ?`,
+          WHERE fact_id = ? AND status = 'archived'`,
       )
       .run(trust, clock, factId).changes
   }

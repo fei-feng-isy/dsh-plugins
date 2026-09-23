@@ -511,3 +511,55 @@ export interface DocumentChunk {
 export interface DocumentDetail extends DocumentRecord {
   chunks: DocumentChunk[]
 }
+
+/** What one `kb_manage` source string turned out to be. */
+export type SourceKind = 'url' | 'file' | 'directory' | 'text' | 'missing'
+
+/**
+ * The answer the UI needs to label the input and pick the right `kb_manage` action.
+ *
+ * It lives in the CONTRACT rather than next to the engine that computes it, because the browser half
+ * cannot import the engine (it must not pull node into the client bundle) and used to hand-mirror this
+ * shape — the same "mirror drifts, then a render body dereferences a field the host stopped sending"
+ * failure that has already cost this family once.
+ */
+export interface SourceClassification {
+  readonly kind: SourceKind
+  /** Resolved, boundary-checked absolute paths (when `kind` is `file`/`directory`). */
+  readonly paths: readonly string[]
+  /** Inputs that look like paths but do not resolve, or resolve outside the allowed roots. */
+  readonly missing: readonly string[]
+  /** Why the missing ones are missing (the boundary's own message; they differ per input). */
+  readonly reasons: readonly string[]
+  /** How many files a directory holds that ingestion would actually take. */
+  readonly files: number
+}
+
+/** One row of a directory listing (the 选择 picker's `browseDir`). */
+export interface BrowseEntry {
+  readonly name: string
+  readonly path: string
+  /** `dir` navigates; `ingestable` can be picked; `other` exists but ingestion would refuse it. */
+  readonly kind: 'dir' | 'ingestable' | 'other'
+}
+
+/**
+ * One directory as the browser picker sees it.
+ *
+ * Pinned to the engine's `browseDirectory` return BY the host Remote declaration, which annotates its
+ * payload with this interface: the two cannot drift without a type error. That check is the reason this
+ * shape is spelled here rather than mirrored in the browser half.
+ */
+export interface BrowseListing {
+  readonly path: string
+  /** The parent directory, or `null` when this is an allowed root (or the filesystem root). */
+  readonly parent: string | null
+  /** The configured roots — what the picker may walk when `unrestricted` is false. */
+  readonly roots: readonly string[]
+  /**
+   * `knowledge.ingest.allow_outside_workspace`: the whole filesystem is fair game, so `roots` is
+   * informational only and the UI must say "不限制" rather than show a boundary it does not honour.
+   */
+  readonly unrestricted: boolean
+  readonly entries: readonly BrowseEntry[]
+}

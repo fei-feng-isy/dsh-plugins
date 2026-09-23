@@ -36,6 +36,7 @@ import { unwrapRemoteEnvelope, formatViolations, type RemoteEnvelope } from '@av
 // single source for UI payloads). `import type` is erased, so the client bundle still pulls only
 // the `/remote` subpath it needs — a local mirror is what let a server-side field go missing.
 import type {
+  BrowseListing,
   ContradictionRecord,
   DocumentDetail,
   DocumentSummary,
@@ -46,6 +47,7 @@ import type {
   KbSyncReport,
   RecallHit,
   RecallResult,
+  SourceClassification,
   RetrievalHealthSummary,
   StatsSummary,
 } from '@avantf/mem-contract'
@@ -75,22 +77,25 @@ interface AvantfRemote {
   kbAddDomain(args: Record<string, unknown>): Promise<RemoteEnvelope<unknown>>
 }
 
-/** What the host says one source string is (mirrors core's `SourceClassification`). */
-interface SourceClassification {
-  kind: 'url' | 'file' | 'directory' | 'text' | 'missing'
-  paths: string[]
-  missing: string[]
-  reasons: string[]
-  files: number
-}
-
-/** One directory as the picker sees it (mirrors core's `BrowseListing`). */
-interface BrowseListing {
-  path: string
-  parent: string | null
-  roots: string[]
-  unrestricted: boolean
-  entries: { name: string; path: string; kind: 'dir' | 'ingestable' | 'other' }[]
+/**
+ * The host's answer for one source string, NORMALIZED at the boundary that receives it.
+ *
+ * The shape comes from the contract (no hand-mirror to drift), and the three list fields are read
+ * through {@link normalizeClassification} rather than assumed: this object is dereferenced inside a
+ * render body (`info.paths.length`, `info.missing.join`), and a field the host stopped sending would
+ * throw there — which the shell renders as an empty panel with no retry for the session.
+ */
+function normalizeClassification(value: SourceClassification | null | undefined): SourceClassification | null {
+  if (value === null || value === undefined) return null
+  const list = (candidate: readonly string[] | undefined): string[] =>
+    Array.isArray(candidate) ? candidate.filter((entry): entry is string => typeof entry === 'string') : []
+  return {
+    kind: value.kind,
+    paths: list(value.paths),
+    missing: list(value.missing),
+    reasons: list(value.reasons),
+    files: typeof value.files === 'number' ? value.files : 0,
+  }
 }
 
 /** The slice of the client Context this plugin uses. */
@@ -1150,7 +1155,7 @@ function KnowledgePanel(props: { remote?: AvantfRemote }) {
     const timer = setTimeout(() => {
       void callRemote<SourceClassification>('kb.classifySource', remote.classifySource({ text: sourceText }))
         .then((outcome) => {
-          if (outcome.ok) setSourceInfo(outcome.value ?? null)
+          if (outcome.ok) setSourceInfo(normalizeClassification(outcome.value))
           else { setSourceInfo(null); setError(outcome.error) }
         })
     }, 300)

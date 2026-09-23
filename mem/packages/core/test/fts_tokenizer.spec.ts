@@ -13,6 +13,7 @@ import { setRetrievalLogger } from '@avantf/mem-core'
 import { openSqlite } from '../src/db/sqlite.js'
 import type { Db } from '../src/db/port.js'
 import {
+  MAX_FTS_PHRASES,
   buildFtsQuery,
   detectFtsTokenizer,
   reportFtsTokenizerDrift,
@@ -123,5 +124,28 @@ describe('reportFtsTokenizerDrift', () => {
     const after = warnings.length
     reportFtsTokenizerDrift('drift-once', 'facts_fts', 'unicode61', null)
     expect(warnings).toHaveLength(after)
+  })
+})
+
+
+describe('buildFtsQuery is bounded', () => {
+  it('dedupes repeated trigrams and caps the phrase count', () => {
+    // A long CJK run repeats its trigrams, and `"abc" OR "abc"` is exactly `"abc"`: the duplicates cost
+    // `MATCH` time and buy nothing. The cap is the second line of defence behind the contract's
+    // `MAX_QUERY_CHARS` — it bounds the work at a number the tokenizer owns.
+    const long = '这是一段足够长的中文查询'.repeat(40)
+    const built = buildFtsQuery(long, 'trigram')
+    expect(built).not.toBeNull()
+    const phrases = (built ?? '').split(' OR ')
+    expect(phrases.length).toBeLessThanOrEqual(MAX_FTS_PHRASES)
+    // No duplicates survive, and every phrase is still a quoted trigram.
+    expect(new Set(phrases).size).toBe(phrases.length)
+    expect(phrases.every((phrase) => /^"[^"]{3}"$/u.test(phrase))).toBe(true)
+  })
+
+  it('leaves a normal query alone', () => {
+    // Three-plus characters per CJK term: shorter runs are skipped by the trigram branch on purpose
+    // (an n-gram table cannot match them — the PINNED GAP recorded in `eval_zh.spec.ts`).
+    expect(buildFtsQuery('老王头 喜欢她', 'trigram')).toBe('"老王头" OR "喜欢她"')
   })
 })

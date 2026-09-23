@@ -70,8 +70,12 @@ export interface RuntimeOptions {
  * while `ReturnType<Store['method']>` cannot disagree with the store. The trailing general
  * overloads keep dynamic dispatchers (the plugin's tool runner, MCP) compiling, where the request
  * arrives as the whole union.
+ *
+ * Exported because the DSH plugin's Remote gateway is a dynamic dispatcher too, and it should be able
+ * to say what each key answers without inventing a shape: `StoreResult<MemoryStore, 'add'>` is the
+ * fact the store actually wrote, whatever the store's author later changes it to.
  */
-type StoreResult<S, M extends keyof S> = Awaited<ReturnType<Extract<S[M], (...args: never[]) => unknown>>>
+export type StoreResult<S, M extends keyof S> = Awaited<ReturnType<Extract<S[M], (...args: never[]) => unknown>>>
 
 /**
  * A caller-error payload — the shape every self-made refusal in the `switch` returns.

@@ -590,6 +590,23 @@ describe('contradiction detection (structural)', () => {
   })
 })
 
+describe('the contradiction queue reports its real backlog', () => {
+  it('counts rows that are waiting but NOT selectable (no embedder)', async () => {
+    // The queue predicate requires `semantic_vector IS NOT NULL`, so with no embedder — the default
+    // shape on a machine without a model — the SELECTION is empty while rows are genuinely waiting.
+    // The empty branch used to hardcode `pending: 0`, so `maintenance` printed "queue empty" beside
+    // `trust`'s "落后 N" on the very same store.
+    await rt.remember({ action: 'add', content: '老王负责甲事务' })
+    await rt.remember({ action: 'add', content: '小李负责乙事务' })
+
+    const report = rt.memory.drainConflicts()
+    expect(report.checked).toBe(0)
+    expect(report.pending).toBeGreaterThan(0)
+    // The two channels agree, which is the whole point.
+    expect(report.pending).toBe(rt.memory.trustDiagnose().conflict_pending)
+  })
+})
+
 describe('contradiction embedding fallback', () => {
   it('detectContradictionEmbedding scores entity overlap * cosine (near-dup → 0)', () => {
     const v1 = new Float32Array([1, 0, 0, 0])

@@ -237,9 +237,13 @@ function declared(name: string, schema: TypertSchema['schema']): DeclaredSchema 
  * Host face: registered by the host half through `ctx.typert.register()`.
  *
  * The schema assertions name `TypertSchema['schema']` — the FIELD they are assigned to — rather
- * than this package's own `z.ZodType`. The two are different zod copies: the plugin pins
- * zod 4.4.3, the harness bundles 4.6.2, and `ZodType` gained members between them, so a cast to
- * the local `z.ZodType` could never be assignable and the annotation said nothing. Through
+ * than this package's own `z.ZodType`. There are two PHYSICALLY different zod copies in play —
+ * the workspace's (root catalog `zod: 4.6.5`, the one the plugin compiles against) and the one
+ * inside the installed harness build — and two copies of the same major still have incompatible
+ * type identities (`@avantf/mem-contract`'s `zod` note in `mem/AGENTS.md` is the same lesson), so a
+ * cast to the local `z.ZodType` could never be assignable and the annotation said nothing. Never
+ * write a version number here again: it moves with the catalog, and a stale pair sends the next
+ * reader to reason from the wrong premise. Through
  * `TypertSchema['schema']` the assertion is at least against the type the field actually
  * requires, and a future zod alignment (which would make the cast unnecessary) shows up here.
  */

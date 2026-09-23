@@ -26,6 +26,8 @@ import {
   toolErr,
   validationError,
   envAutoDownload,
+  MAX_QUERY_CHARS,
+  QueryUnion,
 } from '../src/index.js'
 
 /**
@@ -582,5 +584,22 @@ describe('envAutoDownload (the two download switches)', () => {
     // The family gate wins even against an explicit project "on".
     withEnv({ AVANTF_MEM_AUTO_DOWNLOAD: '1', AVANTF_ENVINIT_AUTO_DOWNLOAD: '0' }, () => { expect(envAutoDownload()).toBe(false) })
     withEnv({ AVANTF_ENVINIT_AUTO_DOWNLOAD: 'false' }, () => { expect(envAutoDownload()).toBe(false) })
+  })
+})
+
+
+describe('retrieval queries are bounded', () => {
+  it('refuses a query past MAX_QUERY_CHARS, and says why', () => {
+    // A CJK query becomes one trigram OR-phrase per character, and SQLite evaluates `MATCH`
+    // SYNCHRONOUSLY on the host's event loop: 200 000 characters measured at 119 seconds. Every entry
+    // point (plugin tools, MCP inputSchema, CLI argv, UI payload) derives from this union, so the cap
+    // belongs here rather than in one of them.
+    const over = '中'.repeat(MAX_QUERY_CHARS + 1)
+    const rejected = RecallUnion.safeParse({ action: 'search', query: over })
+    expect(rejected.success).toBe(false)
+    expect(JSON.stringify(rejected.success ? [] : rejected.error.issues)).toContain('事件循环')
+    expect(QueryUnion.safeParse({ query: over }).success).toBe(false)
+    // Exactly at the cap is still a legal query.
+    expect(QueryUnion.safeParse({ query: '中'.repeat(MAX_QUERY_CHARS) }).success).toBe(true)
   })
 })

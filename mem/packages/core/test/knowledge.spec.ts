@@ -1013,4 +1013,163 @@ describe('ingest reports the chunks that got no semantic vector', () => {
       rmSync(home, { recursive: true, force: true })
     }
   })
+
+  it('evicts the live index when the batch write fails', async () => {
+    const { rt, home } = runtimeWith(true)
+    try {
+      const internals = rt.knowledge as unknown as {
+        chunks: { setVectors(rows: readonly unknown[]): void }
+        vstore: { count(): number }
+      }
+      const writeVectors = internals.chunks.setVectors.bind(internals.chunks)
+      // The shape of the real failure: encode succeeded, `vstore.add` succeeded, and the one
+      // transaction that lands the BLOBs hit SQLITE_BUSY (multi-process contention).
+      internals.chunks.setVectors = () => { throw new Error('SQLITE_BUSY: database is locked') }
+      try {
+        const res = await rt.knowledge.ingest('# 标题\n\n第一段正文，讲内存回收。\n\n第二段正文，讲页缓存。', 'notes')
+        expect(res.vectors_failed).toBe(res.chunks)
+      } finally {
+        internals.chunks.setVectors = writeVectors
+      }
+      // A vector only THIS process can rank is worse than no vector: the next process would not
+      // have it and nothing would say so. The failed batch is evicted, so both sides agree.
+      expect(internals.vstore.count()).toBe(0)
+    } finally {
+      rt.shutdown()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * Re-ingesting the same document used to re-encode every chunk: the replace deletes the old rows and
+ * inserts new ids, and only `reindex` ever consulted `vectorReusable`. `kb_ingest --overwrite`, a
+ * repeated ingest and `adoptUnclaimed` all pay a full ONNX forward pass for text that had not changed.
+ * The store now carries the old (content_hash → vector) index through the replace and writes those
+ * vectors back, so the encode is skipped — including when the model is unavailable, where the old code
+ * dropped vectors it did not have to drop.
+ */
+describe('re-ingesting unchanged text reuses the stored vectors', () => {
+  const DIM = 512
+  let available = true
+  let encodes = 0
+
+  function countingRuntime(): { rt: AvantfRuntime; home: string } {
+    const home = mkdtempSync(join(tmpdir(), 'avf-kb-reuse-'))
+    // Small chunks: several chunks means "only the changed one is re-encoded" is an assertion with
+    // content, instead of a one-chunk document where it would be vacuous.
+    allowAnyDomain(home, 'chunk_size: 20\nchunk_overlap: 0\n')
+    const semantic: SemanticBackend = {
+      name: 'fake_reuse',
+      dim: DIM,
+      isAvailable: () => available,
+      encode: async () => { encodes += 1; return new Float32Array(DIM) },
+      encodeBatch: async (texts) => texts.map(() => new Float32Array(DIM)),
+    }
+    return { rt: buildRuntime({ dataHome: home, memoryDbPath: join(home, 'memory.db'), semantic }), home }
+  }
+
+  /**
+   * How many chunks have no VALID vector, through the public report a caller would use. The store's
+   * own predicate (`has_vector` + hash + space), so 0 here means the reuse really landed the vectors
+   * on the new rows — `vectors_failed: undefined` alone would also hold if nothing had been written.
+   */
+  const staleVectors = async (rt: AvantfRuntime): Promise<number> =>
+    (await rt.knowledge.reindex(undefined, { dryRun: true })).vectors_stale
+
+  const body = '# 标题\n\n第一段正文，讲内存回收与页缓存。\n\n第二段正文，讲瓦片索引与倒排链。'
+
+  beforeEach(() => { available = true; encodes = 0 })
+
+  it('encodes nothing on a byte-identical re-ingest, and only the changed chunk otherwise', async () => {
+    const { rt, home } = countingRuntime()
+    try {
+      const first = await rt.knowledge.ingest(body, 'notes')
+      expect(first.vectors_failed).toBeUndefined()
+      expect(encodes).toBe(first.chunks) // nothing stored yet: every chunk is encoded
+      expect(await staleVectors(rt)).toBe(0)
+
+      encodes = 0
+      const again = await rt.knowledge.ingest(body, 'notes')
+      expect(again.chunks).toBe(first.chunks)
+      expect(encodes).toBe(0)
+      // …and the vectors are really there, not merely "not counted": the reuse writes the same bytes
+      // onto the new chunk ids.
+      expect(await staleVectors(rt)).toBe(0)
+
+      encodes = 0
+      // Same LENGTH, so the chunk boundaries do not move and exactly one chunk's text changes.
+      await rt.knowledge.ingest(body.replace('瓦片索引', '倒排索引'), 'notes')
+      expect(encodes).toBe(1)
+    } finally {
+      rt.shutdown()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps unchanged vectors even when the model is unavailable at re-ingest time', async () => {
+    const { rt, home } = countingRuntime()
+    try {
+      const first = await rt.knowledge.ingest(body, 'notes')
+      expect(first.chunks).toBeGreaterThan(0)
+
+      available = false
+      encodes = 0
+      const again = await rt.knowledge.ingest(body, 'notes')
+
+      expect(encodes).toBe(0)
+      expect(again.vectors_failed).toBeUndefined() // no shortfall: every chunk was reused
+      expect(await staleVectors(rt)).toBe(0)
+    } finally {
+      rt.shutdown()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * The entity leg is the one leg whose candidate set is built in more than one query: `candidatesBy-
+ * EntityNames` limits PER NAME BATCH (500 names) and unions, so it can return more ids than the cap it
+ * was given — and `scores.size === legCap`, the only observable "this leg was trimmed" signal, then
+ * reported the opposite of the truth for exactly the legs that overshot. The store truncates the union
+ * after scoring it by the real Jaccard.
+ */
+describe('the entity leg caps the union of its name batches', () => {
+  it('returns at most `cap` candidates even when the DAO hands back more', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'avf-kb-entitycap-'))
+    // Small chunks on purpose: one SHORT section per chunk, because the default 800-char window
+    // merges the whole document into a single chunk and there would be nothing to truncate.
+    allowAnyDomain(home, 'chunk_size: 20\nchunk_overlap: 0\n')
+    const local = buildRuntime({ dataHome: home, memoryDbPath: join(home, 'memory.db') })
+    try {
+      // One section per chunk, and every section names 李娜: the query shares an entity with all of
+      // them, so nothing is dropped for scoring 0 and only the cap can shorten the list.
+      const section = (label: string, tail: string): string => `## ${label}\n\n李娜负责${tail}的日常维护与巡检，并在例会上汇报进展和风险。`
+      const res = await local.knowledge.ingest(
+        ['# 总览', section('甲', '统一网关'), section('乙', '风控'), section('丙', '支付'), section('丁', '监控'), section('戊', '值班')].join('\n\n'),
+        'notes',
+      )
+      const ids = (local.knowledge.detail(res.doc_id)?.chunks ?? []).map((c) => c.chunk_id)
+      expect(ids.length).toBeGreaterThan(2)
+
+      const internals = local.knowledge as unknown as {
+        chunks: { candidatesByEntityNames(names: readonly string[], d: string | undefined, s: string | undefined, limit: number): number[] }
+        jaccardPath(query: string, d: string | undefined, s: string | undefined, cap: number): Promise<Map<number, number>>
+      }
+      const dao = internals.chunks.candidatesByEntityNames.bind(internals.chunks)
+      // Simulate the union of two batches. Reaching one for real needs >500 names extracted from a
+      // single query — a fixture nobody would maintain, and the DAO's own per-batch `LIMIT` is what
+      // makes the overshoot possible, not anything the store controls.
+      internals.chunks.candidatesByEntityNames = () => ids
+      try {
+        const scores = await internals.jaccardPath('李娜', undefined, undefined, 2)
+        expect(scores.size).toBe(2) // `size === cap` now truthfully means "this leg was trimmed"
+      } finally {
+        internals.chunks.candidatesByEntityNames = dao
+      }
+    } finally {
+      local.shutdown()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
 })

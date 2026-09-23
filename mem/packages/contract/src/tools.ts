@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { FACT_STATUSES, withoutRetentionDiagnostics } from './types.js'
+import { CATEGORY_VALUES, FACT_STATUSES, withoutRetentionDiagnostics } from './types.js'
 
 /**
  * The closed value sets these tools accept, exported so no other surface has to retype them.
@@ -9,8 +9,33 @@ import { FACT_STATUSES, withoutRetentionDiagnostics } from './types.js'
  * refusing the new value — with no test failing anywhere. One array, every consumer reading it.
  * (`FACT_STATUSES` lives in `types.ts`, beside the `FactStatus` type it is the single source of.)
  */
+/**
+ * The built-in category vocabulary, spelled for the fields that DESCRIBE it.
+ *
+ * `category` is free-form (`FactCategory` is `… | string`) and stays that way — this is a suggestion
+ * a caller can see, not a closed set the engine enforces. It is written once, in `types.ts`, and read
+ * here so the constant has a real consumer: before this, nothing at runtime ever read it, which meant
+ * editing it changed nothing anywhere.
+ */
+const CATEGORY_HINT = `内置分类：${CATEGORY_VALUES.join(' / ')}；也可自定义。`
+
 export const CONTRADICTION_RESOLUTIONS = ['true_positive', 'false_positive'] as const
 export const QUERY_KINDS = ['all', 'fact', 'doc_chunk'] as const
+
+/**
+ * The longest retrieval query the contract accepts, in characters.
+ *
+ * There is no useful query beyond this, and there IS a cost: a CJK query is expanded into one trigram
+ * OR-phrase per character and evaluated by SQLite **synchronously on the host's event loop** (200 000
+ * characters measured at 119 seconds, of which the expansion was 27–52 ms — the rest was `MATCH`). The
+ * cap belongs HERE because every entry point derives from this union: the plugin's tools, the MCP
+ * inputSchema, the CLI's argv validation and the browser payload are all this same object.
+ */
+export const MAX_QUERY_CHARS = 2_000
+
+/** Why the cap exists, in the words the caller sees. */
+const QUERY_TOO_LONG = `检索文本最长 ${String(MAX_QUERY_CHARS)} 字符：更长的输入会被展开成成百上千个 OR 短语并在宿主事件循环上同步执行。`
+  + '把范围收窄，或先用 kb_ingest 把整篇文档入库再检索。'
 
 export type ContradictionResolution = (typeof CONTRADICTION_RESOLUTIONS)[number]
 export type QueryKind = (typeof QUERY_KINDS)[number]
@@ -68,14 +93,14 @@ export const RememberUnion = z.discriminatedUnion(
     z.object({
       action: z.literal('add'),
       content: z.string().min(1).describe('要写入或替换的事实内容：一句自包含的陈述。action=add 时必填。'),
-      category: z.string().optional().describe('分类标签；可选，默认 general。'),
+      category: z.string().optional().describe(`分类标签；可选，默认 general。${CATEGORY_HINT}`),
       ttl_days: z.number().int().nonnegative().optional().describe('有效期天数（0 或省略 = 不设有效期；正整数 = 自写入起该天数后自动归档）。update 未给则继承被改写事实的 TTL。'),
     }),
     z.object({
       action: z.literal('update'),
       fact_id: z.number().int().positive().describe('要更新的事实 ID。action=update 时必填。'),
       content: z.string().min(1).describe('替换后的新事实内容。action=update 时必填。'),
-      category: z.string().optional().describe('新的分类标签；可选，未给则继承被改写事实的分类。'),
+      category: z.string().optional().describe(`新的分类标签；可选，未给则继承被改写事实的分类。${CATEGORY_HINT}`),
       ttl_days: z.number().int().nonnegative().optional().describe('新的有效期天数（0 = 取消有效期）；可选，未给则继承被改写事实的 TTL。'),
     }),
     z.object({
@@ -100,7 +125,7 @@ export const RECALL_ACTIONS = ['search', 'ask', 'chain', 'probe', 'reason', 'rel
 export const RecallUnion = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('search'),
-    query: z.string().min(1).describe('检索文本。action=search 时必填。'),
+    query: z.string().min(1).max(MAX_QUERY_CHARS, QUERY_TOO_LONG).describe('检索文本。action=search 时必填。'),
     category: z.string().optional().describe('限定分类；可选。'),
     limit: z.number().int().positive().max(50).optional().describe('返回条数上限（1-50）；可选。'),
     max_tokens: z.number().int().nonnegative().optional().describe('本次结果的总 token 上限；0=不限制。缺省用配置 retrieval.max_output_tokens。'),
@@ -252,7 +277,7 @@ export const KbUnion = z.discriminatedUnion('action', [
 export type KbRequest = z.infer<typeof KbUnion>
 
 export const QueryUnion = z.object({
-  query: z.string().min(1).describe('检索文本，必填。'),
+  query: z.string().min(1).max(MAX_QUERY_CHARS, QUERY_TOO_LONG).describe('检索文本，必填。'),
   kind: z.enum(QUERY_KINDS).optional().describe('结果类型：all/fact/doc_chunk；可选，默认 all。'),
   max_tokens: z.number().int().nonnegative().optional().describe('本次结果的总 token 上限；0=不限制。缺省用配置 retrieval.max_output_tokens。'),
   domain: z.string().optional().describe('限定知识域；可选。'),
