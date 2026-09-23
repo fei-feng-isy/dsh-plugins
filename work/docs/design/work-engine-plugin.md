@@ -622,7 +622,7 @@ toolFilter:
 
 测试（`test/guidance.spec.ts`）既断言它说了什么（工作的定义与建法、谁在等、**与普通委派的边界**、工作/工作树的用语），也断言它**没说什么**（一张禁用词表），worker 视角为空串。
 
-**正文是用户可编辑的**：正文放在**家族共享**的 `<data home>/prompts/work-tree-guide.md`（`data home` = 插件配置 `dataHome` → `$AVANTF_HOME` → `~/.avantf`；同目录下记忆插件用 `mem-*` 前缀，各插件只动自己前缀的文件）。插件在 `apply` 里**只读一次**（改完重启 `dsh` 生效）：缺失或空白会被原子写入上文的常量作为默认，有内容则**逐字注入**（去首尾空白、剥 BOM、CRLF→LF）；文件不可读写只告警并退回默认，**绝不阻断挂载**。**文件只提供正文**——段名与位次由 `index.ts`（`getSectionOrder('TOOL_WORKS')`）决定，`PROMPT_FILES` 只管"哪个文件对应哪段"，清单外的 `.md` 被忽略且不报错。因此 `guidance.spec.ts` / `wording.spec.ts` 的硬守卫（禁用词表、只说自己插件的工具、worker 视角为空串）**只守内置默认**；用户文本另由 `guidanceTextWarnings` 做一次软检查并 warn（超预算、命中「工作树/子树/节点/树」这类形状词），不截断、不拒绝。ensure/read/fallback 这套流程抽成通用件 `PromptFiles`（`packages/plugin/src/prompt_files.ts`，与 `@avantf/mem` 的同名件镜像；放在插件而非 `work-core`，因为引擎刻意不带 Node 类型）。
+**正文是用户可编辑的**：正文放在**家族共享**的 `<data home>/prompts/work-tree-guide.md`（`data home` = 插件配置 `dataHome` → `$AVANTF_HOME` → `~/.avantf`；同目录下记忆插件用 `mem-*` 前缀，各插件只动自己前缀的文件）。插件在 `apply` 里**只读一次**（改完重启 `dsh` 生效）：缺失或空白会被原子写入上文的常量作为默认，有内容则**逐字注入**（去首尾空白、剥 BOM、CRLF→LF）；文件不可读写只告警并退回默认，**绝不阻断挂载**。**文件只提供正文**——段名与位次由 `index.ts`（`getSectionOrder('TOOL_WORKS')`）决定，`PROMPT_FILES` 只管"哪个文件对应哪段"，清单外的 `.md` 被忽略且不报错。因此 `guidance.spec.ts` / `wording.spec.ts` 的硬守卫（禁用词表、只说自己插件的工具、worker 视角为空串）**只守内置默认**；用户文本另由 `guidanceTextWarnings` 做一次软检查并 warn（超预算、命中「工作树/子树/节点/树」这类形状词），不截断、不拒绝。ensure/read/fallback 这套流程由底座的通用件 `PromptFiles` 提供（`base/plugin-base/src/kit/prompt_files.ts`），插件在运行时从**加载到的底座**上取（`kit?.PromptFiles`），底座缺席时退回内置正文。放在底座而非 `work-core`，因为引擎刻意不带 Node 类型。
 
 ### 6.1 目标与约束
 

@@ -6,10 +6,18 @@ on:
   pull_request:
 
 # The merged workspace: base/ (one published package), mem/ and work/ (one published plugin each).
-# This workflow runs everything that needs NO installed DSH harness. The plugin host gates
-# (`pnpm build:dsh mem`, `pnpm release:check:work`, `pnpm pack:plugin:*`, the mount smokes and
-# `pnpm proof:base-swap:mount`) need a global `npm i -g @deepseek-ai/dsh`, so they are LOCAL gates —
-# run them by hand before releasing; see AGENTS.md §"After changing ANY shared code under base/**".
+#
+# What runs here: `pnpm install` → build → typecheck → test → guard → version:check, plus the
+# publish-surface check. The PLUGIN host gates (`pnpm build:dsh mem`, `pnpm release:check:work`,
+# `pnpm pack:plugin:*`, the mount smokes, `pnpm proof:base-swap:mount`) additionally need a harness
+# CHECKOUT and a profile, so they stay LOCAL — run them by hand before releasing; see AGENTS.md
+# §"After changing ANY shared code under base/**".
+#
+# An installed dsh IS needed, though, and this workflow used to claim otherwise while calling scripts
+# that hard-require it: base's `typecheck`/`test` run `link-dsh.mjs`, which exits 1 without one, and 3
+# of base's 29 specs mount the host's REAL registries on purpose (that is what proves the compat
+# probes work against a real host rather than a stub). Installing it keeps those tests running —
+# skipping them would quietly turn "354 tests are covered" into "the ones that fit are".
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -26,6 +34,8 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Install the DSH harness (base's probe specs mount its real registries)
+        run: npm i -g @deepseek-ai/dsh
       - name: Build (all workspace packages)
         run: pnpm -r build
       # AFTER the build, not before: mem's `typecheck` reads its dependencies through their emitted
@@ -39,8 +49,9 @@ jobs:
         run: pnpm -r test
       - name: Boundary guard (mem/ and work/ never import each other)
         run: pnpm guard
-      # The manifests are derived from versions.json; this catches a hand-edited version before a release.
-      - name: Versions (versions.json is the single source)
+      # Each group records its version in exactly ONE carrier manifest; this catches a second copy
+      # or a bump that missed the carrier.
+      - name: Versions (one carrier manifest per group)
         run: pnpm version:check
       # Static publish-surface checks only: `--offline` skips the registry probe that proves the base
       # is already published (that probe belongs to a release machine).

@@ -18,7 +18,7 @@
 - **旧**包 `@avantf/dsh-envinit` 与 `@avantf/dsh-compat` 已死：代码住在 base 里，不再有新版本，
   任何地方都不许再提它们的名字。
 - 插件把 base 当作 **REQUIRED peer** 依赖，范围要宽到能吃下一个 base 的 patch 或 minor
-  （`^0.1.0`）。它同时在 `devDependencies` 里声明同一个 base（`^0.1.3`），好让 `pnpm install`
+  （`^0.1.0`）。它同时在 `devDependencies` 里声明同一个 base（`^0.1.0`），好让 `pnpm install`
   有东西可解析；根 `pnpm-workspace.yaml` 里的 `linkWorkspacePackages: true` 让这一条指向
   `base/`，绝不会变成下载。
 - 宿主/profile **显式**安装 `@avantf/dsh-plugin-base` **和**两个插件
@@ -233,9 +233,11 @@ pnpm release:check && node scripts/mount-smoke.mjs
     其中 mem 传 `--allow-uncut`：同步不是切版本，`[Unreleased]` 未清空这类**发布簿记**不该拦住一次同步；
     真正发布前要在 rc 里不带该旗标跑一次 `pnpm release:check:mem`。
   - **版本按组（group）走**，组就是顶层子树：`base` / `mem` / `work`。`--version mem=0.1.2` 只盖 mem
-    这一组（该子树内所有 manifest，同一个版本号 —— 组内不齐时生成器直接崩，不猜），不带组名则三组一起盖。
-    `pnpm sync:rc` 默认**保留 rc 当前的组版本**，所以重复同步不会悄悄挪动发布版本；rc 里还没有 manifest
-    （第一次同步）时才用开发树的版本。三个包在同一个 rc 仓库里，tag 用组前缀（`mem-vX.Y.Z`）。
+    这一组**记录版本的那一个 manifest**（该组的可发布包 `mem/packages/plugin/package.json`）—— 组内其余
+    manifest 是私有的、根本不带版本，所以没有"组内不齐"这回事；不带组名则三组一起盖。
+    `pnpm sync:rc` 默认**取开发树的版本**（每组来自它的载体 manifest），而 `--keep-rc-versions` 才是
+    "保留 rc 当前的组版本、让 rc 停在开发树前面"的那个可选开关；无论哪种，三组的取/留都会打印出来，
+    不会悄悄挪动。三个包在同一个 rc 仓库里，tag 用组前缀（`mem-vX.Y.Z`）。
   - 判据（为什么是整仓）：单插件投影必须把测试剥掉、把被内联引擎的运行时依赖面**重新推导**一遍，
     因为一个子树里没有它要内联的引擎包；整仓投影没有这些推导，rc 里能跑与开发树**同一套**门禁。
     两个旧成因（投影树没有 workspace 文件 / 没有根 `scripts/lib/`）也随“整仓”一起消失。

@@ -8,7 +8,7 @@
  */
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { readBootstrapVersion } from '../../scripts/lib/bootstrap-version.mjs'
 
@@ -150,6 +150,25 @@ if (check) {
     problems.push({ text: `${vendoredDts} is missing`, fix: 'node scripts/link-envinit.mjs' })
   } else if (!readFileSync(vendoredDts).equals(vendoredBytes(join(source, 'dist', 'bootstrap.d.ts')))) {
     problems.push({ text: `${vendoredDts} differs byte-for-byte from the ${mode}'s dist/bootstrap.d.ts`, fix: 'node scripts/link-envinit.mjs' })
+  }
+  // Matching the installed copy is not the same as BEING INSTALLABLE. The plugin declares a peer
+  // range, and `linkWorkspacePackages` links past it: when base cuts a minor (0.1.x → 0.2.0) the
+  // workspace keeps linking it, this script keeps vendoring it byte-for-byte, and the only thing that
+  // notices is a run-time `envinit: WARNING` when the baked `supportedRange` rejects the version. The
+  // base's own preset checks this (`bootstrap-version-in-range`); this plugin does not use that
+  // preset, so it checks the one line it needs — with the base's OWN semver implementation rather
+  // than a third copy of the range grammar (`./semver` is not an exported subpath, so it is loaded by
+  // path, the same way this script already reads base's `dist/` directly).
+  if (vendored !== undefined) {
+    const declared = readManifest(pluginDir)?.peerDependencies?.[PACKAGE]
+    const { satisfiesRange } = await import(pathToFileURL(join(source, 'dist', 'semver.js')).href)
+    if (typeof declared !== 'string' || declared === '' || !satisfiesRange(vendored, declared)) {
+      problems.push({
+        text: `vendored bootstrap ${vendored} is outside the declared peer range ${String(declared)}; `
+          + `this plugin would mount with only a WARNING (a base minor moved past its peer)`,
+        fix: `widen peerDependencies["${PACKAGE}"] to admit ${vendored} (and re-check the adapter surface)`,
+      })
+    }
   }
   for (const problem of problems) console.error(`  FAIL ${problem.text}\n       fix: ${problem.fix}`)
   if (problems.length > 0) process.exit(1)

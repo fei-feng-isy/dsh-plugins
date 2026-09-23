@@ -176,6 +176,25 @@ const PUBLIC_VALUES: readonly string[] = [
   'floorOf',
   'provision',
   'verdictOf',
+  // The rest of the gate's reachable surface. It is here because the assertion below is an EQUALITY:
+  // a name missing from this list is a name the test would otherwise refuse to see, and a name the
+  // gate exports without being listed is a name nobody decided to publish.
+  'BUILD_VERSIONS_FILE',
+  'COMPAT_PROBE_TOOL',
+  'checkInterval',
+  'checkServices',
+  'declaredSchemaKeys',
+  'gatherEvidence',
+  'probeToolsRegistry',
+  'probeTypertRegistry',
+  'readBuildVersions',
+  'readDeclaredVersions',
+  'readRuntimeVersions',
+  'registerMegaphone',
+  'resolveRuntimeVersion',
+  'schemaNamesFrom',
+  'toolProbeDeclaration',
+  'verifyRegisteredFaces',
   // kit — the shared, DSH-free helpers the plugins consume at runtime.
   'PromptFiles',
   'createPluginLogger',
@@ -212,9 +231,12 @@ describe('公开面', () => {
     expect(TYPE_NAMES.length).toBe(44)
   })
 
-  it('`.` 只导出公开面：组合根、数据模型与三个内置 provider 工厂', () => {
-    const missing = PUBLIC_VALUES.filter(name => (api as Record<string, unknown>)[name] === undefined)
-    expect(missing).toEqual([])
+  it('`.` 恰好导出公开面：组合根、数据模型与三个内置 provider 工厂', () => {
+    // EQUALITY, not a subset: `missing === []` passes for every NEW export, which is how the name of
+    // this test ("`.` exports exactly the public surface") grew larger than the assertion under it.
+    // `default` is the CJS interop shim, not part of the surface.
+    const actual = Object.keys(api).filter(name => name !== 'default').sort()
+    expect(actual).toEqual([...PUBLIC_VALUES].sort())
   })
 
   it('内部件不在 `.` 上，而在 `./internal` 上（兼容面因此可控）', () => {

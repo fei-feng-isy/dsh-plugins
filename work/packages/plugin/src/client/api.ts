@@ -1,6 +1,7 @@
 /** The client half's data path, kept away from React so the transport edge stays testable.
  * @module @avantf/dsh-work/client/api
  */
+import { detailResultSchema, snapshotResultSchema } from '../wire.js'
 import type { WorkNodeDetail, WorkSnapshot } from './contract.js'
 
 /** Safety-net re-read interval; slow on purpose, since the session itself is the primary trigger. */
@@ -95,11 +96,33 @@ export function unwrap(response: unknown): { value?: unknown; error?: string } {
   return { value: response }
 }
 
+/**
+ * Why a payload could not be read, with the likely reason attached.
+ *
+ * The two halves of this plugin do not update together: the browser bundle is re-read on every page
+ * load, the host half only when `dsh web` starts. So a rebuilt client routinely talks to an older
+ * host, and the ONE failure this must never produce is silence — an unread node field read in a
+ * render body is a `TypeError`, and the shell's slot error boundary turns that into an empty `<div>`
+ * with no text and no retry for the rest of the session. Measured once already (the seat fields), and
+ * again latent behind every new required field.
+ */
+function skewHint(what: string, issues: readonly string[]): string {
+  const detail = issues.slice(0, 3).join('; ')
+  return `${what}返回了无法识别的数据（${detail}）—— 宿主与客户端可能不是同一版本：`
+    + '客户端随页面刷新，宿主只在 dsh web 启动时加载一次，重启 dsh web 后再试。'
+}
+
+/** zod's own words for the first few problems: enough to see WHICH field moved. */
+function issueText(error: { issues: readonly { path: readonly PropertyKey[]; message: string }[] }): string[] {
+  return error.issues.map((issue) => `${issue.path.map(String).join('.') || '(根)'}: ${issue.message}`)
+}
+
+/** Parse a payload against the codec that already travels with this bundle (zod is inlined anyway),
+ *  so a field the host stopped sending is one readable error instead of a dead panel. */
 export function asSnapshot(value: unknown): WorkSnapshot | undefined {
-  if (value === null || typeof value !== 'object') return undefined
-  const trees = (value as { trees?: unknown }).trees
-  if (!Array.isArray(trees)) return undefined
-  return { trees: trees as WorkSnapshot['trees'] }
+  const parsed = snapshotResultSchema.safeParse(value)
+  if (!parsed.success) return undefined
+  return { trees: parsed.data.trees as WorkSnapshot['trees'] }
 }
 
 function textOf(reason: unknown): string {
@@ -112,11 +135,9 @@ function textOf(reason: unknown): string {
 export async function fetchSnapshot(remote: WorkRemote, sessionId: string): Promise<WorkSnapshot> {
   const { value, error } = unwrap(await remote.snapshot({ sessionId }))
   if (error !== undefined) throw new Error(error)
-  const snapshot = asSnapshot(value)
-  if (snapshot === undefined) {
-    throw new Error(`工作树 Remote 返回了无法识别的数据：${JSON.stringify(value)}`)
-  }
-  return snapshot
+  const parsed = snapshotResultSchema.safeParse(value)
+  if (!parsed.success) throw new Error(skewHint('工作树', issueText(parsed.error)))
+  return { trees: parsed.data.trees as WorkSnapshot['trees'] }
 }
 
 /**
@@ -135,14 +156,12 @@ export async function deleteWork(remote: WorkRemote, sessionId: string, rootId: 
 }
 
 export function asDetail(value: unknown): Partial<WorkNodeDetail> & { error?: string } {
-  if (value === null || typeof value !== 'object') return { error: '工作详情返回了无法识别的数据' }
-  const payload = value as { node?: unknown; children?: unknown; error?: unknown }
+  const parsed = detailResultSchema.safeParse(value)
+  if (!parsed.success) return { error: skewHint('工作详情', issueText(parsed.error)) }
   return {
-    ...payload.node === undefined || payload.node === null
-      ? {}
-      : { node: payload.node as WorkNodeDetail['node'] },
-    children: Array.isArray(payload.children) ? (payload.children as WorkNodeDetail['children']) : [],
-    ...typeof payload.error === 'string' ? { error: payload.error } : {},
+    ...parsed.data.node === undefined ? {} : { node: parsed.data.node as WorkNodeDetail['node'] },
+    children: (parsed.data.children ?? []) as WorkNodeDetail['children'],
+    ...parsed.data.error === undefined ? {} : { error: parsed.data.error },
   }
 }
 

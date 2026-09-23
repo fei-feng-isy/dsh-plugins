@@ -185,8 +185,10 @@ type ResourceState =
 ## 6. 关键不变量
 
 - **预装永不抛错**：失败进报告，由策略层决定降级还是拒载。
-- **校验不可跳过**：npm 包核对 `dist.integrity`，归档核对 `sha256`；响应声明的内容长度与实读不符即
-  `fetch/failed`，长度/完整性失败是终局，不再落到下一个镜像（只有传输失败才回退）。
+- **校验不可跳过**：npm 包核对 `dist.integrity`，归档核对 `sha256`。**内容**校验失败（校验和/完整性
+  不符）是终局，不再落到下一个镜像 —— 字节完整但内容不对，换个源并不能把它变对。**传输**失败才是
+  可重试的：HTTP 非 2xx、网络错误，以及"响应声明的内容长度与实读不符"（那是一次被截断的下载，
+  正是该换源的形状），三条都记进 `problems` 后试下一个候选源，全失败才 `fetch/failed`。
 - **发布互斥**：一把族根发布锁；下载与解包在锁外，锁内只做原子改名；`model-cache` 也持这把锁完成
   最终落位与完成标记。
 - **原子落盘不留垃圾**：同目录临时文件要么被改名成完成品，要么在恢复时被清掉（完成标记目录在锁内
@@ -204,7 +206,8 @@ type ResourceState =
 | bootstrap | `./bootstrap` 的版本常量 + `supportedRange` | 构建期断言版本落在插件声明的区间内；运行期超范围即降级 |
 | item 描述符 | `ProvisionItem.schemaVersion` | 高于本实现 ⇒ 该项 `skipped(unsupported-item-schema)` |
 | 磁盘布局 | `<home>/.envinit/.layout.json` | 更高或布局名不同 ⇒ 该 home 只读不写 |
-| 状态面 | `status.json` / `declared.json` 的 `schemaVersion` | 更高 ⇒ 只读旧文件，状态面降级为空 |
+| 状态面 | `status.json` 的 `schemaVersion` | 更高 ⇒ 只读旧文件，状态面降级为空 |
+| 声明登记表 | `declared.json`（`Record<key, {plugin,pid,at}[]>`）**没有**版本字段 | 靠上面那条布局裁决保护：只读时连它也不写（写入排在 `checkHome()` 之后） |
 
 框架本包只作为插件的 **peer**：放进 `dependencies` 会得到多份副本，跨副本的 registry 与
 identity 会分叉。**发布顺序是 base 先于两个插件**：同仓的发布脚本在发布插件前断言 registry 上已有兼容

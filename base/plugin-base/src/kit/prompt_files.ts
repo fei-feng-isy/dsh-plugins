@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 /**
  * User-editable prompt text: one `.md` per prompt section, in the family's shared prompt directory
@@ -83,13 +83,50 @@ export interface PromptFilesOptions {
   readonly io?: PromptFilesIo
 }
 
+/** The temp files {@link nodeIo.write} leaves beside a prompt file, and the age past which one
+ *  certainly belongs to a writer that will never rename it. Same discipline as the provisioner's
+ *  `fs.ts`, which sweeps `.atomic-*` the same way. */
+const TEMP_SUFFIX = /\.tmp-\d+$/
+const STALE_TEMP_MS = 5 * 60_000
+
+/** Best-effort removal of dead sibling temps, so a crash never leaves litter in the user's own
+ *  `prompts/` directory — that directory is theirs (hand-edited files live in it), not ours. */
+function sweepStaleTemps(dir: string, keep: string): void {
+  let entries: readonly string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return
+  }
+  const now = Date.now()
+  for (const entry of entries) {
+    if (!TEMP_SUFFIX.test(entry)) continue
+    const candidate = join(dir, entry)
+    if (candidate === keep) continue
+    try {
+      if (now - statSync(candidate).mtimeMs > STALE_TEMP_MS) rmSync(candidate, { force: true })
+    } catch {
+      // A temp that vanished under us is already gone.
+    }
+  }
+}
+
 const nodeIo: PromptFilesIo = {
   exists: (path) => existsSync(path),
   read: (path) => readFileSync(path, 'utf8'),
   write: (path, text) => {
     const tmp = `${path}.tmp-${String(process.pid)}`
-    writeFileSync(tmp, text, 'utf8')
-    renameSync(tmp, path)
+    // Write-then-rename so a reader never sees a half-written prompt. A crash in between used to
+    // leave `.tmp-<pid>` behind FOREVER: sweep the dead ones first, and drop this one if the rename
+    // is the step that fails (a directory sitting where the file belongs is the everyday case).
+    sweepStaleTemps(dirname(path), tmp)
+    try {
+      writeFileSync(tmp, text, 'utf8')
+      renameSync(tmp, path)
+    } catch (error) {
+      rmSync(tmp, { force: true })
+      throw error
+    }
   },
   ensureDir: (path) => {
     mkdirSync(path, { recursive: true })

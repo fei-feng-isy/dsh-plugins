@@ -32,6 +32,10 @@ export type ProvisionCode =
   | 'unsupported-item-schema'
   | 'layout/too-new'
   | 'layout/mismatch'
+  /** `.layout.json` exists but could not be read (EACCES / ENOSPC / half-written). It shares the
+   *  read-only CONSEQUENCE with the two above and not their meaning: "a newer layout wrote this, do
+   *  not touch it" is a verdict about the home, while this is a fact about the read. */
+  | 'layout/unreadable'
   // ── storage / concurrency ──────────────────────────────────────────────────
   | 'lock/timeout'
   | 'publish/cross-device'

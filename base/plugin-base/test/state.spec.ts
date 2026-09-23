@@ -148,6 +148,22 @@ describe('状态面：status.json / declared.json / .layout.json', () => {
     const created = provisioner('mem')
     const report = await created.ensure()
     expect(report.entries[0]).toMatchObject({ action: 'skipped', code: 'layout/too-new' })
+    // "只读不写" has to cover the DECLARATION registry too, not just status.json. It did not: the
+    // append was kicked off during the synchronous collecting pass, so it landed on disk before the
+    // layout verdict existed — and `declared.json` carries no version field of its own, so a home
+    // from a future layout had no other protection.
+    expect(await exists(fs, join(home, '.envinit', 'declared.json'))).toBe(false)
+  })
+
+  it('读不了 .layout.json ⇒ 只读，但报的是 layout/unreadable 而不是 "更新的布局写的"', async () => {
+    // An unreadable file shares the read-only CONSEQUENCE and not the meaning: reporting
+    // `layout/too-new` told every item's reader "a newer version wrote this, leave it alone" about a
+    // home nobody managed to read. A directory where the file belongs is the cheapest real EISDIR.
+    await mkdir(join(home, '.envinit', '.layout.json'), { recursive: true })
+    const created = provisioner('mem')
+    const report = await created.ensure()
+    expect(report.entries[0]).toMatchObject({ action: 'skipped', code: 'layout/unreadable' })
+    expect(await exists(fs, join(home, '.envinit', 'declared.json'))).toBe(false)
   })
 
   it('status.json 的 schemaVersion 更高 ⇒ 状态面降级为空，不迁移也不覆盖（轴 D）', async () => {

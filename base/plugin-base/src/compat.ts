@@ -36,7 +36,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { z } from 'zod'
 
 /**
  * Every line this module logs carries this token, so a support question can be answered
@@ -91,6 +90,13 @@ export interface CompatSpec {
    * Build the throwaway Typert contribution the wire probe registers. **Pass your real declaration**
    * (`() => myContribution`), so a pass proves the registration you are about to perform. Omitted ⇒
    * the wire contract is not probed at all (recorded as a note, never a refusal).
+   *
+   * The rule is absolute, and it is not a style note: this package once shipped a MINIMAL stand-in
+   * (one schema, no invocations, no codecs) as the convenient default, and a live 0.1.6 host proved
+   * the cost — the stand-in passed (it carried no codec to validate) while the plugin's REAL
+   * contribution threw on `strict codec has no create() factory` halfway through `apply`. A probe
+   * that is not the real declaration turns "the host API moved" into a half-mounted plugin, which is
+   * the one outcome this gate exists to prevent.
    */
   readonly probeTypert?: (packageId: string) => unknown
   /** Wire schema names to verify after registration; omitted means "no post-registration check". */
@@ -450,33 +456,6 @@ export function probeToolsRegistry(registry: unknown, buildProbe: (() => unknown
     }
   }
   return { ran: true, passed: problems.length === 0, problems }
-}
-
-/**
- * A MINIMAL Typert probe: one declared schema, no invocations, no codecs.
- *
- * It exists for a caller whose face really is that small. **It is not a safe default**, and that is
- * not a style note — this package shipped it as one and a live 0.1.6 host proved the cost: the probe
- * passed (it carried no codec to validate) while the plugin's REAL contribution threw on
- * `strict codec has no create() factory` halfway through `apply`. A probe that is not the real
- * declaration can turn "the host API moved" into a half-mounted plugin, which is the one outcome the
- * gate exists to prevent.
- *
- * So the rule is: pass {@link CompatSpec.probeTypert} built from YOUR contribution — the strongest
- * form is `() => yourRealContribution`, which makes "the probe passed" mean "the real registration
- * passes". Use this only when the contribution carries no codecs, and say so in a comment.
- * @param packageId - the contributing package id.
- * @returns a contribution-shaped object for `ctx.typert.register`.
- */
-export function minimalTypertProbeDeclaration(packageId: string): Record<string, unknown> {
-  const schema = (): unknown => z.object({ probe: z.literal(true) })
-  return {
-    package: packageId,
-    face: 'host',
-    schemas: [{ name: 'compatProbe', schema: schema(), create: schema }],
-    model: { services: [], events: [], objects: [] },
-    invocations: [],
-  }
 }
 
 /**

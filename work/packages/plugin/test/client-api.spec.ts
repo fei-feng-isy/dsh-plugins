@@ -64,6 +64,50 @@ describe('fetchSnapshot', () => {
   })
 })
 
+describe('the payload boundary', () => {
+  /** One row exactly as an OLDER host sends it: no `corrections` (the field this client added). */
+  const staleRow = {
+    id: 'n1', parentId: null, children: [], depth: 1, title: 'Ship it', context: [],
+    status: 'running', attempts: 1, createdAt: 1, hasResult: false, resultRef: null,
+  }
+
+  it('turns a row from an older host into ONE readable message, not a render-body TypeError', async () => {
+    // The failure this replaces: `node.corrections.length` throws inside the render body, and the
+    // shell's slot error boundary renders an empty `<div>` — no text, no retry for the session.
+    // Validating here is the difference between "restart dsh web" and a blank panel.
+    const remote = remoteReturning({ ok: true, value: { trees: [{ rootId: 'r1', nodes: [staleRow], closedAt: null }] } })
+    await expect(fetchSnapshot(remote, 'session-1')).rejects.toThrow('重启 dsh web')
+    // And it says WHICH field moved, so the reader is not guessing.
+    await expect(fetchSnapshot(remote, 'session-1')).rejects.toThrow('corrections')
+  })
+
+  it('does not reject a payload that merely carries MORE than this client knows', async () => {
+    // An older CLIENT against a newer host is the same skew from the other side, and zod's object
+    // drops unknown keys rather than refusing the payload: a host that adds a field must not break
+    // the panel that has not learned it yet.
+    const remote = remoteReturning({
+      ok: true,
+      value: {
+        trees: [{
+          rootId: 'r1',
+          closedAt: null,
+          nodes: [{ ...staleRow, corrections: [], somethingNew: true }],
+        }],
+      },
+    })
+    await expect(fetchSnapshot(remote, 'session-1')).resolves.toMatchObject({ trees: [{ rootId: 'r1' }] })
+  })
+
+  it('checks the detail payload the same way', async () => {
+    // Same window, second door: `detailTabs` dereferences several node fields directly.
+    const remote = remoteReturning({
+      ok: true,
+      value: { node: { id: 'n2', rootId: 'r1', title: 't', description: 'd', context: [] }, children: [] },
+    })
+    await expect(fetchDetail(remote, 'session-1', 'n2')).rejects.toThrow('无法识别的数据')
+  })
+})
+
 describe('deleteWork', () => {
   it('sends the TREE root id and returns what went away', async () => {
     // The unit of deletion is the whole tree, so the argument is its root — never a
@@ -135,6 +179,7 @@ describe('fetchDetail', () => {
       value: {
         node: {
           id: 'n2', rootId: 'r1', title: '子工作', description: '做一件事', context: ['因为'],
+          corrections: [], analysisNotes: [], analysisAttempt: 0,
           status: 'done', attempts: 1, depth: 1, result: '做完了', resultPointer: null,
         },
         children: [{ id: 'n3', title: '孙工作', status: 'done', result: '也做完了', resultPointer: null }],

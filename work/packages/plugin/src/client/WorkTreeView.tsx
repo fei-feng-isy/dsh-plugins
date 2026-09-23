@@ -331,6 +331,35 @@ export function detailTabs(
 }
 
 /**
+ * Take everything that is NOT on the path from `overlay` up to `<body>` out of the tab order, and
+ * return the undo.
+ *
+ * `inert` is the platform's own "not tabbable, not clickable, hidden from assistive tech" flag, and
+ * the shell's overlays use it for the same reason. Only elements that were not ALREADY inert are
+ * touched, so an overlay opened over another one restores exactly what it changed. The walk goes all
+ * the way up, not just to the panel's own root: the composer and the sidebars are behind the mask
+ * too, and a dialog that lets Tab reach them is modal only in appearance.
+ */
+export function inertBackground(overlay: HTMLElement): () => void {
+  const changed: HTMLElement[] = []
+  let node: HTMLElement = overlay
+  for (;;) {
+    const parent = node.parentElement
+    if (parent === null) break
+    for (const sibling of Array.from(parent.children)) {
+      if (sibling === node || !(sibling instanceof HTMLElement) || sibling.inert) continue
+      sibling.inert = true
+      changed.push(sibling)
+    }
+    if (parent === document.body) break
+    node = parent
+  }
+  return () => {
+    for (const element of changed) element.inert = false
+  }
+}
+
+/**
  * One work's detail as a MODAL panel: a section rail on the left, the chosen section in a
  * scrollable column on the right — the shell's 设置 dialog, sized for reading (1040×880, capped
  * by the viewport) rather than the settings' 800×800.
@@ -362,10 +391,23 @@ export function WorkDetailDialog({ nodeId, state, onClose, loadResult }: {
     return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [onClose])
 
-  // Entering the dialog focuses its close button, as the settings panel does: the keyboard then
-  // has somewhere to be, and Escape/Enter both do something visible.
+  // Entering the dialog takes the keyboard: the close button is focused, and everything that is not
+  // on the path from the overlay up to <body> goes `inert` — which is what `aria-modal` CLAIMS and
+  // without which Tab walks out of the dialog and into the tree behind it. Leaving restores both, so
+  // a keyboard user comes back to the row they opened. The shell's own overlays do exactly these two
+  // moves; this is that pattern for an overlay that is rendered in place rather than portalled.
   const closeButton = useRef<HTMLButtonElement | null>(null)
-  useEffect(() => { closeButton.current?.focus() }, [])
+  const overlay = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const element = overlay.current
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const release = element === null ? () => undefined : inertBackground(element)
+    closeButton.current?.focus()
+    return () => {
+      release()
+      if (previousFocus?.isConnected === true) previousFocus.focus()
+    }
+  }, [])
 
   const [selected, setSelected] = useState<string | undefined>(undefined)
   const ready = state?.status === 'ready' ? state.detail : undefined
@@ -378,7 +420,7 @@ export function WorkDetailDialog({ nodeId, state, onClose, loadResult }: {
   const titleId = useId()
 
   return (
-    <div className="avwf-dialog-overlay" role="presentation">
+    <div ref={overlay} className="avwf-dialog-overlay" role="presentation">
       {/* The mask is a sibling UNDER the panel, so a click on the panel never reaches it. */}
       <div className="avwf-dialog-mask" aria-hidden="true" onClick={onClose} />
       <div className="avwf-dialog-panel" role="dialog" aria-modal="true" aria-labelledby={titleId}>

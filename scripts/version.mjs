@@ -59,9 +59,11 @@ function prune() {
       const path = join(root, file)
       const manifest = JSON.parse(readFileSync(path, 'utf8'))
       if (manifest.version === undefined) continue
+      // Read BEFORE deleting: this log line is the only place that says which version was dropped.
+      const dropped = manifest.version
       delete manifest.version
       writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`)
-      console.log(`  ${file}: dropped version ${JSON.stringify(manifest.version)}`)
+      console.log(`  ${file}: dropped version ${JSON.stringify(dropped)}`)
       pruned += 1
     }
   }

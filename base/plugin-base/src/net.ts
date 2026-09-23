@@ -96,6 +96,10 @@ export async function downloadBytes(
         problems.push(`${url} → HTTP ${String(response.status)}`)
         continue
       }
+      // A short body is a TRANSPORT failure and retries the next mirror, like a bad status or a
+      // network error — deliberately unlike an integrity check (those run in the providers and are
+      // terminal: complete bytes with the wrong content do not get better at another URL). That
+      // distinction IS the invariant; `docs/DESIGN.md` §6 states it in the same words.
       const bytes = await readCapped(response)
       onProgress?.({ key, phase: 'download', loaded: bytes.byteLength, total: bytes.byteLength })
       return { bytes, url }

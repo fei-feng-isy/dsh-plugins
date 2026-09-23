@@ -124,9 +124,9 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 | 时机 | 行 |
 |---|---|
 | `apply` 进入 | `mounting: config=… inject=…` |
-| typert 注册后 | `typert host face registered (namespace avantfWork, 4 invocations: snapshot, detail, delete, watch)` |
+| typert 注册后 | `typert host face registered (namespace avantfWork, 5 invocations: snapshot, detail, result, delete, watch)` |
 | 工具注册后 | `registered N tools: …` |
-| 挂载收尾 | `mounted: /work command, 8 tools, guidance context, pre-step gate` |
+| 挂载收尾 | `mounted: /work command, 9 tools (/archive, /clean), guidance context, pre-step gate` |
 | 开存储域 | `start-up: opening the work-tree storage domain` |
 | 载入完成 | `start-up: loaded N tree(s), M node(s)` / 孤儿树销毁时 WARN |
 | 引擎就绪 | `engine ready: concurrency=… depth=… failure-budget=… children<=…` |
@@ -218,7 +218,7 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 ## 测试
 
 ```bash
-pnpm -r test        # core 88 项单测 + plugin 209 项（23 个文件；真实 Cordis Context，stub 掉 DSH 服务）
+pnpm -r test        # core + plugin 单测（真实 Cordis Context，stub 掉 DSH 服务；条目数以本次运行为准）
 pnpm build:dsh      # 链接 → 构建 → 挂载冒烟
 ```
 
@@ -244,7 +244,7 @@ pnpm workers:usage -- --strict        # 出现"调了不存在的工具"就非�
 
 ## 环境初始化（`@avantf/dsh-plugin-base`）
 
-插件挂载的第一步不是注册工具，而是**把环境准备好**——交给家族底座 `@avantf/dsh-plugin-base`（peer 区间 `^0.1.0`；本仓把它声明为 peer，peer 不会被自动安装，所以另在 `devDependencies` 里声明 `^0.1.3`，由 `pnpm install` 从 registry 装上）。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本）。时序固定为：
+插件挂载的第一步不是注册工具，而是**把环境准备好**——交给家族底座 `@avantf/dsh-plugin-base`（peer 区间 `^0.1.0`；本仓另在 `devDependencies` 里声明同一个范围，并由根 `pnpm-workspace.yaml` 的 `linkWorkspacePackages: true` 链到本地 `base/`）。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本）。时序固定为：
 
 ```
 内联 bootstrap（解析底座 → 动态 import() → 校验 supportedRange）→ 跑挂载前检查（兼容门禁）

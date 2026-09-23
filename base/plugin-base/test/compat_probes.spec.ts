@@ -25,12 +25,30 @@ import {
   readDeclaredVersions,
   readRuntimeVersions,
   resolveRuntimeVersion,
-  minimalTypertProbeDeclaration,
   schemaNamesFrom,
   toolProbeDeclaration,
 } from '../src/index.js'
 
 const PACKAGE = '@avantf/dsh-plugin-base'
+
+/**
+ * The MINIMAL contribution shape, as a FIXTURE only.
+ *
+ * It used to be exported from the package as a convenience stand-in, and that is exactly the mistake
+ * documented on `CompatSpec.probeTypert`: a probe declaration that is not the real one passed while
+ * the plugin's real contribution threw halfway through `apply` on a live 0.1.6 host. No production
+ * caller ever used it, so it lives here, where "not the real declaration" is the point of the test.
+ */
+function minimalTypertProbeDeclaration(packageId: string): Record<string, unknown> {
+  const schema = (): unknown => z.object({ probe: z.literal(true) })
+  return {
+    package: packageId,
+    face: 'host',
+    schemas: [{ name: 'compatProbe', schema: schema(), create: schema }],
+    model: { services: [], events: [], objects: [] },
+    invocations: [],
+  }
+}
 
 /** The probe declaration a real plugin supplies: its own `defineTool`, so the probe mirrors it. */
 const buildProbe = toolProbeDeclaration(defineTool)

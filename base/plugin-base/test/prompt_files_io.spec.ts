@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, it, expect, beforeEach } from 'vitest'
 import { PromptFiles, type PromptFilesIo } from '../src/kit/prompt_files.js'
 
 /**
@@ -149,5 +152,62 @@ describe('PromptFiles', () => {
     expect(loaded.map((entry) => entry.file)).toEqual(['a.md', 'b.md'])
     expect(loaded[0]?.text).toBe('A')
     expect(fake.files.get(`${DIR}/a.md`)).toBe('A\n')
+  })
+})
+
+/**
+ * The same flow against the REAL filesystem.
+ *
+ * Everything above injects a Map, which is the right way to reach every branch — and the wrong way to
+ * find out that the real writer leaves litter behind. `nodeIo.write` is the one part of this module
+ * that touches a directory the USER owns (hand-edited prompt files live there), so it gets its own
+ * tests: the temp file it renames through must never survive a failure, and dead siblings from an
+ * earlier crash must not accumulate in `prompts/`.
+ */
+describe('PromptFiles over the real filesystem', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'prompt-files-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('creates the file with the default body and leaves no temp behind', () => {
+    const [loaded] = new PromptFiles({ dir, logger }).load([SPEC])
+
+    expect(loaded?.source).toBe('default')
+    expect(readFileSync(join(dir, SPEC.file), 'utf8')).toBe('默认正文\n')
+    expect(readdirSync(dir)).toEqual([SPEC.file])
+  })
+
+  it('sweeps a DEAD temp sibling but keeps a live one', () => {
+    const stale = join(dir, `${SPEC.file}.tmp-999999`)
+    const live = join(dir, `${SPEC.file}.tmp-1`)
+    writeFileSync(stale, 'half-written', 'utf8')
+    writeFileSync(live, 'half-written', 'utf8')
+    const old = new Date(Date.now() - 10 * 60_000)
+    utimesSync(stale, old, old)
+
+    new PromptFiles({ dir, logger }).load([SPEC])
+
+    const left = readdirSync(dir).sort()
+    // The dead one is gone; the recent one could belong to a writer that is still running.
+    expect(left).toEqual([SPEC.file, `${SPEC.file}.tmp-1`].sort())
+  })
+
+  it('drops its own temp when the rename fails, and still returns the default', () => {
+    // A directory sitting where the file belongs is the everyday way the rename step fails.
+    mkdirSync(join(dir, SPEC.file))
+
+    const [loaded] = new PromptFiles({ dir, logger }).load([SPEC])
+
+    expect(loaded?.source).toBe('default')
+    expect(loaded?.text).toBe('默认正文')
+    expect(warnings.some((line) => line.includes(SPEC.file))).toBe(true)
+    // Nothing of ours is left: the temp was removed on the way out.
+    expect(readdirSync(dir)).toEqual([SPEC.file])
   })
 })

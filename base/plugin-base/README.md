@@ -22,7 +22,7 @@
 - 需要安装的下载、校验完整性、原子落盘；
 - 每一项给出 `present / installed / skipped / failed`，失败带稳定 `code`。
 
-运行期零依赖（peer 只有一个 `zod`，用于兼容门禁的 typert 探针），要求 Node.js >= 22。
+运行期零依赖：`dependencies` 为空，源码里连 `zod` 都不 import —— 兼容门禁的 typert 探针用的是**调用方自己**的 contribution，本包不造探针形状。`peerDependencies` 仍有一条 `zod`（`>=4.4.3 <5`），理由只有一个：让**插件的** wire 面与宿主解析到同一份 zod（见下）。要求 Node.js >= 22。
 
 ## 三部分与"只发 base"
 
@@ -248,7 +248,7 @@ assertProviderConformance(report)
 - **不接管原生模块**：`binding.gyp` / `*.node` / 依赖 `postinstall` 的包会被识别并拒绝。
 - **不跳过校验**：npm 包核对 `dist.integrity`，归档核对 `sha256`。
 - **不做进程内预热**：让文件在盘上是框架的事，读进内存是插件自己的事。
-- **运行期依赖只有宿主给的 `zod`**：`dependencies` 为空；`peerDependencies` 恰好一条 `zod`（`>=4.4.3 <5`，兼容门禁的 typert 探针要用同一份 schema identity），本仓与安装版 dsh 共用，**只解析一份**。
+- **运行期零依赖，peer 只有一条 `zod`**：`dependencies` 为空，本包源码不 import `zod`；`peerDependencies` 里那条 `zod`（`>=4.4.3 <5`）是给**用它的插件**的 wire 面用的 —— 插件、base 与宿主必须解析到**同一份** zod（两份物理副本的 schema 身份不同，strict codec 会因此判不兼容），范围宽到同一份 base 既服务本仓、也服务宿主自带的 4.6.5。**只解析一份**。
 
 ## 开发
 

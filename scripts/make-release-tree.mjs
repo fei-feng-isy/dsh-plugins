@@ -14,9 +14,10 @@
  *   1. The RC tooling itself (`scripts/make-release-tree.mjs`, `scripts/sync-release-repo.sh`) is NOT
  *      projected, and the root manifest loses those two script entries: the release repo is generated,
  *      it never generates anything.
- *   2. `--version <group>=<v>` stamps every manifest of one group (`base` | `mem` | `work`). Grouping
- *      is by top-level tree, which is how the family versions its packages: the publishable package and
- *      its private siblings move together, and a group that is not in lockstep is refused here.
+ *   2. `--version <group>=<v>` stamps the ONE manifest a group records its version in (`base` |
+ *      `mem` | `work`): the group's publishable package. Its private siblings carry no `version` at
+ *      all, so there is nothing to keep in lockstep and nothing that could be "not in lockstep" —
+ *      grouping is by top-level tree only.
  *   3. `README.md` is generated (this repo has no root README to copy): the release repo's front page
  *      says what it is, how it was produced and in which order its three packages are published.
  *

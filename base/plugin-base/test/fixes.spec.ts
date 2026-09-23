@@ -396,6 +396,11 @@ describe('修复回归：关停与能力位', () => {
   it('onMissing 的逐轴缺省不变（非法值按该轴缺省）', () => {
     expect(normalizeOnMissing({ atStartup: 'refuse' })).toEqual({ atStartup: 'refuse', atUse: 'error' })
     expect(normalizeOnMissing({ atUse: 'degrade' })).toEqual({ atStartup: 'degrade', atUse: 'degrade' })
+    // Omitting the object and passing `{}` are the SAME request: each axis takes its documented
+    // default. They used to disagree on `atUse` (`degrade` vs `error`), so "declare no preference"
+    // and "declare an empty preference" quietly meant two different things.
+    expect(normalizeOnMissing(undefined)).toEqual({ atStartup: 'degrade', atUse: 'error' })
+    expect(normalizeOnMissing(undefined)).toEqual(normalizeOnMissing({}))
   })
 })
 

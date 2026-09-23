@@ -89,9 +89,12 @@ interface NormalizedMissing {
   readonly atUse: AtUse
 }
 
-/** `onMissing` defaults; absent means `degrade/degrade`. */
+/** `onMissing` defaults, per axis: `degrade` / `error` (see `docs/DESIGN.md`). Absent and `{}` are the
+ *  SAME request — the two used to disagree on `atUse`, so "omit the object" quietly meant something
+ *  other than "declare no preference". (`atUse` is declarative today: nothing consumes it yet, which
+ *  is exactly why the documented default has to be the one the code reports.) */
 export function normalizeOnMissing(value: ProvisionItem['onMissing']): NormalizedMissing {
-  if (value === undefined) return { atStartup: 'degrade', atUse: 'degrade' }
+  if (value === undefined) return { atStartup: 'degrade', atUse: 'error' }
   const atStartup: AtStartup = value.atStartup === 'degrade' || value.atStartup === 'refuse' ? value.atStartup : 'degrade'
   const atUse: AtUse = value.atUse === 'degrade' || value.atUse === 'error' ? value.atUse : 'error'
   return { atStartup, atUse }
@@ -264,8 +267,11 @@ export function createProvisioner(options: ProvisionerOptions): Provisioner {
         logger.warn(`layout/mismatch: ${home} 的布局是 "${result.file.layout}"，本次是 "${layout}"；本次只读不写`)
       }
     } catch (error) {
+      // A read failure keeps the read-only CONSEQUENCE but gets its own code: every item's report
+      // would otherwise say `layout/too-new` — "a NEWER layout wrote this, leave it alone" — about a
+      // home whose layout nobody managed to read at all.
       logger.warn(`layout: 无法读写 .layout.json（${reasonOf(error).message}）；按只读继续`)
-      readOnly = 'layout/too-new'
+      readOnly = 'layout/unreadable'
     }
   }
 
@@ -384,8 +390,17 @@ export function createProvisioner(options: ProvisionerOptions): Provisioner {
       // `requires.providers` maps an absent provider to `provider/unavailable`.
       const expectedProvider = (manifest.requires?.providers ?? []).find(entry => entry.kinds.includes(item.kind))?.package
       items.set(item.id, { plugin: manifest.plugin, item, identity, key, expectedProvider })
-      // Declaration registry: one entry per (key, plugin), appended under the status short lock.
-      pendingDeclared.push(recordDeclared(fs, lock, home, key, manifest.plugin, logger))
+      // Declaration registry: one entry per (key, plugin), appended under the status short lock —
+      // but NOT written here. The home's layout verdict is the authority on whether this home may be
+      // touched at all, and `declare` is the synchronous collecting pass, so it has not been reached
+      // yet. Writing eagerly meant the ONE case the invariant exists for — a home written by a NEWER
+      // layout — still got a declaration registry appended to it. The write now waits for the verdict
+      // and skips when the verdict is read-only.
+      pendingDeclared.push((async () => {
+        await checkHome()
+        if (readOnly !== undefined) return
+        await recordDeclared(fs, lock, home, key, manifest.plugin, logger)
+      })())
     }
   }
 
