@@ -75,7 +75,7 @@
     "nodejieba": "catalog:"
   },
   "devDependencies": {
-    "@avantf/dsh-plugin-base": "^0.1.3",
+    "@avantf/dsh-plugin-base": "^0.1.0",
     "@avantf/mem": "workspace:*",
     "@avantf/mem-contract": "workspace:*",
     "@avantf/mem-convert": "workspace:*",

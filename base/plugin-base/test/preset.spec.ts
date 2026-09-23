@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -6,7 +7,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { assertEnvinitArtifacts, assertEnvinitPreset, assertEnvinitPresetChecks, envinitPreset } from '../src/preset.js'
 import type { PresetCheck } from '../src/preset.js'
 
-const FRAMEWORK_VERSION = '0.1.3'
+/**
+ * This package's OWN version, read rather than written down: `envinitPreset` compares the fixture's
+ * framework against the REAL bootstrap, so a hard-coded number here breaks the moment the base is
+ * versioned — which is exactly what a version bump should not have to remember.
+ */
+const FRAMEWORK_VERSION: string = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+).version
+const FRAMEWORK_RANGE = `^${FRAMEWORK_VERSION}`
 /** This package's own root, for the "the base's real manifest passes its own rule" assertion. */
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -44,8 +53,8 @@ describe('dsh-plugin-base preset', () => {
       JSON.stringify({
         name: 'demo-plugin',
         private: true,
-        peerDependencies: { '@avantf/dsh-plugin-base': overrides.peer ?? '^0.1.3' },
-        devDependencies: { '@avantf/dsh-plugin-base': overrides.dev ?? overrides.peer ?? '^0.1.3' },
+        peerDependencies: { '@avantf/dsh-plugin-base': overrides.peer ?? FRAMEWORK_RANGE },
+        devDependencies: { '@avantf/dsh-plugin-base': overrides.dev ?? overrides.peer ?? FRAMEWORK_RANGE },
       }),
     )
     await writeFile(
@@ -65,8 +74,8 @@ describe('dsh-plugin-base preset', () => {
     return {
       cwd,
       frameworkDir,
-      peer: overrides.peer ?? '^0.1.3',
-      dev: overrides.dev ?? overrides.peer ?? '^0.1.3',
+      peer: overrides.peer ?? FRAMEWORK_RANGE,
+      dev: overrides.dev ?? overrides.peer ?? FRAMEWORK_RANGE,
       server,
       client,
       frameworkVersion,
@@ -82,7 +91,7 @@ describe('dsh-plugin-base preset', () => {
     const f = await fixture()
     const preset = envinitPreset({ cwd: f.cwd })
     expect(preset.ok).toBe(true)
-    expect(preset.declaredRange).toBe('^0.1.3')
+    expect(preset.declaredRange).toBe(FRAMEWORK_RANGE)
     expect(preset.external).toEqual(['@avantf/dsh-plugin-base'])
     expect(preset.noExternal).toEqual(['@avantf/dsh-plugin-base/bootstrap'])
     expect(statusOf(preset.checks, 'preset/framework-self-contained')).toBe('pass')

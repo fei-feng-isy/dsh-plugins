@@ -3,9 +3,9 @@
  * @module bootstrap
  */
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export declare const VERSION = "0.1.3";
+export declare const VERSION = "0.1.0";
 /** The framework interval this bootstrap can launch. */
-export declare const supportedRange = "^0.1.3";
+export declare const supportedRange = "^0.1.0";
 /** Sink for the warnings that replace a throw. */
 export interface BootstrapLogger {
     warn(message: string): void;

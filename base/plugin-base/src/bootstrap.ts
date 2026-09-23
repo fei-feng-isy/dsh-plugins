@@ -9,9 +9,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export const VERSION = '0.1.3'
+export const VERSION = '0.1.0'
 /** The framework interval this bootstrap can launch. */
-export const supportedRange = '^0.1.3'
+export const supportedRange = '^0.1.0'
 
 const PACKAGE = '@avantf/dsh-plugin-base'
 
