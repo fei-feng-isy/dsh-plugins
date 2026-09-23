@@ -21,3 +21,9 @@ work/release/*.tgz
 .vitest/
 coverage/
 *.log
+
+# Review records: kept in the working tree for reference, deliberately not in the
+# repository (they quote internals and go stale as the code moves). They cover the
+# WORKSPACE now — base/ and mem/ as well as work/ — so the rule lives here, not in a
+# subtree's .gitignore.
+docs/review/

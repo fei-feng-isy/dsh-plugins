@@ -16,7 +16,3 @@ dist/
 
 # Test scratch
 *.log
-
-# Review records: kept in the working tree for reference, deliberately not in the
-# repository (they quote internals and go stale as the code moves).
-docs/review/
