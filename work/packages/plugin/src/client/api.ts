@@ -26,6 +26,9 @@ export interface WorkRemote {
   snapshot: (args: { sessionId: string }) => Promise<unknown>
   detail: (args: { sessionId: string; nodeId: string }) => Promise<unknown>
   delete: (args: { sessionId: string; rootId: string }) => Promise<unknown>
+  /** The FULL text behind a spilled result. Optional for the same reason `watch` is: an older host
+   *  simply does not have it, and the pane falls back to showing the locator. */
+  result?: (args: { sessionId: string; nodeId: string }) => Promise<unknown>
   /** The engine's change stream, called with the transport's cancellation signal.
    *  Optional: an older host may not expose it, so the caller keeps its timer fallback. */
   watch?: (args: { sessionId: string }, signal: AbortSignal) => AsyncIterable<unknown>
@@ -151,6 +154,52 @@ export async function fetchDetail(remote: WorkRemote, sessionId: string, nodeId:
   if (detail.error !== undefined) throw new Error(detail.error)
   if (detail.node === undefined) throw new Error(`工作 ${nodeId} 没有可显示的详情`)
   return { node: detail.node, children: detail.children ?? [] }
+}
+
+/**
+ * Name a transport failure that is really a VERSION SKEW.
+ *
+ * The two halves of this plugin do not update together: the browser bundle is re-read on every page
+ * load, the host half is loaded once when `dsh web` starts. So a rebuilt plugin routinely talks to an
+ * older host, and the gateway answers a method that host never published with an HTTP 404 — which
+ * reads exactly like "the work or the file is gone", the two things it does NOT mean.
+ */
+export function transportHint(cause: unknown): string {
+  const text = cause instanceof Error ? cause.message : String(cause)
+  if (!/404|not found/iu.test(text)) return text
+  return '宿主进程里没有这条调用：客户端会随页面刷新，宿主只在启动时加载一次，所以 dsh web 很可能还在跑'
+    + `旧的宿主代码。重启 dsh web 后再试。（原始错误：${text}）`
+}
+
+/**
+ * Read the FULL text behind a spilled result. On demand only: the pane offering it is answering a
+ * question ("show me all of it"), and the host reads a file to answer — so nothing prefetches it.
+ * A host that cannot resolve the locator answers with a reason instead, which the pane shows beside
+ * the locator rather than as a failed read.
+ */
+export async function fetchFullResult(remote: WorkRemote, sessionId: string, nodeId: string): Promise<string> {
+  const getResult = remote.result
+  if (typeof getResult !== 'function') {
+    throw new Error('这个宿主不支持读回完整结果（Remote 面没有 result 调用）')
+  }
+  let response: unknown
+  try {
+    response = await getResult({ sessionId, nodeId })
+  } catch (cause: unknown) {
+    // A rejected call is the transport's, and the commonest reason for it here is a host that does not
+    // know the method yet — say so instead of "transport failure", which sends the reader looking at
+    // the work tree.
+    throw new Error(transportHint(cause))
+  }
+  const { value, error } = unwrap(response)
+  if (error !== undefined) throw new Error(error)
+  const payload = value as { text?: unknown; error?: unknown } | null | undefined
+  if (payload !== null && typeof payload === 'object' && typeof payload.error === 'string') {
+    throw new Error(payload.error)
+  }
+  const text = payload !== null && typeof payload === 'object' ? payload.text : undefined
+  if (typeof text !== 'string') throw new Error('完整结果返回了无法识别的数据')
+  return text
 }
 
 /**

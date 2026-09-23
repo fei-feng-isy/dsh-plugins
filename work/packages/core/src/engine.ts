@@ -3,6 +3,7 @@
  * @module @avantf/work-core/engine
  */
 import { WorkTree } from './tree.js'
+import { isTroubledNode } from './prompt.js'
 import { CAPACITY, TERMINAL, type NodeRecord } from './types.js'
 
 /** Resume a worker for one node; the engine awaits only the reservation, not the worker. */
@@ -148,8 +149,10 @@ export class WorkEngine {
   private async reportStall(node: NodeRecord, silentMs: number): Promise<void> {
     const notify = this.hooks.notifyStalled
     if (notify === undefined) return
-    // The budget test rides `failures` (what the `failed` ceiling actually checks), not `attempts`, which also counts successful aggregate rounds.
-    if (node.stalls < CAPACITY.maxStallsBeforeReport && node.failures < CAPACITY.maxAttempts - 1) return
+    // The SAME floors the owner-facing `isTroubled` flag uses (see `isTroubledNode`), so the flag and
+    // the message cannot report different things about one node. `failures`, not `attempts`: the
+    // latter also rises on rounds that succeed.
+    if (!isTroubledNode(node)) return
     if (!(await this.tree.claimStallReport(node.id))) return
     notify({
       rootId: node.rootId,

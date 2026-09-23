@@ -14,6 +14,7 @@ import {
   deleteWork,
   errorText,
   fetchDetail,
+  fetchFullResult,
   fetchSnapshot,
   startPolling,
   watchChanges,
@@ -33,6 +34,10 @@ function remoteReturning(answer: unknown, calls: { method: string; args: unknown
     },
     delete: (args) => {
       calls.push({ method: 'delete', args })
+      return Promise.resolve(answer)
+    },
+    result: (args) => {
+      calls.push({ method: 'result', args })
       return Promise.resolve(answer)
     },
   }
@@ -150,6 +155,54 @@ describe('fetchDetail', () => {
   it('rejects a payload with no node instead of rendering a blank panel', async () => {
     const remote = remoteReturning({ ok: true, value: { children: [] } })
     await expect(fetchDetail(remote, 'session-1', 'n2')).rejects.toThrow('没有可显示的详情')
+  })
+})
+
+describe('fetchFullResult', () => {
+  it('reads the text and passes the node id through', async () => {
+    const calls: { method: string; args: unknown }[] = []
+    const remote = remoteReturning({ ok: true, value: { text: 'the whole thing' } }, calls)
+    await expect(fetchFullResult(remote, 'session-1', 'n2')).resolves.toBe('the whole thing')
+    expect(calls).toEqual([{ method: 'result', args: { sessionId: 'session-1', nodeId: 'n2' } }])
+  })
+
+  it('turns the host\'s reason into an exception, rather than showing an empty result', async () => {
+    // "The locator is not a file this host can read" is an answer, and the pane shows it beside the
+    // locator — an empty string here would read as "the result is empty".
+    const remote = remoteReturning({ ok: true, value: { text: '', error: '不在本机文件系统上（spill://abc）' } })
+    await expect(fetchFullResult(remote, 'session-1', 'n2')).rejects.toThrow('不在本机文件系统上')
+  })
+
+  it('says a host without the call does not support it', async () => {
+    const { result: _omitted, ...withoutResult } = remoteReturning({ ok: true, value: { text: 'x' } })
+    await expect(fetchFullResult(withoutResult, 'session-1', 'n2')).rejects.toThrow('没有 result 调用')
+  })
+
+  it('rejects a payload it cannot recognise', async () => {
+    const remote = remoteReturning({ ok: true, value: { nope: true } })
+    await expect(fetchFullResult(remote, 'session-1', 'n2')).rejects.toThrow('无法识别的数据')
+  })
+
+  it('names a 404 as a stale HOST process, not as a missing result', async () => {
+    // The two halves update separately: this bundle is re-read on every page load, the host half is
+    // loaded once when `dsh web` starts. A rebuilt plugin therefore talks to an older host, whose
+    // gateway answers an unknown method with 404 — and "404" reads like "the work or the file is
+    // gone", which is the one thing it does not mean. (Reported from a real run.)
+    const stale: WorkRemote = {
+      ...remoteReturning({ ok: true, value: { text: 'x' } }),
+      result: () => Promise.reject(new Error(
+        'client api: avantfWork/result failed: transport failure for /api/avantfWork/result: HTTP 404',
+      )),
+    }
+    await expect(fetchFullResult(stale, 'session-1', 'n2')).rejects.toThrow('重启 dsh web')
+  })
+
+  it('passes an unrelated transport failure through unchanged', async () => {
+    const broken: WorkRemote = {
+      ...remoteReturning({ ok: true, value: { text: 'x' } }),
+      result: () => Promise.reject(new Error('socket closed while reading')),
+    }
+    await expect(fetchFullResult(broken, 'session-1', 'n2')).rejects.toThrow('socket closed while reading')
   })
 })
 

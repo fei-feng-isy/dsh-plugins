@@ -14,4 +14,4 @@ export type {
 } from './tree.js'
 export { WorkEngine, DEFAULT_ENGINE_OPTIONS, detectConcurrency } from './engine.js'
 export type { EngineHooks, EngineOptions, StartWorkerInput, StallReport } from './engine.js'
-export { buildWorkerPrompt, buildProgressLine, isTroubled, spillPointer, statusLabel } from './prompt.js'
+export { buildWorkerPrompt, buildProgressLine, isTroubled, isTroubledNode, spillPointer, statusLabel } from './prompt.js'

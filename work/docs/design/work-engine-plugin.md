@@ -560,7 +560,9 @@ toolFilter:
 
 **遮蔽不是授权。** 这两半只管"模型看不看得见"；真正的边界仍是工具体内的拒绝（`no-authority` / `not-owner`），所以即使某张面孔写错、模型幻觉出名字，调用照样被拒。`test/faces.spec.ts` 有一条不变量测试：**每个注册的工具必须恰好落在一张面孔里** —— 新增工具不归类就会失败。`note_work` 只被放进 owner 的 deny 列表，不进 worker 的：owner 拿一个必然被拒的工具是噪音，worker 缺了它则拆解根本无法通过门禁（§5.3.2）。
 
-**owner 也看不见工作内部（2026-09-20）。** 面孔的另一半同样收紧了：`show_work`（逐个节点列出整棵树，带 `depth` / `parent_id` / `attempts` / `result_ref`）已删除；`list_works` 与每轮的进度行（`buildProgressLine`）都只报"还在跑 / 反复出过问题"，不再报逐状态计数。判据是**这条信息能不能支撑 owner 的动作**：owner 只有 `adjust_work`（只对根有效）与 `cancel_work`（只吃根 id），没有任何对节点动手的工具，所以节点级的结构、派发次数、剩余失败预算都是"看得见却动不了"的信息 —— 引擎的重试策略不属于 owner（§6.0 已按同一理由不写进静态段）。**"出过问题"是例外，也是唯一例外**：它是 owner 唯一能据此做决定的引擎事实（改方向，或者放弃），判据复用引擎既有的 `stalls` / `failures` / `spawnFailures` 三个字段（`core/src/prompt.ts` 的 `isTroubled`），且**门槛与引擎自己的 `reportStall` 一致**（`stalls >= maxStallsBeforeReport`，或 `failures` / `spawnFailures >= maxAttempts - 1`），两个渠道因此说同一套话。`/work` 命令与"工作"面板仍按节点渲染 —— 那是给人看的诊断面，不是模型面。
+**owner 也看不见工作内部（2026-09-20）。** 面孔的另一半同样收紧了：`show_work`（逐个节点列出整棵树，带 `depth` / `parent_id` / `attempts` / `result_ref`）已删除；`list_works` 与每轮的进度行（`buildProgressLine`）都只报"还在跑 / 反复出过问题"，不再报逐状态计数。判据是**这条信息能不能支撑 owner 的动作**：owner 只有 `adjust_work`（只对根有效）与 `cancel_work`（只吃根 id），没有任何对节点动手的工具，所以节点级的结构、派发次数、剩余失败预算都是"看得见却动不了"的信息 —— 引擎的重试策略不属于 owner（§6.0 已按同一理由不写进静态段）。**"出过问题"是例外，也是唯一例外**：它是 owner 唯一能据此做决定的引擎事实（改方向，或者放弃），判据是引擎的 `isTroubledNode`（`core/src/prompt.ts`）—— `stalls >= maxStallsBeforeReport`、`failures >= maxAttempts - 1`、`spawnFailures >= maxAttempts - 1` 三者之一，`isTroubled` 就是它加上"还没结束"这个过滤。**这一个判据现在真的被三个渠道共用**：`list_works` 的标记、静默回收的 heads-up（`reportStall`）、以及**起不来执行者的 heads-up**（宿主在派发失败处投递，同一个门槛、同一个"只报一次"的持久标记）。三处此前并不一致：`isTroubled` 算 `spawnFailures` 而 `reportStall` 的门槛不算，于是一个连续起不来执行者的工作会在 `list_works` 里读作"反复出过问题"，却永远收不到一条消息 —— 起不来的节点从不是 `running`，而静默扫描只看 `running`。`/work` 命令与"工作"面板仍按节点渲染 —— 那是给人看的诊断面，不是模型面。
+
+**2026-09-23 修订：一次独立核对修掉的四处。** 一件真实工作（"工具面完整性核对：参数 × 校验 × 拒绝码"，拆成 4 个前置工作、汇总交出报告）把四个读写边界上的不一致挖了出来，都改了：① `no-caller` 并入 `RefusalCode` —— 九个工具都会产生它而码表里没有，按 union 穷举的消费者会静默漏掉；② 纯空白文本不再能落库 —— `submit_work` 的结果、`adjust_work` 的纠偏、`create_work` 的标题与内容都补上 `blank-text` 拒绝，且**分层不变**：工具层只拒真正的空串，空白由引擎判（与 `note_work` 的 `no-analysis` 同源，否则这些码就没有可达的产生点）；③ 三个 owner 工具对同一个子工作 id 统一回 `not-root`，`finish_work` / `cancel_work` 原先按 ROOT 查表，把"这不是根工作"说成"工作不存在"；④ `isTroubledNode` 抽成唯一判据，并给"连续起不来执行者"补上 owner 提醒（见上）。
 
 **2026-09-21 修订：`stuck` 曾把"历史"说成"现值"。** 首版 `isStuck` 用 `stalls > 0 || failures > 0 || spawnFailures > 0`，而 `stalls` / `failures` **只增不减**（`tree.ts` 无复位路径；只有 `spawnFailures` 会在启动成功时清零）—— 于是一个 worker 掉线被回收、重派后跑得好好的工作，此后余生每轮进度行与每次 `list_works` 都读作"卡住了"，直到整棵树终结。`list_works` 是**当下的读**，这是假陈述；而 owner 的两个动作都有破坏性（`adjust_work` 会作废未完成子工作并整体重规划，`cancel_work` 直接停掉），一个永不复位的旗标会引诱它对健康工作下手。修法两条一起上：①**判据抬到引擎自己的门槛**（见上），一次打嗝不再算数；②**措辞改成历史**（"反复出过问题"），标识符随之改名 `stuck` → `troubled`，让代码也不再声称现值。真正的"现在卡着"是另一个信号（被回收且尚未重派），本项目仍**不做**实时判读 —— 那需要时钟，而引擎的 heads-up 已经在承担这件事。
 
@@ -706,9 +708,11 @@ worker 是真实会话，所以磁盘占用随派活次数线性增长（本机�
 
 **记在哪里：`NodeRecord.corrections`，不是 `context`。** `context` 是拆解者写的"为什么存在这个工作"，纠偏是 owner 对已经派出去的活的指令 —— 作者与生命周期都不同；混在一起时工作链只渲染 `context[0]`，于是纠偏永远排在 index ≥ 1、**对任何后代都不可见**（这正是实现过程中被审查抓到的一条 P1）。现在：纠偏写进独立的 `corrections`，当前节点以独立的"纠偏:"块渲染，而**工作链把每一层的纠偏一并带出**来 —— 链是唯一能到达每一次派发的通道，所以根上写的纠偏会跟着链走到任何后代。
 
+**2026-09-23 修订：纠偏写给了执行者，却没写给查看者。** 上一段的通道只覆盖"执行"这一半：面板的行/详情与 `work_result` 只渲染 `title` / `description` / `result`，而标题是**创建时**的目标 —— 被纠偏过的工作因此读起来是"目标 X、结果 Y"，中间空无一物；纠偏在库里，却没有任何查看面读它（`/work` 的索引行同样没有）。四个面一起补上：快照的行投影（`NodeView`）带 `corrections`，行上渲染"已纠偏 N 次"标签、文本挂 tooltip；`detail`（`NodeDetail`）在"工作内容"与"本工作提交的结果"**之间**给出完整"纠偏"块；`work_result` 把纠偏列在结果之前、`data` 里再带一份；`/work` 的索引行只报次数。**目标本身不改写** —— 纠偏是叠在原始目标旁边的历史；直接改写 `title`/`description` 会把"当初要什么"抹掉，而回溯要的正是两者对照。行投影自此带上了"行只放渲染得到的东西"之外的一个字段，判据是它必须在**折叠状态**下可见、且文本短条数少。守卫：`correction.spec.ts` 的 "a correction is readable back" 三条、`client-view.spec.tsx` 的行标记与详情顺序两条。
+
 **作废为什么不需要持有者**：状态机决定了这一点 —— 一个节点**有未完成子工作时必然是 `blocked`、且没有持有者**（`decompose` 会释放 claim），所以"持有者取消自己的子工作"落不到任何可达状态上。真正会发生作废的时刻，是 master 在后续会话里调整了方向、而根正在等子工作；此时只有 owner 能动手，所以内部原语的授权是"树的所有者，或持有该节点的执行者"（对称），后者不会有未完成子工作可作废。
 
-**边界**（都在机制层拒绝）：只认根工作（给子工作发会被 `not-root` 拒）；已结束的工作不能调整（`terminal`）；作废只向下走 —— 工作本身、它的父工作、兄弟工作都动不了，要结束整棵树用 `cancel_work`；作废后**重算所有被改动节点的父节点**，否则共享前提的另一个分支会永远卡在 `blocked`（这条是被测试逼出来的第一版 bug）。
+**边界**（都在机制层拒绝）：只认根工作（给子工作发会被 `not-root` 拒 —— **三个 owner 工具同款**：`adjust_work` / `finish_work` / `cancel_work` 对同一个子工作 id 都给 `not-root`，后两者原先按 ROOT 查表、把"这不是根工作"说成"工作不存在"）；已结束的工作不能调整（`terminal`）；纯空白的纠偏同样被拒（`blank-text`，见 §5.x 的 2026-09-23 修订）；作废只向下走 —— 工作本身、它的父工作、兄弟工作都动不了，要结束整棵树用 `cancel_work`；作废后**重算所有被改动节点的父节点**，否则共享前提的另一个分支会永远卡在 `blocked`（这条是被测试逼出来的第一版 bug）。
 
 **子工作执行者的改正路径**：汇总轮是全新会话，读到背景里的纠偏后**直接重新 `decompose_work`** 即可（此时没有未完成子工作，拆解本来就允许）—— 不需要先"取消"。
 
@@ -1062,8 +1066,8 @@ decompose(node, children):
 
 | 层 | 贡献 |
 |---|---|
-| 宿主 | `AvantfWorkHost` 改为 `TypertRemoteService`，加 `@Remote('snapshot')`、`@Remote('detail')`、`@Remote('delete')` 与 `@Remote({ mode: 'stream' }) watch` 四个方法；`wire.ts` 手写 host/client 两份 wire face，`apply` 里 `ctx.typert.register(hostContribution)` |
-| 客户端 | `src/client/`：`$mount(clientContribution)` → `ctx.get('remote.avantfWork')` → 挂载时读一次，之后**跟着 `watch` 变更流刷新**（见下）；点工作标题按需调 `detail` 展开该工作的详情；**每棵树**的标题栏带"删除"按钮（二次确认，删完立即重读；树未结束时禁用并说明原因）；节点的展开默认值跟着它自己的状态：在跑/待跑/中断的默认展开（拆出来的子工作立刻可见），`done`/`failed` 的默认折叠（跑完的树收成一行，结束的分支不再压住活着的部分），点击存为覆盖值；`slots.register('conversation.view', …, order 20)` |
+| 宿主 | `AvantfWorkHost` 改为 `TypertRemoteService`，加 `@Remote('snapshot')`、`@Remote('detail')`、`@Remote('result')`、`@Remote('delete')` 与 `@Remote({ mode: 'stream' }) watch` 五个方法；`wire.ts` 手写 host/client 两份 wire face，`apply` 里 `ctx.typert.register(hostContribution)` |
+| 客户端 | `src/client/`：`$mount(clientContribution)` → `ctx.get('remote.avantfWork')` → 挂载时读一次，之后**跟着 `watch` 变更流刷新**（见下）；点工作标题按需调 `detail`，在**弹窗**（设置面板形制：左侧分区栏、右侧唯一滚动区）里展示该工作的标题/内容/上下文/拆解信息/纠偏/结果/子工作；**每棵树**的标题栏带"删除"按钮（二次确认，删完立即重读；树未结束时禁用并说明原因）；节点的展开默认值跟着它自己的状态：在跑/待跑/中断的默认展开（拆出来的子工作立刻可见），`done`/`failed` 的默认折叠（跑完的树收成一行，结束的分支不再压住活着的部分），点击存为覆盖值；`slots.register('conversation.view', …, order 20)` |
 | 构建 | `scripts/build-client.mjs` 用 esbuild 打成 `lib/client.js`（`window.__ModuleLoader__.load` 契约；shell 提供的模块保持 external） |
 
 **为什么手写 wire face**：DSH 包通常由 Typert 生成器产出 `typert.host.js` / `typert.remote-client.js`，而生成器只在 harness 工作区内运行。手写遵循生成器的约定（一个 `args` 对象参数、`<pkg>#<ns>/<method>` 的 invocation id、`strict` codec）。
@@ -1084,13 +1088,17 @@ decompose(node, children):
 
 **兜底为什么还需要**：`timer`（5 秒）只在宿主没有 `watch`、或流连着两次**一帧都没给**时启用（旧版本宿主、连不上的传输）—— 健康的流一定会先给一帧开场（当前 revision），所以"什么都没来"就是"这条流不能用"的判据，会话侧 revision（`useChat`/`useSession` 的便宜派生值）则始终在，用来覆盖"工具调用已经改了树、推送还在路上"的窗口。`timer` 是可选服务，本机浏览器侧没挂它，所以退到浏览器自己的 `setInterval`，两条都试过才算失败 —— 这条路径写错的表现恰好是"这个功能像是没做"。
 
-**详情为什么按需读**：一个结果可以到 2 KB（超过就落盘，只留前 2 KB 与指针），而快照在每次变更时都要重读。通常关着的面板不该为它付钱，所以点开某一行才调 `detail({ sessionId, nodeId })`；已展开的行跟着快照一起重读，所以 worker 在行开着的时候提交结果会直接出现。
+**详情为什么按需读**：一个结果可以到 2 KB（超过就落盘，只留前 2 KB 与指针），而快照在每次变更时都要重读。通常关着的面板不该为它付钱，所以点开某一行才调 `detail({ sessionId, nodeId })`；已打开的弹窗跟着快照一起重读，所以 worker 在它开着的时候提交结果会直接出现。
+
+**2026-09-23 修订：详情从"行内展开"改为"弹窗"。** 行内展开的详情一长就把树顶下去：读完一棵的目标/纠偏/结果再回头看另一棵，原来的滚动位置已经找不到了。现在改为居中弹窗，形制照 DSH「设置」面板 —— 全屏遮罩（`--dsw-alias-bg-mask-1` + `--dsw-mask-blur`）、layer-2 卡片（`--dsw-elevation-prominent`）、左侧分区栏、右侧**唯一**滚动区；卡片 **1040×880**（比设置的 800×800 更宽：这里读的是一列散文加长列表，176px 的分区栏一分走，800px 的内容列就局促了），正文 **15px/1.7**、标题 18px、分区标签 15px（比行文字大一档 —— 这个面就是用来读的，14px 在这个宽度上读起来像小字）。分区由内容生成且**空的分区不出现**：内容/结果恒在，上下文/拆解信息/纠偏/子工作只在有内容时成为一个标签、并在标签后带条数；**标题不是分区，而是弹窗的标题栏**（连同节点 id、状态徽标、第几次派发与深度）—— "我在看哪个工作"在任何分区被选中之前就要回答，而且读每一个分区时都得答得出来，标题曾经占着一个分区，等于让这条前设在切换标签时消失。每个分区前面有一行小字说明它装什么：`内容` 是"要达成什么（验收对象）"、`上下文` 是"为什么需要它（拆解者写的前提，不是验收标准）"—— 两个分区挨着却回答不同问题，只给名字会让人把前提当成目标；`拆解信息` 是 `note_work` 记下的执行者分析（缺什么前提、排除了哪条路、子工作完成后要判断什么），并注明最近一条写于第几次派发 —— 这是判活的那个**全新会话**唯一能看到前任推理的地方，此前只有引擎读得到；`纠偏` 分区里写明「目标以『标题』为准」，这样"标题是创建时的目标、结果是纠偏后的方向"这两件事在同一个面板里被读成一条因果，而不是一对矛盾。关闭路径是关闭按钮、遮罩点击与 Escape，打开时焦点落在关闭按钮上。弹窗渲染在**视图根**而不是行内：行住在虚拟列表里，滚过去就会被卸载，挂在行上的弹窗会随读者的滚动消失。守卫：`client-view.spec.tsx` 的分区集合/顺序/空分区/条数/拆解信息与出处/两个分区的语义小字/溢出指针/加载与失败态，以及"弹窗尺寸、字号与画法跟设置面板同规则"的样式断言。
 
 **为什么不走会话投影**：投影要求状态由 session log 折叠、且每次变化落一条 whole-value 事件。工作树的运行态由 service 持有，复制进日志成本更高，且"查看别的会话之外的树"语义也不对。
 
 **破坏性操作的屏障强度不一致（记录，A4）**：面板的 `delete` 与 `/clean` 都是不可恢复的，但门禁不同 —— `/clean` 要求"是本插件的会话 + 已结算 + （`all` 时）已归档或显式点名 id"，而 `delete({ sessionId, rootId })` 只有归属一条，且 session id 由调用方提供（Remote 不带调用方身份，见下）。本地单用户宿主下可接受，但这两条值得对齐；对齐做法尚未决定（把 `delete` 也要求归档会伤 UX，因为面板的删除正是用来清掉"已完成但未归档"的工作）。
 
-**已知限制**：Remote 调用不携带调用方身份（生成器的方法只收参数），所以 `snapshot({ sessionId })` / `detail({ sessionId, nodeId })` / `delete({ sessionId, rootId })` / `watch({ sessionId })` 的 session 由客户端给出。视图持有它正在显示的那个 id，且这运行在用户自己的宿主进程里。删除的调用形式是 `delete({ sessionId, rootId })`：**单位是整棵树**，节点 id 不是可删除的对象（传节点 id 会被当成"没有这棵树"拒掉）。未结束的树不会被删除 —— 它归引擎管，提前结束它是 `cancel_work`；`finish_work` 是另一种树级结束，保留记录并归档，删除则整条移出。删除不可恢复。
+**已知限制**：Remote 调用不携带调用方身份（生成器的方法只收参数），所以 `snapshot({ sessionId })` / `detail({ sessionId, nodeId })` / `result({ sessionId, nodeId })` / `delete({ sessionId, rootId })` / `watch({ sessionId })` 的 session 由客户端给出。视图持有它正在显示的那个 id，且这运行在用户自己的宿主进程里。删除的调用形式是 `delete({ sessionId, rootId })`：**单位是整棵树**，节点 id 不是可删除的对象（传节点 id 会被当成"没有这棵树"拒掉）。未结束的树不会被删除 —— 它归引擎管，提前结束它是 `cancel_work`；`finish_work` 是另一种树级结束，保留记录并归档，删除则整条移出。删除不可恢复。
+
+**2026-09-23 修订：落盘结果改成"点开就能看"。** 结果超过 2 KB 就落盘，节点只留开头与一个 locator —— 而那个 locator 是**给模型的**（`work_result` 连同检索指引一起交给它），人在面板里点不动：浏览器不会导航到文件路径，DSH 自己那条"用桌面应用打开"的路只对有**授权路由**的 deliverable 开放，而这个 spill 不是交付物。于是加 `result({ sessionId, nodeId })`：面板上的「查看完整结果」让**宿主**（唯一能读自己 spill 产物的一方）把全文读回来，在弹窗里就地展开（展开时**替换**开头那段，不叠加 —— 开头本来就是全文的第一片）。两条降级都写死了：宿主没有这个面 → 不显示按钮（不提供一个注定失败的读）；locator 不是本机路径（`SpillStore` 的契约明确 locator 是**不透明的**，测试桩给的就是 `spill://…`）→ 回一条原因，locator 照旧留在屏幕上 —— 它本来就是"知道这个存储底座的人"要的地址。
 
 ## 十、插件构成
 

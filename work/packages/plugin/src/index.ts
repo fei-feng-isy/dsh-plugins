@@ -212,7 +212,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       log.info(
         `typert host face registered (namespace avantfWork, ${
           String((hostContribution as unknown as { invocations?: readonly unknown[] }).invocations?.length ?? 0)
-        } invocations: snapshot, detail, delete, watch)`,
+        } invocations: snapshot, detail, result, delete, watch)`,
       )
     } catch (error: unknown) {
       log.error(

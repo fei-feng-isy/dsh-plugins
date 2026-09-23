@@ -16,6 +16,7 @@ import {
   coalesce,
   deleteWork,
   fetchDetail,
+  fetchFullResult,
   fetchSnapshot,
   sessionRevision,
   startPolling,
@@ -309,6 +310,11 @@ export function apply(ctx: ClientContext): void {
         const remote = getRemote()
         if (remote === undefined) throw new Error('工作树 Remote 未挂载')
         return await fetchDetail(remote, props.sessionId, nodeId)
+      },
+      loadResult: async (nodeId: string) => {
+        const remote = getRemote()
+        if (remote === undefined) throw new Error('工作树 Remote 未挂载')
+        return await fetchFullResult(remote, props.sessionId, nodeId)
       },
     })
   }

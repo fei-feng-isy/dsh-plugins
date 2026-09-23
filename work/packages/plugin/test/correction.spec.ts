@@ -220,3 +220,57 @@ describe('the engine carries out the consequence of a correction', () => {
     expect(refused.data?.['code']).toBe('not-owner')
   })
 })
+
+describe('a correction is readable back, not only executable', () => {
+  // Recording it for the executor is not enough: a work is read by the panel and by `work_result`,
+  // and both rendered the title the work was CREATED with. A corrected work therefore read as
+  // "goal X, result of Y" with nothing in between — the correction was in the store but invisible
+  // at the two surfaces a reader actually looks at.
+  it('carries the corrections in the row and detail projections the panel reads', async () => {
+    const mounted = await mount()
+    const created = await callTool(mounted, 'create_work', { title: 'T', description: 'd', analysis: [] }, mounted.owner)
+    const root = String(created.data?.root_id ?? '')
+    await mounted.flush()
+    await callTool(mounted, 'adjust_work', { root_id: root, adjustment: '改成先做 B' }, mounted.owner)
+
+    const snapshot = await mounted.host.snapshot({ sessionId: mounted.owner.id })
+    const row = snapshot.trees.flatMap((tree) => tree.nodes).find((node) => node.id === root)
+    expect(row?.corrections).toEqual(['改成先做 B'])
+
+    const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
+    expect(detail.node?.corrections).toEqual(['改成先做 B'])
+    // The goal itself is NOT rewritten — the correction is history laid beside it, which is what
+    // keeps the original intent readable instead of overwritten.
+    expect(detail.node?.title).toBe('T')
+  })
+
+  it('hands the corrections to the owner reading the result', async () => {
+    const mounted = await mount()
+    const created = await callTool(mounted, 'create_work', { title: 'T', description: 'd', analysis: [] }, mounted.owner)
+    const root = String(created.data?.root_id ?? '')
+    await mounted.flush()
+    const rootWorker = agent(String(mounted.dispatched.at(-1)?.childId ?? ''))
+
+    await callTool(mounted, 'adjust_work', { root_id: root, adjustment: '改成先做 B' }, mounted.owner)
+    await callTool(mounted, 'submit_work', { node_id: root, result: 'B 已做完' }, rootWorker)
+
+    const read = await callTool(mounted, 'work_result', { node_id: root }, mounted.owner)
+    expect(read.ok, read.summary).toBe(true)
+    expect(read.summary).toContain('改成先做 B')
+    expect(read.summary).toContain('B 已做完')
+    expect(read.data?.['corrections']).toEqual(['改成先做 B'])
+  })
+
+  it('leaves every read surface untouched for a work that was never corrected', async () => {
+    const mounted = await mount()
+    const created = await callTool(mounted, 'create_work', { title: 'T', description: 'd', analysis: [] }, mounted.owner)
+    const root = String(created.data?.root_id ?? '')
+    await mounted.flush()
+    const rootWorker = agent(String(mounted.dispatched.at(-1)?.childId ?? ''))
+    await callTool(mounted, 'submit_work', { node_id: root, result: 'done' }, rootWorker)
+
+    const snapshot = await mounted.host.snapshot({ sessionId: mounted.owner.id })
+    expect(snapshot.trees[0]?.nodes[0]?.corrections).toEqual([])
+    expect((await callTool(mounted, 'work_result', { node_id: root }, mounted.owner)).summary).not.toContain('纠偏')
+  })
+})

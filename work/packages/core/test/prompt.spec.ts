@@ -7,7 +7,7 @@
  * invites a worker to wait instead of finishing.
  */
 import { describe, expect, it } from 'vitest'
-import { buildProgressLine, buildWorkerPrompt, CAPACITY, isTroubled, type DispatchView, type NodeRecord } from '../src/index.js'
+import { buildProgressLine, buildWorkerPrompt, CAPACITY, isTroubled, isTroubledNode, type DispatchView, type NodeRecord } from '../src/index.js'
 
 function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
   return {
@@ -304,6 +304,26 @@ describe('trouble detection', () => {
 
   it('leaves a work that is simply progressing alone', () => {
     expect(isTroubled([node({ status: 'running' })])).toBe(false)
+  })
+
+  it('exposes ONE predicate, so the flag and the heads-ups cannot disagree', () => {
+    // The bug this pins: the flag counted `spawnFailures` while the stall gate did not, so a work that
+    // could not get a worker started read as 「反复出过问题」 in `list_works` and the owner was never
+    // told. `isTroubledNode` is that one predicate; `isTroubled` is it plus the terminal filter.
+    for (const overrides of [
+      { stalls: CAPACITY.maxStallsBeforeReport },
+      { failures: CAPACITY.maxAttempts - 1 },
+      { spawnFailures: CAPACITY.maxAttempts - 1 },
+    ]) {
+      expect(isTroubledNode(node({ ...overrides, status: 'running' })), JSON.stringify(overrides)).toBe(true)
+      expect(isTroubled([node({ ...overrides, status: 'running' })])).toBe(true)
+    }
+    // Below the floors both say no; on a terminal node only the flag does (the predicate is about a
+    // node's history, the filter is what makes it the owner's business).
+    expect(isTroubledNode(node({ failures: 1 }))).toBe(false)
+    expect(isTroubled([node({ failures: 1 })])).toBe(false)
+    expect(isTroubledNode(node({ status: 'done', failures: 4 }))).toBe(true)
+    expect(isTroubled([node({ status: 'done', failures: 4 })])).toBe(false)
   })
 })
 

@@ -86,6 +86,16 @@ function spawnBackoffMs(n: number): number {
   return Math.min(SPAWN_BACKOFF_BASE_MS * 2 ** (n - 1), SPAWN_BACKOFF_MAX_MS)
 }
 
+/**
+ * Whether text carries nothing but whitespace. The tool layer refuses only the truly EMPTY string, so
+ * blank text used to arrive here and be persisted as a title, a result or a correction — then rendered
+ * back into every later dispatch. The judgement belongs HERE, next to `no-analysis`, because the code
+ * that says why has to have a producer.
+ */
+function isBlank(text: string): boolean {
+  return text.trim().length === 0
+}
+
 /** Random 8-hex-char id, matching the short ids the tools expose. `crypto` is reached through a
  * typed globals lookup because the core is built without DOM or Node ambient types. */
 export function defaultNewId(): string {
@@ -442,6 +452,9 @@ export class WorkTree {
 
   async createRoot(input: CreateRootInput): Promise<MutationResult<NodeRecord>> {
     return this.withLock(async () => {
+      // Before the id is allocated: a refused root must not consume one.
+      if (isBlank(input.title)) return refuse('blank-text', '工作标题不能只有空白')
+      if (isBlank(input.description)) return refuse('blank-text', '工作内容不能只有空白')
       const now = this.deps.now()
       const id = this.allocateId(new Set())
       if (id === undefined) {
@@ -866,6 +879,9 @@ export class WorkTree {
           `工作 ${nodeId} 还有 ${unfinished.length} 个子工作没完成；等它们终态后再判断`,
         )
       }
+      // Same rule as `no-analysis`, one field over: a blank "result" is a submission with nothing in
+      // it, and it used to be stored, shown as the conclusion, and read by the judging round.
+      if (isBlank(result)) return refuse('blank-text', '结果不能只有空白')
 
       let inline = result
       let ref: string | null = null
@@ -895,8 +911,12 @@ export class WorkTree {
   }
 
   /** Record one correction, on the tree owner's authority only. The text lands in the node's
-   * `context`, the durable block every later dispatch of that node renders, so it survives a
-   * reclaim, a retry and the aggregate round rather than living in one worker's inbox. */
+   * `corrections`, NOT in `context`: `context` is the decomposer's "why this work exists", while a
+   * correction is the owner's instruction about work already handed out — a different author and a
+   * different lifetime. (Rendering them together once made every correction invisible to every
+   * descendant, because the chain line only carries `context[0]`.) Either way it is a durable block
+   * that every later dispatch of this node renders, so it survives a reclaim, a retry and the
+   * aggregate round rather than living in one worker's inbox. */
   async correct(nodeId: string, callerSessionId: string, text: string): Promise<MutationResult<NodeRecord>> {
     return this.withLock(async () => {
       const found = this.locate(nodeId)
@@ -908,6 +928,10 @@ export class WorkTree {
       if (state.tree.closedAt !== null || TERMINAL.has(node.status)) {
         return refuse('terminal', `工作 ${nodeId} 处于 ${statusLabel(node.status)}；已结束的工作不能纠偏`)
       }
+      // A blank correction would be stored and then rendered onto the node's own block AND onto the
+      // work-chain line of every descendant — a line that says nothing, in the one channel that
+      // reaches every dispatch.
+      if (isBlank(text)) return refuse('blank-text', '纠偏内容不能只有空白')
       if (node.corrections.includes(text)) return accept(node)
       const updated = this.replace(state, node, { corrections: [...node.corrections, text] })
       await this.flush(node.rootId)

@@ -178,8 +178,16 @@ export type RefusalCode =
   | 'closed'
   /** The caller is not a top-level session, so it has no authority to own a tree. */
   | 'no-authority'
+  /** The tool was reached with no caller agent bound at all, so there is nobody to check authority
+   *  against. Produced by the tool layer — the one place a call can arrive callerless — and listed
+   *  here so a consumer that exhausts this union does not silently drop it. */
+  | 'no-caller'
   /** `note_work` was given text with no non-blank line, so there is nothing to record. */
   | 'no-analysis'
+  /** A required text argument reached the engine containing nothing but whitespace. The tool layer's
+   *  non-empty check only sees the EMPTY string, so without this a blank title, result or correction
+   *  was accepted and persisted — then rendered back into every later dispatch. */
+  | 'blank-text'
   /** `decompose_work` was called by a dispatch that has not written its own analysis: a split
    * must be argued for by the round performing it, not inherited from an earlier one. */
   | 'analysis-missing'

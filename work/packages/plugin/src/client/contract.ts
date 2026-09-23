@@ -14,6 +14,9 @@ export interface WorkNodeView {
   readonly title: string
   /** Why this work exists (written by whoever decomposed its parent). */
   readonly context: readonly string[]
+  /** The owner's corrections, newest last. A row renders the count as a "steered" marker: the title
+   *  above is the goal as created, so a corrected work needs this to be readable at all. */
+  readonly corrections: readonly string[]
   readonly status: string
   readonly attempts: number
   readonly createdAt: number
@@ -44,7 +47,17 @@ export interface WorkNodeDetailView {
   readonly rootId: string
   readonly title: string
   readonly description: string
+  /** Why this work exists — the premise the decomposer attached (the owner's initial judgement,
+   *  for a root). NOT the same as `description`, which is what the work must achieve. */
   readonly context: readonly string[]
+  /** What this work's executors recorded with `note_work` before splitting it: the blocker, the
+   *  paths ruled out, what the prerequisites have to settle. Oldest first; appended, never replaced. */
+  readonly analysisNotes: readonly string[]
+  /** The `attempts` value of the dispatch that wrote the LAST analysis note; `0` when there is none. */
+  readonly analysisAttempt: number
+  /** The direction changes this work was given, newest last — rendered between the goal and the
+   *  result so the two can be read together rather than as a mismatch. */
+  readonly corrections: readonly string[]
   readonly status: string
   readonly attempts: number
   readonly depth: number
@@ -74,4 +87,6 @@ export interface WorkViewProps {
   /** Delete one whole finished work tree by root; rejects with the host's reason, which the view shows. */
   readonly onDeleteTree: (rootId: string) => Promise<void>
   readonly loadDetail: (nodeId: string) => Promise<WorkNodeDetail>
+  /** Read the FULL text behind a spilled result; rejects with the host's reason, which the pane shows. */
+  readonly loadResult: (nodeId: string) => Promise<string>
 }

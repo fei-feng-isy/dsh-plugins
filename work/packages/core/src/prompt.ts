@@ -21,18 +21,29 @@ export function statusLabel(status: string | undefined): string {
 }
 
 /**
- * Whether a work should read as TROUBLED to its owner: three durable, never-reset histories — silent reclaims (`stalls`), failed attempts (`failures`), spawns that could not start (`spawnFailures`) — and only an unfinished work can be troubled.
- * The floors are the ENGINE's own, the same test `reportStall` uses, so both channels speak one vocabulary; the wording has to say this is HISTORY, because a flag that never clears would invite the owner to steer or cancel a work that is running fine, and both actions are destructive.
+ * Whether ONE node carries trouble worth telling the owner about: three durable, never-reset
+ * histories — silent reclaims (`stalls`), failed attempts (`failures`), starts that never got a
+ * worker (`spawnFailures`) — each at the ENGINE's own floor.
+ *
+ * ONE definition, because three channels ask this question: the owner-facing flag below, the stall
+ * heads-up (`reportStall`), and the failed-start heads-up. They used to disagree — the flag counted
+ * `spawnFailures` while the stall gate did not — so a work that could not get a worker started read
+ * as 「反复出过问题」 in `list_works` and the owner was never told why. Splitting the predicate out is
+ * what makes "both channels speak one vocabulary" true by construction rather than by comment.
+ */
+export function isTroubledNode(node: NodeRecord): boolean {
+  return node.stalls >= CAPACITY.maxStallsBeforeReport
+    || node.failures >= CAPACITY.maxAttempts - 1
+    || node.spawnFailures >= CAPACITY.maxAttempts - 1
+}
+
+/**
+ * Whether a work should read as TROUBLED to its owner: some unfinished node trips {@link isTroubledNode}.
+ * The wording has to say this is HISTORY, because a flag that never clears would invite the owner to steer or cancel a work that is running fine, and both actions are destructive.
  * Deliberately NOT here: which work it was, how often, and how much budget is left — those belong to the engine's retry policy, and the owner's two actions (`adjust_work`, `cancel_work`) take the whole work, not a node inside it.
  */
 export function isTroubled(nodes: readonly NodeRecord[]): boolean {
-  return nodes.some(
-    (node) =>
-      !TERMINAL.has(node.status)
-      && (node.stalls >= CAPACITY.maxStallsBeforeReport
-        || node.failures >= CAPACITY.maxAttempts - 1
-        || node.spawnFailures >= CAPACITY.maxAttempts - 1),
-  )
+  return nodes.some((node) => !TERMINAL.has(node.status) && isTroubledNode(node))
 }
 
 /** The basic facts a work-chain entry carries — deliberately not the full content; a correction is rendered here as well as on its own node because corrections are written on the ROOT, and the chain is the only channel that reaches every dispatch. */

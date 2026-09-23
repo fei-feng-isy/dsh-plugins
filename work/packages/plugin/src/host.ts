@@ -5,6 +5,8 @@
  *
  * @module @avantf/dsh-work/host
  */
+import { readFile } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -73,6 +75,11 @@ export interface NodeView {
   readonly depth: number
   readonly title: string
   readonly context: readonly string[]
+  /** The owner's corrections, newest last. Carried in the ROW projection (unlike `description` and
+   *  the submitted result) because a row has to say the work was steered: `title` is frozen at
+   *  creation, so a corrected work otherwise reads as "goal X, result of Y" with nothing between
+   *  them to explain the difference. The texts are few and short, and a row renders only the count. */
+  readonly corrections: readonly string[]
   readonly status: string
   readonly attempts: number
   readonly createdAt: number
@@ -87,6 +94,10 @@ export interface NodeDetail {
   readonly title: string
   readonly description: string
   readonly context: readonly string[]
+  /** The owner's corrections, newest last: the direction changes this work has been given, in the
+   *  order they arrived. Rendered as its own block so the goal above and the result below are read
+   *  in the light of them, and so a work can be traced back to why it ended up where it did. */
+  readonly corrections: readonly string[]
   /** What this work's executors recorded, oldest first; exposed so an operator reads the judgement a
    *  re-dispatched executor sees (the panel does not render it yet). */
   readonly analysisNotes: readonly string[]
@@ -652,7 +663,17 @@ export class AvantfWorkHost extends TypertRemoteService {
   }
 
   async finishWork(agent: Agent, rootId: string): Promise<MutationResult<NodeRecord>> {
-    const result = await this.requireTree().finish(rootId, agent.id)
+    const tree = this.requireTree()
+    // The same two checks `adjust_work` makes, in the same order: "this node is not a root" is not
+    // "no such work", and a child id reported as 不存在 sends the owner hunting for a typo that is
+    // not there. What was wrong was only the message — `tree.finish` looks the ROOT up by id, so a
+    // child fell through to `not-found`.
+    const node = tree.node(rootId)
+    if (node === undefined) return { ok: false, code: 'not-found', message: `工作 ${rootId} 不存在` }
+    if (node.id !== node.rootId) {
+      return { ok: false, code: 'not-root', message: `${rootId} 不是根工作；收尾只对根工作` }
+    }
+    const result = await tree.finish(rootId, agent.id)
     if (result.ok) {
       this.log.info(`finish_work: tree ${rootId} archived by ${agent.id}`)
       this.announceTree(rootId)
@@ -666,6 +687,13 @@ export class AvantfWorkHost extends TypertRemoteService {
     const tree = this.requireTree()
     // Ownership BEFORE any side effect: interrupting executors is observable and irreversible, so a
     // refused call must not have touched anybody's worker (`cancelTree` re-checks, too late).
+    // Existence and root-ness first, for the same reason `finish_work` does it: `treeOf` is keyed by
+    // ROOT id, so a child id used to come back as 「工作 X 不存在」 about a node that plainly exists.
+    const node = tree.node(rootId)
+    if (node === undefined) return { ok: false, code: 'not-found', message: `工作 ${rootId} 不存在` }
+    if (node.id !== node.rootId) {
+      return { ok: false, code: 'not-root', message: `${rootId} 不是根工作；取消只对根工作` }
+    }
     const owner = tree.treeOf(rootId)
     if (owner === undefined) return { ok: false, code: 'not-found', message: `工作 ${rootId} 不存在` }
     if (owner.ownerSessionId !== agent.id) {
@@ -763,6 +791,38 @@ export class AvantfWorkHost extends TypertRemoteService {
     return Promise.resolve({ trees: this.treesForSession(args.sessionId) })
   }
 
+  /**
+   * One node's FULL result, read back from where an over-long one was spilled. On demand, never part
+   * of `detail`: a result that was spilled is spilled because it is big, and `detail` is re-read on
+   * every engine change while the dialog is open.
+   *
+   * The locator is the spill backend's, and the backend's contract says it is OPAQUE — `SpillStore`
+   * defines `saveText` and nothing else, on purpose. The one backend in use (`dsh-spill-local`) hands
+   * out an absolute path, so that is the case this reads; anything else answers with an error and the
+   * pane keeps the locator for a reader that knows the substrate (which is what the locator is FOR).
+   */
+  @Remote('result')
+  async result(args: { sessionId?: string; nodeId: string }): Promise<{ text: string; error?: string }> {
+    const tree = this.tree
+    if (tree === undefined) return { text: '', error: '工作引擎尚未启动' }
+    const node = tree.node(args.nodeId)
+    if (node === undefined) return { text: '', error: `工作 ${args.nodeId} 不存在` }
+    const owner = tree.treeOf(node.rootId)
+    if (args.sessionId === undefined || owner === undefined || owner.ownerSessionId !== args.sessionId) {
+      return { text: '', error: '这个工作属于别的会话' }
+    }
+    // Never spilled: the node IS the whole result.
+    if (node.resultRef === null) return { text: node.result ?? '' }
+    if (!isAbsolute(node.resultRef)) {
+      return { text: '', error: `完整结果不在本机文件系统上（${node.resultRef}），请用这个位置去取` }
+    }
+    try {
+      return { text: await readFile(node.resultRef, 'utf8') }
+    } catch (cause: unknown) {
+      return { text: '', error: `读取完整结果失败：${cause instanceof Error ? cause.message : String(cause)}` }
+    }
+  }
+
   /** One node's full detail: a second read rather than more snapshot, since results run to 2 KB and the
    *  summary is re-read on every change. Children's results feed an aggregate's conclusion. */
   @Remote('detail')
@@ -806,6 +866,7 @@ export class AvantfWorkHost extends TypertRemoteService {
         title: node.title,
         description: node.description,
         context: node.context,
+        corrections: node.corrections,
         analysisNotes: node.analysisNotes,
         analysisAttempt: node.analysisAttempt,
         status: node.status,
@@ -918,6 +979,7 @@ export class AvantfWorkHost extends TypertRemoteService {
           depth: node.depth,
           title: node.title,
           context: node.context,
+          corrections: node.corrections,
           status: node.status,
           attempts: node.attempts,
           createdAt: node.createdAt,
@@ -949,8 +1011,12 @@ export class AvantfWorkHost extends TypertRemoteService {
         .map(([status, count]) => `${count} ${statusLabel(status)}`)
         .join('，')
       const closed = work.closed ? ' [已归档]' : ''
+      // The correction count, not the texts: this line is an index. What was asked for is read in the
+      // panel's detail or through `work_result`, both of which carry the corrections themselves.
+      const correctionCount = work.root?.corrections.length ?? 0
+      const corrected = correctionCount === 0 ? '' : ` ｜ 已纠偏 ${String(correctionCount)} 次`
       lines.push(
-        `- [${work.tree.rootId}] ${work.root?.title ?? '（根工作缺失）'} — ${statusLabel(work.root?.status)}${closed}（${counts}）`,
+        `- [${work.tree.rootId}] ${work.root?.title ?? '（根工作缺失）'} — ${statusLabel(work.root?.status)}${closed}（${counts}）${corrected}`,
       )
     }
     return lines.join('\n')
@@ -1191,7 +1257,18 @@ export class AvantfWorkHost extends TypertRemoteService {
       this.log.warn(`dispatch of ${node.id} failed: ${String(error)}`)
       // Charged to `spawnFailures`, not the work's `failures` budget: the node never got a worker. The
       // reclaim also starts the cooldown that holds it out of the next few pumps.
-      await tree.reclaim(node.id, 'spawn-failed').catch(() => undefined)
+      const reverted = await tree.reclaim(node.id, 'spawn-failed').catch(() => undefined)
+      // A node that cannot even get a worker started is trouble the owner can act on, at the SAME floor
+      // `isTroubledNode` reports at (one short of the ceiling that fails it). Without this it was the one
+      // trouble `list_works` flagged that never reached the owner as a message — the stall heads-up
+      // cannot see it, because a spawn-failed node is never `running` and its sweep only visits those.
+      if (reverted !== undefined && reverted.ok
+        && reverted.value.spawnFailures >= CAPACITY.maxAttempts - 1
+        // The same durable "told once" marker the stall heads-up uses: one node, one message about it,
+        // whichever way it is failing.
+        && await tree.claimStallReport(node.id)) {
+        this.notifySpawnTrouble(reverted.value)
+      }
     } finally {
       this.endStartAttempt(claimId)
     }
@@ -1293,6 +1370,18 @@ export class AvantfWorkHost extends TypertRemoteService {
       rootId,
       `工作 ${rootId} 已结束（${statusLabel(reason)}）。`,
       `root ${rootId} reached ${reason}`,
+    )
+  }
+
+  /** Tell the owner that one node cannot get a worker started at all. Same shape as the stall heads-up
+   *  — the engine keeps retrying on its own (with a cooldown), so this is information, not a request —
+   *  and the same durable marker keeps either kind of trouble to one message per node. */
+  private notifySpawnTrouble(node: NodeRecord): void {
+    this.deliverToOwner(
+      node.rootId,
+      `工作 ${node.id}（"${node.title}"）连续 ${String(node.spawnFailures)} 次没能启动执行者，已按退避重试；`
+      + `到 ${String(CAPACITY.maxAttempts)} 次仍起不来，这个工作会被判失败。`,
+      `failed starts on ${node.id} reported to the owner`,
     )
   }
 

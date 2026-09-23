@@ -8,7 +8,7 @@
  */
 import { Context } from '@deepseek-ai/cordis'
 import { validateJsonSchemaValue, type JsonSchemaNode } from '@deepseek-ai/dsh-tools'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AvantfWorkHost } from '../src/host.js'
@@ -245,6 +245,17 @@ export async function mount(
      */
     deferStart?: boolean
     /**
+     * Make every `subagents.startContinuable` reject, as an outage does. Charged to `spawnFailures`
+     * rather than the work's own failure budget, and the host owes the owner a heads-up once the
+     * streak reaches the engine's floor.
+     */
+    failStart?: boolean
+    /**
+     * Hand out the spilled artifact's real PATH, as `dsh-spill-local` does, instead of the opaque
+     * `spill://` locator. Only a test that reads a spill back through the host needs the shape.
+     */
+    spillToDisk?: boolean
+    /**
      * Make `typert.register` throw, as a registry whose contribution shape moved
      * between harness revisions does. `apply` must contain it.
      */
@@ -302,6 +313,8 @@ export async function mount(
   const listedSessions: { header: Record<string, unknown>; live: boolean }[] = []
   const live = new Map<string, StubAgent>()
   const spill = { saved: [] as string[], locator: 'spill://work-result', hint: 'read it with the read tool' }
+  /** Real spill files written by `saveText` when `spillToDisk` is on; removed by `dispose`. */
+  const spillFiles: string[] = []
 
   const owner = agent('owner')
   // An agent-scoped tool face: `restrict()` is only legal on a scoped context, and this
@@ -399,6 +412,11 @@ export async function mount(
       childId: string
       request: { prompt: { text: string }[]; parent: StubAgent; toolFilter?: { deny?: readonly string[] } }
     }) => {
+      // An outage: nothing can be materialized. Rejected before the dispatch is recorded, because
+      // no worker ever started — which is exactly what `spawnFailures` counts.
+      if (options.failStart === true) {
+        return Promise.reject(new Error('stubbed: no worker could be started'))
+      }
       const refused = (spec.request.toolFilter?.deny ?? []).filter((name) =>
         (options.unrestrictable ?? []).includes(name),
       )
@@ -489,6 +507,15 @@ export async function mount(
     ctx.provide('spillStore', {
       saveText: (input: { content: string }) => {
         spill.saved.push(input.content)
+        // The DEFAULT locator is the opaque `spill://` form, which is the contract: a locator is the
+        // backend's, and nothing may assume it is a path. `spillToDisk` models `dsh-spill-local`,
+        // the one backend that does hand out a path, for the test that reads a spill back.
+        if (options.spillToDisk === true) {
+          const file = join(mkdtempSync(join(tmpdir(), 'avantf-work-spill-')), 'result.txt')
+          writeFileSync(file, input.content, 'utf8')
+          spillFiles.push(file)
+          return Promise.resolve({ locator: file, bytes: input.content.length, retrievalHint: spill.hint })
+        }
         return Promise.resolve({ locator: spill.locator, bytes: input.content.length, retrievalHint: spill.hint })
       },
     })

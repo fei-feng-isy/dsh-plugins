@@ -93,6 +93,9 @@ const nodeSchema = z.object({
   depth: z.number(),
   title: z.string(),
   context: z.array(z.string()),
+  // In the row projection on purpose: a row marks a steered work, because the title it renders is
+  // the goal as created and a correction is the only thing explaining a differing result.
+  corrections: z.array(z.string()),
   status: z.string(),
   attempts: z.number(),
   createdAt: z.number(),
@@ -107,13 +110,15 @@ const treeSchema = z.object({
 })
 
 /**
- * The wire surface: `snapshot` the summary, `detail` one node's full record, `delete`
+ * The wire surface: `snapshot` the summary, `detail` one node's full record, `result` the FULL text
+ * behind a spilled one (on demand — a reader asks for it, the panel never prefetches it), `delete`
  * one finished tree, `watch` a revision on every change (the engine pushing, not polling).
  * Every method carries a session id because a Remote invocation has no caller identity.
  */
 export const descriptors: readonly InvocationDescriptor[] = [
   direct('snapshot', z.object({ sessionId: z.string().optional() })),
   direct('detail', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
+  direct('result', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('delete', z.object({ sessionId: z.string().optional(), rootId: z.string() })),
   direct('watch', z.object({ sessionId: z.string().optional() }), [], { stream: true }),
 ]
@@ -121,6 +126,16 @@ export const descriptors: readonly InvocationDescriptor[] = [
 /** The `snapshot` result, mirrored by the client-side contract. */
 export const snapshotResultSchema = z.object({
   trees: z.array(treeSchema),
+})
+
+/**
+ * One node's full result: the text plus, when it could not be read back, the reason. A failure is a
+ * message rather than a thrown error for the same reason `delete`'s is — "the locator is not a file
+ * this host can read" is an answer the pane has to be able to show beside the locator it keeps.
+ */
+export const resultTextSchema = z.object({
+  text: z.string(),
+  error: z.string().optional(),
 })
 
 /**
@@ -138,6 +153,8 @@ const detailNodeSchema = z.object({
   title: z.string(),
   description: z.string(),
   context: z.array(z.string()),
+  /** The owner's corrections, newest last — the direction changes this work was given. */
+  corrections: z.array(z.string()),
   // Carried so the wire shape matches the host's `NodeDetail`; a strict codec rejects extras.
   analysisNotes: z.array(z.string()),
   analysisAttempt: z.number(),
@@ -173,6 +190,8 @@ declaredSchemas.push(
   declare('deleteResult', deleteResultSchema),
   declare('detailargs', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   declare('detailResult', detailResultSchema),
+  declare('resultargs', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
+  declare('resultText', resultTextSchema),
   declare('watchargs', z.object({ sessionId: z.string().optional() })),
   declare('watchFrame', watchFrameSchema),
 )

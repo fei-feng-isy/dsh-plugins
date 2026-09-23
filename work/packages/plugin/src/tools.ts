@@ -67,6 +67,9 @@ const NO_CALLER: WorkToolResult = {
 
 function str(args: Record<string, unknown>, key: string): string {
   const value = args[key]
+  // Only the truly EMPTY string is refused here. Blank-but-not-empty text is the ENGINE's to judge —
+  // it has the field's meaning and a refusal code to say so (`no-analysis`, `blank-text`) — and
+  // collapsing the two layers here would leave those codes with no reachable producer.
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`work tool: parameter "${key}" must be a non-empty string`)
   }
@@ -320,13 +323,20 @@ export function defineWorkTools(host: AvantfWorkHost): ToolDefinition[] {
       const body = node.result ?? '（空结果）'
       const spilled = spillPointer(node)
       const pointer = spilled === '' ? '' : `\n\n完整结果落盘于：${spilled}`
+      // Read BEFORE the result on purpose: the title above is the goal as the owner created it, and
+      // a corrected work's result answers a later direction. Without this the two read as a mismatch
+      // — and this is the only place the owner can recover a correction made in an earlier session.
+      const corrections = node.corrections.length === 0
+        ? ''
+        : `\n\n纠偏（按先后顺序）：\n${node.corrections.map((entry) => `- ${entry}`).join('\n')}`
       return {
         ok: true,
-        summary: `[${node.id}] ${node.title} — ${node.status}\n\n${body}${pointer}`,
+        summary: `[${node.id}] ${node.title} — ${node.status}${corrections}\n\n${body}${pointer}`,
         data: {
           node_id: node.id,
           title: node.title,
           status: node.status,
+          corrections: [...node.corrections],
           result: node.result,
           result_ref: node.resultRef,
           result_hint: node.resultHint,

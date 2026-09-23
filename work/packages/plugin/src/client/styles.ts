@@ -49,6 +49,9 @@ const CSS = `
 .avwf-title-open .avwf-title-text { font-weight: 600; }
 .avwf-detail-hint { color: var(--dsw-alias-label-secondary); }
 .avwf-reused { color: var(--dsw-alias-label-secondary); border: 0.5px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: 3px; padding: 0 3px; }
+/* Same treatment as the reused tag: a bordered label, because both say "read this row differently"
+   rather than naming a state. Deliberately NOT a status hue — a correction is an event, not a status. */
+.avwf-corrected { border: 0.5px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: 3px; padding: 0 3px; }
 .avwf-row:hover .avwf-detail-hint { color: var(--dsw-alias-label-primary); }
 /* The badge is text: it wears a label colour and takes its status hue from the tint only.
    A status colour as TEXT does not survive both themes (light-theme green is 2.3:1). */
@@ -70,20 +73,62 @@ const CSS = `
 /* A disabled control is allowed to read as inert; an enabled one is not. */
 .avwf-delete:disabled { opacity: .4; cursor: default; }
 .avwf-delete-armed { color: var(--dsw-alias-state-error-primary, #d9534f); border-color: currentColor; }
-.avwf-detail { margin: 2px 0 6px; padding: 6px 8px; border-left: 2px solid color-mix(in srgb, currentColor 22%, transparent); background: color-mix(in srgb, currentColor 4%, transparent); border-radius: 0 4px 4px 0; display: flex; flex-direction: column; gap: 3px; }
-.avwf-detail-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.avwf-detail-id { font-family: ui-monospace, monospace; color: var(--dsw-alias-label-secondary); }
-.avwf-detail-label { margin-top: 3px; font-size: 11px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
 .avwf-detail-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
-.avwf-detail-title { font-weight: 600; }
 .avwf-detail-none { color: var(--dsw-alias-label-secondary); }
 .avwf-detail-pointer { color: var(--dsw-alias-label-secondary); font-family: ui-monospace, monospace; }
 .avwf-detail-failed { color: var(--dsw-alias-state-error-primary, #d9534f); }
-.avwf-detail-context { margin: 0; padding-left: 16px; line-height: 1.6; }
-.avwf-detail-child { margin-top: 3px; padding: 3px 6px; border-radius: 3px; background: color-mix(in srgb, currentColor 4%, transparent); }
+/* The corrections are the reader's own instructions, not background: full-strength text, where the
+   context list above stays secondary. */
+.avwf-detail-corrections { color: var(--dsw-alias-label-primary); }
+/* One entry of a list section — context / analysis / corrections — and the identical box a child's
+   result wears, because these are all multi-line prose and the box, not a bullet glyph, is what
+   separates them. Shared on purpose: the four sections have to read as ONE list style. */
+.avwf-detail-item { padding: 5px 9px; border-radius: 5px; background: color-mix(in srgb, currentColor 5%, transparent); }
+.avwf-detail-child { display: flex; flex-direction: column; gap: 2px; }
+/* The expanded full result wears the same box as every other long entry, so it reads as one block
+   instead of as prose that starts again after the locator. */
+.avwf-detail-full { padding: 6px 10px; border-radius: 5px; background: color-mix(in srgb, currentColor 4%, transparent); }
+/* A link-styled button: the panel's one "do this now" affordance. It wears the shell's LINK token,
+   not a status hue — a status colour as text does not survive both themes (see the badge note). */
+.avwf-link { align-self: flex-start; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-link, var(--dsw-alias-label-primary)); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.avwf-link:hover { text-decoration-thickness: 2px; }
+.avwf-link:disabled { color: var(--dsw-alias-label-secondary); cursor: default; text-decoration: none; }
 .avwf-detail-child-head { display: flex; align-items: center; gap: 6px; }
 .avwf-detail-child-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.avwf-detail-foot { margin-top: 4px; font-size: 11px; font-family: ui-monospace, monospace; color: var(--dsw-alias-label-secondary); }
+/* The detail dialog, built to the shell's 设置 panel: full-viewport mask + a centered card split
+   into a section rail and a scrolling content column. Layout numbers follow that panel where the
+   content is the same shape; the card is 1040x880, wider than the settings panel because the
+   reading matter here is a column of prose plus long lists, and the settings' 800px left the
+   content column cramped once the 176px rail took its share. */
+.avwf-dialog-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.avwf-dialog-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }
+.avwf-dialog-panel { position: relative; z-index: 1; display: flex; width: 1040px; height: min(880px, calc(100vh - 2 * max(24px, var(--dsh-frame-top-clearance, 24px)))); max-width: calc(100vw - 48px); border-radius: 24px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-elevation-prominent); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+.avwf-dialog-nav { flex: none; display: flex; flex-direction: column; gap: 18px; width: 176px; padding: 22px 12px 0; box-sizing: border-box; }
+.avwf-dialog-nav-title { padding: 0 12px; font-size: 17px; line-height: 26px; font-weight: 500; color: var(--dsw-alias-label-primary); }
+.avwf-dialog-nav-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.avwf-dialog-nav-cell { display: flex; align-items: center; gap: 8px; height: 42px; padding: 9px 12px; box-sizing: border-box; border: none; border-radius: 12px; background: transparent; cursor: pointer; font-family: inherit; font-size: 15px; line-height: 24px; color: var(--dsw-alias-label-primary); text-align: left; }
+.avwf-dialog-nav-cell:hover { background: var(--dsw-specific-sidebar-nav-item-hover, color-mix(in srgb, currentColor 6%, transparent)); }
+.avwf-dialog-nav-cell-active { background: var(--dsw-specific-sidebar-nav-item-active, color-mix(in srgb, currentColor 9%, transparent)); }
+.avwf-dialog-nav-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.avwf-dialog-nav-count { flex: none; font-size: 13px; color: var(--dsw-alias-label-secondary); }
+.avwf-dialog-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.avwf-dialog-header { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 20px 16px 10px 14px; box-sizing: border-box; }
+.avwf-dialog-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* The work's title IS the dialog heading. It wraps rather than elides: a title is the one piece of
+   text a reader must not have to hover to read, and titles run to 80 characters by construction. */
+.avwf-dialog-head-title { margin: 0; font-size: 17px; line-height: 1.45; font-weight: 600; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
+.avwf-dialog-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--dsw-alias-label-secondary); }
+.avwf-dialog-head-id { font-family: ui-monospace, monospace; }
+.avwf-dialog-head-meta .avwf-badge { font-size: 12px; }
+.avwf-dialog-close { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: none; border-radius: 30px; background: transparent; cursor: pointer; font: inherit; font-size: 16px; color: var(--dsw-alias-label-primary); }
+.avwf-dialog-close:hover { background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 6%, transparent)); }
+/* The body is the only scrolling region: the rail is short and the header is fixed, so a long
+   description or a long child list scrolls inside a panel that stays put — the point of the dialog.
+   15px/1.7, one step above the row text: this is the surface meant for actual reading, and 14px at
+   this width read as fine print. The section hints and the meta lines scale with it. */
+.avwf-dialog-body { flex: 1; min-height: 0; padding: 0 28px 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.7; }
+.avwf-dialog-body .avwf-meta { font-size: 13px; }
+.avwf-dialog-hint { color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 1.6; }
 `
 
 /**

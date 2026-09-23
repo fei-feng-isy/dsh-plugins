@@ -2,7 +2,8 @@
  * Host behaviour through the tool surface: ownership, the finish gate, the
  * worker tool face, spill rendering and turn conclusion.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { RefusalCode } from '@avantf/work-core'
 import { agent, callTool, executorFor, mount, noteAndSplit } from './mount.js'
 import { clientContribution } from '../src/wire.js'
 import { WORKER_TOOL_DENY } from '../src/faces.js'
@@ -41,6 +42,64 @@ describe('create_work authority', () => {
   it('admits a top-level session', async () => {
     const mounted = await mount()
     expect(await createTree(mounted)).not.toBe('')
+  })
+})
+
+describe('tool-level argument and caller refusals', () => {
+  it('answers a callerless call with no-caller, a code the refusal table knows', async () => {
+    // An audit found `no-caller` produced by all nine tools but absent from `RefusalCode`: any
+    // consumer that exhausts the union would silently drop it. Pin BOTH halves — the value is
+    // produced, and it is part of the table.
+    const mounted = await mount()
+    const callerless = await callTool(
+      mounted,
+      'create_work',
+      { title: 'T', description: 'd', analysis: [] },
+      undefined as never,
+    )
+    expect(callerless.ok).toBe(false)
+    expect(callerless.data?.['code']).toBe('no-caller')
+    // A type-level half: this line stops compiling if `no-caller` leaves `RefusalCode`.
+    const known: RefusalCode = 'no-caller'
+    expect(known).toBe(callerless.data?.['code'])
+  })
+
+  it('refuses whitespace-only content, the way note_work always has', async () => {
+    // "Must be a non-empty string" meant `length > 0`, so `"   "` was content: a blank title, a blank
+    // result, a blank correction — persisted, then rendered back into later prompts. `note_work`
+    // already refused the same thing with a code (`no-analysis`); the other three writes answer with
+    // the same SHAPE (`blank-text`), not with a thrown error.
+    const mounted = await mount()
+    const rootId = await createTree(mounted)
+
+    const blankTitle = await callTool(
+      mounted,
+      'create_work',
+      { title: '   ', description: 'd', analysis: [] },
+      mounted.owner,
+    )
+    expect(blankTitle.ok).toBe(false)
+    expect(blankTitle.data?.['code']).toBe('blank-text')
+
+    const blankAdjustment = await callTool(
+      mounted,
+      'adjust_work',
+      { root_id: rootId, adjustment: ' \n ' },
+      mounted.owner,
+    )
+    expect(blankAdjustment.ok).toBe(false)
+    expect(blankAdjustment.data?.['code']).toBe('blank-text')
+
+    const blankResult = await callTool(mounted, 'submit_work', { node_id: rootId, result: '\t' }, worker(mounted))
+    expect(blankResult.ok).toBe(false)
+    expect(blankResult.data?.['code']).toBe('blank-text')
+
+    // Nothing was written on the way to any of those refusals.
+    const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: rootId })
+    expect(detail.node?.corrections).toEqual([])
+    expect(detail.node?.result).toBeNull()
+    const works = await callTool(mounted, 'list_works', {}, mounted.owner)
+    expect(works.summary.match(/^\[/gmu) ?? []).toHaveLength(1)
   })
 })
 
@@ -193,9 +252,71 @@ describe('dispatch and reclamation', () => {
     // `before` is the snapshot taken immediately before the refusing sweep; that sweep must add nothing.
     expect(mounted.host.claimCounts()).toEqual(before)
   })
+
+  it('tells the owner when a node keeps failing to start a worker', async () => {
+    // The gap an audit found: a spawn-failed node is never `running`, so the stall sweep — the only
+    // heads-up the engine had — could not see it, while `list_works` still marked the work
+    // 「反复出过问题」. The message has to come from the dispatch failure itself, at the SAME floor
+    // (`isTroubledNode`), because otherwise the two channels report different things about one node.
+    //
+    // Only `Date` is faked: the counters and floors are the engine's own, and each failed start starts
+    // a real cooldown, so the clock is advanced between pumps the way an outage would advance it.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const mounted = await mount({ failStart: true })
+      // `deliverToOwner` only writes to a LIVE owner; a deferred message is a log line, which is the
+      // right production behaviour and a silent no-op in a test. Making it live is the assertion's
+      // precondition, not a convenience.
+      const ownerAgent = mounted.makeLive('owner')
+      const rootId = await createTree(mounted, 'Ship it')
+
+      // Drive the outage until the owner is actually TOLD — that message is the behaviour under test,
+      // and the counter crossing its floor is only how it gets there. Each failed start begins a real
+      // cooldown, so the clock is advanced between pumps the way an outage would advance it.
+      let guard = 0
+      while (ownerAgent.received.length === 0 && guard < 10) {
+        guard += 1
+        vi.setSystemTime(Date.now() + 11 * 60_000)
+        await mounted.flush()
+      }
+
+      const node = mounted.nodeFor(rootId)
+      expect(node?.spawnFailures).toBeGreaterThanOrEqual(4)
+      // Charged to the START budget, never to the work's own failure budget: an outage is not the
+      // work's fault, and the two ceilings are deliberately separate.
+      expect(node?.failures).toBe(0)
+      const told = ownerAgent.received.map((message) => JSON.stringify(message)).join('\n')
+      expect(told).toContain('没能启动执行者')
+      expect(told).toContain(rootId)
+      expect(told).toContain('5 次')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('the two terminal tools', () => {
+  it('says a child is not a root, instead of claiming it does not exist', async () => {
+    // `finish` looks the ROOT up by id, so a child id fell through to `not-found` — 「工作 X 不存在」
+    // about a node that plainly exists. `adjust_work` had the right shape already; all three owner
+    // tools now answer the same way.
+    const mounted = await mount()
+    const rootId = await createTree(mounted)
+    const split = await noteAndSplit(
+      mounted,
+      rootId,
+      [{ title: 'A', description: 'a', context: ['why'] }],
+      worker(mounted),
+    )
+    const child = String((split.data?.['created'] as string[] | undefined)?.[0] ?? '')
+    expect(child).not.toBe('')
+
+    const refused = await callTool(mounted, 'finish_work', { root_id: child }, mounted.owner)
+    expect(refused.ok).toBe(false)
+    expect(refused.data?.['code']).toBe('not-root')
+    expect(refused.summary).toContain('不是根工作')
+  })
+
   it('runs the aggregate pass to a done root and concludes each worker turn', async () => {
     const mounted = await mount()
     const rootId = await createTree(mounted)
@@ -359,6 +480,44 @@ describe('results', () => {
     expect((await callTool(mounted, 'finish_work', { root_id: rootId }, mounted.owner)).ok).toBe(true)
     expect((await callTool(mounted, 'work_result', { node_id: rootId }, mounted.owner)).ok).toBe(true)
   })
+
+  it('reads a spilled result back in full, and only for its own session', async () => {
+    // The panel cannot follow the locator itself (a browser will not open a filesystem path), so the
+    // host reads its own spill artifact. `spillToDisk` models `dsh-spill-local`, the backend whose
+    // locator IS a path — read, not assumed.
+    const mounted = await mount({ spillToDisk: true })
+    const rootId = await createTree(mounted)
+    const long = 'z'.repeat(2500)
+    await callTool(mounted, 'submit_work', { node_id: rootId, result: long }, worker(mounted))
+
+    const full = await mounted.host.result({ sessionId: mounted.owner.id, nodeId: rootId })
+    expect(full.error).toBeUndefined()
+    expect(full.text).toBe(long)
+    // The node itself still holds only the head — the read is the full text, not a bigger node.
+    expect(mounted.nodeFor(rootId)?.result).toHaveLength(2000)
+    // Someone else's session is refused, exactly like `detail`.
+    expect((await mounted.host.result({ sessionId: 'elsewhere', nodeId: rootId })).error).toContain('别的会话')
+    expect((await mounted.host.result({ sessionId: mounted.owner.id, nodeId: 'nope' })).error).toContain('不存在')
+  })
+
+  it('answers with the inline text when nothing was spilled, and says why when the locator is not a path', async () => {
+    // The default stub hands out an OPAQUE locator (`spill://…`), which is what the `SpillStore`
+    // contract allows. A host that cannot resolve it must say so and leave the locator readable —
+    // never silently show nothing, and never guess that a locator is a filename.
+    const mounted = await mount({ spill: false })
+    const inlineRoot = await createTree(mounted, 'inline')
+    await callTool(mounted, 'submit_work', { node_id: inlineRoot, result: 'short' }, worker(mounted))
+    expect(await mounted.host.result({ sessionId: mounted.owner.id, nodeId: inlineRoot }))
+      .toEqual({ text: 'short' })
+
+    const spilled = await mount()
+    const opaqueRoot = await createTree(spilled, 'opaque')
+    await callTool(spilled, 'submit_work', { node_id: opaqueRoot, result: 'q'.repeat(2500) }, worker(spilled))
+    const refused = await spilled.host.result({ sessionId: spilled.owner.id, nodeId: opaqueRoot })
+    expect(refused.text).toBe('')
+    expect(refused.error).toContain('不在本机文件系统上')
+    expect(refused.error).toContain(spilled.spill.locator)
+  })
 })
 
 describe('what the owner sees of a work', () => {
@@ -428,6 +587,28 @@ describe('cancel', () => {
     // `submit_work` can only be refused.
     expect(mounted.interrupts).toContain(claim)
   })
+
+  it('says a child is not a root, instead of claiming it does not exist', async () => {
+    // `treeOf` is keyed by ROOT id, so a child id used to come back as 「工作 X 不存在」 — and this
+    // tool's whole job is to act on the id it was handed, so a misleading refusal is expensive.
+    const mounted = await mount()
+    const rootId = await createTree(mounted)
+    const split = await noteAndSplit(
+      mounted,
+      rootId,
+      [{ title: 'A', description: 'a', context: ['why'] }],
+      worker(mounted),
+    )
+    const child = String((split.data?.['created'] as string[] | undefined)?.[0] ?? '')
+    expect(child).not.toBe('')
+
+    const refused = await callTool(mounted, 'cancel_work', { root_id: child }, mounted.owner)
+    expect(refused.ok).toBe(false)
+    expect(refused.data?.['code']).toBe('not-root')
+    expect(refused.summary).toContain('不是根工作')
+    // And nothing was interrupted on the way to that refusal.
+    expect(mounted.interrupts).toEqual([])
+  })
 })
 
 describe('the browser half\'s wire face', () => {
@@ -445,6 +626,7 @@ describe('the browser half\'s wire face', () => {
     expect(contribution.invocations.map((entry) => entry.method)).toEqual([
       'snapshot',
       'detail',
+      'result',
       'delete',
       'watch',
     ])
@@ -455,6 +637,8 @@ describe('the browser half\'s wire face', () => {
       'deleteResult',
       'detailargs',
       'detailResult',
+      'resultargs',
+      'resultText',
       'watchargs',
       'watchFrame',
     ])
