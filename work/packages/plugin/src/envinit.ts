@@ -289,7 +289,15 @@ async function loadCompatOnce(options: CompatLoadOptions): Promise<CompatRuntime
   // no managed `~/.avantf/env/compat/**`; a failure here degrades to a WARNING and the plugin still
   // mounts (see the module note: "cannot tell" is never "incompatible").
   try {
-    const runtime = runtimeFrom(options.compatModule ?? (framework as unknown as CompatModule), framework)
+    // Only the TEST SEAM is cast. `options.compatModule` is a partial module by construction — but
+    // `framework` is the REAL thing, and laundering it through `unknown` on its way into a hand-written
+    // `CompatModule` meant the compiler checked nothing: every gate signature (`provision`,
+    // `compatReport`, `registerMegaphone`, `schemaNamesFrom`, `verifyRegisteredFaces`, the
+    // `read*Versions` family) could change and this file would still build. The kit half is typed the
+    // same way through `EnvinitModule`, so the two halves behave alike only if this assignment is a
+    // real structural check of work's `CompatModule` against what base actually exports.
+    const gate: CompatModule = options.compatModule ?? framework
+    const runtime = runtimeFrom(gate, framework)
     loaded = runtime
     return runtime
   } catch (error) {

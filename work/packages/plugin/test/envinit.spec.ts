@@ -12,7 +12,13 @@
  * across tests would leak the first fake into every later one. Shapes that drift fail here instead
  * of on the one path where the `/work` report is the user's only channel.
  */
+import { readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
+
+/** `work/packages/plugin` — the source the shape assertions below read. */
+const pluginDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** Every call the fakes recorded; one shape per fake so a test can assert on any of them. */
 interface Calls {
@@ -285,5 +291,31 @@ describe('envinit loader', () => {
     expect(attempts).toBe(2)
     expect(runtime?.prefix).toBe('compat:')
     expect(runtime?.kit).toBe(flaky)
+  })
+})
+
+/**
+ * The gate seam has to be COMPILE-checked, not cast away.
+ *
+ * The kit half has always been typed through `EnvinitModule`; the gate half used to bypass the
+ * compiler with `framework as unknown as CompatModule`, so every gate signature (`provision`,
+ * `compatReport`, `registerMegaphone`, `schemaNamesFrom`, `verifyRegisteredFaces`, the
+ * `read*Versions` family) could change and this file still built — and the gate is precisely the half
+ * whose semantics are hardest to see in a diff. Only the TEST seam may be cast: it is a partial
+ * module by construction. No type-level rule can pin "do not cast", so the source shape is the guard
+ * (same device as the seat readers in `seat.spec.ts`).
+ */
+describe('the gate module is structurally checked', () => {
+  it('never routes the real base module through `unknown`', () => {
+    const source = readFileSync(join(pluginDir, 'src', 'envinit.ts'), 'utf8')
+    // Deliberately NOT comment-stripped: the obvious way to do that (`replace(/\/\*[\s\S]*?\*\//gu)`)
+    // is itself a trap — this file contains `env/compat/**` inside a `//` line, whose `/*` opens a
+    // "block comment" that swallows everything up to the next `*/`, i.e. the assignment under test.
+    // So the source comment above the assignment names the old cast without reproducing it verbatim,
+    // and the guard below matches the two things that must stay true.
+    expect(source).not.toMatch(/as\s+unknown\s+as\s+CompatModule/u)
+    // …and the real load still lands in a `CompatModule`-annotated binding, which is what makes the
+    // compiler compare work's hand-written subset against what base actually exports.
+    expect(source).toMatch(/:\s*CompatModule\s*=\s*options\.compatModule \?\? framework/u)
   })
 })
