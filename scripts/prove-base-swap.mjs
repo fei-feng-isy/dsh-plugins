@@ -171,6 +171,20 @@ for (const plugin of PLUGINS) {
     )
   }
   note(`${plugin.name}: no static base import, no kit entry identifier, no inlined kit declaration (${markers.length} marker names checked)`)
+
+  // The host entry must be the BUNDLED artifact, and self-contained except for the inlined bootstrap.
+  // Every check above also passes on a bare `tsc` emit of `src` (no static base import, no inlined kit)
+  // — which is exactly what a package-level `build` that stops at `tsc` leaves in `lib/index.js`, and
+  // that file is not what the host loads. `pnpm -r build` runs each package's own `build`, so this is a
+  // real state to catch here rather than in a pack gate much later.
+  const relatives = [...text.matchAll(/\bfrom\s*['"](\.[^'"]+)['"]/gu)].map((match) => match[1])
+  const strays = [...new Set(relatives.filter((specifier) => !specifier.includes('envinit-bootstrap')))]
+  if (strays.length > 0) {
+    fail(
+      `${plugin.name}: lib/index.js imports sibling module(s) ${strays.slice(0, 5).join(', ')} — it is not the `
+      + `bundled host entry (run \`pnpm build:dsh ${plugin.id}\`; a package-level \`tsc\` build does not bundle)`,
+    )
+  }
 }
 
 // ── B. a swapped base is what the plugin's own loader reaches ────────────────────────────────────

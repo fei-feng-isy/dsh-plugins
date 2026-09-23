@@ -305,8 +305,18 @@ for (const [label, value] of [['main', packed.main], ['types', packed.types]]) {
 }
 if (packed.exports?.['./client'] === undefined) fail('tarball manifest: exports["./client"] is missing (the browser half)')
 if (packed.dsh?.client?.platform !== 'web') fail('tarball manifest: dsh.client.platform must be "web"')
+// The npm page is the package's OWN README: assert it ships and that its title names this package.
+// (`files` lists README.md, so a missing one means the package directory lost it — and a copy/rename
+// slip would publish another package's page; nothing else in this chain would notice either.)
+const readme = tarFile('package/README.md')
+if (readme.trim() === '') {
+  fail(`${tarball}: missing README.md — the npm page has to be the package's own README`)
+} else if (readme.split('\n')[0]?.trim() !== `# ${String(packed.name)}`) {
+  fail(`${tarball}: README.md starts with ${JSON.stringify(readme.split('\n')[0])}, expected "# ${String(packed.name)}"`)
+}
+
 const contents = spawnSync('tar', ['-tzf', tarball], { encoding: 'utf8' }).stdout.split('\n')
-for (const entry of ['package/lib/index.js', 'package/lib/client.js', 'package/lib/types/index.d.ts', 'package/lib/dsh-build.json']) {
+for (const entry of ['package/lib/index.js', 'package/lib/client.js', 'package/lib/types/index.d.ts', 'package/lib/dsh-build.json', 'package/README.md', 'package/LICENSE']) {
   if (!contents.includes(entry)) fail(`tarball is missing ${entry}`)
 }
 // `lib/` is however many files the LAST tsdown run left there, and tsdown does not clean it: a build

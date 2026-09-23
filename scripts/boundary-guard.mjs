@@ -85,7 +85,14 @@ function walkFiles(dir, match) {
   return out
 }
 
-const sourceFiles = (dir) => walkFiles(dir, (name) => SOURCE.test(name))
+/**
+ * Vitest writes a temporary `<config>.timestamp-<ms>-<hash>.mjs` beside the config it was given and
+ * deletes it when the run ends — so a scan that runs WHILE a suite runs can list it and then fail to
+ * read it. It is build noise by definition, never a source of record.
+ */
+const VITEST_TEMP = /\.timestamp-\d+-[0-9a-f]+\.mjs$/u
+
+const sourceFiles = (dir) => walkFiles(dir, (name) => SOURCE.test(name) && !VITEST_TEMP.test(name))
 
 function readManifest(file) {
   try {
@@ -105,6 +112,16 @@ function ownedPackages(tree) {
   return names
 }
 
+/** Read a UTF-8 file, or `undefined` when it is gone (ENOENT only — anything else still throws). */
+function readIfPresent(file) {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
 /**
  * The file's CODE: comments blanked out one-for-one (newlines kept), so a specifier that appears only
  * in prose is not read as an import — several modules here document `await import('@avantf/…')` or
@@ -113,7 +130,11 @@ function ownedPackages(tree) {
  * This is a scanner, not a parser: it tracks quotes and escapes, nothing else.
  */
 function codeOf(file) {
-  const text = readFileSync(file, 'utf8')
+  // `undefined` when the file vanished between the listing and this read: another process may be
+  // creating and deleting its own scratch files (see `VITEST_TEMP`). A file that is gone has no
+  // specifiers, and that is not a violation.
+  const text = readIfPresent(file)
+  if (text === undefined) return undefined
   let out = ''
   let i = 0
   let mode = 'code'
@@ -164,6 +185,7 @@ function codeOf(file) {
  */
 function specifiersOf(file) {
   const text = codeOf(file)
+  if (text === undefined) return []
   const found = []
   for (const pattern of [
     /(?:^|[;\n}])\s*import\s[^;'"]*?from\s*['"]([^'"]+)['"]/gmu,
@@ -213,6 +235,7 @@ function isTypeOnlyClause(clause) {
 /** How a BUNDLED file imports the base by value — empty when it only takes types. */
 function baseValueImports(file) {
   const text = codeOf(file)
+  if (text === undefined) return []
   const found = []
   for (const match of text.matchAll(new RegExp(`(?:^|[;\\n}])\\s*(?:import|export)\\s+([^;'"]*?)from\\s*['"]${BASE}['"]`, 'gmu'))) {
     if (isTypeOnlyClause(match[1] ?? '')) continue

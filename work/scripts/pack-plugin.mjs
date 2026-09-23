@@ -395,6 +395,20 @@ for (const tarball of tarballs) {
   const files = listing.stdout ?? ''
   if (!files.includes('package/package.json')) failures.push(`${tarball}: missing package.json`)
   if (!files.includes('package/lib/index.js')) failures.push(`${tarball}: missing lib/index.js`)
+  // The npm page is the package's OWN README (npm shows `package/README.md`), so assert it ships and
+  // that its title names the package the tarball declares. A copy/rename slip would otherwise publish
+  // one plugin's page under another's name, and nothing else in this chain would notice.
+  const fromTarball = (entry) => spawnSync('tar', ['-xzOf', join(outDir, tarball), entry], { encoding: 'utf8' }).stdout ?? ''
+  const packed = JSON.parse(fromTarball('package/package.json'))
+  const readme = fromTarball('package/README.md')
+  if (!files.includes('package/LICENSE')) {
+    failures.push(`${tarball}: missing LICENSE — npm ships the license file beside package.json, and its absence is a compliance gap, not a cosmetic one`)
+  }
+  if (readme.trim() === '') {
+    failures.push(`${tarball}: missing README.md — the npm page has to be the package's own README`)
+  } else if (readme.split('\n')[0]?.trim() !== `# ${String(packed.name)}`) {
+    failures.push(`${tarball}: README.md starts with ${JSON.stringify(readme.split('\n')[0])}, expected "# ${String(packed.name)}"`)
+  }
 }
 
 if (failures.length > 0) {

@@ -25,12 +25,21 @@ const check = (condition, message) => {
 const packed = spawnSync('pnpm', ['pack', '--pack-destination', outDir], { cwd: repo, stdio: 'inherit', env: process.env })
 check(packed.status === 0, 'pnpm pack failed')
 
+// The npm page is the package's OWN README: it is in the required-entry list above, and its title has
+// to name THIS package — a copy/rename slip would otherwise publish the wrong page.
+function assertReadmeTitle(tarball) {
+  const readme = spawnSync('tar', ['-xzOf', join(outDir, tarball), 'package/README.md'], { encoding: 'utf8' }).stdout ?? ''
+  const first = readme.split('\n')[0]?.trim() ?? ''
+  check(first === `# ${String(manifest.name)}`, `README.md starts with ${JSON.stringify(first)}, expected "# ${String(manifest.name)}"`)
+}
+
 const tarballs = readdirSync(outDir).filter(file => file.endsWith('.tgz'))
 const expected = `${String(manifest.name).replace('@', '').replace('/', '-')}-${String(manifest.version)}.tgz`
 check(tarballs.length === 1, `expected 1 tarball, found ${String(tarballs.length)}`)
 check(tarballs[0] === expected, `tarball name ${String(tarballs[0])} does not match ${expected}`)
 
 for (const tarball of tarballs) {
+  assertReadmeTitle(tarball)
   const listing = spawnSync('tar', ['-tzf', join(outDir, tarball)], { encoding: 'utf8' }).stdout ?? ''
   for (const entry of [
     'package/package.json',

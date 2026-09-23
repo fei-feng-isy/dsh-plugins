@@ -26,7 +26,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/build.mjs",
     "typecheck": "node ../../scripts/link-dsh.mjs --no-bake && tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },

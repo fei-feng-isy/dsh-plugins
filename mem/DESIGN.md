@@ -271,7 +271,8 @@ DSH 的 Typert API 已经在我们脚下动过一次（`TypertSchema { schema }`
 ```
 avantf-mem/
 ├─ package.json · pnpm-workspace.yaml · tsconfig.base.json
-├─ DESIGN.md · README.md · AGENTS.md · LICENSE(MIT) · cordis.example.yml
+├─ DESIGN.md · README.md · AGENTS.md · cordis.example.yml
+│  （LICENSE 随包走：packages/plugin/LICENSE —— npm 页面与许可证文件都要在包目录里）
 └─ packages/
    ├─ retrieval-core/   # @avantf/mem-core —— 可替换检索底座
    ├─ core/             # @avantf/mem —— 引擎

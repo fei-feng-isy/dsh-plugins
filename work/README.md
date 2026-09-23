@@ -8,6 +8,10 @@ DSH（DeepSeek Harness）的**工作树引擎**插件：`@avantf/dsh-work`。
 
 主文档：[`docs/design/work-engine-plugin.md`](docs/design/work-engine-plugin.md)
 
+实现笔记（已知限制、诊断、构建细节；面向用户的发布 README 是
+[`packages/plugin/README.md`](packages/plugin/README.md)，npm 页面就是它）：
+[`docs/plugin-internals.md`](docs/plugin-internals.md)
+
 参考文档（上游 AvantF 设计的移植分析，主文档按需引用）：
 
 - [`docs/reference/worktree-port.md`](docs/reference/worktree-port.md) —— 工作树移植的逐层判定

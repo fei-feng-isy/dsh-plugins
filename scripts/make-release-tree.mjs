@@ -168,8 +168,25 @@ const excluded = (path) => compiledExclude.some((rx) => rx.test(path))
 
 const isBinary = (buffer) => buffer.includes(0)
 
+/** Untracked files are never projected (the source set is `git ls-files`). Say so LOUDLY: an untracked
+ * NEW file — a README, a source module — is exactly what a projection drops silently, and the release
+ * checkout then fails a gate far away from the cause. (That is how this warning came to exist: a new
+ * package README was left untracked, the projection deleted the old one, and the rc pack gate — which
+ * asserts the tarball carries its own README — blew up on a package with no README at all.) */
+function warnUntracked() {
+  const out = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], {
+    cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  })
+  const untracked = out.split('\0').filter((file) => file !== '')
+  if (untracked.length === 0) return
+  console.error(`warning: ${String(untracked.length)} untracked file(s) are NOT projected — \`git add\` them if they belong in the release:`)
+  for (const file of untracked.slice(0, 10)) console.error(`  ${file}`)
+  if (untracked.length > 10) console.error(`  …and ${String(untracked.length - 10)} more`)
+}
+
 /** The whole projected tree: relative path → Buffer. */
 function projectTree(stamps) {
+  warnUntracked()
   const files = new Map()
   const missing = []
   const paths = [...new Set([...trackedFiles(repo), 'README.md'])].sort()
