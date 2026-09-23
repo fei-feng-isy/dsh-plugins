@@ -73,6 +73,14 @@ pnpm 关掉 `autoInstallPeers` 或 yarn 不会自动装，那时要在宿主/pro
 `"@avantf/dsh-plugin-base": "^0.2.0"`。宿主自己提供的 peer（宿主内部包）才标
 `peerDependenciesMeta.optional`，避免包管理器跑去 registry 拉一份宿主内部实现；缺 base 时插件仍降级挂载。
 
+**版本承诺（目标形态，见 [docs/INTERFACE.md](docs/INTERFACE.md)）**：`@avantf/dsh-plugin-base` 的公开接口
+是它 `.` 上的导出（值 + 类型）以及 `docs/DESIGN.md` §7 那几张协议面版本表。接口**变了**才提 major（并升
+接口编号）；只改业务流程或可观察行为——接口不变——只提 minor；纯修复提 patch。因此插件声明一次区间
+（`^1.0.0`）之后，base 的 minor/patch 会自动送达，不必同批改插件。**现状**：base 还在 0.x，而 0.x 的
+caret 不跨 minor，所以今天每次 base minor 都要两个插件同批放宽 peer 与 `supportedRange`；接口编号与
+快照门禁尚未落地（[docs/INTERFACE.md](docs/INTERFACE.md) §7 列出了待做项与落地顺序）。写插件时请只依赖 `.` 上的东西（`./internal` 不承诺稳定），并把
+顺序敏感的参数当对象传——那是接口面的一部分。
+
 ### 2. 内联 bootstrap
 
 唯一需要进入插件产物的是框架的零依赖 `bootstrap`：它只把这份框架解析出来并校验版本，**不安装任何东西**。

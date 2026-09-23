@@ -167,6 +167,34 @@ pnpm version:prune           # 把私有 manifest 上多余的 version 删掉（
 - **版本不是发布**：`mem/CHANGELOG.md` 的版本节仍要自己切（mem 自己的 release gate 检查第一个版本节
   == 当前版本、`[Unreleased]` 为空）。
 
+### 版本号说什么：接口 / 行为 / 修复
+
+版本号不是"改了东西"的计数器，三件事分开表达（完整设计与落地顺序见
+`base/plugin-base/docs/INTERFACE.md`，`DESIGN.md` §9 只留一条指针）：
+
+| 变更 | 版本 | 插件是否必须同批改 |
+| --- | --- | --- |
+| **接口**：base `.` 的导出集合、类型形状、顺序敏感参数的 slot 含义、语义契约 | **major**（1.0 → 2.0），并 `INTERFACE_VERSION` +1、新增 `api/interface-vN.json` | 是 |
+| **业务流程 / 可观察行为**（插件自己的测试断言的那些） | **minor**（1.0.0 → 1.1.0） | 否 |
+| **纯修复**，无可观察变化 | patch | 否 |
+
+**现状（别把目标当事实）**：base 现在还是 0.x，而 0.x 的 caret **不跨 minor** —— 所以今天"只发 base
+就能修好共享代码"只对 patch 成立；base 换 minor 必须**同批**放宽两个插件的 peer 与 `devDependencies`
+**以及** `base/plugin-base/src/bootstrap.ts` 的 `supportedRange`（0.1.0 → 0.2.0 就是这么走的）。
+到了 `1.0.0`，`^1.0.0` 自动吃掉 1.x 的 minor/patch，上表后两行才真正成立。
+
+**已经机械化的部分**：`.` 的导出集合由 `base/plugin-base/test/public-surface.spec.ts` 的 equality
+白名单钉住（子集断言抓不到"多导出了一个"）；插件 `import type` base 并按
+`typeof import('@avantf/dsh-plugin-base')` 定型，所以 base 改签名会让插件 typecheck 红 —— 接口变更必然
+牵动插件，这是好事而不是负担。**还缺**：`INTERFACE_VERSION`、`api/interface-v*.json` 快照与"变了就必须
+升编号"的门禁、base 拥有的接口类型（插件不再用整个命名空间类型）、运行期门禁从"包版本区间"改成"接口
+编号"。
+
+改 `.` 面时适用两条写法规则（都是评审踩出来的）：**顺序敏感的语义必须用具名对象承载**
+（`resolveDataHome(explicit, env, common)` 那种位置参数让"数据根按哪个 slot 解析"这种语义变化既不可检
+也不可读）；**可观察的文案归调用方**（`compatReport` 的尾行曾经硬编码中文，一个通用发布包不该替调用方
+决定语言）。
+
 ## 要跑的门禁
 
 | 命令 | 它证明什么 |

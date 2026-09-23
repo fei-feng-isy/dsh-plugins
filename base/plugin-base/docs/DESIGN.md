@@ -216,6 +216,10 @@ identity 会分叉。**发布顺序是 base 先于两个插件**：同仓的发�
 （`^0.2.0`）要足够宽以接受 base 的补丁（0.x 的 caret 不跨 minor，换 minor 要同批放宽它），否则这条会被
 peer 区间卡死。
 
+上面这张表里的"框架 API"一轴用的是**包版本**，那是过渡状态：它把发版频率当成了接口稳定性。
+[INTERFACE.md](./INTERFACE.md) 给出目标形态 —— 接口冻结、接口编号与包版本解耦，于是"接口变 ⇒ major、
+行为变 ⇒ minor、修复 ⇒ patch"；本节那四张表就是那套做法在协议面的先行样板。
+
 ## 8. 公共 API
 
 ```ts
@@ -263,3 +267,12 @@ interface ProvisionerOptions {
 
 内置 provider：`npmPackageProvider()`、`binaryArchiveProvider()`、`modelCacheProvider()`。
 `./conformance` 与 `./preset` 的用法见 [README.md](../README.md)。
+
+## 9. 接口冻结
+
+公开接口由什么构成、接口编号、快照门禁，以及"接口变 ⇒ major ／ 行为变 ⇒ minor ／ 修复 ⇒ patch"的完整
+设计与实现清单，住在 [INTERFACE.md](./INTERFACE.md)。这里不再重复它。
+
+与本节这张表的关系：§7 的四张协议面版本表（item `schemaVersion`、`layout.json`、`status.json`、
+`declared.json`）是**同一套思路在协议面的先行样板** —— 每一面都有编号、都比"包版本"更精确、不兼容时的
+动作都写明了对应的一行；`INTERFACE.md` 是把同一套做法搬到 API 面（`.` 的导出、类型形状、语义契约）。
