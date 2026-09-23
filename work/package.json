@@ -19,9 +19,7 @@
     "clean": "node ../scripts/clean.mjs --group work",
     "workers:usage": "node scripts/worker-usage.mjs",
     "workspace:doctor": "node scripts/workspace-doctor.mjs",
-    "spike:cold-resume": "node scripts/spike-cold-resume.mjs",
-    "release:tree": "node scripts/make-release-tree.mjs",
-    "sync:rc": "bash scripts/sync-release-repo.sh"
+    "spike:cold-resume": "node scripts/spike-cold-resume.mjs"
   },
   "license": "MIT"
 }

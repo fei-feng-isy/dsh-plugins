@@ -22,6 +22,8 @@
     "guard": "node scripts/boundary-guard.mjs",
     "proof:base-swap": "node scripts/prove-base-swap.mjs",
     "proof:base-swap:mount": "node scripts/prove-base-swap.mjs --mount",
+    "release:tree": "node scripts/make-release-tree.mjs",
+    "sync:rc": "bash scripts/sync-release-repo.sh",
     "clean": "node scripts/clean.mjs"
   },
   "license": "MIT"

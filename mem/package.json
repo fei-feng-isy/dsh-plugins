@@ -23,9 +23,7 @@
     "bench:reinforce": "node scripts/bench-reinforce.mjs",
     "clean": "node ../scripts/clean.mjs --group mem",
     "rebuild:dsh": "pnpm run build:dsh",
-    "cleanup:dsh": "bash scripts/cleanup.sh",
-    "release:tree": "node scripts/make-release-tree.mjs",
-    "sync:rc": "bash scripts/sync-release-repo.sh"
+    "cleanup:dsh": "bash scripts/cleanup.sh"
   },
   "license": "MIT"
 }

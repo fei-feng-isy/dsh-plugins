@@ -233,39 +233,30 @@ DSHHARNESS=/nonexistent pnpm build:dsh   # 反证：没有任何编译路径会�
 `note:`，都不是硬失败——checkout 领先于 pin 是重新对齐前的正常状态）；没有 checkout 时什么都不打。
 也可单独跑 `node scripts/check-preset-drift.mjs`（有漂移时 exit 1）。
 
-发布仓库（`avantf-mem-rc`）的整棵树由本仓库生成，不要手工编辑：
+发布仓库 `../dsh-plugins-rc` 由**整仓投影**生成（`dsh-plugins` 的每个受控文件原样进去，不再是单插件子树），
+不要手工编辑。入口在**仓库根**（`pnpm sync:rc` / `pnpm release:tree`），不是本子树：
 
 ```bash
 pnpm sync:rc                       # 预览 → 确认 → 同步 → 复查 rc 已等于投影（推荐入口）
 pnpm sync:rc --dry-run             # 只看漂移，不改任何东西（有漂移则 exit 1）
-pnpm sync:rc --version 0.1.1       # 切版本：把 7 个 manifest 盖成新版本号
-pnpm sync:rc --yes --commit        # 非交互 + 在 rc 里提交 "release: sync from avantf-mem@<sha>"
-pnpm sync:rc --yes --gate          # 同步后在 rc 里跑完整发布门禁（含 pack --plugin --mount）
+pnpm sync:rc --version mem=0.1.2    # 切版本：把 mem 这一组的 manifest 盖成新版本号
+pnpm sync:rc --version 0.1.2       # 不带组名 = 三个组（base/mem/work）一起盖
+pnpm sync:rc --yes --commit        # 非交互 + 在 rc 里提交 "release: sync from dsh-plugins@<sha>"
+pnpm sync:rc --yes --gate          # 同步后在 rc 里跑三个包的完整发布门禁
 ```
 
 `pnpm sync:rc` 默认**保留 rc 当前的版本号**（重复同步不会悄悄挪动发布版本），只在你显式传
 `--version` 时才盖新版本；它不会碰 `~/.avantf`、不会删 rc 未跟踪的文件（`node_modules/`、`lib/`、`dist/`），
-不传 `--commit`/`--gate` 就只做投影 + 复查。
+不传 `--commit`/`--gate` 就只做投影 + 复查。整仓投影意味着 rc 里**连测试都在**：同一个仓库形态、同一套
+门禁，投影本身不需要剥离规则（唯一不进 rc 的是 RC 工具链自己：`scripts/make-release-tree.mjs` 与
+`scripts/sync-release-repo.sh`），`pnpm-lock.yaml` 也原样投影（组版本号不写进锁文件）。
 
-底层工具是同一个生成器，需要更细的控制时直接用：
-
-```bash
-pnpm release:tree --into ../avantf-mem-rc                      # 只报告差异
-pnpm release:tree --into ../avantf-mem-rc --apply --version 0.1.1
-pnpm release:tree --out /tmp/release-tree --version 0.1.1      # 生成一棵全新的树
-```
-
-剥离规则与逐文件转换都写在 `scripts/make-release-tree.mjs` 顶部的表里：`test/**`、
-`tsconfig.test.json`、`vitest.config.ts` 与仓库内的开发文档（`DESIGN.md`、`docs/`、`CHANGELOG.md`、
-`AGENTS.md`）与开发专用的入口包 `packages/cli`、`packages/mcp` 不进发布树（发布物只有一个自包含插件包）；
-`release/README.md` 是**唯一**面向使用者的说明，同一份文案投影到发布仓库的
-`README.md`（仓库首屏）与 `packages/plugin/README.md`（npm 页面，所以插件的 `files` 里有它），改一处即可；
-两份都是**真实文件**（不用软链接：Windows 的 `core.symlinks=false` 会把链接检出成一行路径文本，托管平台的
-软链接 README 渲染又是版本相关的；内容一致性由单一来源 + 漂移检查保证）；
-插件的 manifest 在两棵树里是**同一个形态**（引擎与 `react`/`react-dom` 放 `devDependencies` 以便内联，
-`dependencies` / `optionalDependencies` 就是引擎的运行时依赖面；家族侧不再有 `dependencies` 例外——底座
-`@avantf/dsh-plugin-base` 是 **peer**（不随包发布；本仓另在 `devDependencies` 里声明一条以便 `pnpm install`
-装上）），投影只做断言、不再搬运 —— 目标树里 `pnpm-lock.yaml` 重新生成。本仓库的 `README.md`（开发向）与 `docs/**` 都不会发布。
+本包的 npm 页面就是 `packages/plugin/README.md` 本身（真实文件，`files` 里有它）；rc 仓库首屏的
+`README.md` 由生成器写（本仓库没有根 README 可复制）。插件的 manifest 在 rc 里与开发树**逐字相同**
+（引擎与 `react`/`react-dom` 放 `devDependencies` 以便内联，`dependencies` / `optionalDependencies` 就是
+引擎的运行时依赖面；底座 `@avantf/dsh-plugin-base` 是 **peer**，本仓另在 `devDependencies` 里声明一条以便
+`pnpm install` 装上）。本仓库的 `README.md`（开发向）与 `docs/**` 都会进 rc（rc 是同一个仓库的投影，不是
+一份精简的发布物）。
 
 > 这份 manifest 形态是**构建正确性的一部分**，不是发布树的特例：tsdown 的规则是"production 段保持
 > import，其余全部内联"，所以引擎一旦回到 `dependencies`，`lib/index.js` 就会悄悄**不内联**——这种产物
@@ -347,10 +338,10 @@ node packages/cli/lib/index.js query "张伟" --kind all
 | `pnpm pack:plugin` | 打出"用户安装的那**一个**包"并断言自包含：引擎已内联、依赖里没有 `@avantf/*`、`catalog:` 已落成真实范围、`files` 含 `lib`+`README.md` | `dist/avantf-dsh-mem-<version>.tgz` |
 | `pnpm pack:plugin --mount` | 再把 tarball 解进临时 profile **真实安装并挂载**（需要已安装的全局 dsh） | `--out <dir>` 换输出目录，`--keep` 失败时保留 scratch |
 | `pnpm release:check` | 发布门禁一条命令：preflight（6 包版本一致 / CHANGELOG 已切 / 只 plugin 可发布 / 声明了 DSH peer）→ frozen-lockfile → build → typecheck → test → 插件 typecheck → `build:dsh`+mount smoke | 打 tag 前必跑；`--allow-uncut` 用于切版本节之前的预跑 |
-| `pnpm release:tree --into <rc>` | 把本仓库**投影**成发布树，只报告漂移（有漂移 exit 1） | 只管理 rc 跟踪的文件 |
-| `pnpm release:tree --into <rc> --apply --version 0.1.1` | 同步发布树并盖版本号（7 个 manifest） | 规则见 `scripts/make-release-tree.mjs` 顶部 |
-| `pnpm release:tree --out <dir> --version 0.1.1` | 生成一棵全新的发布树（含 `pnpm install --lockfile-only` 重生成锁文件） | |
-| `pnpm sync:rc …` | 上面的封装：预览 → 确认 → 投影 → 复查（`--dry-run`/`--yes`/`--version`/`--commit`/`--gate`/`--rc <dir>`） | 默认保留 rc 当前版本号 |
+| `pnpm release:tree --into <rc>`（**仓库根**） | 把 `dsh-plugins` **整仓**投影成发布树，只报告漂移（有漂移 exit 1） | 只管理 rc 跟踪的文件 |
+| `pnpm release:tree --into <rc> --apply --version mem=0.1.2` | 同步发布树并盖 mem 这一组的版本号（9 个 manifest） | 规则见根 `scripts/make-release-tree.mjs` 顶部 |
+| `pnpm release:tree --out <dir>` | 生成一棵全新的发布树（含生成的根 `README.md`） | |
+| `pnpm sync:rc …`（**仓库根**） | 上面的封装：预览 → 确认 → 投影 → 复查（`--dry-run`/`--yes`/`--version <组>=<v>`/`--commit`/`--gate`/`--rc <dir>`） | 默认保留每个组在 rc 里的版本号 |
 | `pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks` | 真正发布（**只这一个包**） | 其余 5 个是 `private: true`，`pnpm -r publish` 碰不到 |
 
 #### 四、基准与辅助

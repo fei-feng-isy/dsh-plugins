@@ -75,15 +75,17 @@ git add -A && git commit -m "chore(release): X.Y.Z"
 git tag -a vX.Y.Z -m "avantf-mem X.Y.Z"
 git push origin master --follow-tags
 
-# 5) 同步发布树（投影 + 盖版本 + 提交；--gate 别放这一步，见 §2 的原生依赖说明）
-pnpm sync:rc --version X.Y.Z --yes --commit
-# 发布树装出原生模块，再单独跑它自己的门禁（含 pack --mount）
-( cd ../avantf-mem-rc && (pnpm install --frozen-lockfile || pnpm rebuild) && pnpm release:check )
-git -C ../avantf-mem-rc tag -a vX.Y.Z -m "avantf-mem X.Y.Z"
-git -C ../avantf-mem-rc push --follow-tags
+# 5) 同步发布树（整仓投影 + 盖 mem 这一组的版本 + 提交；--gate 别放这一步，见 §2 的原生依赖说明）
+pnpm sync:rc --version mem=X.Y.Z --yes --commit
+# 发布树装出原生模块，再单独跑它自己的门禁（含三个包的门禁与 pack --mount）
+( cd ../dsh-plugins-rc && (pnpm install --frozen-lockfile || pnpm rebuild) \
+    && pnpm release:check:base && pnpm release:check:mem && pnpm release:check:work )
+# 三个包在同一个 rc 仓库里，tag 带组前缀，避免 vX.Y.Z 撞在一起
+git -C ../dsh-plugins-rc tag -a mem-vX.Y.Z -m "avantf-mem X.Y.Z"
+git -C ../dsh-plugins-rc push --follow-tags
 
 # 6) 只发一个包（registry 必须显式给；token 见 §2）
-( cd ../avantf-mem-rc && pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks \
+( cd ../dsh-plugins-rc && pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks \
     --registry https://registry.npmjs.org/ )
 
 # 7) 按 REGISTRY 反向确认，不要只信 CLI 的 ✅
@@ -105,8 +107,10 @@ granular token（§2 的发布前提 2）。
 - 开发树里的 8 个包（`@avantf/mem-contract` / `mem-core` / `mem` / `mem-convert` / `mem-provision` / `mem-cli` / `mem-mcp` / `dsh-mem`）
   **共用同一个版本号**：插件是引擎的薄壳（且把引擎内联进自己的 `lib/index.js`），版本各走各的只会制造
   "这是哪一版的引擎"的问题。`release:check` 的 preflight 会拦下不一致（清单从目录派生）。
-- **发布树只装 4 个包**：`contract` / `retrieval-core` / `core` / `plugin`。`packages/cli` 与 `packages/mcp`
-  是开发专用的源码入口，`sync:rc` 会把它们整目录排除——发布物永远是一个自包含的插件包，描述里也不再提它们。
+- **发布树是 `dsh-plugins` 的整仓投影**（含 `packages/cli` 与 `packages/mcp`、含测试与文档）：
+  投影只是把同一个仓库形态搬进 rc，所以 rc 里能跑与开发树相同的门禁；唯一不进 rc 的是 RC 工具链自己
+  （`scripts/make-release-tree.mjs`、`scripts/sync-release-repo.sh`）。真正发布出去的仍然只有一个自包含插件包
+  `@avantf/dsh-mem`（外加底座 peer），引擎与开发入口都是 `private: true`。
 - **只发布 `@avantf/dsh-mem` 一个包**。另外 7 个在 manifest 里是 `private: true`（workspace-only），
   `pnpm -r publish` 碰不到它们；preflight 会断言"可发布的只有 plugin"，所以既不会误发引擎，
   也不会出现"插件悄悄变成 private 而没人发现"。DSH 用户装的是这一个插件包**加上**它的 peer 底座
@@ -160,21 +164,21 @@ granular token（§2 的发布前提 2）。
   需要发插件）。发布顺序因此是：**先发底座、再发插件**——底座版本往前走时先发底座。
   要就地联调底座，用 `DSH_ENVINIT=<checkout> pnpm build:dsh`（不是工作区 `overrides`）；无论怎样，
   **打包/投影前工作区里都不能留 `link:`/`file:`**（`pack-plugin.mjs` 拒绝仍带这类 specifier 的 tarball，
-  `make-release-tree.mjs` 拒绝投影这样的工作区）。
+  根 `scripts/make-release-tree.mjs` 拒绝投影这样的工作区）。
   底座的 zod peer 已放宽到 `>=4.4.3 <5`；`zod` 在**根** `pnpm-workspace.yaml` 的 catalog 里统一成一份
   （合并后是 `4.6.5`，跟随已安装 dsh 的版本），发布底座时不要把它改回只接受单一小版本。
 
 **发布树要先装一次原生依赖**（2026-09-21 发 0.1.1 实测）：`release:check` 的第一步是
 `pnpm install --frozen-lockfile --ignore-scripts`，它只证明锁文件一致，**不会构建原生模块**。一棵全新
-（或从未装过依赖）的 `avantf-mem-rc` 上，mount smoke 会因为 `better-sqlite3` 缺 binding 而走降级挂载 →
+（或从未装过依赖）的 `dsh-plugins-rc` 上，mount smoke 会因为 `better-sqlite3` 缺 binding 而走降级挂载 →
 判 FAIL；症状还可能被 mount-smoke 自身的错误行掩盖。先装全再跑门禁：
 
 ```bash
-cd ../avantf-mem-rc
+cd ../dsh-plugins-rc
 pnpm install --frozen-lockfile     # 注意：不带 --ignore-scripts
 # node_modules 已存在时 install 会短路（"Lockfile is up to date"），此时用：
 pnpm rebuild
-pnpm release:check
+pnpm release:check:base && pnpm release:check:mem && pnpm release:check:work
 ```
 
 ## 3. 数据、升级与回滚

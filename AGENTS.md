@@ -172,11 +172,12 @@ pnpm release:check && node scripts/mount-smoke.mjs
 - 两个真正一模一样的辅助被提到 `scripts/lib/`，各自的副本已**删除**；`mem/scripts/*` 与
   `work/scripts/*` import 根上那两份（不再有重复文件留存）。
 - 插件的流水线**刻意**留在各自插件里 —— `link-dsh` / `link-envinit` / `mount-smoke` /
-  `pack-plugin` / `release-check` / `make-release-tree` 有 80 %+ 是不同的实现，参数是各插件自己
-  的包集合、自己的打包流水线（mem：`tsc` + 钉住的 tsdown client preset；work：`tsc` + esbuild
-  + core 类型搬迁）和自己的 item 清单。把脚本合成一个参数化的，就得为每处差异加一个 switch，
-  而那正是本仓库拒绝的“假抽象”。共享的**骨架**住在 `scripts/lib/` 和 `base/` 里；真正一模一样
-  的脚本才会被提上去，比如上面那两个。
+  `pack-plugin` / `release-check` 有 80 %+ 是不同的实现，参数是各插件自己的包集合、自己的打包
+  流水线（mem：`tsc` + 钉住的 tsdown client preset；work：`tsc` + esbuild + core 类型搬迁）和
+  自己的 item 清单。把脚本合成一个参数化的，就得为每处差异加一个 switch，而那正是本仓库拒绝的
+  “假抽象”。共享的**骨架**住在 `scripts/lib/` 和 `base/` 里；真正一模一样的脚本才会被提上去 ——
+  两个辅助，以及**整仓投影**（`make-release-tree.mjs` + `sync-release-repo.sh`，见下）都是这样
+  提上来的：投影是仓库级操作，没有“每个插件一份”的版本。
 - `mem/scripts/release-check.mjs` 仍然是 mem 范围内的门禁（它只断言那里的
   `mem/packages/plugin` 可发布）；**全仓库**的断言 —— 恰好
   `@avantf/dsh-plugin-base`、`@avantf/dsh-mem`、`@avantf/dsh-work`，其余 private —— 在
@@ -184,23 +185,25 @@ pnpm release:check && node scripts/mount-smoke.mjs
 - 有且只有**一个** `pnpm-workspace.yaml` 和一个 catalog：根上那份。按子树的 workspace 文件
   （`mem/pnpm-workspace.yaml`、`work/pnpm-workspace.yaml`、`base/*/pnpm-workspace.yaml`）已删除，
   所以 `pnpm -C work …` 走的是合并后的工作区（用 `pnpm -C work list` 验证）。
-- **已知遗留（再次使用 RC 树流程之前需要处理）。** 按子树的 release-tree 脚本
-  （`mem/scripts/make-release-tree.mjs`、`work/scripts/make-release-tree.mjs`）与
-  `*/scripts/sync-release-repo.sh` 仍然按**合并前**的布局投影：一个子树一棵、子树自己一份
-  `pnpm-workspace.yaml`。它们不属于验收门禁，且由于投影有 80 % 不同而被刻意留在各子树；
-  `pnpm release:tree` / `pnpm sync:rc` 必须在下一次 RC 之前重新参数化到合并后的根工作区。
-  **重参数化时要一起解决的三个具体成因**（2026-09-22 审查实测）：
-  1. 生成器读 `<tree>/pnpm-workspace.yaml`，合并后它只在根上 → ENOENT。现在**优雅退出**：
-     生成器把崩溃/拒绝都归到 exit 70（`CRASH_EXIT`），`sync-release-repo.sh` 只把 exit 1 当
-     「有漂移」——从前崩溃也是 1，于是它打印「a sync would apply it」然后什么都没应用。
-  2. 投影树里没有 workspace 文件，而各包只写 `catalog:` → 生成器结尾的 `regenerateLockfile`
-     必然失败。投影必须**自己合成**一份 `pnpm-workspace.yaml`（含 catalog），并且要决定
-     `base/` 是否随投影一起进去（`<tree>/scripts/release-check.mjs` 会跑 `pnpm -C ../base/plugin-base build`）。
-  3. `git -C <tree> ls-files` 不含根 `scripts/lib/*`，而 `build.mjs` / `link-envinit.mjs` /
-     `mount-smoke.mjs` 已经从根上取那两个助手 → 投影树里 `pnpm release:check` 会 MODULE_NOT_FOUND。
-     投影必须显式带上 `scripts/lib/`。
-  它们所强制的 tarball `link:`/`file:` 规则，已经由 `scripts/release-check.mjs` 与两个
-  `pack-plugin.mjs` 门禁覆盖。
+- **RC 投影：整仓，不是单插件。** 发布用的投影仓是 `../dsh-plugins-rc`（可用 `$AVANTF_RC` 覆盖），
+  由**仓库根**的两个脚本维护，子树里没有对应脚本：
+  - `scripts/make-release-tree.mjs` —— 把 `dsh-plugins` 的**每个受控文件**整仓投影过去（`--into <dir>`
+    报漂移、`--apply` 落盘、`--out <dir>` 生成一棵新树）。rc 因此是**同一个仓库形态**：一个根
+    workspace、一个 catalog、`base/`+`mem/`+`work/`、测试与文档都在，所以投影**不需要任何剥离规则或
+    逐文件转换**，`pnpm-lock.yaml` 也原样投影（组版本号不写进锁文件）。唯一不进 rc 的是 RC 工具链自己
+    （这两个脚本），根 manifest 里对应的两条 script 也一并去掉 —— 发布仓是生成的，它不生成任何东西。
+  - `scripts/sync-release-repo.sh` —— 推荐入口：预览 → 确认 → 投影 → 复查 →（`--commit`）提交 →
+    （`--gate`）在 rc 里跑门禁。rc 不存在时会自动 `git init`。`--gate` 是**产物级**门禁
+    （install → guard → `release:check --offline` → 三个包各自的 `release:check` → `proof:base-swap`），
+    其中 mem 传 `--allow-uncut`：同步不是切版本，`[Unreleased]` 未清空这类**发布簿记**不该拦住一次同步；
+    真正发布前要在 rc 里不带该旗标跑一次 `pnpm release:check:mem`。
+  - **版本按组（group）走**，组就是顶层子树：`base` / `mem` / `work`。`--version mem=0.1.2` 只盖 mem
+    这一组（该子树内所有 manifest，同一个版本号 —— 组内不齐时生成器直接崩，不猜），不带组名则三组一起盖。
+    `pnpm sync:rc` 默认**保留 rc 当前的组版本**，所以重复同步不会悄悄挪动发布版本；rc 里还没有 manifest
+    （第一次同步）时才用开发树的版本。三个包在同一个 rc 仓库里，tag 用组前缀（`mem-vX.Y.Z`）。
+  - 判据（为什么是整仓）：单插件投影必须把测试剥掉、把被内联引擎的运行时依赖面**重新推导**一遍，
+    因为一个子树里没有它要内联的引擎包；整仓投影没有这些推导，rc 里能跑与开发树**同一套**门禁。
+    两个旧成因（投影树没有 workspace 文件 / 没有根 `scripts/lib/`）也随“整仓”一起消失。
 
 ## 四条工作原则
 
