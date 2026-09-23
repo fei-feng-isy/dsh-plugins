@@ -30,9 +30,15 @@ const VIRTUAL_ESTIMATED_TREE_PX = 120
  */
 const VIRTUAL_INITIAL_VIEWPORT_PX = 600
 
+/**
+ * The browser half's own copy of the status vocabulary: it cannot import the engine (`contract.ts`
+ * explains why), so the wording is kept IDENTICAL to the engine's `statusLabel` by hand. It had
+ * drifted — the same status read 「可执行」 here and 「待执行」 in `list_works` — which is how a user
+ * ends up comparing two names for one state. `client-view.spec.tsx` pins the wording.
+ */
 const STATUS_LABEL: Record<string, string> = {
-  blocked: '等待子工作完成',
-  ready: '可执行',
+  blocked: '等待子工作',
+  ready: '待执行',
   running: '执行中',
   interrupted: '已中断',
   done: '已完成',
@@ -311,7 +317,10 @@ export function WorkTreeView({ useSnapshot, onDeleteTree, loadDetail }: WorkView
   }
 
   const read = (nodeId: string): void => {
-    setDetails((prev) => ({ ...prev, [nodeId]: { status: 'loading' } }))
+    // A RE-read keeps what is on screen. The effect below re-reads every open panel on every snapshot
+    // (so a result that lands while a row is open appears without a re-click), and blanking the panel
+    // back to 「读取工作详情…」 each time made a live tree flicker — worst while an executor is running.
+    setDetails((prev) => (prev[nodeId]?.status === 'ready' ? prev : { ...prev, [nodeId]: { status: 'loading' } }))
     void loader.current(nodeId)
       .then((detail) => { setDetails((prev) => ({ ...prev, [nodeId]: { status: 'ready', detail } })) })
       .catch((cause: unknown) => {

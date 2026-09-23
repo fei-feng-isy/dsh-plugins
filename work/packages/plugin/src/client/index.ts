@@ -5,7 +5,7 @@
  * entry waiting for a missing service); the hand-written contribution is mounted here.
  * @module @avantf/dsh-work/client
  */
-import { createElement as h, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createElement as h, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { clientContribution } from '../wire.js'
 import { WorkTreeView } from './WorkTreeView.js'
@@ -13,6 +13,7 @@ import {
   POLL_INTERVAL_MS,
   REFRESH_COALESCE_MS,
   STREAM_REOPEN_MS,
+  coalesce,
   deleteWork,
   fetchDetail,
   fetchSnapshot,
@@ -23,6 +24,7 @@ import {
   type WorkRemote,
 } from './api.js'
 import type { WorkSnapshot, WorkSnapshotState } from './contract.js'
+import { chatNodeCount, isRunning, queuedCount, type SeatChatView, type SeatSessionView } from './seat.js'
 
 /** Cordis plugin name; matches the host half. */
 export const name = 'avantf-work'
@@ -65,10 +67,8 @@ interface ClientContext {
 /** Structural for the same reason as {@link ClientContext}; only the two "something happened" values matter. */
 interface SeatProps {
   readonly sessionId: SessionId
-  readonly useChat: <T>(select: (chat: { readonly order: readonly string[] }) => T) => T
-  readonly useSession: <T>(
-    select: (session: { readonly queue: readonly unknown[]; readonly running: boolean }) => T,
-  ) => T
+  readonly useChat: <T>(select: (chat: SeatChatView) => T) => T
+  readonly useSession: <T>(select: (session: SeatSessionView) => T) => T
 }
 
 /**
@@ -106,6 +106,10 @@ function useSnapshotFor(deps: SnapshotDeps): WorkSnapshotState {
   const [link, setLink] = useState<RefreshLink>('pending')
   const firstRender = useRef(true)
 
+  // Reads can overlap — a stream frame lands while the previous read is still in flight — and without
+  // this the OLDER response can land last and overwrite the newer snapshot, leaving the panel stale
+  // until the next change. Every read takes a ticket; only the newest ticket may write.
+  const readSeq = useRef(0)
   const refresh = useCallback(async (): Promise<void> => {
     // Never race the mount: a read before the namespace exists would report a
     // failure that is really just "not yet".
@@ -115,16 +119,27 @@ function useSnapshotFor(deps: SnapshotDeps): WorkSnapshotState {
       setError('工作树 Remote 未挂载：本插件自带的 typert contribution 挂载失败（详见控制台）。')
       return
     }
+    const seq = ++readSeq.current
     setLoading(true)
     try {
-      setData(await fetchSnapshot(remote, sessionId))
+      const next = await fetchSnapshot(remote, sessionId)
+      if (seq !== readSeq.current) return
+      setData(next)
       setError(undefined)
     } catch (cause) {
+      if (seq !== readSeq.current) return
       setError(`读取工作树失败：${cause instanceof Error ? cause.message : String(cause)}`)
     } finally {
-      setLoading(false)
+      if (seq === readSeq.current) setLoading(false)
     }
   }, [mounted, getRemote, sessionId])
+
+  // ONE coalescer for every trigger (session revision, stream frames, stream reopen). It used to be
+  // wired to the revision path only, while the change stream called `refresh()` per frame — and the
+  // engine pushes a frame per state change, so a burst became one snapshot RPC per frame.
+  const coalescer = useMemo(() => coalesce(() => { void refresh() }, REFRESH_COALESCE_MS), [refresh])
+  const requestRefresh = coalescer.request
+  useEffect(() => coalescer.cancel, [coalescer])
 
   useEffect(() => {
     if (firstRender.current) {
@@ -132,9 +147,8 @@ function useSnapshotFor(deps: SnapshotDeps): WorkSnapshotState {
       void refresh()
       return undefined
     }
-    const timer = setTimeout(() => { void refresh() }, REFRESH_COALESCE_MS)
-    return () => { clearTimeout(timer) }
-  }, [refresh, revision])
+    requestRefresh()
+  }, [refresh, revision, requestRefresh])
 
   // The engine's change stream: opened once per mounted panel, reopened if the link changes.
   useEffect(() => {
@@ -158,7 +172,7 @@ function useSnapshotFor(deps: SnapshotDeps): WorkSnapshotState {
         try {
           await watchChanges(remote, sessionId, controller.signal, () => {
             frames += 1
-            void refresh()
+            requestRefresh()
           })
         } catch (cause) {
           // A broken stream is a transport fact: the session revision and the next reopen
@@ -174,7 +188,7 @@ function useSnapshotFor(deps: SnapshotDeps): WorkSnapshotState {
         }
         // Ended without an abort, i.e. the connection generation changed: frames may have
         // been missed while it was down, so re-read once, then reopen.
-        void refresh()
+        requestRefresh()
         reopen = setTimeout(() => { void run() }, STREAM_REOPEN_MS)
       }
       void run()
@@ -184,7 +198,7 @@ function useSnapshotFor(deps: SnapshotDeps): WorkSnapshotState {
       controller.abort()
       if (reopen !== undefined) clearTimeout(reopen)
     }
-  }, [mounted, getRemote, sessionId, refresh])
+  }, [mounted, getRemote, sessionId, requestRefresh])
 
   // Timer fallback only; its disposer belongs to the effect, so leaving the tab stops it.
   useEffect(() => {
@@ -260,11 +274,15 @@ export function apply(ctx: ClientContext): void {
   // in the installed runtime's catalog but not the checkout's composed type, so it is read
   // structurally and guarded; whether the seat hands it over cannot change during a mount,
   // which keeps the conditional hook call stable across renders.
+  //
+  // Every field is read through `seat.ts`, never off the snapshot directly: these are the HOST's
+  // structures, and a selector that throws in the render body blanks the whole panel silently
+  // (dsh 0.1.6 dropped `queue` — see that file). `seat.spec.ts` pins the rule.
   function useSeatRevision(seat: SeatProps): string {
-    const queued = seat.useSession((session) => session.queue.length)
-    const running = seat.useSession((session) => session.running)
+    const queued = seat.useSession((session) => queuedCount(session))
+    const running = seat.useSession((session) => isRunning(session))
     const chatNodes = typeof seat.useChat === 'function'
-      ? seat.useChat((chat) => chat.order.length)
+      ? seat.useChat((chat) => chatNodeCount(chat))
       : -1
     return sessionRevision({ chatNodes, queued, running })
   }

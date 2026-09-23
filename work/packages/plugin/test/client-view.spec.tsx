@@ -7,10 +7,12 @@
  * the fact that a row starts collapsed, none of which need a click simulation, and
  * all of which a wrong branch would silently get wrong in the browser.
  */
+import { readFileSync } from 'node:fs'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { NodeDetailPanel, WorkTreeView } from '../src/client/WorkTreeView.js'
 import type { WorkNodeDetail, WorkNodeView, WorkSnapshot, WorkSnapshotState } from '../src/client/contract.js'
+import { statusLabel } from '@avantf/work-core'
 
 // The view injects its stylesheet on render, which is the one browser API in its path.
 // The tags are kept so the stylesheet itself can be asserted.
@@ -64,6 +66,26 @@ function detail(overrides: Partial<WorkNodeDetail['node']> = {}, children: WorkN
 function panel(state: Parameters<typeof NodeDetailPanel>[0]['state']): string {
   return renderToStaticMarkup(<NodeDetailPanel nodeId="r1" depth={0} state={state} />)
 }
+
+describe('the status vocabulary the panel shows', () => {
+  it('says exactly what the engine says, status for status', () => {
+    // The browser half cannot import the engine, so its map is a hand-kept copy — and it had drifted:
+    // one status read 「可执行」 in the panel and 「待执行」 in `list_works`. Comparing the literal in the
+    // source against the engine's own `statusLabel` is what keeps the copy honest.
+    const source = readFileSync(new URL('../src/client/WorkTreeView.tsx', import.meta.url), 'utf8')
+    const table = /const STATUS_LABEL: Record<string, string> = \{([\s\S]*?)\}/u.exec(source)?.[1]
+    expect(table, 'STATUS_LABEL not found in WorkTreeView.tsx').toBeDefined()
+    const entries = [...(table ?? '').matchAll(/(\w+):\s*'([^']*)'/gu)].map((match) => [match[1], match[2]] as const)
+    expect(entries.length).toBeGreaterThan(0)
+    for (const [status, label] of entries) {
+      expect(label, `panel label for ${status}`).toBe(statusLabel(status))
+    }
+    // And the reverse: a status the engine names but the panel does not would render the raw key.
+    for (const status of ['blocked', 'ready', 'running', 'interrupted', 'done', 'failed']) {
+      expect(entries.map(([key]) => key)).toContain(status)
+    }
+  })
+})
 
 describe('NodeDetailPanel', () => {
   it('shows the title, the content and the context', () => {

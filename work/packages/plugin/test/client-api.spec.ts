@@ -8,8 +8,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   POLL_INTERVAL_MS,
+  REFRESH_COALESCE_MS,
   STREAM_REOPEN_MS,
+  coalesce,
   deleteWork,
+  errorText,
   fetchDetail,
   fetchSnapshot,
   startPolling,
@@ -196,5 +199,50 @@ describe('watchChanges', () => {
 
   it('keeps the reopen delay short enough to look live', () => {
     expect(STREAM_REOPEN_MS).toBeLessThanOrEqual(5_000)
+  })
+})
+
+describe('errorText', () => {
+  it('keeps the message of an Error-shaped failure, which JSON.stringify would drop', () => {
+    // `RemoteError extends Error`: `message` is NOT an own enumerable property, so the old
+    // `JSON.stringify(error)` fallback rendered `{"code":"…"}` and threw away the one sentence the
+    // reader needs.
+    const remoteError = Object.assign(new Error('工作 r1 正在执行；只有已结束的树才能删除'), { code: 'tree-running' })
+    expect(errorText(remoteError)).toBe('工作 r1 正在执行；只有已结束的树才能删除')
+    expect(JSON.stringify(remoteError)).not.toContain('正在执行')
+    // A plain object with a message is just as good.
+    expect(errorText({ message: 'boom', code: 'x' })).toBe('boom')
+  })
+
+  it('falls back to the JSON (then to String) when there is no message', () => {
+    expect(errorText({ code: 'x', details: [1] })).toBe('{"code":"x","details":[1]}')
+    expect(errorText(undefined)).toBe('undefined')
+    expect(errorText('plain')).toBe('plain')
+  })
+})
+
+describe('coalesce', () => {
+  it('collapses a burst into one call, and cancels a pending one', () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      const coalescer = coalesce(() => { calls += 1 }, REFRESH_COALESCE_MS)
+      // The engine pushes a frame per state change: ten frames must not mean ten snapshot reads.
+      for (let i = 0; i < 10; i += 1) coalescer.request()
+      expect(calls).toBe(0)
+      vi.advanceTimersByTime(REFRESH_COALESCE_MS)
+      expect(calls).toBe(1)
+      // A second burst after the quiet period is a second call, not a third.
+      coalescer.request()
+      vi.advanceTimersByTime(REFRESH_COALESCE_MS)
+      expect(calls).toBe(2)
+      // Cancelled before the delay: never fires (this is the unmount disposer).
+      coalescer.request()
+      coalescer.cancel()
+      vi.advanceTimersByTime(REFRESH_COALESCE_MS * 2)
+      expect(calls).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

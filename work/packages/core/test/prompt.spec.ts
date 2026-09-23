@@ -64,6 +64,28 @@ describe('execution prompt', () => {
     expect(prompt).toContain('不要等')
   })
 
+  it('warns an executor at the depth ceiling, and only there', () => {
+    // The engine refuses a decomposition at depth `maxDepth`, and before this line the refusal was the
+    // only place that fact existed: the executor spent `note_work` + `decompose_work` on a call that
+    // could not succeed, and a node that never recovered was reclaimed as `stalled` — a structural
+    // ceiling recorded as an executor that hung.
+    const below = buildWorkerPrompt(view({ node: node({ depth: CAPACITY.maxDepth - 1 }) }))
+    expect(below).not.toContain('深度上限')
+
+    const atCeiling = buildWorkerPrompt(view({ node: node({ depth: CAPACITY.maxDepth }) }))
+    expect(atCeiling).toContain(`深度上限（第 ${String(CAPACITY.maxDepth)} 层）`)
+    expect(atCeiling).toContain('submit_work')
+    // It must NOT tell the executor to decompose at a depth where the engine will refuse it.
+    expect(atCeiling).toContain('不要再 note_work + decompose_work')
+  })
+
+  it('warns the aggregate pass at the ceiling too: its tail also suggests decomposing', () => {
+    const child = node({ id: 'n0002', parentId: 'n0001', title: 'Child', status: 'done', depth: CAPACITY.maxDepth })
+    const atCeiling = buildWorkerPrompt(view({ node: node({ depth: CAPACITY.maxDepth }), children: [child] }))
+    expect(atCeiling).toContain('子工作都已终态')
+    expect(atCeiling).toContain('深度上限')
+  })
+
   it('asks the analysis to record what was RULED OUT, not just what is missing', () => {
     // Progressive convergence is exclusion as much as addition: a later executor — or the
     // same session woken again after its children land — needs to know which route was

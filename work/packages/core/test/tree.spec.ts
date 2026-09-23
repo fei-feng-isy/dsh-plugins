@@ -337,6 +337,27 @@ describe('the tree-size backstop', () => {
     expect(tree.nodesOf(rootId).filter((node) => node.title === 'shared')).toHaveLength(1)
     expect(tree.nodesOf(rootId)).toHaveLength(CAPACITY.maxNodesPerTree)
   })
+  it('counts a spec repeated inside ONE call once, so the cap cannot refuse a legal split', async () => {
+    // 1 root + 198 = 199 nodes: one more fits, two would not. The call names the same spec twice, and
+    // the loop reuses the node its own first occurrence creates — so it ADDS one. The pre-pass used to
+    // charge two (it put a `'pending'` placeholder where the loop puts the created id, and
+    // `findEquivalent` cannot resolve a placeholder), refusing a decompose that fits and reporting a
+    // wrong number while doing it.
+    const filler = Array.from({ length: CAPACITY.maxNodesPerTree - 2 }, (_, i) => `fill-${String(i)}`)
+    const { tree, rootId } = await seededTree(filler)
+    expect(tree.nodesOf(rootId)).toHaveLength(CAPACITY.maxNodesPerTree - 1)
+
+    const accepted = await noteAndSplit(tree, rootId, 'work-root', [
+      { title: 'twice', description: 'same', context: [] },
+      { title: 'TWICE', description: 'same ', context: [] },
+    ])
+    expect(accepted.ok, JSON.stringify(accepted)).toBe(true)
+    // One node created, and the second spec reused it (the loop reports the same id in both lists).
+    expect(accepted.ok && accepted.value.created).toHaveLength(1)
+    expect(accepted.ok && accepted.value.reused).toEqual(accepted.ok ? accepted.value.created : [])
+    expect(tree.nodesOf(rootId).filter((node) => node.title.toLowerCase() === 'twice')).toHaveLength(1)
+    expect(tree.nodesOf(rootId)).toHaveLength(CAPACITY.maxNodesPerTree)
+  })
 })
 
 describe('the parked-session address', () => {

@@ -126,6 +126,18 @@ const AGGREGATE_TAIL_PREFIX = [
 ].join('\n')
 
 /**
+ * What an executor at the depth ceiling has to know BEFORE it plans a decomposition, because the engine
+ * refuses one there (`depth-exceeded`) and that refusal is otherwise the only place the fact exists.
+ * Without this line the executor burns a turn on `note_work` + `decompose_work`, and a node that never
+ * recovers is reclaimed as `stalled` — a structural ceiling gets recorded as an executor that hung.
+ * Appended to BOTH tails: an aggregate at the ceiling has the same trap (`还缺东西 → decompose_work`).
+ */
+function depthCeilingLine(): string {
+  return `⚠ 本工作已在深度上限（第 ${String(CAPACITY.maxDepth)} 层），引擎不会再接受拆解：不要再 note_work + decompose_work，`
+    + '直接把结论 `submit_work` 交上来；确实做不完，就把「缺什么前提、已经排除了哪条路」写进结果，交给上一层去拆。'
+}
+
+/**
  * Build the complete prompt for one dispatch; the work chain carries only titles and one-line context, so its size is bounded by the depth limit, and the full `description`/`context` is included for the current node only.
  * The tail branches on the CHILDREN in the view, not on the node's status: the prompt is built after `dispatch()` has already marked the node `running`, so a status test can never see the aggregate case, and a `failed` node is never dispatched at all.
  */
@@ -146,6 +158,9 @@ export function buildWorkerPrompt(view: DispatchView): string {
   } else {
     sections.push(EXECUTE_TAIL)
   }
+
+  // The ceiling is a dispatch-time fact, so it is stated here rather than discovered by refusal.
+  if (node.depth >= CAPACITY.maxDepth) sections.push(depthCeilingLine())
 
   return sections.join('\n\n')
 }

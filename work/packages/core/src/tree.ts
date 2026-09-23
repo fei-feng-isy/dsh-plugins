@@ -109,6 +109,11 @@ function normalizeTitle(title: string): string {
   return title.trim().replace(/\s+/gu, ' ').toLowerCase()
 }
 
+/** The identity the decomposition dedup compares on — exactly what {@link findEquivalent} matches. */
+function childIdentity(title: string, description: string): string {
+  return `${normalizeTitle(title)}\u0000${normalizeTitle(description)}`
+}
+
 /** Add only the new background facts to a reused node; `undefined` when none. */
 function withAddedContext(node: NodeRecord, facts: readonly string[]): NodeRecord | undefined {
   const added = facts.filter((fact) => !node.context.includes(fact))
@@ -767,7 +772,8 @@ export class WorkTree {
       if (node.depth >= CAPACITY.maxDepth) {
         return refuse(
           'depth-exceeded',
-          `工作 ${nodeId} 已在深度 ${node.depth}；深度上限是 ${CAPACITY.maxDepth}`,
+          `工作 ${nodeId} 已在深度 ${node.depth}，深度上限是 ${CAPACITY.maxDepth} —— 这一层不能再拆：`
+          + '直接 submit_work 给结论，把缺的前提写进结果',
         )
       }
       const created: string[] = []
@@ -1204,20 +1210,28 @@ export class WorkTree {
 
   /** How many of these specs would actually ADD a node: a child that reuses an existing
    * prerequisite must not be counted, or the ceiling would fire on the engine's own reuse path.
-   * A pre-pass, not a gate in the loop, because a refusal must leave no child behind. */
+   * A pre-pass, not a gate in the loop, because a refusal must leave no child behind.
+   *
+   * It has to answer the SAME question the loop answers, including the one case the loop handles
+   * through its `created` list: a spec repeated inside ONE call reuses the node that call is about to
+   * create. This used to push a `'pending'` placeholder into the equivalent-scope, and
+   * `findEquivalent` resolves ids with `nodes.get(id)` → `undefined`, so the repeat was charged as a
+   * second new node and a legal decomposition was refused with a wrong number (`node-limit`). */
   private countNewChildren(
     nodes: ReadonlyMap<string, NodeRecord>,
     parent: NodeRecord,
     specs: readonly ChildSpec[],
   ): number {
-    const pending: string[] = []
-    const reused = new Set<string>()
+    const planned = new Set<string>()
+    let added = 0
     for (const spec of specs) {
-      const existing = this.findEquivalent(nodes, parent, spec.title, spec.description, pending)
-      if (existing !== undefined) reused.add(existing.id)
-      else pending.push('pending')
+      const identity = childIdentity(spec.title, spec.description)
+      if (planned.has(identity)) continue
+      if (this.findEquivalent(nodes, parent, spec.title, spec.description) !== undefined) continue
+      planned.add(identity)
+      added += 1
     }
-    return specs.length - reused.size
+    return added
   }
 
   private async flush(rootId: string): Promise<void> {

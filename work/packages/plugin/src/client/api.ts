@@ -38,14 +38,56 @@ export interface IntervalTimer {
   interval: (callback: () => void, delay: number) => () => void
 }
 
+/**
+ * The human half of a failure. `Error#message` is NOT an own enumerable property, so a plain
+ * `JSON.stringify(error)` drops exactly the sentence a reader needs and leaves `{"code":…}` — the
+ * `RemoteError` this boundary carries is an `Error` subclass with `code`/`details` as the own ones.
+ * So: the message first, the JSON only when there is no message to show.
+ */
+export function errorText(error: unknown): string {
+  if (typeof error === 'string') return error
+  if (error === null || typeof error !== 'object') return String(error)
+  const message = (error as { message?: unknown }).message
+  if (typeof message === 'string' && message !== '') return message
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
+
+/**
+ * Collapse a burst of triggers into ONE call after `delayMs` of quiet.
+ *
+ * The work tree has three refresh triggers (the session revision, the engine's change stream, and the
+ * stream's reopen) and the engine pushes a frame per state change, so without this a burst of changes
+ * costs one snapshot RPC per frame. `cancel` releases a pending call — the disposer of the effect that
+ * owns the coalescer, so leaving the tab cannot fire a read into an unmounted panel.
+ */
+export function coalesce(run: () => void, delayMs: number): { request: () => void; cancel: () => void } {
+  let pending: ReturnType<typeof setTimeout> | undefined
+  return {
+    request: (): void => {
+      if (pending !== undefined) return
+      pending = setTimeout(() => {
+        pending = undefined
+        run()
+      }, delayMs)
+    },
+    cancel: (): void => {
+      if (pending === undefined) return
+      clearTimeout(pending)
+      pending = undefined
+    },
+  }
+}
+
 /** Peel the transport envelope (`{ ok, value }` / `{ ok, error }`, or a bare value) so a
  *  wiring mistake surfaces as a message rather than an empty view. */
 export function unwrap(response: unknown): { value?: unknown; error?: string } {
   if (response === null || typeof response !== 'object') return { value: response }
   const envelope = response as RemoteEnvelope
-  if (envelope.ok === false) {
-    return { error: typeof envelope.error === 'string' ? envelope.error : JSON.stringify(envelope.error) }
-  }
+  if (envelope.ok === false) return { error: errorText(envelope.error) }
   if (envelope.ok === true) return { value: envelope.value }
   return { value: response }
 }
