@@ -223,6 +223,9 @@ describe('config layering', () => {
     const common = { dataHome: '~/.avantf' }
     expect(resolveDataHome(common)).toBe(join(homedir(), '.avantf'))
     expect(resolveDataHome(common, '~/custom')).toBe(join(homedir(), 'custom'))
+    // A BARE `~` is the home directory, not a relative path called `~` — the two family copies used
+    // to disagree on exactly this input (see `packages/plugin/test/family_pin.spec.ts`).
+    expect(resolveDataHome({ dataHome: '~' })).toBe(homedir())
   })
 })
 

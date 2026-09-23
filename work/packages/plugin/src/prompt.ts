@@ -63,29 +63,42 @@ export const PROMPT_FILES: readonly PromptFileEntry[] = [
  * Every avantf plugin writes its model-facing text there and owns a prefix — `work-*` here, `mem-*`
  * in the memory plugin (whose own section file is `work-tree-guide.md`'s sibling) — so a deployment
  * can find, diff and back up all of it in one place without any plugin having to guess which files
- * are its own. The data home follows the memory plugin's precedence: an explicit `dataHome` config
- * → `$AVANTF_HOME` → `~/.avantf`.
+ * are its own. The data home follows the FAMILY's layer order, the same one the memory engine uses
+ * (`mem/AGENTS.md` 「配置分层」): an explicit caller value → `$AVANTF_HOME` → the configured
+ * `dataHome` → `~/.avantf`.
+ *
+ * The configured value is passed as its OWN layer, NOT as the explicit one. Handing a
+ * schema-defaulted config value to the first parameter promotes layer ② above layer ④ and makes
+ * `$AVANTF_HOME` dead whenever a config file merely mentions `dataHome` — which is how the two
+ * halves of the family ended up resolving the same config to different directories.
  */
 export function promptDir(
-  dataHome?: string,
+  configured?: string,
   env: Record<string, string | undefined> = process.env,
   /**
    * The resolver to use — the BASE's `resolveDataHome` at runtime when the base is available.
    * Defaults to the local fallback below, which is what a base-less mount uses.
    */
-  resolve: (explicit?: string, env?: Record<string, string | undefined>) => string = resolveDataHome,
+  resolve: (
+    explicit?: string,
+    env?: Record<string, string | undefined>,
+    common?: string,
+  ) => string = resolveDataHome,
 ): string {
-  return join(resolve(dataHome, env), 'prompts')
+  return join(resolve(undefined, env, configured), 'prompts')
 }
 
-/** The data home, with `~/` expanded. `explicit` wins, then `$AVANTF_HOME`, then `~/.avantf`. */
+/** The data home, with `~/` (and a bare `~`) expanded: ⑤ explicit → ④ `$AVANTF_HOME` → ② the
+ *  configured value → `~/.avantf`. The base-less fallback for {@link promptDir}. */
 export function resolveDataHome(
   explicit?: string,
   env: Record<string, string | undefined> = process.env,
+  common?: string,
 ): string {
-  const configured = explicit?.trim() ?? ''
+  const layer5 = explicit?.trim() ?? ''
   const fromEnv = env['AVANTF_HOME']?.trim() ?? ''
-  const base = configured !== '' ? configured : fromEnv !== '' ? fromEnv : join(homedir(), '.avantf')
+  const layer2 = common?.trim() ?? ''
+  const base = layer5 !== '' ? layer5 : fromEnv !== '' ? fromEnv : layer2 !== '' ? layer2 : join(homedir(), '.avantf')
   if (base === '~') return homedir()
   return base.startsWith('~/') ? join(homedir(), base.slice(2)) : base
 }

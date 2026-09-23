@@ -45,15 +45,27 @@ export function familyModelsDir(env: Record<string, string | undefined> = proces
 }
 
 /**
- * The data root: an explicit value (the resolved `common.dataHome`) → `$AVANTF_HOME` → `~/.avantf`.
- * `~/` is expanded here so every caller agrees on one directory.
+ * The data root: an explicit caller value (⑤) → `$AVANTF_HOME` (④) → the configured
+ * `common.dataHome` (②) → `~/.avantf`. That is the family's layer order (`mem/AGENTS.md`
+ * 「配置分层」: built-in → common.yaml → store → ENV → explicit), so the environment wins over the
+ * config file and an explicit argument wins over both.
+ *
+ * The configured value is a SEPARATE parameter rather than the first one for a reason that cost a
+ * real divergence: `common.dataHome` carries a schema default, so it always holds a value. Handing
+ * it to the `explicit` slot promotes layer ② above layer ④ and quietly makes `$AVANTF_HOME` dead on
+ * one side of the family — the same config then resolves to two different directories, which is what
+ * `mem/packages/plugin/test/family_pin.spec.ts` now pins.
+ *
+ * `~/` (and a bare `~`) is expanded here so every caller agrees on one directory.
  */
 export function resolveDataHome(
   explicit?: string,
   env: Record<string, string | undefined> = process.env,
+  common?: string,
 ): string {
-  const configured = explicit?.trim() ?? ''
+  const layer5 = explicit?.trim() ?? ''
   const fromEnv = env['AVANTF_HOME']?.trim() ?? ''
-  const base = configured !== '' ? configured : fromEnv !== '' ? fromEnv : '~/.avantf'
+  const layer2 = common?.trim() ?? ''
+  const base = layer5 !== '' ? layer5 : fromEnv !== '' ? fromEnv : layer2 !== '' ? layer2 : '~/.avantf'
   return expandHome(base)
 }

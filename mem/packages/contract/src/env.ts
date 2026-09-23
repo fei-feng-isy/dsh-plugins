@@ -6,8 +6,14 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-/** Expand a leading `~/` against the USER home directory. */
+/** Expand `~/…` (and a BARE `~`) against the USER home directory.
+ *
+ * The bare form matters: `AVANTF_HOME=~` used to come back verbatim, i.e. as the RELATIVE path `~`,
+ * and everything built on it was written into the current working directory. The base kit's own
+ * `expandHome` always expanded it, so the two copies disagreed on exactly the input a shell makes
+ * easy to type. */
 export function expandHome(p: string): string {
+  if (p === '~') return homedir()
   return p.startsWith('~/') ? join(homedir(), p.slice(2)) : p
 }
 

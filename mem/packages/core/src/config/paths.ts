@@ -9,11 +9,18 @@ export { expandHome }
 /**
  * Resolve the data home (default `~/.avantf`).
  *
- * Precedence, per DESIGN §3: an EXPLICIT caller value (layer ⑤) → `AVANTF_HOME`
- * (layer ④) → the configured/default `dataHome`. `common.dataHome` cannot stand in
- * for layer ⑤: the schema gives it a default, so it always holds a value and would
- * make an explicit argument indistinguishable from "nothing was configured" —
- * which is exactly how the env var used to win over a caller's own `dataHome`.
+ * Precedence, per DESIGN §3 and `mem/AGENTS.md`'s layering (built-in → common.yaml → store → ENV →
+ * explicit): an EXPLICIT caller value (⑤) → `AVANTF_HOME` (④) → the configured `common.dataHome`
+ * (②) → `~/.avantf`. The environment is a deployment override and outranks the config file.
+ *
+ * `common.dataHome` cannot stand in for layer ⑤: the schema gives it a default, so it always holds a
+ * value and would make an explicit argument indistinguishable from "nothing was configured" — which
+ * is exactly how the env var used to win over a caller's own `dataHome`.
+ *
+ * The base kit implements the SAME order (`resolveDataHome(explicit, env, common)`), and the work
+ * plugin passes its config value as `common` rather than as `explicit` for that reason: promoting
+ * layer ② to ⑤ on one side is how the same config used to resolve to two different directories.
+ * `packages/plugin/test/family_pin.spec.ts` pins the two implementations together.
  */
 export function resolveDataHome(common: Pick<Config, 'dataHome'>, explicit?: string): string {
   const base = explicit || process.env['AVANTF_HOME'] || common.dataHome || '~/.avantf'

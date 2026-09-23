@@ -33,14 +33,19 @@ describe('the editable guidance file', () => {
     expect(promptFileSpecs()).toEqual([{ file: 'work-tree-guide.md', fallback: WORK_TREE_GUIDANCE }])
   })
 
-  it('resolves the shared prompt directory: explicit dataHome, else $AVANTF_HOME, else ~/.avantf', () => {
-    expect(promptDir('/tmp/explicit', { AVANTF_HOME: '/tmp/family' })).toBe('/tmp/explicit/prompts')
-    expect(promptDir(undefined, { AVANTF_HOME: '/tmp/family' })).toBe('/tmp/family/prompts')
+  it('resolves the shared prompt directory by the FAMILY order: $AVANTF_HOME, else the config, else ~/.avantf', () => {
+    // The configured `dataHome` is layer ② and the environment is layer ④ (`mem/AGENTS.md`
+    // 「配置分层」), so the environment is the deployment override that wins. This used to be the
+    // opposite here: the config value was handed to the resolver's EXPLICIT slot, which promoted it
+    // above the environment and made `$AVANTF_HOME` dead on this side of the family.
+    expect(promptDir('/tmp/configured', { AVANTF_HOME: '/tmp/family' })).toBe('/tmp/family/prompts')
+    expect(promptDir('/tmp/configured', {})).toBe('/tmp/configured/prompts')
     // A blank value is "unset", not "the filesystem root" — for both layers.
     expect(promptDir('  ', { AVANTF_HOME: '   ' })).toBe(join(homedir(), '.avantf', 'prompts'))
     expect(promptDir(undefined, {})).toBe(join(homedir(), '.avantf', 'prompts'))
-    // `~/` is expanded, as it is for every other configured path.
+    // `~/` (and a bare `~`) is expanded, as it is for every other configured path.
     expect(promptDir('~/custom')).toBe(join(homedir(), 'custom', 'prompts'))
+    expect(promptDir('~')).toBe(join(homedir(), 'prompts'))
   })
 
   it('uses the BASE\'s data-home resolver at runtime, and its own fallback only without one', () => {
@@ -48,13 +53,15 @@ describe('the editable guidance file', () => {
     // degradation path. Pinning the wiring here means a prompt layer that silently stopped taking the
     // base's convention (two resolves could drift) shows up as a failing test, not as text in the
     // wrong directory.
-    const calls: [string | undefined, Record<string, string | undefined> | undefined][] = []
-    const sentinel = (explicit?: string, env?: Record<string, string | undefined>) => {
-      calls.push([explicit, env])
+    const calls: [(string | undefined), (Record<string, string | undefined> | undefined), (string | undefined)][] = []
+    const sentinel = (explicit?: string, env?: Record<string, string | undefined>, common?: string) => {
+      calls.push([explicit, env, common])
       return '/sentinel/base-data-home'
     }
-    expect(promptDir('/ignored', { AVANTF_HOME: '/ignored' }, sentinel)).toBe('/sentinel/base-data-home/prompts')
-    expect(calls[0]?.[0]).toBe('/ignored')
+    expect(promptDir('/configured', { AVANTF_HOME: '/family' }, sentinel)).toBe('/sentinel/base-data-home/prompts')
+    // The configured value travels in the LAYER ② slot, never as the explicit one — that is the whole
+    // point of the third parameter.
+    expect(calls[0]).toEqual([undefined, { AVANTF_HOME: '/family' }, '/configured'])
     // Without a resolver the local fallback answers, so a base-less mount still finds a directory.
     expect(promptDir(undefined, {}, undefined)).toBe(join(homedir(), '.avantf', 'prompts'))
   })
