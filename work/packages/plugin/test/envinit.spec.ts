@@ -303,7 +303,9 @@ describe('envinit loader', () => {
  * `read*Versions` family) could change and this file still built — and the gate is precisely the half
  * whose semantics are hardest to see in a diff. Only the TEST seam may be cast: it is a partial
  * module by construction. No type-level rule can pin "do not cast", so the source shape is the guard
- * (same device as the seat readers in `seat.spec.ts`).
+ * (same device as the seat readers in `seat.spec.ts`). It is a guard against the STYLE coming back, not
+ * against bypasses — `const m: unknown = framework` then `m as CompatModule` would still pass it; what
+ * makes the gate half compile-checked is the annotated assignment itself having to satisfy the type.
  */
 describe('the gate module is structurally checked', () => {
   it('never routes the real base module through `unknown`', () => {
