@@ -147,7 +147,7 @@ worker 起的时候 `parent` 恒为**根 owner**（`startWorker` 里 `ctx.agents
 
 #### 4.1.2 投给 owner 的是一条**信号**，不是一条指令
 
-沿用既有契约（`createUserMessage` + `source: { kind: 'plugin', plugin: 'avantf-work' }`），正文只陈述事实，**不要求 owner 调用任何工具**：
+沿用既有契约（`createUserMessage` + `source: { kind: 'plugin:avantf-work' }`，生产者自有的 source kind；DSH V4 已废弃 `kind: 'plugin'` 包装），正文只陈述事实，**不要求 owner 调用任何工具**：
 
 ```
 工作 <nodeId>（"<title>"）的子工作都已终态；它的执行者停在 <parkedId>，

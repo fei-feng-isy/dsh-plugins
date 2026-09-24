@@ -46,12 +46,13 @@ describe('the /archive and /clean registrations', () => {
       expect(command?.description, name).toMatch(/[\u4e00-\u9fff]/)
       expect(command?.description, name).toMatch(/work|会话/)
     }
-    expect(mounted.commands.find((entry) => entry.name === 'clean')?.input?.hint).toBe('[all|work-xxxxxxxx]')
+    // The hint is the grammar in one line: both scopes, both targets, and the id shapes.
+    expect(mounted.commands.find((entry) => entry.name === 'clean')?.input?.hint)
+      .toBe('[archive [all|work-xxxxxxxx] | orphans [all|root-xxxxxxxx]]')
   })
 
   it('reports an empty store instead of failing', async () => {
-    // No sessionQuery in the mount harness: the commands must degrade to "nothing here",
-    // never to a thrown error inside a slash handler.
+    // The commands must degrade to "nothing here", never to a thrown error inside a slash handler.
     const mounted = await mount()
     expect((await mounted.runCommand('clean', '')).text).toContain('没有 work 会话记录')
     expect((await mounted.runCommand('archive', '')).text).toContain('无法归档')

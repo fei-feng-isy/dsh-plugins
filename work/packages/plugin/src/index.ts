@@ -26,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-typert-registry'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
-import { AvantfWorkHost } from './host.js'
+import { AvantfWorkHost, type OrphanTreeReport, type OwnerProbe } from './host.js'
 import { defineWorkTools } from './tools.js'
 import {
   GUIDANCE_CONTEXT_ORDER,
@@ -37,8 +37,16 @@ import {
   promptFileSpecs,
 } from './prompt.js'
 import { OWNER_TOOL_DENY, visibleTo } from './faces.js'
-import { archiveWorkers, bytes, removeWorker, workerSessions, type ArchiveRegistry } from './workerSessions.js'
+import {
+  archiveWorkers,
+  bytes,
+  removeWorker,
+  workerSessions,
+  type ArchiveRegistry,
+  type WorkerSession,
+} from './workerSessions.js'
 import { hostContribution } from './wire.js'
+import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createLogger } from './log.js'
 import {
   loadCompat,
@@ -51,6 +59,15 @@ export const name = 'avantf-work'
 
 // A title is one line by convention (the work chain renders one per ancestor), so a pasted paragraph must not become one.
 const TITLE_MAX = 80
+
+/** Why a tree counts as an orphan, as `/clean orphans` groups and renders it: the operator reads the
+ *  difference between a session that is GONE (reconciled automatically) and a host that cannot answer
+ *  (waiting on a person) in this one string. */
+function orphanReason(probe: OwnerProbe): string {
+  if (probe.kind === 'missing') return '不存在（owner 会话确实不存在）'
+  if (probe.kind === 'unobservable') return `不可观测：${probe.detail}`
+  return 'owner 会话存在'
+}
 
 // Every service this plugin needs, gating `apply`: subagents (work units), storageDomain (the tree),
 // systemPrompt (guidance), tools (model surface), agents (liveness), commands (`/work`).
@@ -93,7 +110,11 @@ export { WORKER_TOOL_DENY } from './faces.js'
 /** This plugin's own wake signal: a trigger to open a turn, never content. */
 function isOwnWake(message: UserMessage): boolean {
   const source = message.source as { kind?: string; plugin?: string }
-  return source.kind === 'plugin' && source.plugin === name
+  // The released `plugin` wrapper is still recognized: a session written under an older host keeps
+  // that shape until the V3→V4 migration rewrites it, and a plugin update must not read its own
+  // pending wake as someone else's user text in the meantime.
+  return source.kind === OWN_WAKE_SOURCE_KIND
+    || (source.kind === 'plugin' && source.plugin === name)
 }
 
 // Results travel through the tree, so the worker's own closing words are dropped; only our workers qualify.
@@ -391,10 +412,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       : { ...decision, messages: [...admitted, queued] }
   })
 
-  // ── `/archive` and `/clean`: the worker logs behind the trees ─────────────
+  // ── `/archive` and `/clean`: worker logs and orphan trees ────────────────
   // Workers are real sessions, so they accumulate one directory per dispatch. Archiving goes through
   // the workspace registry; removing has no harness API and is done here against the session store,
-  // with the guardrails in `workerSessions.ts` — ours only, settled only, and for `all` archived only.
+  // with the guardrails in `workerSessions.ts` — ours only, settled only, and for `archive all`
+  // archived only. Orphan trees are the other scope: their owner session is gone or unobservable,
+  // which is the one case where this command may touch a tree belonging to another session.
   const registryOf = (): ArchiveRegistry | undefined =>
     ctx.get('workspaceRegistry') as ArchiveRegistry | undefined
   const sessionDeps = {
@@ -421,15 +444,101 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     sessionsRoot: config.sessionsRoot ?? join(homedir(), '.dsh', 'sessions'),
   }
 
+  /** The ids the workspace registry reports as archived; empty without a registry. */
+  const archivedIds = (): ReadonlySet<string> =>
+    new Set((registryOf()?.archivedSessionIds ?? []).map((id) => String(id)))
+
+  /** The `archive` scope as a read-only listing: what would be freed, and what is held back. */
+  const archiveScopeLines = (workers: readonly WorkerSession[], archived: ReadonlySet<string>): string[] => {
+    const ready = workers.filter((worker) => !worker.live && archived.has(worker.id))
+    const pending = workers.filter((worker) => !worker.live && !archived.has(worker.id))
+    return [
+      `可清理（已归档、非运行）${String(ready.length)} 个，共 ${bytes(ready.reduce((sum, worker) => sum + worker.bytes, 0))}：`,
+      ...ready.map((worker) => `  ${worker.id}  ${bytes(worker.bytes)}`),
+      ...(pending.length === 0
+        ? []
+        : [`另有 ${String(pending.length)} 个已完成但未归档，先执行 /archive 再清理（或用 /clean archive <work-xxxxxxxx> 单独指定）。`]),
+      '执行 /clean archive all 清理上面这些；/clean archive <work-xxxxxxxx> 只清理一个。',
+    ]
+  }
+
+  /** The `orphans` scope as a read-only listing, grouped by the reason each probe came back with. */
+  const orphanScopeLines = (orphans: readonly OrphanTreeReport[]): string[] => {
+    const groups = new Map<string, OrphanTreeReport[]>()
+    for (const entry of orphans) {
+      const reason = orphanReason(entry.probe)
+      groups.set(reason, [...(groups.get(reason) ?? []), entry])
+    }
+    const lines = [`孤儿工作树 ${String(orphans.length)} 棵（按原因分组）：`]
+    for (const [reason, entries] of groups) {
+      lines.push(`  ${reason}（${String(entries.length)} 棵）：`)
+      for (const entry of entries) {
+        const state = entry.closedAt === null ? '未收尾' : '已归档'
+        const created = new Date(entry.createdAt).toISOString()
+        const closed = entry.closedAt === null ? '' : ` · 闭合 ${new Date(entry.closedAt).toISOString()}`
+        lines.push(`    ${entry.rootId} · ${state} · 创建 ${created}${closed} · ${reason}`)
+      }
+    }
+    lines.push('执行 /clean orphans all 清理上面这些；/clean orphans <root-xxxxxxxx> 只清理一棵。')
+    return lines
+  }
+
+  /** Delete the named trees, re-probing each owner FIRST: a listing is a report, never authorization.
+   *  A tree whose session came back — or that is already gone — is skipped, and the reply says so. */
+  const removeOrphanTrees = async (
+    callerId: string,
+    rootIds: readonly string[],
+  ) => {
+    const removed: OrphanTreeReport[] = []
+    const skipped: string[] = []
+    for (const rootId of rootIds) {
+      const report = await host.probeOrphanTree(rootId)
+      if (report === undefined) {
+        skipped.push(`${rootId}（工作树已不存在）`)
+        continue
+      }
+      if (report.probe.kind === 'exists') {
+        skipped.push(`${rootId}（owner 会话已可观测，跳过）`)
+        continue
+      }
+      await host.destroyOrphanTree(rootId)
+      removed.push(report)
+    }
+    const count = (kind: OwnerProbe['kind']): number =>
+      removed.filter((entry) => entry.probe.kind === kind).length
+    // Audit trail: who asked, how many went, and by which verdict — the only record of a destructive
+    // act that leaves no session log behind.
+    log.info(
+      `/clean orphans from ${callerId}: removed ${String(removed.length)} tree(s) `
+      + `(missing: ${String(count('missing'))}, unobservable: ${String(count('unobservable'))}), `
+      + `skipped ${String(skipped.length)}: ${removed.map((entry) => entry.rootId).join(', ')}`,
+    )
+    if (removed.length === 0) {
+      return {
+        kind: 'error' as const,
+        text: ['没有删除任何工作树：', ...skipped.map((line) => `  ${line}`)].join('\n'),
+      }
+    }
+    return {
+      kind: 'success' as const,
+      text: [
+        `已清理 ${String(removed.length)} 棵孤儿工作树（不存在 ${String(count('missing'))}、`
+        + `不可观测 ${String(count('unobservable'))}）：`,
+        ...removed.map((entry) => `  ${entry.rootId}`),
+        ...(skipped.length === 0 ? [] : [`跳过 ${String(skipped.length)} 棵：`, ...skipped.map((line) => `  ${line}`)]),
+      ].join('\n'),
+    }
+  }
+
   ctx.commands.register({
     name: 'archive',
-    description: '归档本会话已完成的 worker 会话记录（只标记归档，不释放磁盘；释放用 /clean）。',
+    description: '归档本会话已完成的 worker 会话记录（只标记归档，不释放磁盘；释放用 /clean archive）。',
     handler: async ({ agent }) => {
       if (registryOf() === undefined) {
         return { kind: 'error', text: '这个部署没有挂载 workspace registry，无法归档。' }
       }
-      const archivedIds = new Set((registryOf()?.archivedSessionIds ?? []).map((id) => String(id)))
-      const result = await archiveWorkers(sessionDeps, agent.id, (id) => archivedIds.has(id))
+      const archived = archivedIds()
+      const result = await archiveWorkers(sessionDeps, agent.id, (id) => archived.has(id))
       if (result.archived.length === 0) {
         return {
           kind: 'success',
@@ -442,7 +551,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         text: [
           `已归档 ${String(result.archived.length)} 个 work 会话：`,
           ...result.archived.map((id) => `  ${id}`),
-          '归档只是标记（不释放磁盘）。要释放磁盘请执行 /clean all。',
+          '归档只是标记（不释放磁盘）。要释放磁盘请执行 /clean archive all。',
         ].join('\n'),
       }
     },
@@ -450,36 +559,77 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   ctx.commands.register({
     name: 'clean',
-    description: '清理 worker 会话记录以释放磁盘：all 清理所有已归档的，或给一个 worker 会话 id 只清理它。',
-    input: { hint: '[all|work-xxxxxxxx]' },
+    // The two scopes are the command's whole grammar, so the description names both and states the one
+    // rule that is easy to get wrong: no argument only LISTS; deleting needs a scope AND a target.
+    description: '清理 worker 会话记录或孤儿记录：archive 作用域针对本会话已归档、非运行的 worker 会话记录；'
+      + 'orphans 作用域针对 owner 会话已不存在或不可观测的记录。无参只列不删，删除必须同时给作用域与目标（all 或具体 id）。',
+    input: { hint: '[archive [all|work-xxxxxxxx] | orphans [all|root-xxxxxxxx]]' },
     handler: async ({ agent, rawInput }) => {
-      const request = rawInput.trim()
-      const workers = await workerSessions(sessionDeps, agent.id)
-      if (workers.length === 0) {
-        return { kind: 'success', text: '本会话没有 work 会话记录。' }
-      }
-      const archivedIds = new Set((registryOf()?.archivedSessionIds ?? []).map((id) => String(id)))
-      const target = (worker: (typeof workers)[number]): boolean => !worker.live
+      const words = rawInput.trim().split(/\s+/u).filter((word) => word.length > 0)
+      const [scope = '', target = '', ...extra] = words
 
-      if (request.length === 0) {
-        // No argument is the dry run: what `/clean all` would remove, and what it skips.
-        const ready = workers.filter((worker) => target(worker) && archivedIds.has(worker.id))
-        const pending = workers.filter((worker) => target(worker) && !archivedIds.has(worker.id))
+      // No argument is the read-only overview: both scopes, nothing removed.
+      if (scope === '') {
+        const workers = await workerSessions(sessionDeps, agent.id)
+        const orphans = await host.orphanTreeReports({ fresh: true })
+        if (workers.length === 0 && orphans.length === 0) {
+          return { kind: 'success', text: '本会话没有 work 会话记录，也没有孤儿工作树。' }
+        }
+        log.info(
+          `/clean (list) from ${agent.id}: ${String(workers.length)} session record(s), `
+          + `${String(orphans.length)} orphan tree(s)`,
+        )
         return {
           kind: 'success',
           text: [
-            `可清理（已归档）${String(ready.length)} 个，共 ${bytes(ready.reduce((sum, w) => sum + w.bytes, 0))}：`,
-            ...ready.map((worker) => `  ${worker.id}  ${bytes(worker.bytes)}`),
-            pending.length === 0
-              ? ''
-              : `另有 ${String(pending.length)} 个已完成但未归档，先执行 /archive 再清理（或用 /clean <id> 单独指定）。`,
-            '执行 /clean all 清理上面这些；/clean <work-xxxxxxxx> 只清理一个。',
-          ].filter((line) => line !== '').join('\n'),
+            '工作会话记录（archive 作用域）：',
+            ...archiveScopeLines(workers, archivedIds()),
+            // Absent rather than empty when there is nothing to say: an "orphans: 0" section is noise.
+            ...(orphans.length === 0 ? [] : ['', ...orphanScopeLines(orphans)]),
+          ].join('\n'),
         }
       }
 
-      if (request === 'all') {
-        const doomed = workers.filter((worker) => target(worker) && archivedIds.has(worker.id))
+      // One command, one spelling. The pre-scope forms (`/clean all`, `/clean <id>`) are ERRORS that
+      // name their replacement — never silent aliases, because two spellings for one intent is what
+      // this grammar exists to remove.
+      if (scope !== 'archive' && scope !== 'orphans') {
+        return {
+          kind: 'error',
+          text: scope === 'all'
+            ? '作用域必填：改用 /clean archive all（已归档会话记录）或 /clean orphans all（孤儿工作树）。'
+            : `作用域必填：改用 /clean archive ${scope}（已归档会话记录）或 /clean orphans <root-xxxxxxxx>（孤儿树）。`,
+        }
+      }
+      if (extra.length > 0) {
+        return { kind: 'error', text: `参数太多：/clean ${scope} 只接受 all 或一个 id。` }
+      }
+
+      if (scope === 'orphans') {
+        if (target === '') {
+          const orphans = await host.orphanTreeReports({ fresh: true })
+          if (orphans.length === 0) return { kind: 'success', text: '没有孤儿工作树。' }
+          log.info(`/clean orphans (list) from ${agent.id}: ${String(orphans.length)} tree(s)`)
+          return { kind: 'success', text: orphanScopeLines(orphans).join('\n') }
+        }
+        if (target === 'all') {
+          // The candidate set; every member is re-probed below before anything is destroyed.
+          const listed = await host.orphanTreeReports({ fresh: true })
+          if (listed.length === 0) return { kind: 'success', text: '没有孤儿工作树可清理。' }
+          return await removeOrphanTrees(agent.id, listed.map((entry) => entry.rootId))
+        }
+        return await removeOrphanTrees(agent.id, [target])
+      }
+
+      const workers = await workerSessions(sessionDeps, agent.id)
+      if (target === '') {
+        // The archive scope's read-only listing — today's dry run, now with its scope spelled out.
+        if (workers.length === 0) return { kind: 'success', text: '本会话没有 work 会话记录。' }
+        return { kind: 'success', text: archiveScopeLines(workers, archivedIds()).join('\n') }
+      }
+      if (target === 'all') {
+        const archived = archivedIds()
+        const doomed = workers.filter((worker) => !worker.live && archived.has(worker.id))
         if (doomed.length === 0) {
           return { kind: 'success', text: '没有已归档的 work 会话可清理（先 /archive）。' }
         }
@@ -489,7 +639,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           freed += removeWorker(worker)
           removed.push(worker.id)
         }
-        log.info(`/clean all from ${agent.id}: removed ${String(removed.length)} session(s), ${bytes(freed)}`)
+        log.info(`/clean archive all from ${agent.id}: removed ${String(removed.length)} session(s), ${bytes(freed)}`)
         return {
           kind: 'success',
           text: [
@@ -499,15 +649,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         }
       }
 
-      const named = workers.find((worker) => worker.id === request)
+      // A named record is looked up ONLY among this session's own workers, so a `/clean archive <id>`
+      // can never reach another session's log. (The orphans scope is the one deliberate exception,
+      // and only for a tree whose owner is missing or unobservable.)
+      const named = workers.find((worker) => worker.id === target)
       if (named === undefined) {
-        return { kind: 'error', text: `${request} 不是本会话的 work 会话（用 /clean 看清单）。` }
+        return { kind: 'error', text: `${target} 不是本会话的 work 会话（用 /clean archive 看清单）。` }
       }
       if (named.live) {
-        return { kind: 'error', text: `${request} 还在运行，不能清理。` }
+        return { kind: 'error', text: `${target} 还在运行，不能清理。` }
       }
       const freed = removeWorker(named)
-      log.info(`/clean ${named.id} from ${agent.id}: ${bytes(freed)}`)
+      log.info(`/clean archive ${named.id} from ${agent.id}: ${bytes(freed)}`)
       return { kind: 'success', text: `已清理 ${named.id}，释放约 ${bytes(freed)}。` }
     },
   })

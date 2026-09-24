@@ -3,16 +3,70 @@
  * Pack the plugin into ./release (`pnpm pack:plugin`) and assert the tarball is self-contained:
  * no bundled `@deepseek-ai/*` (all peers, keeping host identities single) and no reference to the
  * unpublished `@avantf/work-core`, whose runtime and declarations are inlined instead.
+ *
+ * Usage:
+ *   pnpm pack:plugin               # pack into release/ + the static tarball assertions
+ *   pnpm pack:plugin --mount       # + extract the tarball into a scratch profile and mount it
+ *   pnpm pack:plugin --out <dir>   # pack destination (default: <repo>/release)
+ *   pnpm pack:plugin --keep        # keep the scratch profile when --mount fails
+ *
+ * Every flag that is understood is listed above, and an UNKNOWN one exits non-zero: `--mount` used
+ * to be accepted and silently ignored, so a release run looked like the packed tarball had been
+ * extracted and mounted when nothing of the sort had happened. A flag this script cannot honour
+ * must fail loudly — never be a no-op.
+ *
+ * Run `pnpm build:dsh` first (this script never builds): `lib/index.js` must be the artifact the
+ * assertions describe. `--mount` needs the installed dsh (`npm i -g @deepseek-ai/dsh`), the peers a
+ * real profile resolves.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { withWorkspaceVersions } from '../../scripts/lib/versions.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const outDir = join(repo, 'release')
+
+/**
+ * Parse the flags FIRST, so an unsupported option fails before anything is packed.
+ *
+ * `--out` takes a value; a missing one is an error, not a silent default. `--keep` is only
+ * meaningful together with `--mount` (there is no scratch profile otherwise), so it is rejected
+ * alone rather than accepted as a no-op.
+ */
+const args = process.argv.slice(2)
+let mount = false
+let keep = false
+let outArg
+for (let index = 0; index < args.length; index += 1) {
+  const arg = args[index]
+  if (arg === '--mount') { mount = true; continue }
+  if (arg === '--keep') { keep = true; continue }
+  if (arg === '--out') {
+    outArg = args[index + 1]
+    if (outArg === undefined || outArg.startsWith('--')) {
+      console.error('pack-plugin: --out needs a directory')
+      process.exit(2)
+    }
+    index += 1
+    continue
+  }
+  console.error(`pack-plugin: unknown option ${arg}`)
+  console.error('  usage: node scripts/pack-plugin.mjs [--mount] [--keep] [--out <dir>]')
+  console.error('  an unsupported option is NOT ignored — that is how `--mount` looked verified without mounting anything')
+  process.exit(2)
+}
+if (keep && !mount) {
+  console.error('pack-plugin: --keep only applies to --mount (without it there is no scratch profile to keep)')
+  process.exit(2)
+}
+const outDir = outArg === undefined ? join(repo, 'release') : resolve(outArg)
+if (outDir === resolve('/')) {
+  console.error('pack-plugin: refusing to pack into /')
+  process.exit(2)
+}
 mkdirSync(outDir, { recursive: true })
 // Remove only tarballs: `release/` also holds a tracked source file the development tree needs.
 for (const entry of readdirSync(outDir)) {
@@ -443,6 +497,88 @@ for (const tarball of tarballs) {
   }
 }
 
+// ── 5. optional: mount the PACKED tarball in a scratch profile ─────────────────
+// `--mount` proves the tarball itself — the bytes the registry would serve — can be loaded by a
+// host. The build tree passing `pnpm build:dsh` says nothing about that: the tarball is assembled by
+// `pnpm pack` from the manifest's `files` whitelist, so a missing file or a broken entry only shows
+// up once it is extracted and imported. The extraction and the peer links live here; the mount is
+// the SAME `scripts/mount-smoke.mjs` the release gate runs, pointed at the extracted package through
+// the packed-artifact hooks (`AVANTF_PLUGIN_DIR` / `AVANTF_MOUNT_SCRATCH`) — nothing is copied.
+if (mount && failures.length === 0) {
+  const pluginDir = join(repo, 'packages', 'plugin')
+  const packedTarball = join(outDir, tarballs[0])
+  const linkedPeers = join(pluginDir, 'node_modules', '@deepseek-ai')
+
+  if (!existsSync(linkedPeers)) {
+    failures.push(`${packedTarball}: the @deepseek-ai peers are not linked — run \`pnpm build:dsh\` (or node scripts/link-dsh.mjs) before --mount`)
+  } else {
+    /**
+     * Extract `packedTarball` into a scratch profile and mount it there.
+     *
+     * `linkBase` is the whole point of running twice: with the base linked into the scratch tree the
+     * inlined bootstrap resolves it and the compatibility gate runs off that copy (`compat: ok`);
+     * with nothing able to resolve it, the same bytes must still mount in full, printing the
+     * `envinit: WARNING` — the family's degrade rule, "no base → still mounts". Peers are the
+     * installed dsh copies an explicit `<scratch>/node_modules` link makes, `--runtime` semantics.
+     */
+    function mountVariant(label, { linkBase }) {
+      const scratch = mkdtempSync(join(tmpdir(), 'avf-work-pack-mount-'))
+      const scope = join(scratch, 'node_modules', '@avantf')
+      mkdirSync(scope, { recursive: true })
+      console.log(`\n▶ [${label}] extract ${packedTarball}\n  → ${join(scope, 'dsh-work')}`)
+      if (spawnSync('tar', ['-xzf', packedTarball, '-C', scope], { stdio: 'inherit' }).status !== 0) {
+        failures.push(`${label}: cannot extract ${packedTarball}`)
+        if (keep) console.log(`  scratch[${label}] kept: ${scratch}`)
+        else rmSync(scratch, { recursive: true, force: true })
+        return
+      }
+      renameSync(join(scope, 'package'), join(scope, 'dsh-work'))
+      // The runtime externals an npm install would have put beside the package. Every `@avantf/*`
+      // ENGINE name stays unlinked on purpose: the core is inlined, so a leaked engine import must
+      // fail to resolve — that is what makes this mount a self-containment proof.
+      const peerScope = join(scratch, 'node_modules', '@deepseek-ai')
+      mkdirSync(peerScope, { recursive: true })
+      for (const name of readdirSync(linkedPeers)) {
+        symlinkSync(join(linkedPeers, name), join(peerScope, name), 'dir')
+      }
+      symlinkSync(join(pluginDir, 'node_modules', 'zod'), join(scratch, 'node_modules', 'zod'), 'dir')
+      // The base PEER: linked (resolvable) or absent (unresolvable), never both — the variant's
+      // whole point is which of the two bootstrap paths runs.
+      if (linkBase) {
+        const from = join(pluginDir, 'node_modules', '@avantf', 'dsh-plugin-base')
+        if (!existsSync(from)) {
+          failures.push(`${label}: @avantf/dsh-plugin-base is not installed here — cannot prove the base-resolvable mount`)
+          if (keep) console.log(`  scratch[${label}] kept: ${scratch}`)
+          else rmSync(scratch, { recursive: true, force: true })
+          return
+        }
+        symlinkSync(from, join(scratch, 'node_modules', '@avantf', 'dsh-plugin-base'), 'dir')
+      }
+      const status = spawnSync(process.execPath, [join(repo, 'scripts', 'mount-smoke.mjs'), '--runtime'], {
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          AVANTF_PLUGIN_DIR: join(scope, 'dsh-work'),
+          AVANTF_MOUNT_SCRATCH: scratch,
+          // No base linked: the smoke must assert the base-unavailable WARNING and still mount.
+          ...(linkBase ? {} : { AVANTF_COMPAT_ABSENT: '1' }),
+        },
+      }).status
+      if (status !== 0) {
+        failures.push(`the packed tarball did not mount [${label}] (see the mount smoke output above)`)
+        if (keep) console.log(`  scratch[${label}] kept: ${scratch}`)
+        else rmSync(scratch, { recursive: true, force: true })
+      } else {
+        rmSync(scratch, { recursive: true, force: true })
+      }
+    }
+
+    // The two bootstrap paths a user's install can take.
+    mountVariant('base linked', { linkBase: true })
+    mountVariant('base unresolvable', { linkBase: false })
+  }
+}
+
 if (failures.length > 0) {
   console.error(`\npack:plugin FAILED (${String(failures.length)})`)
   for (const failure of failures) console.error(`  - ${failure}`)
@@ -450,3 +586,6 @@ if (failures.length > 0) {
 }
 console.log(`\npack:plugin ok → ${outDir}`)
 for (const tarball of tarballs) console.log(`  ${tarball}`)
+if (mount) {
+  console.log(`\n✓ PACK OK — the packed tarball mounts in a scratch profile: ${join(outDir, tarballs[0])}`)
+}

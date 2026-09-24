@@ -29,16 +29,26 @@ function clone(state: TreeState): TreeState {
   return { tree: state.tree, nodes: new Map(state.nodes) }
 }
 
-/** A tree with a controllable clock, live set and id sequence. */
-function makeTree(options: { live?: Set<string>; owners?: Set<string>; spill?: boolean } = {}) {
+/** A tree with a controllable clock, live set and id sequence. `unobservable` models a host that
+ * cannot answer the ownership question at all (a session store refusing an old log), which must
+ * stay distinct from a session that is genuinely gone. */
+function makeTree(options: { live?: Set<string>; owners?: Set<string>; unobservable?: Set<string>; spill?: boolean } = {}) {
   const store = memoryStore()
   const live = options.live ?? new Set<string>(['owner'])
   const owners = options.owners ?? new Set<string>(['owner'])
+  const unobservable = options.unobservable ?? new Set<string>()
   let tick = 0
   let sequence = 0
   const tree = new WorkTree(store, {
     isAgentLive: (sessionId) => live.has(sessionId),
-    ownerExists: (sessionId) => Promise.resolve(owners.has(sessionId)),
+    probeOwner: (sessionId) =>
+      Promise.resolve(
+        unobservable.has(sessionId)
+          ? { kind: 'unobservable' as const, detail: `stubbed: cannot read ${sessionId}` }
+          : owners.has(sessionId)
+            ? { kind: 'exists' as const }
+            : { kind: 'missing' as const },
+      ),
     spill: (text) =>
       Promise.resolve(
         options.spill === false
@@ -48,7 +58,7 @@ function makeTree(options: { live?: Set<string>; owners?: Set<string>; spill?: b
     now: () => (tick += 1),
     newId: () => `n${String(++sequence).padStart(4, '0')}`,
   })
-  return { tree, store, live, owners }
+  return { tree, store, live, owners, unobservable }
 }
 
 async function rootOf(tree: WorkTree): Promise<string> {
@@ -271,7 +281,7 @@ describe('the tree-size backstop', () => {
     const store = memoryStore()
     const tree = new WorkTree(store, {
       isAgentLive: (sessionId) => sessionId === 'work-root',
-      ownerExists: () => Promise.resolve(true),
+      probeOwner: () => Promise.resolve({ kind: 'exists' }),
       spill: () => Promise.resolve(null),
       now: () => 1,
       newId: (() => {
@@ -953,7 +963,7 @@ describe('reconcile on open', () => {
     // A fresh process: same durable state, the worker is gone, the owner is back.
     const reopened = new WorkTree(store, {
       isAgentLive: (sessionId) => sessionId === 'owner',
-      ownerExists: () => Promise.resolve(true),
+      probeOwner: () => Promise.resolve({ kind: 'exists' }),
       spill: () => Promise.resolve(null),
       now: () => 1,
       newId: () => 'fresh',
@@ -970,7 +980,7 @@ describe('reconcile on open', () => {
 
     const reopened = new WorkTree(store, {
       isAgentLive: (sessionId) => sessionId === 'work-live' || sessionId === 'owner',
-      ownerExists: () => Promise.resolve(true),
+      probeOwner: () => Promise.resolve({ kind: 'exists' }),
       spill: () => Promise.resolve(null),
       now: () => 1,
       newId: () => 'fresh',
@@ -987,7 +997,7 @@ describe('reconcile on open', () => {
     const id = await rootOf(tree)
     const reopened = new WorkTree(store, {
       isAgentLive: () => false,
-      ownerExists: () => Promise.resolve(true),
+      probeOwner: () => Promise.resolve({ kind: 'exists' }),
       spill: () => Promise.resolve(null),
       now: () => 1,
       newId: () => 'fresh',
@@ -1002,7 +1012,7 @@ describe('reconcile on open', () => {
     await rootOf(gone.tree)
     const reopened = new WorkTree(gone.store, {
       isAgentLive: () => false,
-      ownerExists: () => Promise.resolve(false),
+      probeOwner: () => Promise.resolve({ kind: 'missing' }),
       spill: () => Promise.resolve(null),
       now: () => 1,
       newId: () => 'fresh',
@@ -1010,7 +1020,8 @@ describe('reconcile on open', () => {
     await reopened.open()
     const orphans = await reopened.orphanedTrees()
     expect(orphans).toHaveLength(1)
-    await reopened.destroyTree(orphans[0]?.rootId ?? '')
+    expect(orphans[0]?.probe).toEqual({ kind: 'missing' })
+    await reopened.destroyTree(orphans[0]?.tree.rootId ?? '')
     expect(reopened.trees()).toHaveLength(0)
     expect(gone.store.documents.size).toBe(0)
 
@@ -1020,7 +1031,7 @@ describe('reconcile on open', () => {
     await rootOf(kept.tree)
     const survivor = new WorkTree(kept.store, {
       isAgentLive: () => false,
-      ownerExists: () => Promise.resolve(true),
+      probeOwner: () => Promise.resolve({ kind: 'exists' }),
       spill: () => Promise.resolve(null),
       now: () => 1,
       newId: () => 'fresh',
@@ -1028,6 +1039,21 @@ describe('reconcile on open', () => {
     await survivor.open()
     expect(await survivor.orphanedTrees()).toHaveLength(0)
     expect(survivor.trees()).toHaveLength(1)
+  })
+
+  it('separates the three owner states, carrying the detail for an unobservable one', async () => {
+    // Three owners, one per verdict: gone, opaque, and present. The middle one is the
+    // regression guard — "cannot tell" must not collapse into either yes or no.
+    const world = makeTree({ owners: new Set(['owner']), unobservable: new Set(['opaque']) })
+    await rootOf(world.tree)
+    await world.tree.createRoot({ ownerSessionId: 'gone', title: 'g', description: 'd', analysis: [] })
+    await world.tree.createRoot({ ownerSessionId: 'opaque', title: 'o', description: 'd', analysis: [] })
+
+    const orphans = await world.tree.orphanedTrees()
+    const byOwner = new Map(orphans.map((entry) => [entry.tree.ownerSessionId, entry.probe]))
+    expect(byOwner.get('owner')).toBeUndefined()
+    expect(byOwner.get('gone')).toEqual({ kind: 'missing' })
+    expect(byOwner.get('opaque')).toEqual({ kind: 'unobservable', detail: 'stubbed: cannot read opaque' })
   })
 })
 

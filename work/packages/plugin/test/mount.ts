@@ -8,10 +8,12 @@
  */
 import { Context } from '@deepseek-ai/cordis'
 import { validateJsonSchemaValue, type JsonSchemaNode } from '@deepseek-ai/dsh-tools'
+import { WorkTree } from '@avantf/work-core'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AvantfWorkHost } from '../src/host.js'
+import { createTreeStore, type TreesTable } from '../src/store.js'
 import { apply as applyPlugin, inject, name } from '../src/index.js'
 
 // The plugin's environment initialisation loads the family base `@avantf/dsh-plugin-base` through the
@@ -23,7 +25,11 @@ import { apply as applyPlugin, inject, name } from '../src/index.js'
 process.env['AVANTF_HOME'] = mkdtempSync(join(tmpdir(), 'avantf-work-test-home-'))
 
 /** The runtime-context snapshot the system-prompt projection appends per step. */
-export const SNAPSHOT_SOURCE = { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'snapshot' }
+export const SNAPSHOT_SOURCE = {
+  kind: 'runtime-context',
+  form: 'snapshot',
+  sections: [{ name: 'avantf-work', text: 'guidance' }],
+}
 
 export interface Message {
   id: string
@@ -113,7 +119,7 @@ export function nodeIdOfPrompt(prompt: string): string | undefined {
 const SNAPSHOT: Message = {
   id: 'runtime-context-snapshot',
   content: [{ type: 'text', text: 'guidance' }],
-  source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'snapshot' },
+  source: SNAPSHOT_SOURCE,
 }
 
 export interface Dispatched {
@@ -165,6 +171,17 @@ export interface Mounted {
   runCommand: (name: string, rawInput: string, agent?: StubAgent) => Promise<{ kind: string; text?: string }>
   owners: Set<string>
   sessions: Set<string>
+  /**
+   * Session ids whose owner probe FAILS with an error that is not "not found", as a session store
+   * refusing an old log does. Mutable, so a test can turn a session opaque after the mount.
+   */
+  unobservableSessions: Set<string>
+  /** Session ids the workspace registry reports as archived. Mutable, for `/clean archive all`. */
+  archivedSessions: Set<string>
+  /** The root ids of the trees seeded by `options.seedTrees`, in the order they were seeded. */
+  seededRoots: string[]
+  /** Materialize one session away, as a delete would: the next probe cannot see it live. */
+  dropLive: (sessionId: string) => void
   spill: { saved: string[]; locator: string; hint: string }
   /** Run one pre-step through the real event chain. */
   preStep: (payload: {
@@ -273,6 +290,23 @@ export async function mount(
      * `subagent/end` runs inside that gap: proving the guard needs a test that can stop there.
      */
     deferSend?: boolean
+    /**
+     * More session ids `observeSession` resolves as existing (the durable store's answer), on top of
+     * `owner`. Mutable afterwards through `mounted.sessions`, so a test can make a session vanish.
+     */
+    sessions?: readonly string[]
+    /** Session ids whose probe fails with a non-"not found" error: orphaned but never destroyed. */
+    unobservableSessions?: readonly string[]
+    /**
+     * Seed one tree per owner session into the durable store BEFORE the plugin opens it, so start-up
+     * reconciliation (orphan destruction, the aggregate report) runs against them exactly as after a
+     * restart. The generated root ids come back as `mounted.seededRoots`.
+     */
+    seedTrees?: readonly string[]
+    /** Mount a workspace registry whose archive set is `mounted.archivedSessions`. */
+    workspaceRegistry?: boolean
+    /** Plugin config, so a test can point `sessionsRoot` at a throwaway directory. */
+    pluginConfig?: Record<string, unknown>
   } = {},
 ): Promise<Mounted> {
   const records: Records = new Map()
@@ -308,7 +342,10 @@ export async function mount(
     }) => Promise<{ kind: string; text?: string }> | { kind: string; text?: string }
   }[] = []
   const owners = new Set<string>(['owner'])
-  const sessions = new Set<string>(['owner'])
+  const sessions = new Set<string>(['owner', ...(options.sessions ?? [])])
+  const unobservableSessions = new Set<string>(options.unobservableSessions ?? [])
+  const archivedSessions = new Set<string>()
+  const seededRoots: string[] = []
   /** Sessions `listSessions()` reports; tests push entries to exercise the commands. */
   const listedSessions: { header: Record<string, unknown>; live: boolean }[] = []
   const live = new Map<string, StubAgent>()
@@ -355,30 +392,57 @@ export async function mount(
 
   let open = false
   let domainOpens = 0
+  // The one table over `records`, shared by the domain stub and by `seedTrees`: seeding goes through
+  // the same store shape the plugin will open, so a seeded document is byte-for-byte what a restart
+  // would have loaded.
+  const table: TreesTable = {
+    get: (key) => records.get(key) as ReturnType<TreesTable['get']>,
+    entries: () => records.entries() as ReturnType<TreesTable['entries']>,
+    put: (key, value) => {
+      records.set(key, value)
+      return Promise.resolve()
+    },
+    delete: (key: string) => Promise.resolve(records.delete(key)),
+    get size() {
+      return records.size
+    },
+  }
   const storageDomainService = {
     open: (spec: { name: string }) => {
       if (open) throw new Error(`domain '${spec.name}' is already open`)
       open = true
       domainOpens += 1
       return Promise.resolve({
-        table: () => ({
-          get: (key: string) => records.get(key),
-          entries: () => records.entries(),
-          put: (key: string, value: unknown) => {
-            records.set(key, value)
-            return Promise.resolve()
-          },
-          delete: (key: string) => Promise.resolve(records.delete(key)),
-          get size() {
-            return records.size
-          },
-        }),
+        table: () => table,
         close: () => {
           open = false
           return Promise.resolve()
         },
       })
     },
+  }
+
+  if (options.seedTrees !== undefined) {
+    // A throwaway tree over the same store: `createRoot` is the only place a VALID tree document is
+    // built, so seeding through it keeps the fixture honest instead of hand-rolling node records.
+    let seeded = 0
+    const beforeOpen = new WorkTree(createTreeStore(table), {
+      isAgentLive: () => false,
+      probeOwner: () => Promise.resolve({ kind: 'exists' }),
+      spill: () => Promise.resolve(null),
+      now: () => Date.now(),
+      newId: () => (seeded += 1).toString(16).padStart(8, '0'),
+    })
+    for (const ownerSessionId of options.seedTrees) {
+      const created = await beforeOpen.createRoot({
+        ownerSessionId,
+        title: `seeded ${ownerSessionId}`,
+        description: 'seeded before the plugin opened its store',
+        analysis: [],
+      })
+      if (!created.ok) throw new Error(`seeding a tree for ${ownerSessionId} failed`)
+      seededRoots.push(created.value.id)
+    }
   }
 
   const ctx = new Context()
@@ -495,6 +559,11 @@ export async function mount(
     // wants otherwise; the mount harness has no session store behind it.
     listSessions: () => Promise.resolve(listedSessions),
     observeSession: (sessionId: string) => {
+      if (unobservableSessions.has(sessionId)) {
+        // The shape of a host-side failure that is NOT "not found" (a session-store migration
+        // refusing an old log): the owner's trees must survive it, and be reported instead.
+        return Promise.reject(new Error(`stubbed: session store cannot read "${sessionId}"`))
+      }
       if (!sessions.has(sessionId)) {
         const error = new Error(`session "${sessionId}" not found`) as Error & { code: string }
         error.code = 'SESSION_QUERY_SESSION_NOT_FOUND'
@@ -503,6 +572,19 @@ export async function mount(
       return Promise.resolve({ header: {}, [Symbol.dispose]: () => undefined })
     },
   })
+  if (options.workspaceRegistry === true) {
+    // The durable archive marker `/clean`'s `all` target reads; absent unless a test asks for it,
+    // because a headless deployment really has none and the commands must degrade without it.
+    ctx.provide('workspaceRegistry', {
+      get archivedSessionIds() {
+        return [...archivedSessions]
+      },
+      archiveSession: (id: string) => {
+        archivedSessions.add(String(id))
+        return Promise.resolve()
+      },
+    })
+  }
   if (options.spill !== false) {
     ctx.provide('spillStore', {
       saveText: (input: { content: string }) => {
@@ -521,7 +603,7 @@ export async function mount(
     })
   }
 
-  await ctx.plugin({ name, inject, apply: applyPlugin }, {})
+  await ctx.plugin({ name, inject, apply: applyPlugin }, options.pluginConfig ?? {})
   const host = ctx.get('avantfWork') as unknown as AvantfWorkHost
   await host.whenReady()
 
@@ -578,6 +660,12 @@ export async function mount(
     },
     owners,
     sessions,
+    unobservableSessions,
+    archivedSessions,
+    seededRoots,
+    dropLive: (sessionId: string) => {
+      live.delete(sessionId)
+    },
     spill,
     preStep,
     typertContributions,

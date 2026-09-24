@@ -2,7 +2,7 @@
  * Finding, archiving and removing the session logs of this plugin's own workers.
  * Archiving is a supported harness operation that frees no disk; removing has NO harness
  * API, so this module deletes the directory itself — only for a session this plugin
- * dispatched, never a live one, `/clean all` limited to archived ids, and the directory
+ * dispatched, never a live one, `/clean archive all` limited to archived ids, and the directory
  * named exactly the session id under the configured sessions root.
  * @module @avantf/dsh-work/workerSessions
  */

@@ -11,6 +11,8 @@ export type {
   SpilledText,
   CreateRootInput,
   DispatchDecision,
+  OwnerProbe,
+  OrphanedTree,
 } from './tree.js'
 export { WorkEngine, DEFAULT_ENGINE_OPTIONS, detectConcurrency } from './engine.js'
 export type { EngineHooks, EngineOptions, StartWorkerInput, StallReport } from './engine.js'

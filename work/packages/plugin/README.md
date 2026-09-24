@@ -20,8 +20,10 @@ owner 的对话里。
 - **三条命令**：
   - `/work`：列出本会话的工作树；后面跟文本则用这段文本建一个根工作；
   - `/archive`：把本会话**已完成**的 worker 会话标记为归档（只标记，不释放磁盘）；
-  - `/clean`：释放磁盘 —— 无参数是干跑清单，`/clean all` 清理所有**已归档**的，
-    `/clean <work-xxxxxxxx>` 只清一个。
+  - `/clean`：释放磁盘或清理孤儿工作树，两个作用域同形 —— 无参数只列不删，删除必须给 `all` 或具体 id：
+    `/clean archive all` 清理本会话所有**已归档**的 worker 会话记录，`/clean archive <work-xxxxxxxx>` 只清一个；
+    `/clean orphans` 列出 owner 会话已不存在或不可观测的工作树，`/clean orphans all` 或
+    `/clean orphans <root-xxxxxxxx>` 清理它们（删除前会重新探测 owner，期间恢复的树会跳过）。
 - **一个「工作」标签**：会话视图条里排在「对话」「轨迹」之后，树形展示本会话的工作树；引擎一变就把
   变更推给标签，点开某一行才按需读该工作的详情，并在弹窗里按「内容 / 上下文 / 拆解信息 / 纠偏 /
   结果 / 子工作」分区查看（工作标题就是弹窗标题；每个分区前有一行说明它装什么；上下文 / 拆解信息 /
@@ -89,7 +91,7 @@ dsh web
 - **配置项**：`maxConcurrent`（并发工作单元上限）、`staleMs`（多久没有进展算卡死）、
   `sessionsRoot`（worker 会话目录根，默认 `<dsh home>/sessions`）。
 - **数据**：工作树走 DSH 存储域（`avantf_work`）；每个工作单元都是**真实会话**，日志在
-  `~/.dsh/sessions` 下。`/archive` 只改归档标记，要真正腾磁盘用 `/clean all`。
+  `~/.dsh/sessions` 下。`/archive` 只改归档标记，要真正腾磁盘用 `/clean archive all`。
 
 ## 升级 / 卸载
 

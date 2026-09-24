@@ -18,7 +18,7 @@ DSH（DeepSeek Harness）原生 Cordis 插件：**工作树引擎**。
 | 一段引导上下文 | 每轮把树的状态写进 owner 的 prompt |
 | 一个 `agent/pre-step` 钩子 | 过滤 worker 结算通知、决定某一步带什么进模型；引擎的唤醒信号在没有可处理状态时被**清空**（不是 reject，reject 会截断这一轮并把队列搁置）|
 | `/archive` 命令 | 把本会话**已完成**的 work 会话记录标记为归档（走 workspace registry 的官方接口，durable、可 unarchive）。只标记，**不释放磁盘** |
-| `/clean` 命令 | 释放磁盘：`/clean` 无参数=列出可清理的（干跑）、`/clean all` 清理所有**已归档**的、`/clean <work-xxxxxxxx>` 只清一个 |
+| `/clean` 命令 | 两个作用域，删除必须同时给作用域与目标：`/clean`（无参数）=只读总览、`/clean archive [all\|work-xxxxxxxx]` 释放已归档的 worker 会话日志、`/clean orphans [all\|root-xxxxxxxx]` 清理 owner 会话已不存在或不可观测的孤立工作树 |
 | `/work` 命令 | 无参数：列出本会话拥有的工作树；**带文本：用它建一个根工作**（等价于 agent 调 `create_work`）|
 | **"工作"标签**（客户端半边）| 会话视图条里排在"对话""轨迹"之后的第三个标签，用树形展示本会话的工作树；**引擎一变就推给标签**（`watch` 流），点工作标题按需读该工作详情并在**弹窗**里按标签展示（左侧"内容/上下文/拆解信息/纠偏/结果/子工作"，右侧一次一个分区、单独滚动；空的分区不出现，每个分区前有一行说明它装什么；工作标题是弹窗的标题栏，连同节点 id/状态/派发次数/深度）；**每棵**工作树的标题栏带"删除"按钮（二次确认；树还在跑时按钮可见但禁用并说明原因）；**在跑的节点默认展开、已完成的默认折叠**（点击可覆盖，且覆盖之后不再被状态改回）|
 
@@ -79,22 +79,31 @@ dsh plugin --profile web add @avantf/dsh-work
     staleMs: 1800000
 ```
 
-## `/archive` 与 `/clean`（worker 会话日志）
+## `/archive` 与 `/clean`（worker 会话日志与孤儿工作树）
 
 worker 是真实会话，所以每派活一次就多一个会话目录（本机实测每个约 40 KB）。两条命令分工明确：
 
 - **`/archive`**：把本会话已完成的 work 会话标记为归档。走 `workspaceRegistry.archiveSession()` —— harness 的官方接口，durable，可用 unarchive 撤销。**它只改标记，不释放任何磁盘。**
-- **`/clean`**：
-  - `/clean`（无参数）→ 干跑：列出可清理的（已归档）与"已完成但未归档"的数量和体积；
-  - `/clean all` → 删除所有**已归档**的 worker 会话目录，报告释放的字节；
-  - `/clean <work-xxxxxxxx>` → 只删这一个（需在清单里、且不在运行）。
+- **`/clean`**：两个作用域同形，**只给作用域永远只列不删**，删除必须 `all` 或具体 id；旧的无作用域形式 `/clean all`、`/clean <work-id>` 一律报错并指路（不静默当别名）：
+  - `/clean`（无参数）→ 只读总览：archive 作用域的可清理清单 + orphans 作用域的按原因分组清单；
+  - `/clean archive` → 只列 archive 作用域；`/clean archive all` → 删除所有**已归档、非运行**的 worker 会话目录；`/clean archive <work-xxxxxxxx>` → 只删这一个（需是本会话的、且不在运行）；
+  - `/clean orphans` → 只列孤立工作树（按原因分节）；`/clean orphans all` → 删除列出的每一棵；`/clean orphans <root-xxxxxxxx>` → 只删一棵；
+  - 删除前**逐个重新探测** owner：期间变回可观测的、或已经不存在的树会被跳过并在输出里说明。这是唯一允许触碰别的会话的工作树的路径，且仅当该树的 owner 不存在或不可观测。
 
 **为什么"删除"要自己动手**：harness 的会话持久化只有 `create`/`open`/`list`/`stat`，**没有 delete**，GUI 也只有归档。所以释放磁盘只能由本插件删目录，护栏写在 `src/workerSessions.ts`：
 
 1. 只认本插件派出的 worker（claim id 形状 `work-<8 hex>` + 头里 `origin: subagent`、`delegationDepth: 1`、`parentSession` 是本会话）；
 2. 绝不动仍在运行的会话（结算后的 worker 没有 agent、也没有打开的写入者）；
-3. `/clean all` 只碰**已归档**的 —— 丢弃一定是有人明确做过的决定；单独指定 id 才跳过这道闸；
+3. `/clean archive all` 只碰**已归档**的 —— 丢弃一定是有人明确做过的决定；单独指定 id 才跳过这道闸；
 4. 目录必须**正好以 session id 命名**、且位于配置的会话根之下（`config.sessionsRoot`，默认 `<dsh home>/sessions`）—— 根给错时"什么都删不到"，而不是删错东西。
+
+**孤儿工作树的判定是三态，不是布尔**（`WorkTree.orphanedTrees()`，`TreeDeps.probeOwner`）：
+
+- `exists` —— owner 会话还在（含"有活 agent"这条短路）；树照常；
+- `missing` —— `sessionQuery` 明确回答会话不存在：`WorkEngine.reconcileOrphans()` 在启动与每次 sweep 自动销毁（先 `interruptWorker` 再 `destroyTree`）；
+- `unobservable` —— 宿主**答不上来**（例如 session 存储迁移拒绝一条旧日志、或没有挂 `sessionQuery`）：既不当存在、也**绝不销毁**（"说不清"不是"没了"；树可回收，被毁的工作不能），留给 `/clean orphans` 人工处理。
+
+启动与 sweep 的对账只打**一条聚合报告**（`orphans: N tree(s) ... (unobservable: X, missing: Y); run /clean orphans`），不再每棵树一条 WARN；集合没变就不重复打。插件侧探针有 5 分钟 TTL 缓存，命令的清单与删除路径都**绕过缓存**重新探测。
 
 ## `/work`
 

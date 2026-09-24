@@ -10,6 +10,13 @@
  * it needs the subagent runtime, so `subagents` is a recorder and the run asserts dispatch
  * attempts go through it.
  *
+ * PACKED-ARTIFACT MODE — `AVANTF_PLUGIN_DIR` (the extracted tarball's package directory) plus
+ * `AVANTF_MOUNT_SCRATCH` (a profile the caller already prepared: the extracted package under
+ * `node_modules/@avantf/dsh-work`, the `@deepseek-ai/*` peers and `zod` beside it, and the base
+ * peer iff that variant wants it). Both set together; this run then links NOTHING and only drives
+ * the mount, so a leaked engine `@avantf/*` import has nothing to resolve — the mount itself is the
+ * assertion that the packed package is self-contained. `pack-plugin.mjs --mount` is the caller.
+ *
  * TWO PROFILES, chosen by what is installed — both must hold:
  *
  *   - NORMAL: `@avantf/dsh-plugin-base` is installed into the plugin and built. The gate IS that
@@ -33,7 +40,18 @@ import { resolveHarness } from '../../scripts/lib/harness-path.mjs'
 
 const require = createRequire(import.meta.url)
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const pluginDir = join(repo, 'packages', 'plugin')
+
+/**
+ * The plugin package this run loads.
+ *
+ * Default: the built artifact in the workspace. `AVANTF_PLUGIN_DIR` + `AVANTF_MOUNT_SCRATCH` are
+ * the packed-artifact mode `pack-plugin.mjs --mount` uses — see the header. `packagedProfile` is
+ * what turns off this smoke's own linking: the caller owns the profile.
+ */
+const packagedDir = process.env['AVANTF_PLUGIN_DIR']
+const preparedScratch = process.env['AVANTF_MOUNT_SCRATCH']
+const pluginDir = packagedDir ?? join(repo, 'packages', 'plugin')
+const packagedProfile = packagedDir !== undefined && preparedScratch !== undefined
 
 /** Every harness package the smoke resolves at runtime, plus the workspace core. */
 const LINKS = [
@@ -55,7 +73,9 @@ const LINKS = [
   ['dsh-system-prompt', 'packages/core/system-prompt'],
 ]
 
-const scratch = mkdtempSync(join(tmpdir(), 'avantf-work-mount-'))
+const scratch = preparedScratch ?? mkdtempSync(join(tmpdir(), 'avantf-work-mount-'))
+/** The caller's scratch is the caller's to remove (it may want the evidence after a failure). */
+const ownsScratch = preparedScratch === undefined
 const dataHome = join(scratch, 'data')
 mkdirSync(join(scratch, 'node_modules', '@deepseek-ai'), { recursive: true })
 mkdirSync(join(scratch, 'node_modules', '@avantf'), { recursive: true })
@@ -66,16 +86,24 @@ mkdirSync(dataHome, { recursive: true })
 process.env['AVANTF_HOME'] = dataHome
 
 // ── which profile this run is ─────────────────────────────────────────────────
-// The base must be INSTALLED and BUILT before anything else runs: with the peer missing, the
-// inlined bootstrap only warns and the plugin mounts degraded (gate absent), which must never pass
-// as green — so refuse, with the fix. `AVANTF_COMPAT_ABSENT=1` is the explicit opt-in to the other
-// profile, and it is the only way to get the degraded path instead of a hard failure.
-const baseDir = join(pluginDir, 'node_modules', '@avantf', 'dsh-plugin-base')
-const baseManifest = join(baseDir, 'package.json')
+// The base must be REACHABLE AND BUILT before anything else runs: with the peer missing, the inlined
+// bootstrap only warns and the plugin mounts degraded (gate absent), which must never pass as green
+// — so refuse, with the fix. `AVANTF_COMPAT_ABSENT=1` is the explicit opt-in to the other profile.
+// "Reachable" is resolved the same way the bootstrap resolves it: `createRequire` off the plugin
+// entry. In the workspace that is the plugin's own link; in the packed profile it is whatever the
+// caller linked into the scratch tree, or nothing.
+const entryRequire = createRequire(join(pluginDir, 'lib', 'index.js'))
+const baseDir = (() => {
+  try {
+    return dirname(entryRequire.resolve('@avantf/dsh-plugin-base/package.json'))
+  } catch {
+    return undefined
+  }
+})()
 const absentRequested = process.env['AVANTF_COMPAT_ABSENT'] === '1'
-const baseReady = existsSync(baseManifest) && existsSync(join(baseDir, 'dist', 'index.js'))
+const baseReady = baseDir !== undefined && existsSync(join(baseDir, 'dist', 'index.js'))
 if (!baseReady && !absentRequested) {
-  console.error(`mount-smoke: @avantf/dsh-plugin-base is not installed/built for the plugin (${baseManifest})`)
+  console.error(`mount-smoke: @avantf/dsh-plugin-base is not installed/built for the plugin (${baseDir ?? `unresolved from ${join(pluginDir, 'lib', 'index.js')}`})`)
   console.error('  without it the inlined bootstrap only warns and the plugin mounts degraded (no gate),')
   console.error('  which is not what this smoke verifies. Run: pnpm install && pnpm build:base')
   console.error('  to exercise the documented degrade path instead:')
@@ -83,11 +111,12 @@ if (!baseReady && !absentRequested) {
   process.exit(1)
 }
 if (baseReady && absentRequested) {
-  // The flag means "hide the base": the scratch copy below is what makes that true, so say it out
-  // loud rather than letting a bug leave the gate ON while the assertions expect ABSENT.
-  console.warn('mount-smoke: AVANTF_COMPAT_ABSENT=1 — the plugin is loaded from a copy with no base in reach')
+  // The flag means "hide the base": the scratch copy (workspace) or the caller's unlinked scratch
+  // profile (packed) is what makes that true, so say it out loud rather than letting a bug leave the
+  // gate ON while the assertions expect ABSENT.
+  console.warn(`mount-smoke: AVANTF_COMPAT_ABSENT=1 — loading from ${packagedProfile ? 'a profile with no base linked' : 'a copy with no base in reach'}`)
 }
-/** The gate is ON unless this run is the absent profile (where the copy genuinely cannot resolve it). */
+/** The gate is ON unless this run is the absent profile (where the loaded copy genuinely cannot resolve it). */
 const gateOn = !absentRequested
 
 // The guidance text is user-editable, one `.md` in the shared `<data home>/prompts`. It is seeded HERE,
@@ -106,9 +135,13 @@ writeFileSync(join(promptDir, 'work-tree-guide.md'), `${editedGuidance}\n`, 'utf
  * linked into a scratch tree, and only that branch reads `DSHHARNESS`.
  */
 const runtime = process.argv.includes('--runtime')
-const harness = runtime ? undefined : resolveHarness(undefined, 'mount-smoke')
+const harness = runtime || packagedProfile ? undefined : resolveHarness(undefined, 'mount-smoke')
 
-if (runtime) {
+if (packagedProfile) {
+  // The caller prepared the profile (extracted tarball, peers, and the base peer iff this variant
+  // wants it): link nothing here. A leaked engine `@avantf/*` import must have nothing to resolve —
+  // that is what makes the mount a self-containment proof for the packed artifact.
+} else if (runtime) {
   const linked = join(pluginDir, 'node_modules', '@deepseek-ai')
   if (!existsSync(linked)) {
     console.error('mount-smoke: --runtime needs `node scripts/link-dsh.mjs --runtime <dshDir>` first')
@@ -144,12 +177,14 @@ if (runtime) {
  * NORMAL: the built artifact in place, so `@avantf/dsh-plugin-base` resolves from the plugin's own
  * install — the workspace base under test.
  *
- * ABSENT: a COPY of the same built artifact, one level under the scratch tree where no
+ * ABSENT (workspace): a COPY of the same built artifact, one level under the scratch tree where no
  * `@avantf/dsh-plugin-base` exists, which is what makes "the base is missing" true rather than
- * simulated. Nothing is rebuilt: this is the same bytes the normal profile loads.
+ * simulated. Nothing is rebuilt: this is the same bytes the normal profile loads. PACKED the caller
+ * did that already — the extracted package sits in a scratch profile with no base linked — so it is
+ * imported in place.
  */
 let pluginEntry = join(pluginDir, 'lib', 'index.js')
-if (absentRequested) {
+if (absentRequested && !packagedProfile) {
   const copy = join(scratch, 'plugin')
   mkdirSync(copy, { recursive: true })
   cpSync(join(pluginDir, 'lib'), join(copy, 'lib'), { recursive: true })
@@ -157,7 +192,7 @@ if (absentRequested) {
   pluginEntry = join(copy, 'lib', 'index.js')
 }
 
-const cordisRoot = runtime
+const cordisRoot = runtime && !packagedProfile
   ? join(pluginDir, 'node_modules', '@deepseek-ai', 'cordis')
   : join(scratch, 'node_modules', '@deepseek-ai', 'cordis')
 const { Context } = require(cordisRoot)
@@ -296,12 +331,12 @@ ctx.on = (eventName, listener, options) => {
 }
 
 // ── mount ─────────────────────────────────────────────────────────────────────
-/** The engine's wake: a plugin-sourced message carrying a signal only. */
+/** The engine's wake: a producer-owned plugin source carrying a signal only. */
 const wakeMessage = {
   role: 'user',
   id: 'm2',
   content: [],
-  source: { kind: 'plugin', plugin: 'avantf-work' },
+  source: { kind: 'plugin:avantf-work' },
 }
 
 const ownerReceived = []
@@ -561,7 +596,7 @@ if (preStepListeners.length === 1) {
   // The default the agent loop uses: the claimed inbox batch plus the runtime-context snapshot; a
   // stub returning `messages: []` could not show whether the hook preserves either.
   const user = { role: 'user', id: 'm1', content: [], source: { kind: 'user' } }
-  const snapshot = { role: 'user', id: 's1', content: [], source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'snapshot' } }
+  const snapshot = { role: 'user', id: 's1', content: [], source: { kind: 'runtime-context', form: 'snapshot', sections: [{ name: 'avantf-work', text: 'guidance' }] } }
   const enterWith = (claimed, context) => () =>
     Promise.resolve({ kind: 'enter', messages: context === undefined ? [...claimed] : [...claimed, context] })
 
@@ -626,7 +661,7 @@ if (workCommand !== undefined) {
 
 // ── teardown ─────────────────────────────────────────────────────────────────
 await host.stop()
-rmSync(scratch, { recursive: true, force: true })
+if (ownsScratch) rmSync(scratch, { recursive: true, force: true })
 
 if (failures.length > 0) {
   console.error(`\nMOUNT SMOKE FAILED (${String(failures.length)})`)

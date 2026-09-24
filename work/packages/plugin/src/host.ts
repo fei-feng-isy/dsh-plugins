@@ -31,6 +31,8 @@ import {
   type ChildSpec,
   type MutationResult,
   type NodeRecord,
+  type OrphanedTree,
+  type OwnerProbe,
   type SpilledText,
   type StallReport,
   type TreeRecord,
@@ -38,6 +40,7 @@ import {
 import { workDomain, TREES_TABLE } from './domain.js'
 import { createLogger, type WorkLogger } from './log.js'
 import { NAMESPACE } from './wire.js'
+import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createTreeStore, type TreesTable } from './store.js'
 
 /** The child-side face; both tool faces live in one place, `./faces.js`. */
@@ -144,6 +147,19 @@ export interface WorkSummary {
   readonly troubled: boolean
 }
 
+/** One orphaned tree as `/clean orphans` renders it: the durable record, the probe that says why,
+ *  and the root's status. `unobservable` is the operator's business; `missing` is already cleaned
+ *  by the next reconciliation and is listed only so the count adds up. */
+export interface OrphanTreeReport {
+  readonly rootId: string
+  readonly ownerSessionId: string
+  readonly createdAt: number
+  readonly closedAt: number | null
+  /** The root work's status at read time, so a closed-but-orphaned tree reads differently. */
+  readonly rootStatus: string
+  readonly probe: OwnerProbe
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     avantfWork: AvantfWorkHost
@@ -190,8 +206,12 @@ export class AvantfWorkHost extends TypertRemoteService {
    *  reaches the browser without polling or session-log writes. */
   private readonly revisions = new Map<string, number>()
   private readonly waiters = new Map<string, Set<() => void>>()
-  /** Recent durable owner-existence answers, so a sweep cannot hammer storage. */
-  private readonly ownerChecks = new Map<string, { at: number; exists: boolean }>()
+  /** Recent durable owner-probe answers, so a sweep cannot hammer storage. `unobservable` is cached
+   *  like any other verdict for the TTL; a delete re-probes fresh rather than trusting it. */
+  private readonly ownerChecks = new Map<string, { at: number; probe: OwnerProbe }>()
+  /** The orphan set the last aggregate report described, so a sweep that changes nothing is silent.
+   *  Missing trees are absent from it: reconciliation destroys them in the same pass that reports. */
+  private orphanReportSignature: string | undefined
   /** Parked nodes the owner has already been told about. `reportParkedReady` fires on every pump, so
    *  without this the owner's inbox accumulates one wake per pass; an entry is dropped when the node
    *  leaves the parked state, so it never outlives its condition. In-memory on purpose: after a restart
@@ -285,7 +305,7 @@ export class AvantfWorkHost extends TypertRemoteService {
     // The tree is constructed with its store so every mutation has somewhere to land.
     const tree = new WorkTree(store, {
       isAgentLive: (sessionId) => this.workerLive(sessionId),
-      ownerExists: (sessionId) => this.ownerExists(sessionId),
+      probeOwner: (sessionId) => this.ownerProbe(sessionId),
       spill: (text) => this.spillText(text),
       now: () => Date.now(),
       newId: () => defaultNewId(),
@@ -339,10 +359,7 @@ export class AvantfWorkHost extends TypertRemoteService {
       `start-up: loaded ${String(trees.length)} tree(s), ${String(nodes)} node(s)`
       + (trees.length === 0 ? ' (none persisted yet)' : ''),
     )
-    const orphans = await this.engine.reconcileOrphans()
-    if (orphans.length > 0) {
-      this.log.warn(`start-up: destroyed ${String(orphans.length)} tree(s) whose owner session is gone: ${orphans.join(', ')}`)
-    }
+    await this.reconcileOrphans()
     // `ctx.interval` is the timer plugin's effect-scoped timer, cancelled when the fiber unloads.
     this.sweepDispose = this.ctx.interval(() => {
       void this.sweep().catch(() => undefined)
@@ -392,7 +409,7 @@ export class AvantfWorkHost extends TypertRemoteService {
     if (this.tree !== undefined) {
       // Progress is in memory between flushes; persist it before this pass judges anyone against it.
       await this.tree.flushProgress()
-      await this.engine.reconcileOrphans()
+      await this.reconcileOrphans()
     }
     const result = await this.engine.sweep()
     if (result.reclaimed > 0) {
@@ -401,6 +418,110 @@ export class AvantfWorkHost extends TypertRemoteService {
     // A sweep is the engine acting on its own — the one change no session-side signal can carry.
     if (result.reclaimed + result.dispatched > 0) this.announceAllTrees()
     return result
+  }
+
+  // ── orphans: what the engine destroys, and what only a person may ────────
+
+  /** Every tree whose owner session did not resolve to `exists`, with the probe that says why.
+   *  `fresh` bypasses the probe cache: a listing a person acts on must not be up to five minutes
+   *  stale about whether a session came back. The startup/sweep path keeps the cache, because it
+   *  asks the same question about the same trees every sixty seconds. */
+  async orphanTreeReports(options: { fresh?: boolean } = {}): Promise<readonly OrphanTreeReport[]> {
+    const tree = this.tree
+    if (tree === undefined) return []
+    const orphans: readonly OrphanedTree[] = options.fresh === true
+      ? await this.probeEveryTreeFresh()
+      : await tree.orphanedTrees()
+    return orphans.map((entry) => this.orphanReportOf(entry))
+  }
+
+  /** Re-probe ONE tree's owner from durable storage, ignoring the cache: the check a delete must
+   *  make, so a session that came back between the listing and the delete keeps its tree.
+   *  `undefined` means the tree is gone (already destroyed, or an id that never named one). */
+  async probeOrphanTree(rootId: string): Promise<OrphanTreeReport | undefined> {
+    const tree = this.tree
+    if (tree === undefined) return undefined
+    const record = tree.treeOf(rootId)
+    if (record === undefined) return undefined
+    const probe = await this.ownerProbe(record.ownerSessionId, { fresh: true })
+    return this.orphanReportOf({ tree: record, probe })
+  }
+
+  /** Destroy one orphan tree: stop the workers it still holds, then remove it through the store.
+   *  Refuses nothing — the caller has already re-probed the owner and may only reach here for a
+   *  tree whose owner is missing or unobservable. */
+  async destroyOrphanTree(rootId: string): Promise<boolean> {
+    const tree = this.tree
+    if (tree === undefined) return false
+    const record = tree.treeOf(rootId)
+    if (record === undefined) return false
+    for (const node of tree.heldByLiveWorkers(rootId)) {
+      if (node.claimedBy !== null) await this.interruptWorker(node.claimedBy, record.ownerSessionId)
+    }
+    await tree.destroyTree(rootId)
+    this.announceOwner(record.ownerSessionId)
+    return true
+  }
+
+  /** Destroy the trees of owners that are PROVEN gone, and report the orphan set as one line.
+   *  Returns the destroyed root ids (the shape the engine's reconcile has always had). */
+  private async reconcileOrphans(): Promise<readonly string[]> {
+    if (this.engine === undefined || this.tree === undefined) return []
+    // Probed BEFORE the destruction: the missing trees are gone afterwards, and the operator is owed
+    // both counts. The engine re-probes inside its own call, which the cache answers for free.
+    const before = await this.orphanTreeReports()
+    const destroyed = await this.engine.reconcileOrphans()
+    this.reportOrphans(before, destroyed)
+    return destroyed
+  }
+
+  /** The orphan set, probed one tree at a time with the cache bypassed. */
+  private async probeEveryTreeFresh(): Promise<readonly OrphanedTree[]> {
+    const tree = this.tree
+    if (tree === undefined) return []
+    const orphaned: OrphanedTree[] = []
+    for (const record of tree.trees()) {
+      const probe = await this.ownerProbe(record.ownerSessionId, { fresh: true })
+      if (probe.kind !== 'exists') orphaned.push({ tree: record, probe })
+    }
+    return orphaned
+  }
+
+  private orphanReportOf(entry: OrphanedTree): OrphanTreeReport {
+    const root = this.tree?.node(entry.tree.rootId)
+    return {
+      rootId: entry.tree.rootId,
+      ownerSessionId: entry.tree.ownerSessionId,
+      createdAt: entry.tree.createdAt,
+      closedAt: entry.tree.closedAt,
+      rootStatus: root?.status ?? 'missing',
+      probe: entry.probe,
+    }
+  }
+
+  /** ONE line per distinct orphan set — never one per tree. The per-tree WARN this replaces was the
+   *  noise the user saw on every start: twelve old trees, twelve lines, for one host-side condition.
+   *  WARN when somebody has to decide (`unobservable`); INFO when reconciliation already cleaned up. */
+  private reportOrphans(orphans: readonly OrphanTreeReport[], destroyed: readonly string[]): void {
+    if (orphans.length === 0) {
+      this.orphanReportSignature = undefined
+      return
+    }
+    const unobservable = orphans.filter((entry) => entry.probe.kind === 'unobservable')
+    const missing = orphans.length - unobservable.length
+    // What the set will look like once reconciliation has destroyed the missing ones; comparing
+    // against that keeps the next sweep silent instead of re-announcing the same survivors.
+    const after = `0:${unobservable.map((entry) => entry.rootId).sort().join(',')}`
+    if (after === this.orphanReportSignature) return
+    this.orphanReportSignature = after
+    const parts = [
+      unobservable.length > 0 ? `unobservable tree(s): ${idList(unobservable.map((entry) => entry.rootId))}` : '',
+      destroyed.length > 0 ? `destroyed ${String(destroyed.length)} tree(s) whose owner session is gone: ${idList(destroyed)}` : '',
+    ].filter((part) => part !== '')
+    const line = `orphans: ${String(orphans.length)} tree(s) belong to sessions that cannot be observed `
+      + `(unobservable: ${String(unobservable.length)}, missing: ${String(missing)}); run /clean orphans`
+    if (unobservable.length > 0) this.log.warn(`${line} — ${parts.join('; ')}`)
+    else this.log.info(`${line} — ${parts.join('; ')}`)
   }
 
   /** Record one worker's activity if the session is ours. The feed carries every session in the
@@ -1417,7 +1538,7 @@ export class AvantfWorkHost extends TypertRemoteService {
     owner.followup(
       createUserMessage({
         content: [{ type: 'text', text }],
-        source: { kind: 'plugin', plugin: 'avantf-work' },
+        source: { kind: OWN_WAKE_SOURCE_KIND },
       }),
     )
     this.log.info(`${why}; woke owner ${owned.ownerSessionId}`)
@@ -1444,42 +1565,60 @@ export class AvantfWorkHost extends TypertRemoteService {
   }
 
   /**
-   * Whether the tree's owner still exists, by the fact of its session. The agent registry is the wrong
-   * question: agents are materialized on demand, so right after a restart every owner is absent from it
-   * while its session data is intact — treating that as "gone" would destroy every tree. `sessionQuery`
-   * answers the durable question instead, live-preferred; every uncertain outcome resolves to "exists".
+   * What durable storage says about the tree's owner, in three states rather than a boolean. The agent
+   * registry is the wrong question: agents are materialized on demand, so right after a restart every
+   * owner is absent from it while its session data is intact — treating that as "gone" would destroy
+   * every tree. `sessionQuery` answers the durable question instead, live-preferred; "cannot tell" stays
+   * its own answer (an opaque host is not evidence the owner is gone) and is only ever REPORTED.
    */
-  private async ownerExists(sessionId: string): Promise<boolean> {
+  private async ownerProbe(sessionId: string, options: { fresh?: boolean } = {}): Promise<OwnerProbe> {
     // A live agent's session obviously exists — the common case, no persistence read.
-    if (this.ctx.agents.get(SessionId(sessionId)) !== undefined) return true
+    if (this.ctx.agents.get(SessionId(sessionId)) !== undefined) return { kind: 'exists' }
 
     const cached = this.ownerChecks.get(sessionId)
-    if (cached !== undefined && Date.now() - cached.at < OWNER_CHECK_TTL_MS) return cached.exists
+    if (options.fresh !== true && cached !== undefined && Date.now() - cached.at < OWNER_CHECK_TTL_MS) {
+      return cached.probe
+    }
 
-    const exists = await this.probeOwner(sessionId)
-    this.ownerChecks.set(sessionId, { at: Date.now(), exists })
-    return exists
+    const probe = await this.probeOwnerByStorage(sessionId)
+    this.ownerChecks.set(sessionId, { at: Date.now(), probe })
+    return probe
   }
 
-  /** Ask durable storage whether the session exists; every uncertain outcome resolves to `true` (a stray
-   *  tree is recoverable, destroyed work is not). */
-  private async probeOwner(sessionId: string): Promise<boolean> {
+  /** Ask durable storage whether the session exists. Only session-query's own "not found" means
+   *  `missing`; every other failure is `unobservable`, carrying a one-line reason for the operator —
+   *  NO log line here, because one line per tree per probe is exactly the noise the aggregate report
+   *  replaced. */
+  private async probeOwnerByStorage(sessionId: string): Promise<OwnerProbe> {
     const query = this.ctx.get('sessionQuery')
     if (query === undefined) {
-      // No durable reader mounted: nothing can tell "deleted" from "not opened yet", so keep the trees;
-      // the cost is a tree that never dispatches, not one that gets destroyed.
-      return true
+      // No durable reader mounted: nothing can tell "deleted" from "not opened yet", so the tree is
+      // kept and reported as unobservable rather than destroyed or silently called present.
+      return { kind: 'unobservable', detail: 'sessionQuery is not mounted' }
     }
     try {
       const observation = await query.observeSession(SessionId(sessionId), { projectionMode: 'none' })
       observation[Symbol.dispose]()
-      return true
+      return { kind: 'exists' }
     } catch (error) {
-      if (isSessionNotFound(error)) return false
-      this.log.warn(`cannot resolve session ${sessionId} (${String(error)}); keeping its trees`)
-      return true
+      if (isSessionNotFound(error)) return { kind: 'missing' }
+      return { kind: 'unobservable', detail: errorSummary(error) }
     }
   }
+}
+
+/** A one-line, length-capped reason for an unobservable owner; the aggregate report has one line for
+ *  the whole set, so a verbose host error must not become several. */
+function errorSummary(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  const oneLine = raw.replace(/\s+/gu, ' ').trim()
+  return oneLine.length > 160 ? `${oneLine.slice(0, 159)}…` : oneLine
+}
+
+/** A comma-joined id list capped for a log line: a hundred orphans must not print a hundred ids. */
+function idList(ids: readonly string[], max = 20): string {
+  if (ids.length <= max) return ids.join(', ')
+  return `${ids.slice(0, max).join(', ')} …(+${String(ids.length - max)})`
 }
 
 /** Whether an error is session-query's "this session does not exist anywhere". */
@@ -1498,4 +1637,4 @@ function refusedToolNames(error: unknown, deny: readonly string[]): readonly str
   return named.filter((name) => deny.includes(name))
 }
 
-export type { NodeRecord, TreeRecord }
+export type { NodeRecord, TreeRecord, OwnerProbe }

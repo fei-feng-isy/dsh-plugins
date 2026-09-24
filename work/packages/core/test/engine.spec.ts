@@ -37,11 +37,14 @@ function makeWorld(options: {
   staleMs?: number
   clock?: () => number
   sessions?: Set<string>
+  /** Owner sessions the host cannot answer for at all: orphaned, but never destroyed. */
+  unobservable?: Set<string>
   materializeLazily?: boolean
 }) {
   const store = memoryStore()
   const live = new Set<string>(['owner'])
   const sessions = options.sessions ?? new Set<string>(['owner'])
+  const unobservable = options.unobservable ?? new Set<string>()
   const started: string[] = []
   /** Every claim id handed out by `reserveClaimId`, in order, so a test can name the one a refusal used. */
   const reserved: string[] = []
@@ -55,7 +58,14 @@ function makeWorld(options: {
   let tick = 0
   const tree = new WorkTree(store, {
     isAgentLive: (sessionId) => live.has(sessionId),
-    ownerExists: (sessionId) => Promise.resolve(sessions.has(sessionId)),
+    probeOwner: (sessionId) =>
+      Promise.resolve(
+        unobservable.has(sessionId)
+          ? { kind: 'unobservable' as const, detail: `stubbed: cannot read ${sessionId}` }
+          : sessions.has(sessionId)
+            ? { kind: 'exists' as const }
+            : { kind: 'missing' as const },
+      ),
     spill: () => Promise.resolve(null),
     now: options.clock ?? (() => (tick += 1)),
     newId: () => `n${String(++sequence).padStart(4, '0')}`,
@@ -254,6 +264,29 @@ describe('orphans', () => {
     expect(world.tree.treeOf(gone)).toBeUndefined()
     expect(world.tree.treeOf(kept)).toBeDefined()
     expect(world.store.documents.size).toBe(1)
+  })
+
+  it('never destroys a tree whose owner is merely unobservable, and interrupts the workers of one that is gone', async () => {
+    const world = makeWorld({
+      maxConcurrent: 4,
+      sessions: new Set(['owner']),
+      unobservable: new Set(['opaque-session']),
+    })
+    const [kept] = await roots(world.tree, 1)
+    const [gone] = await roots(world.tree, 1, 'deleted-session')
+    const [opaque] = await roots(world.tree, 1, 'opaque-session')
+    // A worker still holding the gone tree: destroying it must stop the worker first.
+    await world.tree.dispatch(gone, 'work-gone')
+    world.live.add('work-gone')
+
+    expect(await world.engine.reconcileOrphans()).toEqual([gone])
+    expect(world.interrupted).toEqual(['work-gone'])
+    expect(world.tree.treeOf(gone)).toBeUndefined()
+    expect(world.tree.treeOf(kept)).toBeDefined()
+    // "Cannot tell" is not "gone": the opaque tree keeps its owner's work.
+    expect(world.tree.treeOf(opaque)).toBeDefined()
+    const orphans = await world.tree.orphanedTrees()
+    expect(orphans.map((entry) => entry.probe.kind)).toEqual(['unobservable'])
   })
 })
 

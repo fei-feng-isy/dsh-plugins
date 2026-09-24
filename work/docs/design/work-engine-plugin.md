@@ -682,13 +682,14 @@ worker 是真实会话，所以磁盘占用随派活次数线性增长（本机�
 | 命令 | 走什么 | 可行性 |
 |---|---|---|
 | `/archive` | `workspaceRegistry.archiveSession(id)` | **官方接口**：durable 写进 registry 的归档集合，可 unarchive。只改标记，**不释放磁盘** |
-| `/clean all\| <id>` | 直接删会话目录 | **没有任何官方接口**：`SessionPersistence` 只有 `create`/`open`/`list`/`stat`，没有 delete；GUI 只有归档。所以只能由插件删目录 |
+| `/clean archive all\| <work-id>` | 直接删会话目录 | **没有任何官方接口**：`SessionPersistence` 只有 `create`/`open`/`list`/`stat`，没有 delete；GUI 只有归档。所以只能由插件删目录 |
+| `/clean orphans all\| <root-id>` | `tree.destroyTree()` | 删的是插件**自己的**树记录：owner 会话已不存在或不可观测时才允许，删除前逐个重新探测 |
 
 护栏（`src/workerSessions.ts`，见该模块注释）：
 
 1. **只认自己的 worker**：claim id 形状 `work-<8 hex>`（`reserveClaimId`）+ 头里 `origin: subagent` / `delegationDepth: 1` / `parentSession` == 本会话。harness 自己的委派用 uuid，天然区分；
 2. **绝不动在跑的会话**（`live` 为真或 `agents.get(id)` 有答案就跳）；
-3. **`/clean all` 只删已归档的**：这样"丢弃"总是一个有人明确做过的决定；要跳过这道闸必须显式点名一个 id；
+3. **`/clean archive all` 只删已归档的**：这样"丢弃"总是一个有人明确做过的决定；要跳过这道闸必须显式点名一个 id；
 4. **路径只按名字找、不做编码复刻**：在 `config.sessionsRoot`（默认 `<dsh home>/sessions`）下扫 `*/<id>`，目录名必须**正好**是 session id。harness 的目录名有 slug 编码规则（`projectKey`/`encodeSegment`），复刻它就会在下一次编码变更时静默失效 —— 因此根给错或布局变了时的结果是"删不到"，而不是"删错"。
 
 **为什么不把删除做进引擎的常规回收**：删的是**另一个子系统的持久数据**（会话存储），不是本插件的树记录。引擎的日常职责只到"节点解绑、活 Agent 由 harness 在结算时销毁"；删日志必须是一个人类明确的手势，所以它是一条 slash，而不是自动清理。

@@ -43,13 +43,30 @@ export interface SpilledText {
   readonly hint: string
 }
 
+/**
+ * What asking durable storage about an owner session resolved to. Three states, not a boolean:
+ * "cannot tell" and "gone" demand different actions — a gone owner's tree is destroyed, an
+ * opaque host must never be allowed to destroy work (a stray tree is recoverable, destroyed work
+ * is not), yet the operator still has to hear about it.
+ */
+export type OwnerProbe =
+  | { readonly kind: 'exists' }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'unobservable'; readonly detail: string }
+
+/** One tree whose owner did not resolve to `exists`, with the probe that explains why. */
+export interface OrphanedTree {
+  readonly tree: TreeRecord
+  readonly probe: OwnerProbe
+}
+
 /** Injected environment facts; the core never imports the harness. */
 export interface TreeDeps {
   isAgentLive(sessionId: string): boolean
   /** Whether a session still EXISTS, asked of durable storage rather than the live registry: an
    * agent is materialized on demand, so right after a restart a live check is false. Ownership is
-   * decided by this one. */
-  ownerExists(sessionId: string): Promise<boolean>
+   * decided by this one. `unobservable` is a THIRD answer, not a synonym for either. */
+  probeOwner(sessionId: string): Promise<OwnerProbe>
   /** Persist an over-long result, or return `null` when no spill backend is configured — the node
    * then keeps the full text inline, because a locator nobody can resolve loses the tail. */
   spill(text: string): Promise<SpilledText | null>
@@ -204,12 +221,15 @@ export class WorkTree {
     return { ...node, status: 'interrupted', claimedBy: null, updatedAt: this.deps.now() }
   }
 
-  /** Trees whose owner session no longer exists, asked of durable storage rather than the live
-   * registry, so a restart keeps its trees and only a genuinely deleted session loses them. */
-  async orphanedTrees(): Promise<TreeRecord[]> {
-    const orphaned: TreeRecord[] = []
+  /** Trees whose owner session did not resolve to `exists`, each with the probe that says why.
+   * Asked of durable storage rather than the live registry, so a restart keeps its trees and only a
+   * genuinely deleted session loses them. `missing` and `unobservable` are reported separately: the
+   * caller decides what may be destroyed (see `WorkEngine.reconcileOrphans`). */
+  async orphanedTrees(): Promise<readonly OrphanedTree[]> {
+    const orphaned: OrphanedTree[] = []
     for (const state of this.states.values()) {
-      if (!(await this.deps.ownerExists(state.tree.ownerSessionId))) orphaned.push(state.tree)
+      const probe = await this.deps.probeOwner(state.tree.ownerSessionId)
+      if (probe.kind !== 'exists') orphaned.push({ tree: state.tree, probe })
     }
     return orphaned
   }

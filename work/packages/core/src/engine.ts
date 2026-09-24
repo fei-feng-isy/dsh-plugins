@@ -165,16 +165,19 @@ export class WorkEngine {
     })
   }
 
-  /** Destroy trees whose owner session no longer exists: the owner is the authority over the tree, and a hot reload or host restart leaves it resolvable, so nothing is destroyed there. */
+  /** Destroy trees whose owner session no longer exists: the owner is the authority over the tree, and a hot reload or host restart leaves it resolvable, so nothing is destroyed there. A tree whose owner merely cannot be OBSERVED is left alone and reported instead — the host being unable to answer is not evidence the owner is gone, and a destroyed tree cannot be recovered. */
   async reconcileOrphans(): Promise<readonly string[]> {
     const orphaned = await this.tree.orphanedTrees()
-    for (const tree of orphaned) {
+    const destroyed: string[] = []
+    for (const { tree, probe } of orphaned) {
+      if (probe.kind !== 'missing') continue
       for (const node of this.tree.heldByLiveWorkers(tree.rootId)) {
         if (node.claimedBy !== null) await this.hooks.interruptWorker(node.claimedBy)
       }
       await this.tree.destroyTree(tree.rootId)
+      destroyed.push(tree.rootId)
     }
-    return orphaned.map((tree) => tree.rootId)
+    return destroyed
   }
 
   /**

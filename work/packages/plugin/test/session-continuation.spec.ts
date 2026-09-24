@@ -64,6 +64,9 @@ describe('the parked session is woken, not replaced', () => {
     const text = signals[0]?.content.map((part) => part.text).join('') ?? ''
     expect(text).toContain(root)
     expect(text).not.toContain('工具')
+    // The wake carries THIS plugin's producer-owned source kind: DSH V4 refuses the retired
+    // `plugin` wrapper at the session writer, so this is the durable contract, not a formality.
+    expect(signals[0]?.source).toEqual({ kind: 'plugin:avantf-work' })
   })
 
   it('adopts the parked session on the owner step and delivers the aggregate prompt', async () => {

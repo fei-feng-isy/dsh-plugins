@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { callTool, agent, loopNext, message, mount, SNAPSHOT_SOURCE } from './mount.js'
 
 const wake = (): ReturnType<typeof message> =>
-  message('w', { kind: 'plugin', plugin: 'avantf-work' }, 'Work tree n1 reached done.')
+  message('w', { kind: 'plugin:avantf-work' }, 'Work tree n1 reached done.')
 
 const notice = (childId: string): ReturnType<typeof message> =>
   message('n', { kind: 'subagent-settled', form: 'notice', summary: 'work finished', senderSessionId: childId })
@@ -324,7 +324,27 @@ describe('the final state the owner declares', () => {
 
 describe('the engine keeps at most one message queued', () => {
   const queuedWake = (id: string): ReturnType<typeof message> =>
+    message(id, { kind: 'plugin:avantf-work' }, 'Work tree n1 reached done.')
+
+  const legacyQueuedWake = (id: string): ReturnType<typeof message> =>
     message(id, { kind: 'plugin', plugin: 'avantf-work' }, 'Work tree n1 reached done.')
+
+  it('still recognizes a wake written under the released plugin wrapper', async () => {
+    // A session written before the producer-owned kind kept the wrapper until the migration rewrites
+    // it; the gate must drain that pending wake rather than serve it as user text.
+    const mounted = await mount()
+    await withTree(mounted)
+    mounted.owner.inbox.append('next-turn', legacyQueuedWake('w0'))
+
+    const decision = await mounted.preStep({
+      agent: mounted.owner,
+      messages: [wake()],
+      next: loopNext([wake()]),
+    })
+
+    expect(decision.messages).toEqual([])
+    expect(mounted.owner.inbox.nextTurn).toEqual([])
+  })
 
   it('drops a queued wake once the owner has nothing to act on', async () => {
     // The root is running, so the engine has no state for the owner: a wake left in
