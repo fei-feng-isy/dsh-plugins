@@ -149,7 +149,7 @@ query(kind?/domain?/source?)
      → top-k（不改动两库原始结果对象），标注 kind/domain/source/source_ref/score
 ```
 
-- **分数可比**（AGENTS.md 口径）：两库结果**合并后在合并池上 min-max 归一化**，保证跨库分数同刻度；库内三路融合各自先做路径级归一化（自 §20.17 起是"按该腿最大值缩放"，不是 min-max）。
+- **分数可比**（§20.17 口径）：两库结果**合并后在合并池上 min-max 归一化**，保证跨库分数同刻度；库内三路融合各自先做路径级归一化（自 §20.17 起是"按该腿最大值缩放"，不是 min-max）。
 - **查询只编码一次**：两条腿共用同一个嵌入后端与模型（§3 公共配置），因此 `runtime.query` 先把 query 编码成向量、再把同一个向量传给两条腿（`queryVector`），而不是各腿各自 `encode` 一遍。实测跨库查询 7.57ms → 5.29ms（单次编码 3.7–4.3ms，其余为融合/reinforce 固定开销）。注意**重排仍按腿进行**：`rerank` 属于各 store 的检索流程（§5），所以启用 `bge_reranker` 时一次跨库查询会跑两遍 cross-encoder 前向——这是既定形状（§7 的 ①/② 各自成链路），默认 `rerank.backend: none` 下无代价。
 - **过滤**：`kind`（仅记忆/仅文档/全量）、`domain`（仅知识库维度；设置后记忆命中自然被过滤）、`source`（仅文档切片，读命中自带的 `domain`/`source` 字段——由拥有 `documents` 行的 store 填充，因此 domain/source 名里含 `:` 也不会错位；**不要**再从 `source_ref` 解析）；默认按分数自然混合。`quota` 配额未实现（后置）。
 - **检索统计只记"真正返回的"**：`kb_query` 为融合做的超额召回不写检索统计，router 过滤后只给最终返回的 fact 记 `retrieval_count`/`last_retrieved_at`（否则会凭空刷新 dormancy 时钟，破坏 `lifecycle.archive_after_days` 归档）。
@@ -278,7 +278,7 @@ DSH 的 Typert API 已经在我们脚下动过一次（`TypertSchema { schema }`
 ```
 avantf-mem/
 ├─ package.json · pnpm-workspace.yaml · tsconfig.base.json
-├─ DESIGN.md · README.md · AGENTS.md · cordis.example.yml
+├─ DESIGN.md · README.md · cordis.example.yml
 │  （LICENSE 随包走：packages/plugin/LICENSE —— npm 页面与许可证文件都要在包目录里）
 └─ packages/
    ├─ retrieval-core/   # @avantf/mem-core —— 可替换检索底座

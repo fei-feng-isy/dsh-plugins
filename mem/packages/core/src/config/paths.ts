@@ -9,9 +9,10 @@ export { expandHome }
 /**
  * Resolve the data home (default `~/.avantf`).
  *
- * Precedence, per DESIGN §3 and `mem/AGENTS.md`'s layering (built-in → common.yaml → store → ENV →
- * explicit): an EXPLICIT caller value (⑤) → `AVANTF_HOME` (④) → the configured `common.dataHome`
- * (②) → `~/.avantf`. The environment is a deployment override and outranks the config file.
+ * Precedence, per DESIGN §3 and the family layering (root `AGENTS.md` 「边界与路径」: built-in →
+ * profile → store → ENV → explicit): an EXPLICIT caller value (⑤) → `AVANTF_HOME` (④) → the
+ * configured `common.dataHome` (②) → `~/.avantf`. The environment is a deployment override and
+ * outranks the config file.
  *
  * `configured` cannot stand in for layer ⑤: the schema gives it a default, so it always holds a
  * value and would make an explicit argument indistinguishable from "nothing was configured" — which

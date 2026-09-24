@@ -37,7 +37,7 @@
 **非目标**
 - 不让 trust 影响检索"排多前"（如需，另开 `retriever.trust_weight`，默认 0）。
 - 不改知识库：`documents/doc_chunks` 无 trust，`crossQuery` 不引入 trust。
-- 不做用户隔离/多租户（AGENTS.md：记忆是共享单库）。
+- 不做用户隔离/多租户（`DESIGN.md` 决策 D1：记忆是共享单库）。
 
 ## 2. 模型
 

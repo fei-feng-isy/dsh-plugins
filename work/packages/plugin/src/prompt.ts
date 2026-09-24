@@ -64,7 +64,7 @@ export const PROMPT_FILES: readonly PromptFileEntry[] = [
  * in the memory plugin (whose own section file is `work-tree-guide.md`'s sibling) — so a deployment
  * can find, diff and back up all of it in one place without any plugin having to guess which files
  * are its own. The data home follows the FAMILY's layer order, the same one the memory engine uses
- * (`mem/AGENTS.md` 「配置分层」): an explicit caller value → `$AVANTF_HOME` → the configured
+ * (root `AGENTS.md` 「边界与路径」): an explicit caller value → `$AVANTF_HOME` → the configured
  * `dataHome` → `~/.avantf`.
  *
  * The configured value is passed as its OWN NAMED layer, NOT as the explicit one. Handing a

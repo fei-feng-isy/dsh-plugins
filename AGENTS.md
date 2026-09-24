@@ -1,326 +1,174 @@
-# AGENTS.md — 合并后的 `dsh-plugins` 工作区
+# AGENTS.md
 
-`base/`、`mem/`、`work/` 是**一个**仓库。它们从前是四个（`dsh-envinit`、`dsh-compat`、
-`avantf-mem`、`avantf-work`）；这份文件说明合并保证了什么、以及这里的改动**不能**破坏什么。
-每个子树仍保留自己的 `AGENTS.md`/`DESIGN.md` 管自己的领域 —— 先读这一份。
-
-## 发布面：恰好三个包
+整个工作区的约定。一个仓库、**三个可发布包**：
 
 | 目录 | 包 | 是什么 |
 | --- | --- | --- |
-| `base/plugin-base` | `@avantf/dsh-plugin-base` | envinit（启动期环境初始化）**+** 宿主兼容性门禁 **+** 共享 kit —— 一个包、一次发版 |
-| `mem/packages/plugin` | `@avantf/dsh-mem` | 记忆/知识 DSH 插件 |
-| `work/packages/plugin` | `@avantf/dsh-work` | 工作树 DSH 插件 |
+| `base/plugin-base` | `@avantf/dsh-plugin-base` | DSH 插件的底座：启动期资源预装（声明式 provisioner）+ 宿主兼容门禁 + 共享 kit，运行期零依赖 |
+| `mem/packages/plugin` | `@avantf/dsh-mem` | DSH 的记忆/知识插件：可长期检索的记忆 + 文档知识库（8 个模型工具、两个设置页） |
+| `work/packages/plugin` | `@avantf/dsh-work` | DSH 的工作树插件：把一件能连验收标准一起交出去的事交给引擎，由它后台逐级派给一次性执行者 |
 
-其余所有工作区包（`@avantf/mem-*`、`@avantf/work-core`、CLI/MCP）都是 `private: true`，会被内联进
-使用它的那个插件。`scripts/release-check.mjs` 会在可发布集合不是这三个时失败。
+其余工作区包（`@avantf/mem-*`、`@avantf/work-core`、CLI/MCP）都是 `private: true`，会被内联进使用它的
+那个插件。每个子树的领域设计仍写在自己的 `DESIGN.md` / `docs/` 里。
 
-- **旧**包 `@avantf/dsh-envinit` 与 `@avantf/dsh-compat` 已死：代码住在 base 里，不再有新版本，
-  任何地方都不许再提它们的名字。
-- 插件把 base 当作 **REQUIRED peer** 依赖（**`>=0.3.0 <1.0.0`**）。这个区间刻意宽：base 只改业务
-  流程或修 bug（普通 minor/patch）时两个插件**不必**同批改，区间自动送达。**接口变更**（`.` 的导出集合 /
-  类型形状 / 成员语义、顺序敏感参数的 slot —— 见 `base/plugin-base/docs/INTERFACE.md` §1）**不再要求插件
-  同批改 peer**：接口有自己的轴 —— 升 `INTERFACE_VERSION`、新增 `api/interface-vN.json`，由 base 的
-  **运行期门禁**裁决；旧插件会被判 `incompatible`，按降级路径挂载（自带 prompt 默认正文、门禁跳过、
-  legacy provisioning，工具/service/Remote/UI 照常），**绝不拒载**。包版本退回普通 semver（base 现在是
-  `0.3.0`），只表达包自身，**接口变不再要求提 major**。base peer 与 `devDependencies`、以及
-  `base/plugin-base/src/bootstrap.ts` 的 `supportedRange`（`>=0.3.0 <1.0.0`，`VERSION` = `0.3.0`）三者同步
-  （`scripts/release-check.mjs` 会拦住一个吃不下 workspace base 的区间；`supportedRange` 是**运行期**的包
-  版本门）。运行期门禁住在 base 里：插件构建期把 `INTERFACE_VERSION` bake 进 `lib/interface-version.json`，
-  启动时用 base 的 `readInterfaceRequirement` 读回 required、再调 base 的 `checkInterface`；`incompatible`
-  ⇒ 告警 + 不用 base 的共享能力但仍挂载，`cannot-tell`（老 base 没有门禁函数、bake 缺失/畸形）⇒ 只告警、
-  照常使用（`scripts/lib/interface-version.mjs` + 两棵树的 `scripts/link-envinit.mjs`）。根
-  `pnpm-workspace.yaml` 里的 `linkWorkspacePackages: true` 让 `devDependencies` 那一条指向 `base/`，
-  绝不会变成下载。
-- 宿主/profile **显式**安装 `@avantf/dsh-plugin-base` **和**两个插件
-  （`autoInstallPeers: false`）。会自动装 peer 的 npm 式安装器则会顺带把 base 装上。
-- **`zod` 只解析出一份。** 根 catalog 一行 `zod: 4.6.5`（已安装 dsh 自带的版本）。base 自己的
-  peer 保持 `>=4.4.3 <5`，于是同一份 base 既服务本工作区、也服务宿主的 4.6.5。改 catalog 那一行，
-  永远不要改 `package.json`。
-- **发布顺序：base → 插件。** 插件的 required peer 必须已经在 registry 上；
-  `scripts/release-check.mjs` 会断言插件 peer 范围内存在一个已发布的 base 版本
-  （只在发布前试跑时用 `--allow-missing-base`）。任何 tarball 都不许带 `link:`/`file:` 说明符。
+## 发布面
+
+- **可发布集合恰好是这三个包**；`scripts/release-check.mjs` 会在这件事不成立时失败。
+- **发布顺序：base → 插件**：插件的 required peer 必须已经在 registry 上；发布前可用
+  `--allow-missing-base` 试跑。
+- 插件把 base 声明为 **required peer**（`>=0.3.0 <1.0.0`）+ `devDependencies` 同一条区间；发布的
+  tarball 里绝不出现 `link:`/`file:`；`publishConfig.access` 是 `public`。
+- **只有一份 `zod`**：从根 `pnpm-workspace.yaml` 的 `catalog:` 解析（改 catalog，不改 `package.json`）；
+  base 的 zod peer 保持 `>=4.4.3 <5`，同一份 base 既服务本仓、也服务宿主自带的那份。
 
 ## 家族的三条硬约束
 
 1. **被 provision 的代码既不打包、也不静态 import。** 插件对 base 的唯一静态引用，是 vendor 进
-   `packages/plugin/src/envinit-bootstrap.js` 并**内联**进产物的零依赖 bootstrap。一句静态的
-   `import ... from '@avantf/dsh-plugin-base'` —— 或者字面量的动态
-   `import('@avantf/dsh-plugin-base')` —— 都会让 base 缺席时插件模块加载失败，而那正是插件
-   **绝不能**有的失败。
-2. **base 由框架/宿主提供，并按 file URL 动态加载。** 启动时内联的 bootstrap 用
-   `createRequire(import.meta.url).resolve('@avantf/dsh-plugin-base/package.json')` 解析出它，再
-   `import()` 结果，然后拿内联的 `supportedRange` 校验版本。缺失或超出范围 → 一条
-   `envinit: WARNING`，插件照常挂载。
+   `packages/plugin/src/envinit-bootstrap.js` 并**内联**进产物的零依赖 bootstrap；一句静态的
+   `import ... from '@avantf/dsh-plugin-base'` 就会让 base 缺席时插件模块加载失败，而那正是插件绝不能
+   有的失败。
+2. **base 由宿主提供、按 file URL 动态加载。** 启动时 bootstrap 用
+   `createRequire(import.meta.url).resolve('@avantf/dsh-plugin-base/package.json')` 解析它、动态 `import()`、
+   用内联的 `supportedRange` 校验版本；缺失或超出区间 → 一条 `envinit: WARNING`，插件照常挂载。
 3. **发布有序、路径干净。** 先 base，后插件；已发布的 manifest 里永远不出现 `link:`/`file:`。
 
-## 唯一的判断准则：这条知识能不能靠一次 base 发版修好？
+## base 缺失（或接口世代不同）时的降级
 
-每次你要决定一块知识放 `base/`（运行时消费）还是留在插件里，就问这一句：
-**“这条知识必须能靠一次 base 发版修好吗？”**
-
-- **能 → base 拥有它，插件在运行时从加载到的 base 模块上取。** 这就是 kit 不是一个私有包、
-  插件也不许内联它的原因。今天从 base 运行时取得的有：
-  - 兼容性门禁：规则、探针、裁决、报告、注册后校验（`runtimeFromCompat(framework)`），
-  - envinit provisioner：`createProvisioner`、三个 provider 工厂、`ITEM_SCHEMA_VERSION`
-    以及各 item 种类，
-  - 提示词文件层 `PromptFiles`（两个插件都从加载到的 base 上构造 `kit.PromptFiles`）。
-- **一处刻意的镜像，由测试钉住。** 家族/数据路径解析有**两份**副本，且必须都留着：
-  `base/plugin-base/src/kit/family.ts` 是正本，work 的 `promptDir` 从加载到的 base 上取
-  `kit.resolveDataHome`；而 `@avantf/mem-contract` 的 `family.ts` 保留自己那份无依赖副本，
-  因为 CLI 与 MCP server 没有 DSH 宿主、从不加载 base。有一个测试把两份副本钉在一起。
-  这是“一次 base 发版就够了”**唯一**不成立的地方 —— 改这个约定等于一次 base 发版**加**一次
-  mem 引擎改动 —— 而这是刻意的：无 base 的路径必须能用。
-- **不能 → 它可以留在插件里，但要在这里写明，并接受改动它需要一次插件发版。** 已记录的
-  插件本地知识：
-  - Typert 的 `strict` codec 信封，以及 `<pkg>#<namespace>/<method>:<field>` 类型符号辅助
-    （`mem/packages/plugin/src/remote.ts`、`work/packages/plugin/src/wire.ts`）。它们只是镜像
-    生成器约定的几行，且在模块加载时组装；描述符组装本身两个插件确实不同（work 多出
-    `stream`/取消；mem 多出 `acceptsUndefined` 参数辅助）。**base kit 也导出了
-    `strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol` 作为正本副本，所以插件
-    *可以*从加载到的模块上取 —— 但今天这两处各留各的，改**它们**需要一次插件发版。**
-  - 插件 logger。它在 `apply` 里、base 解析**之前**就建好了（base 加载器自己需要一个 sink 来
-    上报），所以它不可能来自加载到的模块；`base/kit` 仍然导出 `createPluginLogger` 作为新插件
-    的正本副本。
-  - 各插件的 compat SPEC 与 envinit item 清单：它调用哪些 service/方法、哪些 dsh 包标识宿主、
-    它的 wire schema 名、它的事件、它的中文报告字符串，以及它的
-    `mem:pandoc` / `mem:model` / `work:*` item。只有那个插件自己知道。
-  - 各插件内置的默认提示词正文与其 client/UI 半边，以及无 base 时的兜底（work `prompt.ts` 里
-    `resolveDataHome` 的默认参数、mem `prompt.ts` 里的默认 section 文本）。兜底不是第二份权威
-    实现：它只在 base 缺席时运行。
-
-## base 缺失时的降级（绝不拒绝挂载）
-
-| 能力 | base 缺席时 |
+| 能力 | base 不可用时 |
 | --- | --- |
-| 提示词文件层 | 插件用**自己**内置的默认正文（是它的内容，不是 kit 的副本） |
-| 兼容性门禁 | 一条 `compat:` WARNING，门禁跳过。裁决语义永不变：只有**被证实**的不兼容才拒绝挂载，“说不清”只是一条备注，版本差异只是警告，什么都不抛 |
-| 资源 provision（pandoc/model） | 旧的 `@avantf/mem-provision` / legacy-tools-dir 路径 |
-| 工具、service、Remote、UI 各个面 | 不受影响 —— 插件完整挂载 |
+| 提示词文件层 | 用插件**内置的默认正文**（那是插件自己的内容，不是 kit 的副本） |
+| 兼容门禁 | 一条 `compat:` WARNING，门禁跳过。裁决语义不变：只有**被证实**的不兼容才拒载，"说不清"只是备注，版本差异只是警告 |
+| 资源 provision | 旧的 `@avantf/mem-provision` / legacy tools 目录 |
+| 工具 / service / Remote / UI | 不受影响 —— 插件完整挂载 |
 
-## 构建入口：一条命令，插件自动发现
+## 新增插件怎么用 base
 
-```
-pnpm build:dsh            # 全部插件，按目录名字典序（当前 mem、work；每个都会先构建 base）
-pnpm build:dsh mem        # 只构建记忆插件
-pnpm build:dsh work       # 只构建任务插件
-pnpm build:dsh base       # 只构建 base（tsc；不出插件产物、不跑挂载冒烟）
-```
+- **声明**：base 只放 `peerDependencies`（required）+ `devDependencies`（同一条区间），**绝不放
+  `dependencies`** —— 那会装出多份副本，跨副本的 registry 与类型身份会分叉。
+- **装载**：唯一静态引用是内联的零依赖 bootstrap；用 `@avantf/dsh-plugin-base/bootstrap` 的
+  `loadFramework()` 解析 → 校验版本 → 动态 import。绝不在源码里静态 import 本包。
+- **取用**：`PromptFiles` / `createPluginLogger` / `familyHome` / `resolveDataHome` / `strictCodec` 等从
+  **加载到的那个模块**上取，不复制、不内联。
+- **宿主门禁**：挂载前用 `provision` / `verdictOf` / `gatherEvidence` / `compatReport` 判宿主。
+- **接口世代**：用 base 的 `checkInterface(required, module)` 与 `readInterfaceRequirement(url)` 比对
+  "构建时所对的世代"与"运行时加载到的世代"：`incompatible` ⇒ 不用 base 的共享能力但**照常挂载**，
+  `cannot-tell` ⇒ 只告警。插件构建期把自己的世代 bake 进 `lib/interface-version.json`。
+- **降级义务**：base 缺席或世代不匹配时插件必须完整挂载（自带提示词默认正文、门禁跳过、legacy 路径），
+  **绝不拒载**。
+- **新增插件要动四处**（构建入口是**发现式**的：新目录只要自带 `build:dsh` 脚本，`pnpm build:dsh <目录名>`
+  立刻可用，`scripts/` 一个字都不用改）：
+  ① 根 `pnpm-workspace.yaml` 的 `packages:` 加 `<tree>/packages/*`；
+  ② `scripts/release-check.mjs` 的可发布集合加一行；
+  ③ 插件自己的 manifest：required peer + 同区间 dev、`build:dsh`、`scripts/mount-smoke.mjs`、`files` 里带上
+  `lib/interface-version.json`；
+  ④ 依赖版本写进根 catalog。`pnpm guard` 按同一份发现结果自动适用，不用登记。
 
-**插件集合是发现出来的，不是列出来的**：一个**插件树** = 顶层目录，其 `package.json` 里有一个
-`build:dsh` 脚本。所以新增插件（比如 `notes/` + `@avantf/dsh-notes`）只要自己带上构建脚本，
-`pnpm build:dsh notes` 立刻可用 —— `scripts/build-dsh.mjs` 和 `scripts/lib/plugins.mjs` **一个字都
-不用改**，也没有第二份清单会忘记更新。`scripts/lib/plugins.mjs` 里的 `discoverPlugins()` 做这件事，
-`prove-base-swap.mjs` 读同一个集合，因此新插件不会被任一门禁漏掉。目标名就是目录名；`base` 是唯一的
-非插件目标（它按包名 `@avantf/dsh-plugin-base` 在 `base/` 下被发现）。
+## 业务逻辑与代码共用原则
 
-`scripts/build-dsh.mjs` **只做路由**：真正的构建仍在各子树（`mem/scripts/build-plugin.mjs`、
-`work/scripts/build-plugin.mjs`、base 的 `tsc`），因为各条流水线确实不同 —— 合并的只是“该进哪棵树”
-这条记忆。目标之后的旗标原样转给该插件自己的 `build:dsh`（`pnpm build:dsh mem --fresh`、
-`pnpm build:dsh work --skip-link`，各插件认什么用 `pnpm build:dsh <目标> --help` 问它自己）；**不带
-目标时任何旗标都会被拒绝**，因为旗标是插件私有的：`--fresh` 只属于 mem，转给别的插件只会在前一个插件
-已经重建完之后把整轮跑挂。
+**判据只有一句：这条知识必须能靠一次 base 发版修好吗？**
 
-### 新增一个插件时要动什么
+- **能 → base 拥有它**，插件在运行时从加载到的模块上取。今天从 base 取的有：兼容门禁（规则 / 探针 /
+  裁决 / 报告 / 注册后复查）、envinit provisioner 与三个 provider 工厂、`PromptFiles`、家族与数据路径
+  解析、Typert 符号工具、接口门禁。
+- **不能 → 可以留在插件里**，但要在本文写明，并接受"改它需要一次**插件**发版"。已记录的本地知识：
+  Typert `strict` codec 与端点 / 字段 / 结果符号那几行；插件自己的 logger（它在 base 解析之前就要用）；
+  各插件的 compat SPEC 与 envinit item 清单；各插件内置的默认提示词正文与 client 半边。
+- **一处刻意的镜像**：家族 / 数据路径解析有两份 —— `base/plugin-base/src/kit/family.ts` 是正本，
+  `@avantf/mem-contract` 保留一份**无依赖**副本（CLI / MCP 没有 DSH 宿主、从不加载 base）。有跨树测试把
+  两份钉在一起，改它等于一次 base 发版**加**一次 mem 引擎改动。
+- **两个插件绝不互相 import**（连相对路径也不行）；共享一律走 `base/`。
+- 刻意**不复用**之处：两个内核（`@avantf/mem` 与 `@avantf/work-core` 不共享领域模型）、两个 client 半边
+  （不同 UI、不同 remote）、各插件的 item 清单与 SPEC。
 
-**不用动**（发现式）：`pnpm build:dsh <目录名>`；`pnpm proof:base-swap` 读同一份发现结果，所以新插件
-自动进入它的检查 —— 还没跟上家族布局（缺 `packages/plugin`）或还没构建时，它会把这一项**报出来**，
-不会静默跳过。
+## 抽取共用业务：先接口、后实现、向前兼容
 
-**要动，而且都是刻意的**：
+把插件里的共享逻辑抽到 base 时按这个次序做，否则旧插件会被判不兼容：
 
-- 根 `pnpm-workspace.yaml` 的 `packages:` 加一条 `<tree>/packages/*`。不加以外，它的包不进工作区：
-  `pnpm install` 不装、`pnpm -r build|test` 不覆盖（`pnpm build:dsh <tree>` 仍然能跑，因为那是该目录
-  自己的脚本）。
-- 根 `scripts/release-check.mjs` 的**可发布集合**加一行。那里刻意写死包名：可发布面是要被审查的，
-  不该被自动发现悄悄放大。
-- 插件自己那一份：`packages/plugin/package.json` 里 base 是 required peer（`>=0.3.0 <1.0.0`）+ 同一条
-  `devDependencies`、自己的 `build:dsh`、`scripts/mount-smoke.mjs`（`proof:base-swap --mount` 要求）、
-  以及 `files` 里带上 `lib/interface-version.json`（构建期 bake 出的接口编号，运行期门禁读它）。
-- 依赖版本一律写进根 `pnpm-workspace.yaml` 的 `catalog:`，各 `package.json` 只写 `"catalog:"`。
+1. **先升接口版本**：`INTERFACE_VERSION` +1，新增 `api/interface-vN.json`
+   （`UPDATE_INTERFACE_SNAPSHOT=1 pnpm -C base/plugin-base test public-surface` 重落快照），把新成员写进
+   `.` 的接口类型与两份名单。接口与包版本**是两条轴**：接口换代只动接口编号，包版本按普通 semver 走。
+2. **再实现逻辑**（放在 base），并补**跨树行为测试**：从**已链接的 base** 取真实实现比对，在 mock 里
+   断言不算。
+3. **向前兼容是硬要求**：新成员必须是**增量** —— 不改既有成员的形状与语义；顺序敏感的参数用具名对象
+   （`resolveDataHome({ explicit, env, configured })`）；可观察的文案归调用方（`compatReport` 的 `words`）。
+   旧插件遇到新世代只会降级挂载，所以一次增面绝不能让谁拒载。
+4. 要发布就按正常顺序发 base；插件在方便时重建以消费新能力即可（peer 区间宽，安装期不拦）。
 
-`pnpm guard` **不在**这个清单里：它按同一份发现结果扫每一棵树，新插件自动适用四条规则（不许 import
-别棵树的包、相对路径不许出树、产物里不许按值 import base、`@avantf/*` 只能是本树的包）。
+细节与完整清单见 `base/plugin-base/docs/INTERFACE.md`。
 
-## 版本：每个组只记在一个 manifest 里
-
-一个**版本组** = 一个顶层子树（`base` / `mem` / `work`），它的版本**只记录在一处**——该组那个可发布包的
-manifest：
+## 版本：每组只记在一个 manifest 里
 
 | 组 | 版本记录在 | 组内其余 manifest |
 |---|---|---|
-| `base` | `base/plugin-base/package.json` | 无（就它一个） |
-| `mem` | `mem/packages/plugin/package.json` | `mem/package.json` + `packages/{core,contract,convert,provision,retrieval-core,cli,mcp}` —— **都不带 `version`** |
-| `work` | `work/packages/plugin/package.json` | `work/package.json` + `work/packages/core` —— 都不带 `version` |
-
-私有 manifest **不写版本号**：它们不会被发布（插件把引擎内联进产物，工作区里按路径链接），写一份就是多一处
-要改、多一处会漂。这也意味着**切版本就是改一个文件**，没有任何"同步/派生"步骤：
+| `base` | `base/plugin-base/package.json` | 无 |
+| `mem` | `mem/packages/plugin/package.json` | `mem/package.json` + `packages/{core,contract,convert,provision,retrieval-core,cli,mcp}` 都不带 `version` |
+| `work` | `work/packages/plugin/package.json` | `work/package.json` + `work/packages/core` 都不带 `version` |
 
 ```bash
-pnpm version:set mem 0.1.2   # 只改 mem/packages/plugin/package.json
-pnpm version:check           # 打印三组版本；私有 manifest 一旦又长出 version 就报错
-pnpm version:prune           # 把私有 manifest 上多余的 version 删掉（唯一可能的漂移）
+pnpm version:set mem 0.1.2   # 只改该组那一个 manifest
+pnpm version:check           # 打印三组版本；私有 manifest 长出 version 就报错
+pnpm version:prune           # 删掉私有 manifest 上多余的 version
 ```
 
-- 映射与规则只在 `scripts/lib/versions.mjs` 一处（哪个 manifest 是载体、哪些必须没有版本），
-  `scripts/version.mjs`（CLI）、`scripts/release-check.mjs`（门禁 2b 段）、`mem/scripts/release-check.mjs`
-  的 preflight 与 `scripts/make-release-tree.mjs`（投影）都读它。
-- CI 跑 `pnpm version:check`，所以"又给私有包加回版本号"这类回归在评审前就红。
-- **`workspace:*` 指到的私有包，版本只在打包那一刻存在。** `pnpm pack` 会把 `workspace:*` 改写成
-  **目标包的 `version`**，所以那些被引用的包在打包时必须有一个版本可读；但它们不发布，于是版本由
-  `scripts/lib/versions.mjs` 的 `withWorkspaceVersions()` 在 `pnpm pack` 期间临时写进去、`finally` 里逐字
-  还原（mem 的 4 个引擎包 + work 的 core；见两个 `pack-plugin.mjs`）。仓库里不留副本，忘了还原会被
-  `pnpm version:check` 抓住、`pnpm version:prune` 收拾。
-- 投影默认**取开发树的版本**；`pnpm sync:rc --version mem=X` 只给发布树盖章（改的同样是那一个载体），
-  `--keep-rc-versions` 保留发布树现有版本。投影还会断言发布树的形态与开发树同规则（私有 manifest 无版本）。
-- **版本不是发布**：`mem/CHANGELOG.md` 的版本节仍要自己切（mem 自己的 release gate 检查第一个版本节
-  == 当前版本、`[Unreleased]` 为空）。
+**版本号说什么**：接口变 → `INTERFACE_VERSION` +1（与包版本解耦）；业务流程 / 可观察行为变 → minor；
+纯修复 → patch。`workspace:*` 指到的私有包，版本只在 `pnpm pack` 那一刻临时写进、`finally` 还原。
 
-### 版本号说什么：接口 / 行为 / 修复
+## 发布 README 的内容要求
 
-版本号不是"改了东西"的计数器。**接口有自己的一条轴，与包版本解耦**（完整设计与落地顺序见
-`base/plugin-base/docs/INTERFACE.md`，`DESIGN.md` §9 只留一条指针）：
+随包发布的 README 就是 npm 页面（`pack-plugin.mjs` 断言它随包、且首行是包名），只写**这个包本身**：
 
-| 变更 | 接口版本（主契约） | 包版本 | 插件是否必须同批改 |
-| --- | --- | --- | --- |
-| **接口**：base `.` 的导出集合、类型形状、顺序敏感参数的 slot 含义、语义契约 | `INTERFACE_VERSION` +1、新增 `api/interface-vN.json` | 由包自身决定（普通 semver，**不再**"接口变 ⇒ major"） | **否** —— 旧插件在运行期被判 `incompatible`，按降级路径挂载 |
-| **业务流程 / 可观察行为**（插件自己的测试断言的那些） | 不变 | minor | 否 |
-| **纯修复**，无可观察变化 | 不变 | patch | 否 |
+- **base**：包是什么 → 主要功能 → 怎么用（可以有基础示例）→ 源码怎么编译。
+- **mem / work**：插件是什么 → 主要功能 → **怎么接入 dsh** → 怎么用。
+- **不要写**：谁在用它、发布顺序、这个包由哪些包合并而来、catalog / rc / 发布门禁这类仓库内部内容；
+  也不要指向**不随包发布**的仓库文档（`docs/DESIGN.md`、`docs/INTERFACE.md`、`INSTALL.md` 等）。
+- 计数按实测写（工具个数、提示词段数）；发布文档里出现过期数字属于缺陷。
 
-**现状**：base 是 **`0.3.0`**，两个插件的 base peer 与 `devDependencies` 是 **`>=0.3.0 <1.0.0`**，
-`bootstrap.ts` 的 `VERSION` = `0.3.0`、`supportedRange` = `>=0.3.0 <1.0.0`。接口变更**不再要求插件同批
-改 peer**：宽区间收得下，运行期门禁把旧插件判成 `incompatible` 并按降级路径挂载。`INTERFACE_VERSION`
-**保持 1**（这一代从未发布，门禁函数是就地精修进 v1 的）。
+## 构建与门禁
 
-**已经机械化的部分**：`.` 的导出集合由 `api/interface-v1.json` 快照钉住，`base/plugin-base/test/
-public-surface.spec.ts` 是那条门禁，而快照的**唯一载体**是 `base/plugin-base/src/interface.ts` 里的
-`BaseRuntimeV1` / `BaseTypeSurfaceV1` 与两份名单（`VALUE_NAMES_V1` / `TYPE_NAMES_V1`）—— 不再有测试里的
-第二份白名单。`INTERFACE_VERSION` 与文件名 `N` 同源、由门禁断言；插件除 `import type` 接口类型外，
-构建期还把 `INTERFACE_VERSION` bake 进 `lib/interface-version.json`（两个 `link-envinit.mjs`），启动时用
-base 的 `readInterfaceRequirement` 读回 required、再调 base 的 `checkInterface`：`incompatible` ⇒ 告警 +
-不用 base 的共享能力（自带 prompt 默认正文、门禁跳过、legacy provisioning）但**照常挂载**；`cannot-tell`
-（老 base 没有门禁函数、bake 缺失/畸形）⇒ 只告警、照常使用。每个带语义的成员另有一条跨树行为测试
-（`mem/packages/plugin/test/interface.spec.ts`、`work/packages/plugin/test/interface.spec.ts`），从已链接
-的 base 取真实实现。
-
-完整清单与落地顺序见 `base/plugin-base/docs/INTERFACE.md` §7（每一步都标了「已有 / 待做」）。改 `.` 面时
-适用三条规则（都是评审踩出来的）：**顺序敏感的语义必须用具名对象承载**（`resolveDataHome` 过去那种位置
-参数让"数据根按哪个 slot 解析"这种语义变化既不可检也不可读 —— 现在它是 `{ explicit?, env?, configured? }`）
-—— 但它只挡「值放错了 slot」，挡不住「同一个键的含义变了」；**可观察的文案归调用方**（`compatReport` 的
-尾行曾经硬编码中文，一个通用发布包不该替调用方决定语言）；**每个带语义的接口成员要有一条跨树行为测试**
-（从已链接的 base 取真实实现比对；在 mock 里断言不算）—— 语义面机器抓不到，这是它唯一可执行的形态。
-
-## 要跑的门禁
+```bash
+pnpm build:dsh            # 全部插件（按目录名字典序）；每个都会先构建 base
+pnpm build:dsh mem|work   # 只构建某个插件（含挂载冒烟）
+pnpm build:dsh base       # 只构建 base（tsc）
+```
 
 | 命令 | 它证明什么 |
 | --- | --- |
-| `pnpm version:check`（`scripts/version.mjs`） | 每个组的版本只记在它的可发布 manifest 里，私有 manifest 不带版本（回归即红） |
-| `pnpm guard`（`scripts/boundary-guard.mjs`） | 每个**被发现**的插件树只够得到 base 与自己的包：①不许 import 别棵树的包；②相对路径不许走出本树（唯一例外是 `scripts/lib/`）；③会被打进产物的文件不许**按值** import base（只能 `import type` / `typeof import(…)`，测试不受此限）；④其余 `@avantf/*` 必须是本树的包。**实现只有一份**：`base/plugin-base/test/boundary.spec.ts` 直接 spawn 这个脚本并断言它扫到了每一棵树，不再各写一份规则 |
-| `pnpm release:check`（`scripts/release-check.mjs`） | 可发布集合恰好是那三个、其余都是 private；peer 是 required 且范围够宽；base peer 的 zod 是 `>=4.4.3 <5`；`catalog.zod` 是 4.6.5；没有 `link:`/`file:`；registry 上已有兼容的 base |
-| `pnpm proof:base-swap`（`scripts/prove-base-swap.mjs`） | 构建出的插件产物里既没有静态 base import 也没有内联的 kit 声明，且插件**构建产物**的 bootstrap 能加载一份**被替换**的 base 并从它取提示词读写与根解析，产物字节一致 |
-| `pnpm proof:base-swap:mount` | 同上，外加两个插件针对构建产物 + 工作区 base 的完整 Cordis 挂载冒烟 |
-| `pnpm release:check:base` / `:mem` / `:work` | 各包自己的 typecheck → build → test → pack 门禁 |
+| `pnpm version:check` | 每个组的版本只记在它的可发布 manifest 里，私有 manifest 不带版本 |
+| `pnpm guard` | 每棵插件树只够得到 base 与自己的包（①不许 import 别棵树 ②相对路径不许出树 ③产物里不许按值 import base ④其余 `@avantf/*` 必须是本树自己的） |
+| `pnpm release:check` | 可发布集合恰好那三个、peer 是 required 且够宽、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base |
+| `pnpm proof:base-swap[:mount]` | 产物里没有静态 base import / 内联 kit；**被替换的** base 仍能提供提示词读写、根解析与接口门禁 |
+| `pnpm release:check:base\|:mem\|:work` | 各包自己的 typecheck → build → test → pack |
 
-### 改动 `base/**` 下任何共享代码之后
+**改动 `base/**` 之后两个插件都要回归**（base 自己的测试不会走到挂载）：
 
-要把**两个**插件都回归一遍，因为 base 的改动可能弄坏任意一个，而 base 自己的测试里没有任何一项
-会走到插件的挂载：
-
-```
-# mem（在 mem/ 里）
-pnpm build:dsh && node scripts/mount-smoke.mjs
-# work（在 work/ 里）
-pnpm release:check && node scripts/mount-smoke.mjs
+```bash
+pnpm build:dsh mem && node mem/scripts/mount-smoke.mjs
+pnpm build:dsh work && node work/scripts/mount-smoke.mjs    # 或 pnpm -C work release:check
 ```
 
-从仓库根看，同样两行是
-`pnpm build:dsh mem && node mem/scripts/mount-smoke.mjs` 与
-`pnpm build:dsh work && node work/scripts/mount-smoke.mjs`（两条命令末尾的挂载冒烟其实已经在插件
-自己的 `build:dsh` 里跑过一遍）。`pnpm proof:base-swap:mount` 把两个挂载冒烟当作一个门禁一起跑；
-上面那两行是只迭代单个插件时用的。
-
-### 脚本住在哪里，以及为什么有些脚本**没有**被合并
-
-- 根 `scripts/` 拥有所有关于**工作区**的东西：`release-check.mjs`（可发布集合、base 先于插件的
-  顺序、只有一份 `zod`）、`boundary-guard.mjs`、`prove-base-swap.mjs`、`build-dsh.mjs`（统一的
-  `pnpm build:dsh [<插件目录>|base]` 入口）、`clean.mjs`，以及
-  `scripts/lib/{harness-path,bootstrap-version,plugins}.mjs`。`plugins.mjs` **不登记任何插件**：
-  它按“顶层目录 + `build:dsh` 脚本”发现插件集合（外加按包名发现 base），所以新增插件不碰它；
-  `build-dsh.mjs` 与 `prove-base-swap.mjs` 读的是同一个发现结果。（踩过的坑：`.gitignore`
-  里那条构建产物规则 `lib/` 会连 `scripts/lib/` 下的**新**文件一起吞掉 —— 加它之后新文件不会出现在
-  `git status` 里，`harness-path.mjs` / `bootstrap-version.mjs` 就这样长期没进仓库，克隆出来的树根本
-  构建不了。已用 `!scripts/lib/**` 反制，且反制必须排在规则**之后**。）
-- 两个真正一模一样的辅助被提到 `scripts/lib/`，各自的副本已**删除**；`mem/scripts/*` 与
-  `work/scripts/*` import 根上那两份（不再有重复文件留存）。
-- 插件的流水线**刻意**留在各自插件里 —— `link-dsh` / `link-envinit` / `mount-smoke` /
-  `pack-plugin` / `release-check` 有 80 %+ 是不同的实现，参数是各插件自己的包集合、自己的打包
-  流水线（mem：`tsc` + 钉住的 tsdown client preset；work：`tsc` + esbuild + core 类型搬迁）和
-  自己的 item 清单。把脚本合成一个参数化的，就得为每处差异加一个 switch，而那正是本仓库拒绝的
-  “假抽象”。共享的**骨架**住在 `scripts/lib/` 和 `base/` 里；真正一模一样的脚本才会被提上去 ——
-  两个辅助，以及**整仓投影**（`make-release-tree.mjs` + `sync-release-repo.sh`，见下）都是这样
-  提上来的：投影是仓库级操作，没有“每个插件一份”的版本。
-- `mem/scripts/release-check.mjs` 仍然是 mem 范围内的门禁（它只断言那里的
-  `mem/packages/plugin` 可发布）；**全仓库**的断言 —— 恰好
-  `@avantf/dsh-plugin-base`、`@avantf/dsh-mem`、`@avantf/dsh-work`，其余 private —— 在
-  `scripts/release-check.mjs`。
-- 有且只有**一个** `pnpm-workspace.yaml` 和一个 catalog：根上那份。按子树的 workspace 文件
-  （`mem/pnpm-workspace.yaml`、`work/pnpm-workspace.yaml`、`base/*/pnpm-workspace.yaml`）已删除，
-  所以 `pnpm -C work …` 走的是合并后的工作区（用 `pnpm -C work list` 验证）。
-- **RC 投影：整仓，不是单插件。** 发布用的投影仓是 `../dsh-plugins-rc`（可用 `$AVANTF_RC` 覆盖），
-  由**仓库根**的两个脚本维护，子树里没有对应脚本。**只在发版时投影**：投影是发布动作的第一步，
-  没有要发布的版本就不要让 rc 树跟着动（日常开发只跑开发树的门禁）。
-  - `scripts/make-release-tree.mjs` —— 把 `dsh-plugins` 的**每个受控文件**整仓投影过去（`--into <dir>`
-    报漂移、`--apply` 落盘、`--out <dir>` 生成一棵新树）。rc 因此是**同一个仓库形态**：一个根
-    workspace、一个 catalog、`base/`+`mem/`+`work/`、测试与文档都在，所以投影**不需要任何剥离规则或
-    逐文件转换**，`pnpm-lock.yaml` 也原样投影（组版本号不写进锁文件）。唯一不进 rc 的是 RC 工具链自己
-    （这两个脚本），根 manifest 里对应的两条 script 也一并去掉 —— 发布仓是生成的，它不生成任何东西。
-  - `scripts/sync-release-repo.sh` —— 推荐入口：预览 → 确认 → 投影 → 复查 →（`--commit`）提交 →
-    （`--gate`）在 rc 里跑门禁。rc 不存在时会自动 `git init`。`--gate` 是**产物级**门禁
-    （install → guard → `release:check --offline` → 三个包各自的 `release:check` → `proof:base-swap`），
-    其中 mem 传 `--allow-uncut`：同步不是切版本，`[Unreleased]` 未清空这类**发布簿记**不该拦住一次同步；
-    真正发布前要在 rc 里不带该旗标跑一次 `pnpm release:check:mem`。
-  - **版本按组（group）走**，组就是顶层子树：`base` / `mem` / `work`。`--version mem=0.1.2` 只盖 mem
-    这一组**记录版本的那一个 manifest**（该组的可发布包 `mem/packages/plugin/package.json`）—— 组内其余
-    manifest 是私有的、根本不带版本，所以没有"组内不齐"这回事；不带组名则三组一起盖。
-    `pnpm sync:rc` 默认**取开发树的版本**（每组来自它的载体 manifest），而 `--keep-rc-versions` 才是
-    "保留 rc 当前的组版本、让 rc 停在开发树前面"的那个可选开关；无论哪种，三组的取/留都会打印出来，
-    不会悄悄挪动。三个包在同一个 rc 仓库里，tag 用组前缀（`mem-vX.Y.Z`）。
-  - 判据（为什么是整仓）：单插件投影必须把测试剥掉、把被内联引擎的运行时依赖面**重新推导**一遍，
-    因为一个子树里没有它要内联的引擎包；整仓投影没有这些推导，rc 里能跑与开发树**同一套**门禁。
-    两个旧成因（投影树没有 workspace 文件 / 没有根 `scripts/lib/`）也随“整仓”一起消失。
-
-## 四条工作原则
-
-1. **复用代码与业务逻辑。** 两个插件需要同一行为，它就属于 `base/`（或属于一个被内联的共享私有
-   引擎包）—— 不是复制一份。kit 与兼容性门禁之所以存在，正是因为这些东西被复制过一次、然后
-   漂移了。
-2. **不为复用而复用。** 共享本身不是目的；错误的抽象比重复更糟。刻意不复用之处，以及原因：
-   - **两个内核**：`@avantf/mem`（检索/知识引擎）与 `@avantf/work-core`（工作树状态机）不共享
-     任何领域模型。把它们合并会把两条无关的生命周期耦合在一起。
-   - **两个 client 半边**：浏览器产物是两套不同的 UI、由不同的 remote 驱动；只有它们的构建
-     ABI（钉住的 harness preset）是共享的。
-   - **各插件的 envinit item 清单与 compat SPEC**：只有插件自己知道它注册了什么。
-3. **改完共享代码，回归每一个插件。** 见上面的命令。base 自己的测试过了，不代表这次改动做完
-   了。
-4. **插件是彼此独立的产品。** 各自拥有包名、版本、打包与发布；绝不互相 import（连相对路径也
-   不行）；任一个都能在另一个缺席时装上、升级或卸掉。
+**RC 投影只在发版时做**（`../dsh-plugins-rc`，整仓投影 + 产物级门禁）：日常开发不投影，不发版不投影。
 
 ## 边界与路径
 
-- 保持 `mem/` ↔ `work/` 零 import（有门禁把守）。共享代码一律走 `base/`。
-- `AVANTF_HOME` 设的是**家族/受管根**（`$AVANTF_HOME`，否则 `~/.avantf/env`；资源在
-  `<root>/tools`、`<root>/models`）。**数据根**按家族的分层来（`mem/AGENTS.md`「配置分层」：
-  内置默认 → `common.yaml` → 存储配置 → **环境** → 显式），即 `~/.avantf` → 插件 profile 的
-  `dataHome`（**配置值**）→ `$AVANTF_HOME` → 显式实参（CLI `--data-home`）；用户数据与可编辑文本住在
-  那里（`memory/`、`knowledge/`、`configs/*.yaml`、`prompts/*.md`）。`configs/common.yaml` 里那条
-  `dataHome` **不参与**：它在数据根**之内**，解析根时还没读到它（`mem/DESIGN.md` §3）。两个半边必须
-  给出同一个答案：base kit 的 `resolveDataHome({ explicit?, env?, configured? })`（具名 slot）与 mem 引擎那份
-  是同一条规则，由 `mem/packages/plugin/test/family_pin.spec.ts` 跨树钉住；两个插件对**自己的** profile
-  `dataHome` 也必须同层 —— 都走配置层（②），mem 侧由 `mem/packages/plugin/test/data_home.spec.ts` 钉住
-  （把它塞进显式层会让 ② 压过 ④，同一个 profile 在两边解析出两个目录，而 `<data home>/prompts` 是共享的）。
-  这两个根刻意不同 —— 不要混为一谈。
-- 兼容性门禁现在属于 base：不再有 `mem:compat`/`work:compat` item，也没有受管的
-  `~/.avantf/env/compat/**` 下载了。机器上如果还留着 `~/.avantf/env/compat/`（或旧的
-  `<dataHome>/dsh-compat/`），可以手工删掉 —— 没有任何东西读它。
-- 数据文件永不搬出 `~/.avantf/{memory,knowledge}`；用户**编辑**的一切都住在
-  `~/.avantf/configs/*.yaml` 与 `~/.avantf/prompts/*.md`，绝不放在数据库旁边。
+- `AVANTF_HOME` 设的是**家族 / 受管根**（否则 `~/.avantf/env`；资源在 `<root>/tools`、`<root>/models`）。
+- **数据根**按家族分层：⑤ 显式实参 → ④ `$AVANTF_HOME` → ② profile 里配置的 `dataHome`（配置值）→
+  `~/.avantf`；用户数据与可编辑文本住在那里（`memory/`、`knowledge/`、`configs/*.yaml`、`prompts/*.md`）。
+  `configs/common.yaml` 里那条 `dataHome` **不参与**：那个文件在数据根之内，解析根时还没读到它。
+- 两个半边必须给出同一个答案：base kit 的 `resolveDataHome({ explicit, env, configured })` 与 mem 引擎
+  那份是同一条规则，由 `mem/packages/plugin/test/family_pin.spec.ts` 跨树钉住；两个插件对**自己的** profile
+  `dataHome` 也必须同层（都走配置层），由 `data_home.spec.ts` 钉住。
+- 数据文件永不搬出 `~/.avantf/{memory,knowledge}`；用户**编辑**的一切都住在 `~/.avantf/configs/*.yaml`
+  与 `~/.avantf/prompts/*.md`，绝不放在数据库旁边。
+
+## 子树约定
+
+- **mem**：`@avantf/mem-contract` 是工具 / 配置 schema 与 UI payload 的**唯一真源**（工具 schema、
+  MCP inputSchema、CLI 参数、client 类型都由它派生）。两个存储（memory / knowledge）各自独立、共用一套
+  检索编排：工具键 → 运行时的派发表只在 `core/src/dispatch.ts`，检索流程只在 `core/src/store/hybrid.ts`，
+  **不许再分叉**。中文评测集（`core/test/eval_zh.spec.ts`，35 条）的汇总数字是**精确断言** —— 任何移动它的
+  改动都要重新冻结并解释。`pnpm typecheck` 也检查 `test/`，且要在 `pnpm build` **之后**跑（包通过产出的
+  `lib/*.d.ts` 读依赖）；`pnpm typecheck:dsh` 覆盖插件的 src + specs，是本地门禁（CI 没有 harness）。
+  读 zod 内部别猜：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })`，形状断言在
+  `contract.spec.ts` / `tool_schema.spec.ts`。
+- **work**：工作树状态机在 `work/packages/core`（**刻意不带 Node 类型**），`work/packages/plugin` 是薄壳；
+  它的领域模型与 mem 不共享任何东西。

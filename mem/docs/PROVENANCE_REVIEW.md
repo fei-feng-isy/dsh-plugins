@@ -191,7 +191,7 @@ drain 查询还要 `SELECT fact_id, content`（`dao/facts.ts:219`），所以第
   "known behaviour" 测试）；`DESIGN.md:259`（仍在讲已删除的 `contradiction_pending_max` /
   `conflict_pending` / `evicted`，与新的 `:508-512` 直接冲突）；`docs/PERFORMANCE_REVIEW.md:495`
   （§10.2 第 3 条门槛仍以 `changed.size` 为断言，而该结构已不存在）。
-  `AGENTS.md:8` 的 "min-max over the *merged* pool" 对**跨库**那一步仍成立（router 的
+  `DESIGN.md`「分数可比」条（原 `AGENTS.md:8`）的 "min-max over the *merged* pool" 对**跨库**那一步仍成立（router 的
   `normalizeMergedScores` 未变），但读者会误读成库内也是 min-max。
 - **N5 归一化的不变性声明过强**：`fusion.ts` 头部、`contract/src/config.ts` 的 `leg_cap` 注释、
   `DESIGN.md:520` 都写"最大值必然属于 cap 删不掉的那一条" —— **对 HRR 腿不成立**：

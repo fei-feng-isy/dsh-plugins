@@ -36,8 +36,8 @@ describe('the editable guidance file', () => {
   })
 
   it('resolves the shared prompt directory by the FAMILY order: $AVANTF_HOME, else the config, else ~/.avantf', () => {
-    // The configured `dataHome` is layer ② and the environment is layer ④ (`mem/AGENTS.md`
-    // 「配置分层」), so the environment is the deployment override that wins. This used to be the
+    // The configured `dataHome` is layer ② and the environment is layer ④ (root `AGENTS.md`
+    // 「边界与路径」), so the environment is the deployment override that wins. This used to be the
     // opposite here: the config value was handed to the resolver's EXPLICIT slot, which promoted it
     // above the environment and made `$AVANTF_HOME` dead on this side of the family.
     expect(promptDir('/tmp/configured', { AVANTF_HOME: '/tmp/family' })).toBe('/tmp/family/prompts')

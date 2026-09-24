@@ -75,8 +75,8 @@ export interface DataHomeInput {
 
 /**
  * The data root: an explicit caller value (⑤) → `$AVANTF_HOME` (④) → the configured
- * `common.dataHome` (②) → `~/.avantf`. That is the family's layer order (`mem/AGENTS.md`
- * 「配置分层」: built-in → common.yaml → store → ENV → explicit), so the environment wins over the
+ * `common.dataHome` (②) → `~/.avantf`. That is the family's layer order (root `AGENTS.md`
+ * 「边界与路径」: built-in → profile → store → ENV → explicit), so the environment wins over the
  * config file and an explicit argument wins over both.
  *
  * The configured value is a NAMED slot ({@link DataHomeInput}) for the reason recorded there: it

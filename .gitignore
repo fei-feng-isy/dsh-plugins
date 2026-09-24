@@ -16,6 +16,11 @@ dist/
 release/*.tgz
 mem/release/*.tgz
 work/release/*.tgz
+# …and any STRAY pack artifact, wherever it lands: a `npm pack` / `npm publish` run inside a package
+# directory drops `<name>-<version>.tgz` next to that package.json, and it is not ours to track. The
+# repository never tracks a tarball (the release/ lines above are the deliberate location, also
+# ignored). One stray 0.3.0 tarball did get committed this way once; this rule is why it cannot again.
+*.tgz
 
 # Test / tool caches
 .vitest/
