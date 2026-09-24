@@ -244,16 +244,16 @@ pnpm workers:usage -- --strict        # 出现"调了不存在的工具"就非�
 
 ## 环境初始化（`@avantf/dsh-plugin-base`）
 
-插件挂载的第一步不是注册工具，而是**把环境准备好**——交给家族底座 `@avantf/dsh-plugin-base`（peer 区间 `^0.2.0`；本仓另在 `devDependencies` 里声明同一个范围，并由根 `pnpm-workspace.yaml` 的 `linkWorkspacePackages: true` 链到本地 `base/`）。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本）。时序固定为：
+插件挂载的第一步不是注册工具，而是**把环境准备好**——交给家族底座 `@avantf/dsh-plugin-base`（peer 区间 `>=0.3.0 <1.0.0`；本仓另在 `devDependencies` 里声明同一个范围，并由根 `pnpm-workspace.yaml` 的 `linkWorkspacePackages: true` 链到本地 `base/`）。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本）。时序固定为：
 
 ```
-内联 bootstrap（解析底座 → 动态 import() → 校验 supportedRange）→ 跑挂载前检查（兼容门禁）
+内联 bootstrap（解析底座 → 动态 import() → 校验 supportedRange）→ 接口门禁（底座判 verdict）→ 跑挂载前检查（兼容门禁）
 ```
 
 - **它要准备什么**：不再有 item 清单，也**没有 `work:compat`**——门禁就是底座本身。本插件像记忆插件一样注册手写的 Typert wire face，有同一个运行时错配风险：契约挪了以后**挂载成功**，然后在某个 remote 调用里炸，报错里没有版本信息，所以启动时用底座自带的规则 / 探针 / 复查跑一次门禁。
 - **底座怎么被找到**：内联 bootstrap 用 `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从**插件自己的依赖树**解析（正常就是 `node_modules/@avantf/dsh-plugin-base`），再动态 `import()`；版本不在内联 `supportedRange` 内 → 一条 `envinit: WARNING`，插件**照常挂载、降级**。绝不静态 `import` 底座、绝不 bundle 底座：静态 import 会在底座缺席时让整个插件模块加载失败。
 - **唯一内联件是 bootstrap**：本插件是 `tsc` 直出（没有打包器），所以底座构建产物里的零依赖单文件 `bootstrap.js` 被**拷进产物**、按相对路径 import。`scripts/build.mjs` 负责拷贝并断言它与**安装的**底座同版本。底座本包**只能是 peer**（外加一条 `devDependencies` 让 pnpm 装上），且**不得被静态 value import**——坏树时静态 import 会先于 bootstrap 抛错，插件连"解析底座并留下 WARNING"这一步都做不到（`pack-plugin.mjs` 断言这两条）。
-- **拿不到就降级，不拒载**：底座不可解析 → 一条 `envinit: WARNING`，插件照常挂载（工具、服务、prompt 段、Remote face 全注册），门禁跳过并退回 legacy provisioning；门禁包装不上或门禁本身跑不起来，同样 WARNING 后继续。判定语义不变：只有**被证明的破坏**（`probe-failed`）才拒载，"无法判定"只是 note，版本差异只是 warning，绝不抛错。
+- **拿不到就降级，不拒载**：底座不可解析 → 一条 `envinit: WARNING`，插件照常挂载（工具、服务、prompt 段、Remote face 全注册），门禁跳过并退回 legacy provisioning；门禁包装不上或门禁本身跑不起来，同样 WARNING 后继续。**接口世代不匹配也一样**：插件 bake 的 `INTERFACE_VERSION` 与加载到的底座报出的不同（区间内但另一世代）⇒ 一条 `WARNING` 且**不使用底座的共享能力**（prompt 层退回本插件内置正文、门禁跳过），走的正是"底座拿不到"那条降级路径，仍**照常挂载**；`cannot-tell`（老底座没有 `checkInterface`/`readInterfaceRequirement`、bake 缺失/畸形）⇒ 只告警、照常使用。判定语义不变：只有**被证明的破坏**（`probe-failed`）才拒载，"无法判定"只是 note，版本差异只是 warning，绝不抛错。
 - **共享逻辑从底座运行时取**：兼容门禁规则/探针/复查、envinit provisioner、prompt 文件层 `PromptFiles`、以及本插件的数据根解析 `resolveDataHome`，都在运行时从动态 import 的那份底座上取用——所以修这些共享逻辑**只需发一次底座**，不必重建插件产物。仍留在插件里、改它们**需要发插件**的是：`typert` `strict` wire codec 与端点/字段/结果符号字面量（照抄宿主约定的两三行，描述符在模块加载期组装），以及本插件自己的 logger 与底座缺席时的 fallback 默认参数。底座 kit 另外导出 `createPluginLogger`、`familyHome` 等，插件可在运行时取用。改 `base/**` 里的共享代码后，两个插件的完整门禁都要重跑（work：`pnpm release:check` + mount-smoke；mem：`pnpm build:dsh` + `node scripts/mount-smoke.mjs`）。
 - **异步那一档**：`startup: 'background'` 的项由框架派发、不占挂载预算，完成时回调 `onSettled` 再做后续；本插件的门禁是 blocking，加项不改代码。
 - **家目录**：族根 `home` = `$AVANTF_HOME`，默认 `~/.avantf/env`；锁、状态都在它下面。工作树与 worker 日志**不在这里**（前者走宿主 `ctx.storageDomain`，后者在 `~/.dsh/sessions`）。

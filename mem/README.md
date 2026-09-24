@@ -43,7 +43,7 @@
 > [`@avantf/dsh-plugin-base`](../base/plugin-base)（`base/plugin-base`，合并后的唯一底座；
 > 从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，两个旧包不再发新版本、已死）
 > 负责——它把资源预装到受管族根（默认 `~/.avantf/env`），并在启动时跑兼容门禁。本仓把底座声明为插件的
-> **peerDependency**（peer 区间 `^0.2.0`，已发布到 registry；另在 `devDependencies` 里声明同一条 `^0.2.0`，
+> **peerDependency**（peer 区间 `>=0.3.0 <1.0.0`；另在 `devDependencies` 里声明同一条 `>=0.3.0 <1.0.0`，
 > `pnpm install` 即装上一份）：**不内联、也不按 specifier import**——插件唯一的静态引用是内联的零依赖
 > `bootstrap`（`packages/plugin/src/envinit-bootstrap.js`），它按
 > `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从插件自己的依赖树解析底座、
@@ -192,8 +192,8 @@ trust:
 pnpm release:check
 ```
 
-家族底座 `@avantf/dsh-plugin-base` 是插件的 **peerDependency**（peer 区间 `^0.2.0`，已发布到 registry）；
-插件同时把它声明进 `devDependencies`（同一条 `^0.2.0`），`pnpm install` 即装上：
+家族底座 `@avantf/dsh-plugin-base` 是插件的 **peerDependency**（peer 区间 `>=0.3.0 <1.0.0`）；
+插件同时把它声明进 `devDependencies`（同一条 `>=0.3.0 <1.0.0`），`pnpm install` 即装上：
 `pnpm build:dsh` 会先跑 `scripts/link-envinit.mjs`，从**安装副本** vendor 它零依赖的 bootstrap；底座
 **绝不内联、也绝不按 specifier import**，所以本地开发**不需要任何 checkout**（只有要就地改底座时才用
 `DSH_ENVINIT=<checkout>` 显式指定）。**作为可安装包部署时**，底座由 npm 这类会自动安装 peer 的包管理器
@@ -203,7 +203,7 @@ pnpm release:check
 ```jsonc
 // ~/.dsh/profiles/<profile>/package.json
 "dependencies": {
-  "@avantf/dsh-plugin-base": "^0.2.0",
+  "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",
   "@avantf/dsh-mem": "^0.1.1"
 }
 ```
@@ -211,8 +211,12 @@ pnpm release:check
 它保持 **required peer**，缺了只是降级挂载（一条 `envinit: WARNING` + 退回 legacy 机制，绝不拒载）。
 宿主自己提供的 peer 才是 `optional`，免得包管理器去 registry 拉一份宿主内部实现。环境初始化框架与启动兼容
 门禁现在都在底座**这一个包**里（不再有独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat`，也不再有
-`mem:compat` item 或受管 `runtime` 根上的门禁副本）。发布顺序是**底座先于插件**——`release-check` 在发布
-插件前会确认 registry 上已有落在插件 peer 区间内的底座版本；发布前确认
+`mem:compat` item 或受管 `runtime` 根上的门禁副本）。**接口世代由底座在运行期裁决**：插件构建期把
+`INTERFACE_VERSION` bake 进 `lib/interface-version.json`，启动时用底座自己的
+`readInterfaceRequirement` 读回、再调 `checkInterface`；`incompatible`（区间内但另一世代）⇒ 一条
+`WARNING` 且**不用底座的共享能力**（自带 prompt 默认正文、门禁跳过、legacy provisioning）但**照常挂载**，
+`cannot-tell` ⇒ 只告警、照常使用 —— 接口变不再要求插件同批改 peer。发布顺序是**底座先于插件**——
+`release-check` 在发布插件前会确认 registry 上已有落在插件 peer 区间内的底座版本；发布前确认
 工作区里没有 `link:`/`file:` 覆盖——`pack-plugin.mjs` 会拒绝仍带这类 specifier 的 tarball，
 `make-release-tree.mjs` 会拒绝投影这样的工作区。
 

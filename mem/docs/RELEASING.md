@@ -157,7 +157,7 @@ granular token（§2 的发布前提 2）。
   重新跑一遍本地门禁再改这个窗口（它是**声明**，不是声明以外的任何保证）。
 
   **家族侧不再是 tarball 里的依赖**（本轮迁移）：家族底座 `@avantf/dsh-plugin-base` 是插件的
-  **peerDependency**（peer 区间 `^0.2.0`，已发布到 registry；插件另在 `devDependencies` 里声明同一条 `^0.2.0`，
+  **peerDependency**（peer 区间 `>=0.3.0 <1.0.0`；插件另在 `devDependencies` 里声明同一条 `>=0.3.0 <1.0.0`，
   `pnpm install` 即装上）——**绝不内联、也绝不随包发布**，`scripts/link-envinit.mjs`（`pnpm build:dsh`
   自动跑）从**安装副本** vendor 它零依赖的 `bootstrap`。底座**一个包**里装着启动期环境初始化框架与启动兼容
   门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，两个旧包不再发新版本），所以没有

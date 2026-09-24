@@ -371,6 +371,23 @@ for (const name of packages) {
         }
       }
     }
+
+    // The RUNTIME interface gate reads the generation this build was written for from
+    // `lib/interface-version.json` (`link-envinit.mjs` bakes it). Without the file the gate degrades to
+    // "not baked" — a warning, which is by design at startup, but a published artifact that never had
+    // the record cannot run the gate at all, so it is a pack failure here.
+    const interfaceRecord = join(dir, 'lib', 'interface-version.json')
+    if (!existsSync(interfaceRecord)) {
+      failures.push(`${manifest.name}: lib/interface-version.json is missing — run scripts/link-envinit.mjs so the interface gate knows which base generation this build was written for`)
+    } else {
+      const record = JSON.parse(readFileSync(interfaceRecord, 'utf8'))
+      if (!Number.isInteger(record.interfaceVersion) || record.interfaceVersion <= 0) {
+        failures.push(`${manifest.name}: interface-version.json declares no positive integer interfaceVersion (found ${JSON.stringify(record.interfaceVersion)})`)
+      }
+      if (typeof record.baseVersion !== 'string' || record.baseVersion === '') {
+        failures.push(`${manifest.name}: interface-version.json has no baseVersion — the record does not say which base it was taken from`)
+      }
+    }
   }
 
   // ── 4. pack ────────────────────────────────────────────────────────────────
@@ -403,6 +420,13 @@ for (const tarball of tarballs) {
   const files = listing.stdout ?? ''
   if (!files.includes('package/package.json')) failures.push(`${tarball}: missing package.json`)
   if (!files.includes('package/lib/index.js')) failures.push(`${tarball}: missing lib/index.js`)
+  // The interface record must ship, and this is asserted on the TARBALL — section 3 checks the built
+  // directory, which a `files` whitelist can still exclude. Without the record the runtime gate degrades
+  // to "not baked" (`cannot-tell`): a warning by design at startup, but a published artifact that can
+  // never run the gate at all. Same assertion the sibling tree's packer makes.
+  if (!files.includes('package/lib/interface-version.json')) {
+    failures.push(`${tarball}: missing lib/interface-version.json — the interface gate cannot run without the baked record (check the manifest's \`files\`)`)
+  }
   // The npm page is the package's OWN README (npm shows `package/README.md`), so assert it ships and
   // that its title names the package the tarball declares. A copy/rename slip would otherwise publish
   // one plugin's page under another's name, and nothing else in this chain would notice.

@@ -52,6 +52,7 @@ import { envAutoDownload, expandHome } from '@avantf/mem-contract'
 import { PANDOC_ARTIFACT_ID, PANDOC_BINARY, PANDOC_PACKS, PANDOC_VERSION } from '@avantf/mem-provision'
 import type { ProvisionItem, ProvisionReportEntry, Provisioner } from '@avantf/dsh-plugin-base'
 import { loadFramework, readDependencyRange } from './envinit-bootstrap.js'
+import { baseIsUsable, interfaceVerdict } from './interface_gate.js'
 import {
   COMPAT_PACKAGE,
   reasonOf,
@@ -227,6 +228,7 @@ export interface EnvinitLoadOptions {
   /** Test seam: a partial module to derive the gate from, instead of `framework` itself. */
   readonly compatModule?: CompatModule
 }
+
 
 /**
  * The family root: `$AVANTF_HOME`, else `~/.avantf/env`.
@@ -407,6 +409,40 @@ async function loadOnce(options: EnvinitLoadOptions): Promise<EnvinitRuntime | u
       `${OWN_PREFIX} WARNING — ${FRAMEWORK_PACKAGE} could not be made available; the plugin falls back to its own provisioning and mounts anyway`,
     )
     return undefined
+  }
+
+  // The RUNTIME interface gate, on its own axis: the generation this artifact was baked for
+  // (`lib/interface-version.json`, written by `scripts/link-envinit.mjs` with the bootstrap) versus
+  // the one the loaded base reports. The DECISION is the base's (`checkInterface` together with its
+  // one reader of the bake record); this plugin only consumes it. Package versions move every release
+  // and stay the INSTALL-time gate (the peer range), so the generation number is the axis that means
+  // "the kit and gate helper set I was written against is the one I loaded".
+  //
+  // The verdict, and why it is a DEGRADATION now rather than the bare warning it used to be: the
+  // interface is the family's MAIN contract, so a base from another generation is not a base whose
+  // shared capabilities this build may use. `incompatible` therefore withholds them — the prompt
+  // layer falls back to this plugin's own default text, the compatibility gate is skipped and the
+  // resources take the legacy path — by taking the SAME route as "the base is unavailable", which the
+  // caller already handles. The mount itself (tools, service, prompt sections, Remote, UI) is never
+  // refused: the family invariant is that only a PROVEN host break refuses, and a generation mismatch
+  // is not one. `cannot-tell` (no gate on the loaded base, no bake record) is a warning and nothing
+  // else — "cannot tell" is never "incompatible".
+  {
+    const verdict = interfaceVerdict(framework)
+    if (!baseIsUsable(verdict)) {
+      warn(
+        options.log,
+        `${OWN_PREFIX} WARNING — interface: ${verdict.reason ?? 'the loaded base implements another interface generation'};`
+        + ' the base\'s shared capabilities are NOT used (own prompt defaults, gate skipped, legacy provisioning) and the plugin mounts anyway',
+      )
+      return undefined
+    }
+    if (verdict.status === 'cannot-tell') {
+      warn(
+        options.log,
+        `${OWN_PREFIX} WARNING — interface: ${verdict.reason ?? 'the interface generation cannot be told'}; using the loaded base anyway ("cannot tell" is never "incompatible")`,
+      )
+    }
   }
 
   // The compatibility gate is part of the base package and arrived WITH it: there is no `mem:compat`

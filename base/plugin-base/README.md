@@ -53,33 +53,36 @@ base 缺失或版本不被接受时插件**照常挂载**（WARN + 降级）：p
 
 ### 1. 声明依赖
 
-插件把 base 声明为 **peer**（不要放 `dependencies`，否则会装出多份 base 副本）。peer 区间要**足够宽**
-以接受 base 的补丁——`^0.2.0`（0.x 的 caret 不跨 minor：base 换 minor 时要同批放宽这一行，并同步
-`src/bootstrap.ts` 的 `supportedRange`，那才是运行期的门）——否则"只发 base"会被 peer 区间卡死；
-`devDependencies` 里再声明
-同一条区间（本仓是 `^0.2.0`，并由根 workspace 的 `linkWorkspacePackages` 指向 `base/`），供
-`pnpm install` 装上：
+插件把 base 声明为 **peer**（不要放 `dependencies`，否则会装出多份 base 副本）。peer 区间要**足够宽**：
+**`>=0.3.0 <1.0.0`** —— 一个普通比较符区间，收得下 base 的每一次 minor/patch，停在下一个大世代。**接口
+变更不再要求插件同批改 peer**：接口有自己的轴（`INTERFACE_VERSION` + `api/interface-vN.json`），由 base 的
+**运行期门禁**裁决（见 [docs/INTERFACE.md](docs/INTERFACE.md) §1、§3）：旧插件会被判 `incompatible`，按降级
+路径挂载（自带 prompt 默认正文、门禁跳过、legacy provisioning，工具/service/Remote/UI 照常），**绝不拒载**。
+base 的**包版本是普通 semver**，只表达包自身（现在是 `0.3.0`）；只有确实要换接口世代时才升
+`INTERFACE_VERSION` 并新增快照。`devDependencies` 里再声明同一条区间（由根 workspace 的
+`linkWorkspacePackages` 指向 `base/`），供 `pnpm install` 装上：
 
 ```jsonc
 {
-  "peerDependencies": { "@avantf/dsh-plugin-base": "^0.2.0" },
-  "devDependencies":  { "@avantf/dsh-plugin-base": "^0.2.0" }
+  "peerDependencies": { "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0" },
+  "devDependencies":  { "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0" }
 }
 ```
 
 base 从**插件自己所在的树**往上解析，所以它必须由那棵树提供，而它**保持 required peer**：npm（以及默认
 `autoInstallPeers: true` 的 pnpm）在装插件时会自动把它一起装上，多个插件共用提升到顶层的那一份；
 pnpm 关掉 `autoInstallPeers` 或 yarn 不会自动装，那时要在宿主/profile 的 `dependencies` 里显式写一条
-`"@avantf/dsh-plugin-base": "^0.2.0"`。宿主自己提供的 peer（宿主内部包）才标
+`"@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0"`。宿主自己提供的 peer（宿主内部包）才标
 `peerDependenciesMeta.optional`，避免包管理器跑去 registry 拉一份宿主内部实现；缺 base 时插件仍降级挂载。
 
-**版本承诺（目标形态，见 [docs/INTERFACE.md](docs/INTERFACE.md)）**：`@avantf/dsh-plugin-base` 的公开接口
-是它 `.` 上的导出（值 + 类型）以及 `docs/DESIGN.md` §7 那几张协议面版本表。接口**变了**才提 major（并升
-接口编号）；只改业务流程或可观察行为——接口不变——只提 minor；纯修复提 patch。因此插件声明一次区间
-（`^1.0.0`）之后，base 的 minor/patch 会自动送达，不必同批改插件。**现状**：base 还在 0.x，而 0.x 的
-caret 不跨 minor，所以今天每次 base minor 都要两个插件同批放宽 peer 与 `supportedRange`；接口编号与
-快照门禁尚未落地（[docs/INTERFACE.md](docs/INTERFACE.md) §7 列出了待做项与落地顺序）。写插件时请只依赖 `.` 上的东西（`./internal` 不承诺稳定），并把
-顺序敏感的参数当对象传——那是接口面的一部分。
+**版本承诺（见 [docs/INTERFACE.md](docs/INTERFACE.md)）**：`@avantf/dsh-plugin-base` 的公开接口
+是它 `.` 上的导出（值 + 类型，由 `api/interface-vN.json` 快照与接口类型 `BaseRuntimeV1` 机械钉住）以及
+`docs/DESIGN.md` §7 那几张协议面版本表。**接口与包版本是两条轴**：接口变了就升 `INTERFACE_VERSION`、
+新增 `api/interface-vN.json` —— 包版本只按包自身走普通 semver（minor/patch），**不再**"接口变 ⇒ major"。
+**现状**：base 是 **`0.3.0`**，两个插件的 peer 与 `devDependencies` 是 `>=0.3.0 <1.0.0`，
+`src/bootstrap.ts` 的 `VERSION` = `0.3.0`、`supportedRange` = `>=0.3.0 <1.0.0`。写插件时请只依赖 `.`
+上的东西（`./internal` 不承诺稳定），把顺序敏感的参数当具名对象传（`resolveDataHome` 的 slot 就是这个规则
+的产物），并让接口类型（`import type { BaseRuntimeV1 }`）约束你从加载到的 base 上取的东西。
 
 ### 2. 内联 bootstrap
 

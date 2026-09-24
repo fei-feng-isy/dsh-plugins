@@ -110,7 +110,7 @@ describe('dsh-plugin-base preset', () => {
   it('fails when no framework copy can be resolved', async () => {
     const cwd = join(root, 'empty-plugin')
     await mkdir(cwd, { recursive: true })
-    await writeFile(join(cwd, 'package.json'), JSON.stringify({ name: 'empty', peerDependencies: { '@avantf/dsh-plugin-base': '^0.1.0' } }))
+    await writeFile(join(cwd, 'package.json'), JSON.stringify({ name: 'empty', peerDependencies: { '@avantf/dsh-plugin-base': FRAMEWORK_RANGE } }))
     const preset = envinitPreset({ cwd })
     expect(preset.ok).toBe(false)
     expect(statusOf(preset.checks, 'preset/framework-resolvable')).toBe('fail')
@@ -127,7 +127,9 @@ describe('dsh-plugin-base preset', () => {
   })
 
   it('fails when devDependencies disagrees with the peer range', async () => {
-    const f = await fixture({ dev: '^1.0.0' })
+    // A version picked to differ from the peer range wherever the base currently sits, without
+    // hard-coding the base's own number (which this suite derives on purpose).
+    const f = await fixture({ dev: '^0.0.1' })
     const preset = envinitPreset({ cwd: f.cwd })
     expect(statusOf(preset.checks, 'preset/range-single-source')).toBe('fail')
     expect(statusOf(preset.checks, 'preset/peer-range-declared')).toBe('pass')

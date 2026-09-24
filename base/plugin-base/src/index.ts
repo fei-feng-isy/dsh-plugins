@@ -30,6 +30,25 @@ export * from './compat.js'
 // inline this code: they load the base at startup and take these capabilities from it at runtime.
 export * from './kit/index.js'
 
+// The INTERFACE TYPE: the named, frozen v1 surface of this `.` entry. Plugins hold this ONE name
+// instead of the whole `typeof import(...)` namespace, and `api/interface-v1.json` records its names
+// as a machine-checked snapshot. `INTERFACE_VERSION` is the integer plugins bake at build time and
+// compare against the value the base they loaded at runtime reports — it is the one value here whose
+// job is the RUNTIME interface gate rather than a caller's API, so it belongs on `.`.
+//
+// `VALUE_NAMES_V1` / `TYPE_NAMES_V1` are deliberately NOT re-exported: they are the snapshot gate's
+// data (read from the source by `test/public-surface.spec.ts`), and exporting them would put the
+// inventory itself into the inventory it describes.
+export { INTERFACE_VERSION } from './interface.js'
+export type { BaseRuntimeV1, BaseTypeSurfaceV1 } from './interface.js'
+
+// The runtime interface gate: the verdict function the plugins call with the generation they baked,
+// and the ONE reader of a plugin's `lib/interface-version.json`. They live here rather than in each
+// plugin so their semantics (bidirectional, guarded, total) are fixable with one base release; the
+// plugins keep only the consumption and the degrade decision.
+export { checkInterface, readInterfaceRequirement } from './interface_gate.js'
+export type { InterfaceVerdict, InterfaceRequirement } from './interface_gate.js'
+
 export type {
   // items and manifests
   AtStartup,
@@ -80,3 +99,15 @@ export type {
   Resolved,
   ResourceIdentity,
 } from './types.js'
+
+// The kit's own shapes, named by the interface type (`BaseRuntimeV1`). They were reachable before
+// only through the `typeof import(...)` namespace; naming them here is what makes the interface
+// type's type members resolvable from `.` as well.
+export type {
+  PluginLogger,
+  PluginLoggerOptions,
+  PromptFilesIo,
+  PromptFilesLogger,
+  PromptFilesOptions,
+  StrictCodec,
+} from './kit/index.js'

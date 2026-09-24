@@ -11,6 +11,7 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { loadFramework } from './envinit-bootstrap.js'
+import { baseIsUsable, interfaceVerdict } from './interface_gate.js'
 import { hostContribution } from './wire.js'
 
 /** The framework package, as declared in this plugin's `peerDependencies`. */
@@ -228,6 +229,7 @@ function runtimeFrom(module: CompatModule, kit?: EnvinitModule): CompatRuntime {
 let loaded: CompatRuntime | undefined
 let loading: Promise<CompatRuntime | undefined> | undefined
 
+
 /**
  * Ensure the framework, then the base, then this plugin's gate runtime. Never throws: it returns
  * `undefined` when the gate cannot run, and the caller then warns and mounts because a missing gate
@@ -283,6 +285,36 @@ async function loadCompatOnce(options: CompatLoadOptions): Promise<CompatRuntime
       `${OWN_PREFIX} WARNING — ${FRAMEWORK_PACKAGE} could not be made available; the compatibility gate is SKIPPED and the plugin mounts anyway`,
     )
     return undefined
+  }
+  // The RUNTIME interface gate, on its own axis: the generation this artifact was baked for versus the
+  // one the loaded base reports. The DECISION is the base's (`checkInterface` plus its one reader of
+  // the bake record); this plugin only consumes it. Package versions move every release and stay the
+  // install-time gate (the peer range), so the generation number is the axis that means "the kit and
+  // gate helper set I was written against is the one I loaded".
+  //
+  // Why `incompatible` now DEGRADES rather than merely warning: the interface is the family's MAIN
+  // contract, so a base from another generation is not one whose shared capabilities this build may
+  // use. Taking the same route as "the base is unavailable" withholds them — the prompt layer falls
+  // back to this plugin's own default text and the gate is skipped — while the mount itself (tools,
+  // service, prompt sections, Remote, UI) always continues: only a PROVEN host break refuses, and a
+  // generation mismatch is not one. `cannot-tell` (no gate on the loaded base, no bake record) warns
+  // and uses the base anyway; "cannot tell" is never "incompatible".
+  {
+    const verdict = interfaceVerdict(framework)
+    if (!baseIsUsable(verdict)) {
+      warn(
+        options.log,
+        `${OWN_PREFIX} WARNING — interface: ${verdict.reason ?? 'the loaded base implements another interface generation'};`
+        + ' the base\'s shared capabilities are NOT used (own prompt defaults, gate skipped) and the plugin mounts anyway',
+      )
+      return undefined
+    }
+    if (verdict.status === 'cannot-tell') {
+      warn(
+        options.log,
+        `${OWN_PREFIX} WARNING — interface: ${verdict.reason ?? 'the interface generation cannot be told'}; using the loaded base anyway ("cannot tell" is never "incompatible")`,
+      )
+    }
   }
   // The gate IS the base: `@avantf/dsh-plugin-base` carries the former environment framework AND the
   // former `@avantf/dsh-compat`. There is no `work:compat` item to declare, nothing to download and

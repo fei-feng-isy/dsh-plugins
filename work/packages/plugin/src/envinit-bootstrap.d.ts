@@ -3,16 +3,19 @@
  * @module bootstrap
  */
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export declare const VERSION = "0.2.0";
+export declare const VERSION = "0.3.0";
 /**
  * The framework interval this bootstrap can launch.
  *
  * Kept equal to the plugins' peer range for the base: the plugin passes no override, so THIS is the
- * runtime gate, and a range wider than what the plugin was built against would load a base whose kit
- * it cannot use (0.2.0 is the line whose `resolveDataHome` takes the configured layer as its own
- * argument — a 0.1.x base would silently resolve the data root to a different directory).
+ * runtime gate. It is a plain comparator interval, NOT a caret: the package version is ordinary
+ * semver again and no longer tracks the interface, so the interval stays as wide as the family's
+ * compatibility promise — `>=0.3.0 <1.0.0` admits every 0.x base this generation of plugins can
+ * consume, and stops at the major that invented a new interface generation. The interface itself is
+ * the separate, runtime axis: a base inside this interval whose `INTERFACE_VERSION` differs is judged
+ * by the base's own gate (INTERFACE.md §1, §3), which degrades rather than refusing.
  */
-export declare const supportedRange = "^0.2.0";
+export declare const supportedRange = ">=0.3.0 <1.0.0";
 /** Sink for the warnings that replace a throw. */
 export interface BootstrapLogger {
     warn(message: string): void;

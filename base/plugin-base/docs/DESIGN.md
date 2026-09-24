@@ -203,8 +203,9 @@ type ResourceState =
 
 | 轴 | 载体 | 不兼容时的动作 |
 | --- | --- | --- |
-| 框架 API | `@avantf/dsh-plugin-base` 的 semver（插件在 peer 声明） | 包管理器在安装期拦；运行期报 `unsupported-envinit`，跳过清单 |
-| bootstrap | `./bootstrap` 的版本常量 + `supportedRange` | 构建期断言版本落在插件声明的区间内；运行期超范围即降级 |
+| 框架 API | `@avantf/dsh-plugin-base` 的 semver（插件在 peer 声明，`>=0.3.0 <1.0.0`） | 包管理器在安装期拦；运行期报 `unsupported-envinit`，跳过清单 |
+| 接口编号 | `.` 导出的整数 `INTERFACE_VERSION` + `api/interface-vN.json` 快照；门禁函数 `checkInterface` / `readInterfaceRequirement` 也在 `.` 上 | 插件把 `{ baseVersion, interfaceVersion }` bake 进 `lib/interface-version.json`，启动时用 base 的 reader 读回、再调 base 的 `checkInterface`：`incompatible` ⇒ 一条 `WARNING` + **不用 base 的共享能力**（自带 prompt 默认正文、门禁跳过、legacy provisioning）但**照常挂载**；`cannot-tell` ⇒ 只告警、照常使用。**绝不拒载**（[INTERFACE.md](./INTERFACE.md) §3、§5） |
+| bootstrap | `./bootstrap` 的版本常量 + `supportedRange`（`>=0.3.0 <1.0.0`） | 构建期断言版本落在插件声明的区间内；运行期超范围即降级 |
 | item 描述符 | `ProvisionItem.schemaVersion` | 高于本实现 ⇒ 该项 `skipped(unsupported-item-schema)` |
 | 磁盘布局 | `<home>/.envinit/.layout.json` | 更高或布局名不同 ⇒ 该 home 只读不写 |
 | 状态面 | `status.json` 的 `schemaVersion` | 更高 ⇒ 只读旧文件，状态面降级为空 |
@@ -213,12 +214,13 @@ type ResourceState =
 框架本包只作为插件的 **peer**：放进 `dependencies` 会得到多份副本，跨副本的 registry 与
 identity 会分叉。**发布顺序是 base 先于两个插件**：同仓的发布脚本在发布插件前断言 registry 上已有兼容
 区间内的 base 版本。kit 与兼容门禁都在这一个包里，所以"改共用逻辑"等于"发一版 base"——插件的 peer 区间
-（`^0.2.0`）要足够宽以接受 base 的补丁（0.x 的 caret 不跨 minor，换 minor 要同批放宽它），否则这条会被
-peer 区间卡死。
+（`>=0.3.0 <1.0.0`）足够宽以接受 base 的 minor/patch，**接口换代只走 `INTERFACE_VERSION` 那条轴**，不再
+要求插件同批改 peer。
 
-上面这张表里的"框架 API"一轴用的是**包版本**，那是过渡状态：它把发版频率当成了接口稳定性。
-[INTERFACE.md](./INTERFACE.md) 给出目标形态 —— 接口冻结、接口编号与包版本解耦，于是"接口变 ⇒ major、
-行为变 ⇒ minor、修复 ⇒ patch"；本节那四张表就是那套做法在协议面的先行样板。
+上面这张表里的"框架 API"一轴用的是**包版本**，那是**安装期**的门；**运行期**的门已经换到"接口编号"这一
+轴（`INTERFACE_VERSION` + 构建期 bake + 启动期门禁）。[INTERFACE.md](./INTERFACE.md) 是这整套做法的完整
+设计 —— 接口冻结、接口编号与包版本解耦：接口变只升接口世代，包版本回到普通 semver；本节那四张表就是那套
+做法在协议面的先行样板。
 
 ## 8. 公共 API
 
@@ -270,8 +272,8 @@ interface ProvisionerOptions {
 
 ## 9. 接口冻结
 
-公开接口由什么构成、接口编号、快照门禁，以及"接口变 ⇒ major ／ 行为变 ⇒ minor ／ 修复 ⇒ patch"的完整
-设计与实现清单，住在 [INTERFACE.md](./INTERFACE.md)。这里不再重复它。
+公开接口由什么构成、接口编号、快照门禁，以及"接口变 ⇒ 只升接口世代 ／ 包版本走普通 semver"的完整设计
+与实现清单，住在 [INTERFACE.md](./INTERFACE.md)。这里不再重复它。
 
 与本节这张表的关系：§7 的四张协议面版本表（item `schemaVersion`、`layout.json`、`status.json`、
 `declared.json`）是**同一套思路在协议面的先行样板** —— 每一面都有编号、都比"包版本"更精确、不兼容时的

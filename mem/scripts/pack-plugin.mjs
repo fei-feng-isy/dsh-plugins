@@ -323,7 +323,7 @@ if (readme.trim() === '') {
 }
 
 const contents = spawnSync('tar', ['-tzf', tarball], { encoding: 'utf8' }).stdout.split('\n')
-for (const entry of ['package/lib/index.js', 'package/lib/client.js', 'package/lib/types/index.d.ts', 'package/lib/dsh-build.json', 'package/README.md', 'package/LICENSE']) {
+for (const entry of ['package/lib/index.js', 'package/lib/client.js', 'package/lib/types/index.d.ts', 'package/lib/dsh-build.json', 'package/lib/interface-version.json', 'package/README.md', 'package/LICENSE']) {
   if (!contents.includes(entry)) fail(`tarball is missing ${entry}`)
 }
 // `lib/` is however many files the LAST tsdown run left there, and tsdown does not clean it: a build
@@ -331,10 +331,12 @@ for (const entry of ['package/lib/index.js', 'package/lib/client.js', 'package/l
 // a shared runtime), and the next build leaves them behind. They are unreferenced by the bundles, so
 // nothing else notices — they just ride along. Pin the shipped set instead.
 //
-// `dsh-build.json` is NOT a stray: `scripts/build-versions.mjs` writes it deliberately and
-// `lib/index.js` reads it at startup (the compatibility gate's "compiled against" side). It must ship
-// with the package — hence the presence check above as well as the exemption here.
-const LIB_OK = /^package\/lib\/(index\.js|client\.js|client\.js\.map|dsh-build\.json|types\/.*)$/
+// `dsh-build.json` and `interface-version.json` are NOT strays: the former is written deliberately by
+// `scripts/build-versions.mjs`, the latter by `scripts/link-envinit.mjs`, and `lib/index.js` reads both
+// at startup (the compatibility gate's "compiled against" side and the interface generation this build
+// was written for). They must ship with the package — hence the presence checks above as well as the
+// exemptions here.
+const LIB_OK = /^package\/lib\/(index\.js|client\.js|client\.js\.map|dsh-build\.json|interface-version\.json|types\/.*)$/
 const strays = contents.filter((entry) => entry.startsWith('package/lib/') && !LIB_OK.test(entry))
 if (strays.length > 0) {
   fail(`tarball carries ${String(strays.length)} file(s) under lib/ that no bundle references (a stale build — rerun \`pnpm build:dsh\` on a clean lib/): ${strays.join(', ')}`)

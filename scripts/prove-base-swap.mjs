@@ -187,6 +187,30 @@ for (const plugin of PLUGINS) {
   }
 }
 
+/**
+ * The plugin's BUILT envinit loader (`lib/envinit.js`, or `lib/types/envinit.js` for the tsdown
+ * layout). This is the artifact the host actually runs, so the interface-degrade decision below is
+ * proven on it rather than on a source-level reimplementation.
+ */
+async function builtLoader(plugin) {
+  for (const relative of ['lib/envinit.js', 'lib/types/envinit.js']) {
+    const candidate = join(plugin.packageDir, relative)
+    if (existsSync(candidate)) return await import(pathToFileURL(candidate).href)
+  }
+  return undefined
+}
+
+/** Run one of the loader's two entry points (`loadEnvinit` / `loadCompat`) and never throw. */
+async function runLoader(loader, options) {
+  const load = loader.loadEnvinit ?? loader.loadCompat
+  if (typeof load !== 'function') return { problem: 'the built loader exports neither loadEnvinit nor loadCompat' }
+  try {
+    return { runtime: await load(options) }
+  } catch (error) {
+    return { problem: `the loader threw (${error instanceof Error ? error.message : String(error)})` }
+  }
+}
+
 // ── B. a swapped base is what the plugin's own loader reaches ────────────────────────────────────
 const scratch = mkdtempSync(join(tmpdir(), 'avantf-base-swap-'))
 try {
@@ -239,6 +263,8 @@ try {
       'export const __AVANTF_SWAP_CALLS__ = []',
       'export function resolveDataHome(...args) { __AVANTF_SWAP_CALLS__.push("resolveDataHome"); return real.resolveDataHome(...args) }',
       'export function familyHome(...args) { __AVANTF_SWAP_CALLS__.push("familyHome"); return real.familyHome(...args) }',
+      'export function checkInterface(...args) { __AVANTF_SWAP_CALLS__.push("checkInterface"); return real.checkInterface(...args) }',
+      'export function readInterfaceRequirement(...args) { __AVANTF_SWAP_CALLS__.push("readInterfaceRequirement"); return real.readInterfaceRequirement(...args) }',
       'export class PromptFiles extends real.PromptFiles {',
       '  constructor(options) { super(options); __AVANTF_SWAP_CALLS__.push("PromptFiles") }',
       '}',
@@ -275,12 +301,20 @@ try {
       fail(`${plugin.name}: the base's PromptFiles did not read the user-edited prompt file back (source=${String(edited?.source)})`)
     }
 
-    // Root resolution: the data root honours an explicit value / $AVANTF_HOME, the family root keeps
-    // the two apart exactly as documented.
+    // Root resolution: the data root honours an explicit value / $AVANTF_HOME / the configured layer,
+    // the family root keeps the two apart exactly as documented. `resolveDataHome` takes the family's
+    // NAMED slot object — never positional arguments — so a caller cannot put the configured value in
+    // the explicit slot by accident.
     const dataHome = join(root, 'data-home')
     const family = join(root, 'family-home')
-    if (framework.resolveDataHome(undefined, { AVANTF_HOME: dataHome }) !== dataHome) {
+    if (framework.resolveDataHome({ env: { AVANTF_HOME: dataHome } }) !== dataHome) {
       fail(`${plugin.name}: the base's resolveDataHome ignored $AVANTF_HOME`)
+    }
+    if (framework.resolveDataHome({ env: { AVANTF_HOME: family }, configured: dataHome }) !== family) {
+      fail(`${plugin.name}: the base's resolveDataHome let the configured layer outrank $AVANTF_HOME`)
+    }
+    if (framework.resolveDataHome({ env: {}, configured: dataHome }) !== dataHome) {
+      fail(`${plugin.name}: the base's resolveDataHome ignored the configured layer`)
     }
     if (framework.familyHome({ AVANTF_HOME: family }) !== family) {
       fail(`${plugin.name}: the base's familyHome ignored $AVANTF_HOME`)
@@ -295,7 +329,71 @@ try {
     for (const wanted of ['PromptFiles', 'resolveDataHome', 'familyHome']) {
       if (!calls.includes(wanted)) fail(`${plugin.name}: ${wanted} was not served by the swapped base (provenance check)`)
     }
-    note(`${plugin.name}: bootstrap (${bootstrapOrigin}) loaded the swapped base; prompt read/write + root resolution served by it`)
+
+    // The runtime INTERFACE GATE is the family's main contract now, and it too is SERVED BY THE
+    // SWAPPED BASE. Two things are proven here: the gate functions come off the swapped module (their
+    // wrappers recorded the calls), and the plugin's OWN BUILT loader DEGRADES — withholds the base
+    // and warns — when the generations differ, instead of refusing the mount (the family invariant:
+    // only a proven host break refuses). The control run below shows the same loader ACCEPTS a
+    // matching generation, so "degrade" is not "always undefined".
+    if (typeof framework.checkInterface !== 'function' || typeof framework.readInterfaceRequirement !== 'function') {
+      fail(`${plugin.name}: the swapped base does not expose the interface gate (checkInterface / readInterfaceRequirement)`)
+      continue
+    }
+    const bakedPath = join(plugin.packageDir, 'lib', 'interface-version.json')
+    const requirement = framework.readInterfaceRequirement(pathToFileURL(bakedPath))
+    if (requirement === undefined) {
+      fail(`${plugin.name}: the swapped base could not read the plugin's bake record at ${bakedPath}`)
+      continue
+    }
+    if (framework.checkInterface(requirement.interfaceVersion, framework).status !== 'ok') {
+      fail(`${plugin.name}: the swapped base judged its own generation as not-ok`)
+    }
+    const otherGeneration = { ...framework, INTERFACE_VERSION: requirement.interfaceVersion + 1 }
+    if (framework.checkInterface(requirement.interfaceVersion, otherGeneration).status !== 'incompatible') {
+      fail(`${plugin.name}: a different INTERFACE_VERSION was not judged incompatible`)
+    }
+
+    const loader = await builtLoader(plugin)
+    if (loader === undefined) {
+      fail(`${plugin.name}: no built envinit loader found (lib/envinit.js or lib/types/envinit.js)`)
+      continue
+    }
+    const runOnce = async (module) => {
+      const warnings = []
+      const log = {
+        debug: () => undefined,
+        info: () => undefined,
+        warn: (message) => { warnings.push(String(message)) },
+        error: () => undefined,
+      }
+      const outcome = await runLoader(loader, { log, home: join(root, 'envinit-home'), framework: module })
+      return { ...outcome, warnings }
+    }
+
+    const degraded = await runOnce(otherGeneration)
+    if (degraded.problem !== undefined) {
+      fail(`${plugin.name}: an interface mismatch made the built loader THROW (${degraded.problem}) — it must degrade, never refuse`)
+    } else if (degraded.runtime !== undefined) {
+      fail(`${plugin.name}: an interface mismatch did NOT withhold the base (the built loader returned a runtime)`)
+    }
+    if (!degraded.warnings.join('\n').includes('shared capabilities are NOT used')) {
+      fail(`${plugin.name}: an interface mismatch emitted no "shared capabilities are NOT used" WARNING`)
+    }
+
+    const accepted = await runOnce({ ...framework })
+    if (accepted.problem !== undefined) {
+      fail(`${plugin.name}: a matching interface made the built loader throw (${accepted.problem})`)
+    } else if (accepted.runtime === undefined) {
+      fail(`${plugin.name}: a matching interface was not accepted (the built loader returned undefined) — the gate refuses too much`)
+    } else {
+      accepted.runtime.dispose?.()
+    }
+
+    for (const wanted of ['checkInterface', 'readInterfaceRequirement']) {
+      if (!calls.includes(wanted)) fail(`${plugin.name}: ${wanted} was not served by the swapped base (provenance check)`)
+    }
+    note(`${plugin.name}: bootstrap (${bootstrapOrigin}) loaded the swapped base; prompt read/write + root resolution + the interface gate served by it`)
   }
 
   // Nothing was rebuilt: the plugin artifacts are byte-identical to when the run started.

@@ -266,9 +266,9 @@ export function loadConfig(opts?: LoadConfigOptions): LoadedConfig {
   }
   if (opts?.dataHome) common = ConfigSchema.parse({ ...common, dataHome: opts.dataHome })
 
-  // The explicit value is passed as its OWN layer (⑤): `common.dataHome` is only
-  // layer ①/④ bookkeeping and must not be able to masquerade as an explicit one.
-  const home = resolveDataHome(common, opts?.dataHome)
+  // The explicit value is passed as its OWN NAMED layer (⑤): `common.dataHome` is only
+  // layer ②/④ bookkeeping and must not be able to masquerade as an explicit one.
+  const home = resolveDataHome({ common, explicit: opts?.dataHome })
   ensureDataLayout(home)
   // Missing or blank is an UNFINISHED edit, not an empty configuration: materialize the all-comment
   // default so the knobs are discoverable. A file with any content is the user's and is left alone.

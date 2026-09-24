@@ -765,6 +765,26 @@ export function provision(ctx: CompatContext, log: CompatLogger, spec: CompatSpe
 }
 
 /**
+ * The caller's copy for {@link compatReport}: the STRUCTURE is the base's, every string is the
+ * caller's (see the function's note). Exported so the interface type
+ * (`BaseRuntimeV1.compatReport`) can name the same shape the implementation takes — a second,
+ * structurally-identical declaration would be exactly the kind of drift the interface snapshot exists
+ * to catch.
+ */
+export interface CompatReportWords {
+  readonly heading: string
+  readonly fix: string
+  readonly warningsLabel: string
+  readonly warnings: readonly string[]
+  /**
+   * Optional because base is a published package: a plugin compiled against an earlier base does not
+   * pass it, and the honest result is no tail line at all rather than one in a language it never
+   * chose.
+   */
+  readonly logPointer?: (prefix: string) => string
+}
+
+/**
  * Build the standard refusal report, so every plugin says the same thing in its own words.
  *
  * The STRUCTURE belongs here (heading, problems, warnings, the fix, where the full log is); the
@@ -783,13 +803,7 @@ export function provision(ctx: CompatContext, log: CompatLogger, spec: CompatSpe
  */
 export function compatReport(
   verdict: CompatVerdict,
-  words: {
-    readonly heading: string
-    readonly fix: string
-    readonly warningsLabel: string
-    readonly warnings: readonly string[]
-    readonly logPointer?: (prefix: string) => string
-  },
+  words: CompatReportWords,
 ): string {
   return [
     words.heading,

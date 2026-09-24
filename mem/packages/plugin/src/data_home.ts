@@ -22,5 +22,5 @@ import { resolveDataHome } from '@avantf/mem'
 
 /** Layer ② for the configured value; `$AVANTF_HOME` (④) and any explicit value (⑤) still outrank it. */
 export function configDataHome(configured: string | undefined): string {
-  return resolveDataHome({ dataHome: configured ?? '' })
+  return resolveDataHome({ common: { dataHome: configured ?? '' } })
 }

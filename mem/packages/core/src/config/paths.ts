@@ -13,17 +13,31 @@ export { expandHome }
  * explicit): an EXPLICIT caller value (⑤) → `AVANTF_HOME` (④) → the configured `common.dataHome`
  * (②) → `~/.avantf`. The environment is a deployment override and outranks the config file.
  *
- * `common.dataHome` cannot stand in for layer ⑤: the schema gives it a default, so it always holds a
+ * `configured` cannot stand in for layer ⑤: the schema gives it a default, so it always holds a
  * value and would make an explicit argument indistinguishable from "nothing was configured" — which
  * is exactly how the env var used to win over a caller's own `dataHome`.
  *
- * The base kit implements the SAME order (`resolveDataHome(explicit, env, common)`), and the work
- * plugin passes its config value as `common` rather than as `explicit` for that reason: promoting
- * layer ② to ⑤ on one side is how the same config used to resolve to two different directories.
- * `packages/plugin/test/family_pin.spec.ts` pins the two implementations together.
+ * The slots are NAMED for the same reason the base kit's copy is: the two implementations used to
+ * disagree about their POSITIONAL order (`(explicit, env, common)` here, `(common, explicit)`…
+ * whichever way a reader guessed), so "which slot does the profile's `dataHome` belong in?" was
+ * answerable only by reading the call site. The base kit implements the same rule with the same named
+ * shape, and `packages/plugin/test/family_pin.spec.ts` pins the two implementations together.
  */
-export function resolveDataHome(common: Pick<Config, 'dataHome'>, explicit?: string): string {
-  const base = explicit || process.env['AVANTF_HOME'] || common.dataHome || '~/.avantf'
+export function resolveDataHome(input: {
+  /** Layer ②: the configured `common.dataHome`. */
+  readonly common: Pick<Config, 'dataHome'>
+  /** Layer ⑤: an explicit caller value (the CLI's `--data-home`). */
+  readonly explicit?: string
+}): string {
+  // Blank is UNSET in every slot, exactly as the base kit treats it. Without the trim a configured
+  // value of spaces won the layer and came back as the RELATIVE path `'   '` — data written under
+  // whatever directory the process started in. That is the divergence this pair of copies is pinned
+  // against (`packages/plugin/test/family_pin.spec.ts` carries the whitespace cases), and it is why
+  // the trim lives here rather than only in the caller.
+  const layer5 = input.explicit?.trim() ?? ''
+  const fromEnv = process.env['AVANTF_HOME']?.trim() ?? ''
+  const layer2 = input.common.dataHome?.trim() ?? ''
+  const base = layer5 !== '' ? layer5 : fromEnv !== '' ? fromEnv : layer2 !== '' ? layer2 : '~/.avantf'
   return expandHome(base)
 }
 

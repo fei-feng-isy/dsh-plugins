@@ -64,7 +64,9 @@ dsh web
   `~/.dsh/profiles/node_modules` 解析，不要在 profile 里再装 `cordis` / `schemastery` / `zod` ——
   第二份对象身份会让存储域的校验器拒绝本插件写入的记录。
 - **底座是 required peer**：它提供启动期环境初始化与兼容门禁。缺了只是**降级挂载**
-  （一条 `envinit: WARNING` + 退回 legacy 机制），绝不拒载。
+  （一条 `envinit: WARNING` + 退回 legacy 机制），绝不拒载。**接口世代不匹配也一样降级而不拒载**：
+  插件 bake 的 `INTERFACE_VERSION` 与加载到的底座不同 ⇒ 一条 `WARNING` + 不用底座的共享能力
+  （prompt 层退回内置正文、门禁跳过），工具/服务/Remote/UI 照常挂载。
 
 ### 配置与数据
 

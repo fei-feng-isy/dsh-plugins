@@ -53,10 +53,10 @@ describe('the family path copies agree', () => {
   })
 
   it('resolves the DATA root by the same rule: ⑤ explicit → ④ env → ② config → ~/.avantf', () => {
-    // The configured value travels in its OWN (third) parameter on the base side, exactly as layer ②
-    // travels in the `common` argument on this side. Passing it as `explicit` instead — which the
-    // work plugin used to do — promotes layer ② above layer ④, and the same config then resolves to
-    // two different directories: `$AVANTF_HOME` silently stops mattering on one side of the family.
+    // The configured value travels in the NAMED `configured` slot on the base side, exactly as layer
+    // ② travels in `common` on this side. Passing it as `explicit` instead — which the work plugin
+    // used to do — promotes layer ② above layer ④, and the same config then resolves to two different
+    // directories: `$AVANTF_HOME` silently stops mattering on one side of the family.
     const cases: { readonly configured: string; readonly env: string | undefined; readonly explicit?: string }[] = [
       { configured: '', env: undefined },
       { configured: '', env: '/tmp/from-env' },
@@ -65,20 +65,30 @@ describe('the family path copies agree', () => {
       { configured: '~/from-config', env: undefined },
       { configured: '~', env: undefined },
       { configured: '/tmp/from-config', env: '/tmp/from-env', explicit: '/tmp/from-caller' },
+      // BLANK means UNSET, in every slot. The engine copy used to take `'   '` as a value and return
+      // it, i.e. a relative data root named three spaces — the base kit had always trimmed, and only
+      // these cases make the two copies prove they agree on it.
+      { configured: '   ', env: undefined },
+      { configured: '   ', env: '/tmp/from-env' },
+      { configured: '/tmp/from-config', env: '   ' },
+      { configured: '', env: '   ' },
+      { configured: '   ', env: '   ' },
+      { configured: '/tmp/from-config', env: undefined, explicit: '   ' },
+      { configured: '/tmp/from-config', env: '/tmp/from-env', explicit: '   ' },
     ]
     for (const { configured, env, explicit } of cases) {
       withEnv(env, () => {
-        const fromBase = base.resolveDataHome(explicit, { AVANTF_HOME: env }, configured)
-        const fromCore = coreResolveDataHome({ dataHome: configured }, explicit)
+        const fromBase = base.resolveDataHome({ explicit, env: { AVANTF_HOME: env }, configured })
+        const fromCore = coreResolveDataHome({ common: { dataHome: configured }, explicit })
         expect(fromCore, `configured=${configured} env=${String(env)} explicit=${String(explicit)}`).toBe(fromBase)
       })
     }
     // And the rule itself, spelled out on the case that used to differ: the environment is the
     // deployment override and outranks the config file; an explicit value outranks both.
     withEnv('/tmp/from-env', () => {
-      expect(coreResolveDataHome({ dataHome: '/tmp/from-config' })).toBe('/tmp/from-env')
-      expect(coreResolveDataHome({ dataHome: '/tmp/from-config' }, '/tmp/from-caller')).toBe('/tmp/from-caller')
-      expect(base.resolveDataHome(undefined, { AVANTF_HOME: '/tmp/from-env' }, '/tmp/from-config'))
+      expect(coreResolveDataHome({ common: { dataHome: '/tmp/from-config' } })).toBe('/tmp/from-env')
+      expect(coreResolveDataHome({ common: { dataHome: '/tmp/from-config' }, explicit: '/tmp/from-caller' })).toBe('/tmp/from-caller')
+      expect(base.resolveDataHome({ env: { AVANTF_HOME: '/tmp/from-env' }, configured: '/tmp/from-config' }))
         .toBe('/tmp/from-env')
     })
   })

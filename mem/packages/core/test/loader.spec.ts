@@ -224,11 +224,11 @@ describe('config layering', () => {
     // Asserted on the pure resolver: `loadConfig()` would mkdir the real ~/.avantf.
     delete process.env['AVANTF_HOME']
     const common = { dataHome: '~/.avantf' }
-    expect(resolveDataHome(common)).toBe(join(homedir(), '.avantf'))
-    expect(resolveDataHome(common, '~/custom')).toBe(join(homedir(), 'custom'))
+    expect(resolveDataHome({ common })).toBe(join(homedir(), '.avantf'))
+    expect(resolveDataHome({ common, explicit: '~/custom' })).toBe(join(homedir(), 'custom'))
     // A BARE `~` is the home directory, not a relative path called `~` — the two family copies used
     // to disagree on exactly this input (see `packages/plugin/test/family_pin.spec.ts`).
-    expect(resolveDataHome({ dataHome: '~' })).toBe(homedir())
+    expect(resolveDataHome({ common: { dataHome: '~' } })).toBe(homedir())
   })
 })
 

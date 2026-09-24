@@ -38,7 +38,7 @@
     "test:dsh": "vitest run --config vitest.dsh.config.ts"
   },
   "peerDependencies": {
-    "@avantf/dsh-plugin-base": "^0.2.0",
+    "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",
     "@deepseek-ai/cordis": "^4.0.0",
     "@deepseek-ai/dsh-system-prompt": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.2",
@@ -75,7 +75,7 @@
     "nodejieba": "catalog:"
   },
   "devDependencies": {
-    "@avantf/dsh-plugin-base": "^0.2.0",
+    "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",
     "@avantf/mem": "workspace:*",
     "@avantf/mem-contract": "workspace:*",
     "@avantf/mem-convert": "workspace:*",

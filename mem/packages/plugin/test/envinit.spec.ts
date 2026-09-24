@@ -14,6 +14,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import * as base from '@avantf/dsh-plugin-base'
 
 /**
  * Controls the ONE bootstrap seam the retry test needs.
@@ -258,13 +259,65 @@ describe('envinit loader', () => {
   it('never throws when the base module is hostile — it degrades and warns', async () => {
     const env = await freshEnvinit()
     const { log, lines } = recordingLogger()
-    // Every member access throws: the module cannot even be read as a gate. The mount must continue.
+    // Every member access throws: the module cannot even be read as a gate, and it cannot report an
+    // interface generation either. The mount must continue, and the interface gate must read that as
+    // "cannot tell" rather than joining the failure. (Vitest runs before any `lib/` exists, so the
+    // baked side is absent too — what matters is that the gate emitted a line instead of throwing,
+    // which is what the two assertions below would catch if the check were unguarded.)
     const hostile = new Proxy({}, { get: () => { throw new Error('shape mismatch') } })
     const runtime = await env.loadEnvinit({ log, home: '/tmp/avantf-mem-envinit-hostile', framework: hostile as never })
     expect(runtime).toBeDefined()
     expect(runtime?.compat).toBeUndefined()
     expect(lines.warn.join('\n')).toContain('compatibility gate could not be initialised')
     expect(lines.warn.join('\n')).toContain('shape mismatch')
+    expect(lines.warn.join('\n')).toContain('interface:')
+  })
+
+  it('withholds the base (never refuses the mount) when the interface generation differs', async () => {
+    const env = await freshEnvinit()
+    const calls = emptyCalls()
+    const home = mkdtempSync(join(tmpdir(), 'avantf-mem-envinit-'))
+    const { log, lines } = recordingLogger()
+    // The REAL base gate, with a bake record that names a generation the loaded base does not
+    // implement — exactly the runtime condition the interface axis exists for.
+    const framework = {
+      ...fakeFramework(calls, undefined),
+      INTERFACE_VERSION: base.INTERFACE_VERSION,
+      checkInterface: base.checkInterface,
+      readInterfaceRequirement: () => ({ baseVersion: '0.3.0', interfaceVersion: base.INTERFACE_VERSION + 1 }),
+    }
+    const runtime = await env.loadEnvinit({ log, home, autoDownload: false, framework: framework as never })
+    // DEGRADED, not refused: `undefined` is the SAME route the caller already handles for "the base is
+    // unavailable", so the prompt layer uses this plugin's own defaults, the compatibility gate is
+    // skipped and provisioning takes the legacy path. Tools/service/Remote/UI are the caller's and
+    // still mount (the mount smoke proves that end to end).
+    expect(runtime).toBeUndefined()
+    expect(lines.warn.join('\n')).toContain('interface:')
+    expect(lines.warn.join('\n')).toContain('shared capabilities are NOT used')
+    // Nothing was registered or declared through the withheld base.
+    expect(calls.provision).toHaveLength(0)
+    expect(calls.declare).toHaveLength(0)
+  })
+
+  it('uses the base normally when the interface generation cannot be told', async () => {
+    const env = await freshEnvinit()
+    const calls = emptyCalls()
+    const home = mkdtempSync(join(tmpdir(), 'avantf-mem-envinit-'))
+    const { log, lines } = recordingLogger()
+    const module = fakeCompat(calls, { load: true, skipped: false, status: 'ok', problems: [], warnings: [], notes: [], lines: [], reason: '' })
+    // The gate is present but there is no bake record: "cannot tell", which is never "incompatible".
+    const framework = {
+      ...fakeFramework(calls, undefined),
+      INTERFACE_VERSION: base.INTERFACE_VERSION,
+      checkInterface: base.checkInterface,
+      readInterfaceRequirement: () => undefined,
+    }
+    const runtime = await env.loadEnvinit({ log, home, autoDownload: false, framework: framework as never, compatModule: module as never })
+    expect(runtime).toBeDefined()
+    expect(runtime?.kit).toBe(framework)
+    expect(runtime?.compat).toBeDefined()
+    expect(lines.warn.join('\n')).toContain('no baked interface requirement')
+    expect(lines.warn.join('\n')).toContain('using the loaded base anyway')
   })
 
   it('retries after a failed load instead of caching "cannot tell" for the whole process', async () => {

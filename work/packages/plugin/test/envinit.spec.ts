@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
+import * as realBase from '@avantf/dsh-plugin-base'
 
 /** `work/packages/plugin` — the source the shape assertions below read. */
 const pluginDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -69,7 +70,7 @@ function fakeBase(calls: Calls) {
     BUILD_VERSIONS_FILE: 'dsh-build.json',
     // ── the kit half ────────────────────────────────────────────────────────
     PromptFiles: FakePromptFiles,
-    resolveDataHome: (explicit?: string) => explicit ?? '/tmp/avantf-base-data',
+    resolveDataHome: (input: { explicit?: string } = {}) => input.explicit ?? '/tmp/avantf-base-data',
     // ── the gate half ───────────────────────────────────────────────────────
     readDeclaredVersions: (url: string | URL, packages: readonly string[]) => {
       calls.declared.push({ url: String(url), packages })
@@ -319,5 +320,67 @@ describe('the gate module is structurally checked', () => {
     // …and the real load still lands in a `CompatModule`-annotated binding, which is what makes the
     // compiler compare work's hand-written subset against what base actually exports.
     expect(source).toMatch(/:\s*CompatModule\s*=\s*options\.compatModule \?\? framework/u)
+  })
+})
+
+/**
+ * The runtime interface gate, consumed from the linked base and ACTED ON by this loader.
+ *
+ * The DECISION is the base's (`checkInterface` + its reader of the bake record); what this file pins
+ * is the plugin's side: `incompatible` withholds the base (the same route as "the base is
+ * unavailable", so the caller's prompt fallback and gate-skip apply) while the mount still happens,
+ * and `cannot-tell` uses the base normally. The gate itself is driven from the REAL base, never a
+ * mock, and the hostile-module case is the one that matters: a gate that throws while deciding would
+ * reject a mount it is not allowed to reject.
+ */
+describe('the interface generation gate', () => {
+  /** The real base gate, with a bake record naming one generation (or none at all). */
+  function gated(calls: Calls, required: number | undefined) {
+    return {
+      ...fakeBase(calls),
+      INTERFACE_VERSION: realBase.INTERFACE_VERSION,
+      checkInterface: realBase.checkInterface,
+      readInterfaceRequirement: () =>
+        required === undefined ? undefined : { baseVersion: '0.3.0', interfaceVersion: required },
+    }
+  }
+
+  it('is bidirectional, hostile-safe and total (the base gate itself)', () => {
+    expect(realBase.checkInterface(1, { INTERFACE_VERSION: 2 }).status).toBe('incompatible')
+    expect(realBase.checkInterface(2, { INTERFACE_VERSION: 1 }).status).toBe('incompatible')
+    expect(realBase.checkInterface(1, {}).status).toBe('cannot-tell')
+    const hostile = new Proxy({}, { get: () => { throw new Error('shape mismatch') } })
+    expect(() => realBase.checkInterface(1, hostile)).not.toThrow()
+    expect(realBase.checkInterface(1, hostile).status).toBe('cannot-tell')
+  })
+
+  it('degrades instead of refusing when the loaded base is from another generation', async () => {
+    const env = await freshEnvinit()
+    const calls = emptyCalls()
+    const { log, lines } = recordingLogger()
+    const frame = gated(calls, realBase.INTERFACE_VERSION + 1)
+
+    const runtime = await env.loadCompat({ log, framework: frame as never })
+    // The base is WITHHELD — `undefined` is the "base unavailable" route the caller already handles,
+    // so its prompt layer falls back to this plugin's own default and the gate is skipped. The mount
+    // itself still happens: tools/service/Remote/UI are registered unconditionally by the caller.
+    expect(runtime).toBeUndefined()
+    expect(lines.warn.join('\n')).toContain('shared capabilities are NOT used')
+    // Nothing was ever run through the withheld base's gate.
+    expect(calls.provision).toEqual([])
+  })
+
+  it('uses the base normally when the generation cannot be told', async () => {
+    const env = await freshEnvinit()
+    const calls = emptyCalls()
+    const { log, lines } = recordingLogger()
+    const frame = gated(calls, undefined)
+    const gate = fakeCompat(calls, OK_VERDICT)
+
+    const runtime = await env.loadCompat({ log, framework: frame as never, compatModule: gate as never })
+    expect(runtime).toBeDefined()
+    expect(runtime?.kit).toBe(frame)
+    expect(lines.warn.join('\n')).toContain('no baked interface requirement')
+    expect(lines.warn.join('\n')).toContain('using the loaded base anyway')
   })
 })

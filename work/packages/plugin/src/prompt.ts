@@ -67,8 +67,8 @@ export const PROMPT_FILES: readonly PromptFileEntry[] = [
  * (`mem/AGENTS.md` 「配置分层」): an explicit caller value → `$AVANTF_HOME` → the configured
  * `dataHome` → `~/.avantf`.
  *
- * The configured value is passed as its OWN layer, NOT as the explicit one. Handing a
- * schema-defaulted config value to the first parameter promotes layer ② above layer ④ and makes
+ * The configured value is passed as its OWN NAMED layer, NOT as the explicit one. Handing a
+ * schema-defaulted config value to the explicit slot promotes layer ② above layer ④ and makes
  * `$AVANTF_HOME` dead whenever a config file merely mentions `dataHome` — which is how the two
  * halves of the family ended up resolving the same config to different directories.
  */
@@ -77,27 +77,35 @@ export function promptDir(
   env: Record<string, string | undefined> = process.env,
   /**
    * The resolver to use — the BASE's `resolveDataHome` at runtime when the base is available.
-   * Defaults to the local fallback below, which is what a base-less mount uses.
+   * Defaults to the local fallback below, which is what a base-less mount uses. Its input is the
+   * family's NAMED slot object, so a caller cannot put the configured value in the explicit slot by
+   * accident — the mistake that once made `$AVANTF_HOME` dead on this side of the family.
    */
-  resolve: (
-    explicit?: string,
-    env?: Record<string, string | undefined>,
-    common?: string,
-  ) => string = resolveDataHome,
+  resolve: (input: {
+    readonly explicit?: string
+    readonly env?: Record<string, string | undefined>
+    readonly configured?: string
+  }) => string = resolveDataHome,
 ): string {
-  return join(resolve(undefined, env, configured), 'prompts')
+  return join(resolve({ explicit: undefined, env, configured }), 'prompts')
 }
 
-/** The data home, with `~/` (and a bare `~`) expanded: ⑤ explicit → ④ `$AVANTF_HOME` → ② the
- *  configured value → `~/.avantf`. The base-less fallback for {@link promptDir}. */
-export function resolveDataHome(
-  explicit?: string,
-  env: Record<string, string | undefined> = process.env,
-  common?: string,
-): string {
-  const layer5 = explicit?.trim() ?? ''
+/**
+ * The data home, with `~/` (and a bare `~`) expanded: ⑤ explicit → ④ `$AVANTF_HOME` → ② the
+ * configured value → `~/.avantf`. The base-less fallback for {@link promptDir}, with the same NAMED
+ * slots as the base's `resolveDataHome` — the two must give the same answer, which
+ * `test/prompt_files.spec.ts` (the wiring) and `mem/packages/plugin/test/family_pin.spec.ts` (the
+ * cross-tree pin) both assert.
+ */
+export function resolveDataHome(input: {
+  readonly explicit?: string
+  readonly env?: Record<string, string | undefined>
+  readonly configured?: string
+} = {}): string {
+  const layer5 = input.explicit?.trim() ?? ''
+  const env = input.env ?? process.env
   const fromEnv = env['AVANTF_HOME']?.trim() ?? ''
-  const layer2 = common?.trim() ?? ''
+  const layer2 = input.configured?.trim() ?? ''
   const base = layer5 !== '' ? layer5 : fromEnv !== '' ? fromEnv : layer2 !== '' ? layer2 : join(homedir(), '.avantf')
   if (base === '~') return homedir()
   return base.startsWith('~/') ? join(homedir(), base.slice(2)) : base

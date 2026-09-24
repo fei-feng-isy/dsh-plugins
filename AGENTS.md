@@ -17,11 +17,19 @@
 
 - **旧**包 `@avantf/dsh-envinit` 与 `@avantf/dsh-compat` 已死：代码住在 base 里，不再有新版本，
   任何地方都不许再提它们的名字。
-- 插件把 base 当作 **REQUIRED peer** 依赖（`^0.2.0`）。注意 0.x 的 caret **不跨 minor**：它只吃同一条
-  minor 的 patch，所以"只发 base 就能修好共享代码"对 patch 成立，而 base 换 minor 时必须**同批**放宽两个
-  插件的 peer 与 `devDependencies`（`scripts/release-check.mjs` 会拦住一个吃不下 workspace base 的区间），
-  且 `base/plugin-base/src/bootstrap.ts` 的 `supportedRange` 要一起走 —— 它是**运行期**的门，比 peer 更硬：
-  插件不给 `loadFramework` 传 override，超出区间的 base 只会得到一条降级告警。根
+- 插件把 base 当作 **REQUIRED peer** 依赖（**`>=0.3.0 <1.0.0`**）。这个区间刻意宽：base 只改业务
+  流程或修 bug（普通 minor/patch）时两个插件**不必**同批改，区间自动送达。**接口变更**（`.` 的导出集合 /
+  类型形状 / 成员语义、顺序敏感参数的 slot —— 见 `base/plugin-base/docs/INTERFACE.md` §1）**不再要求插件
+  同批改 peer**：接口有自己的轴 —— 升 `INTERFACE_VERSION`、新增 `api/interface-vN.json`，由 base 的
+  **运行期门禁**裁决；旧插件会被判 `incompatible`，按降级路径挂载（自带 prompt 默认正文、门禁跳过、
+  legacy provisioning，工具/service/Remote/UI 照常），**绝不拒载**。包版本退回普通 semver（base 现在是
+  `0.3.0`），只表达包自身，**接口变不再要求提 major**。base peer 与 `devDependencies`、以及
+  `base/plugin-base/src/bootstrap.ts` 的 `supportedRange`（`>=0.3.0 <1.0.0`，`VERSION` = `0.3.0`）三者同步
+  （`scripts/release-check.mjs` 会拦住一个吃不下 workspace base 的区间；`supportedRange` 是**运行期**的包
+  版本门）。运行期门禁住在 base 里：插件构建期把 `INTERFACE_VERSION` bake 进 `lib/interface-version.json`，
+  启动时用 base 的 `readInterfaceRequirement` 读回 required、再调 base 的 `checkInterface`；`incompatible`
+  ⇒ 告警 + 不用 base 的共享能力但仍挂载，`cannot-tell`（老 base 没有门禁函数、bake 缺失/畸形）⇒ 只告警、
+  照常使用（`scripts/lib/interface-version.mjs` + 两棵树的 `scripts/link-envinit.mjs`）。根
   `pnpm-workspace.yaml` 里的 `linkWorkspacePackages: true` 让 `devDependencies` 那一条指向 `base/`，
   绝不会变成下载。
 - 宿主/profile **显式**安装 `@avantf/dsh-plugin-base` **和**两个插件
@@ -126,8 +134,9 @@ pnpm build:dsh base       # 只构建 base（tsc；不出插件产物、不跑�
   自己的脚本）。
 - 根 `scripts/release-check.mjs` 的**可发布集合**加一行。那里刻意写死包名：可发布面是要被审查的，
   不该被自动发现悄悄放大。
-- 插件自己那一份：`packages/plugin/package.json` 里 base 是 required peer（`^0.2.0`）+ 同版本
-  `devDependencies`、自己的 `build:dsh`、`scripts/mount-smoke.mjs`（`proof:base-swap --mount` 要求）。
+- 插件自己那一份：`packages/plugin/package.json` 里 base 是 required peer（`>=0.3.0 <1.0.0`）+ 同一条
+  `devDependencies`、自己的 `build:dsh`、`scripts/mount-smoke.mjs`（`proof:base-swap --mount` 要求）、
+  以及 `files` 里带上 `lib/interface-version.json`（构建期 bake 出的接口编号，运行期门禁读它）。
 - 依赖版本一律写进根 `pnpm-workspace.yaml` 的 `catalog:`，各 `package.json` 只写 `"catalog:"`。
 
 `pnpm guard` **不在**这个清单里：它按同一份发现结果扫每一棵树，新插件自动适用四条规则（不许 import
@@ -169,33 +178,37 @@ pnpm version:prune           # 把私有 manifest 上多余的 version 删掉（
 
 ### 版本号说什么：接口 / 行为 / 修复
 
-版本号不是"改了东西"的计数器，三件事分开表达（完整设计与落地顺序见
+版本号不是"改了东西"的计数器。**接口有自己的一条轴，与包版本解耦**（完整设计与落地顺序见
 `base/plugin-base/docs/INTERFACE.md`，`DESIGN.md` §9 只留一条指针）：
 
-| 变更 | 版本 | 插件是否必须同批改 |
-| --- | --- | --- |
-| **接口**：base `.` 的导出集合、类型形状、顺序敏感参数的 slot 含义、语义契约 | **major**（1.0 → 2.0），并 `INTERFACE_VERSION` +1、新增 `api/interface-vN.json` | 是 |
-| **业务流程 / 可观察行为**（插件自己的测试断言的那些） | **minor**（1.0.0 → 1.1.0） | 否 |
-| **纯修复**，无可观察变化 | patch | 否 |
+| 变更 | 接口版本（主契约） | 包版本 | 插件是否必须同批改 |
+| --- | --- | --- | --- |
+| **接口**：base `.` 的导出集合、类型形状、顺序敏感参数的 slot 含义、语义契约 | `INTERFACE_VERSION` +1、新增 `api/interface-vN.json` | 由包自身决定（普通 semver，**不再**"接口变 ⇒ major"） | **否** —— 旧插件在运行期被判 `incompatible`，按降级路径挂载 |
+| **业务流程 / 可观察行为**（插件自己的测试断言的那些） | 不变 | minor | 否 |
+| **纯修复**，无可观察变化 | 不变 | patch | 否 |
 
-**现状（别把目标当事实）**：base 现在还是 0.x，而 0.x 的 caret **不跨 minor** —— 所以今天"只发 base
-就能修好共享代码"只对 patch 成立；base 换 minor 必须**同批**放宽两个插件的 peer 与 `devDependencies`
-**以及** `base/plugin-base/src/bootstrap.ts` 的 `supportedRange`（0.1.0 → 0.2.0 就是这么走的）。
-到了 `1.0.0`，`^1.0.0` 自动吃掉 1.x 的 minor/patch，上表后两行才真正成立。
+**现状**：base 是 **`0.3.0`**，两个插件的 base peer 与 `devDependencies` 是 **`>=0.3.0 <1.0.0`**，
+`bootstrap.ts` 的 `VERSION` = `0.3.0`、`supportedRange` = `>=0.3.0 <1.0.0`。接口变更**不再要求插件同批
+改 peer**：宽区间收得下，运行期门禁把旧插件判成 `incompatible` 并按降级路径挂载。`INTERFACE_VERSION`
+**保持 1**（这一代从未发布，门禁函数是就地精修进 v1 的）。
 
-**已经机械化的部分**：`.` 的导出集合由 `base/plugin-base/test/public-surface.spec.ts` 的 equality
-白名单钉住（子集断言抓不到"多导出了一个"）；插件 `import type` base 并按
-`typeof import('@avantf/dsh-plugin-base')` 定型，所以 base 改签名会让插件 typecheck 红 —— 接口变更必然
-牵动插件，这是好事而不是负担。**还缺**：`INTERFACE_VERSION`、`api/interface-v*.json` 快照与"变了就必须
-升编号"的门禁、base 拥有的接口类型（插件不再用整个命名空间类型）、运行期门禁从"包版本区间"改成"接口
-编号"。
+**已经机械化的部分**：`.` 的导出集合由 `api/interface-v1.json` 快照钉住，`base/plugin-base/test/
+public-surface.spec.ts` 是那条门禁，而快照的**唯一载体**是 `base/plugin-base/src/interface.ts` 里的
+`BaseRuntimeV1` / `BaseTypeSurfaceV1` 与两份名单（`VALUE_NAMES_V1` / `TYPE_NAMES_V1`）—— 不再有测试里的
+第二份白名单。`INTERFACE_VERSION` 与文件名 `N` 同源、由门禁断言；插件除 `import type` 接口类型外，
+构建期还把 `INTERFACE_VERSION` bake 进 `lib/interface-version.json`（两个 `link-envinit.mjs`），启动时用
+base 的 `readInterfaceRequirement` 读回 required、再调 base 的 `checkInterface`：`incompatible` ⇒ 告警 +
+不用 base 的共享能力（自带 prompt 默认正文、门禁跳过、legacy provisioning）但**照常挂载**；`cannot-tell`
+（老 base 没有门禁函数、bake 缺失/畸形）⇒ 只告警、照常使用。每个带语义的成员另有一条跨树行为测试
+（`mem/packages/plugin/test/interface.spec.ts`、`work/packages/plugin/test/interface.spec.ts`），从已链接
+的 base 取真实实现。
 
-改 `.` 面时适用三条规则（都是评审踩出来的）：**顺序敏感的语义必须用具名对象承载**
-（`resolveDataHome(explicit, env, common)` 那种位置参数让"数据根按哪个 slot 解析"这种语义变化既不可检
-也不可读）—— 但它只挡「值放错了 slot」，挡不住「同一个键的含义变了」；**可观察的文案归调用方**
-（`compatReport` 的尾行曾经硬编码中文，一个通用发布包不该替调用方决定语言）；**每个带语义的接口成员要有
-一条跨树行为测试**（从已链接的 base 取真实实现比对，形如 `mem/packages/plugin/test/family_pin.spec.ts`；
-在 mock 里断言不算）—— 语义面机器抓不到，这是它唯一可执行的形态。
+完整清单与落地顺序见 `base/plugin-base/docs/INTERFACE.md` §7（每一步都标了「已有 / 待做」）。改 `.` 面时
+适用三条规则（都是评审踩出来的）：**顺序敏感的语义必须用具名对象承载**（`resolveDataHome` 过去那种位置
+参数让"数据根按哪个 slot 解析"这种语义变化既不可检也不可读 —— 现在它是 `{ explicit?, env?, configured? }`）
+—— 但它只挡「值放错了 slot」，挡不住「同一个键的含义变了」；**可观察的文案归调用方**（`compatReport` 的
+尾行曾经硬编码中文，一个通用发布包不该替调用方决定语言）；**每个带语义的接口成员要有一条跨树行为测试**
+（从已链接的 base 取真实实现比对；在 mock 里断言不算）—— 语义面机器抓不到，这是它唯一可执行的形态。
 
 ## 要跑的门禁
 
@@ -254,7 +267,8 @@ pnpm release:check && node scripts/mount-smoke.mjs
   （`mem/pnpm-workspace.yaml`、`work/pnpm-workspace.yaml`、`base/*/pnpm-workspace.yaml`）已删除，
   所以 `pnpm -C work …` 走的是合并后的工作区（用 `pnpm -C work list` 验证）。
 - **RC 投影：整仓，不是单插件。** 发布用的投影仓是 `../dsh-plugins-rc`（可用 `$AVANTF_RC` 覆盖），
-  由**仓库根**的两个脚本维护，子树里没有对应脚本：
+  由**仓库根**的两个脚本维护，子树里没有对应脚本。**只在发版时投影**：投影是发布动作的第一步，
+  没有要发布的版本就不要让 rc 树跟着动（日常开发只跑开发树的门禁）。
   - `scripts/make-release-tree.mjs` —— 把 `dsh-plugins` 的**每个受控文件**整仓投影过去（`--into <dir>`
     报漂移、`--apply` 落盘、`--out <dir>` 生成一棵新树）。rc 因此是**同一个仓库形态**：一个根
     workspace、一个 catalog、`base/`+`mem/`+`work/`、测试与文档都在，所以投影**不需要任何剥离规则或
@@ -300,10 +314,10 @@ pnpm release:check && node scripts/mount-smoke.mjs
   `dataHome`（**配置值**）→ `$AVANTF_HOME` → 显式实参（CLI `--data-home`）；用户数据与可编辑文本住在
   那里（`memory/`、`knowledge/`、`configs/*.yaml`、`prompts/*.md`）。`configs/common.yaml` 里那条
   `dataHome` **不参与**：它在数据根**之内**，解析根时还没读到它（`mem/DESIGN.md` §3）。两个半边必须
-  给出同一个答案：base kit 的 `resolveDataHome(explicit, env, common)` 与 mem 引擎那份是同一条规则，
-  由 `mem/packages/plugin/test/family_pin.spec.ts` 跨树钉住；两个插件对**自己的** profile `dataHome`
-  也必须同层 —— 都走配置层（②），mem 侧由 `mem/packages/plugin/test/data_home.spec.ts` 钉住（把它塞进
-  显式层会让 ② 压过 ④，同一个 profile 在两边解析出两个目录，而 `<data home>/prompts` 是共享的）。
+  给出同一个答案：base kit 的 `resolveDataHome({ explicit?, env?, configured? })`（具名 slot）与 mem 引擎那份
+  是同一条规则，由 `mem/packages/plugin/test/family_pin.spec.ts` 跨树钉住；两个插件对**自己的** profile
+  `dataHome` 也必须同层 —— 都走配置层（②），mem 侧由 `mem/packages/plugin/test/data_home.spec.ts` 钉住
+  （把它塞进显式层会让 ② 压过 ④，同一个 profile 在两边解析出两个目录，而 `<data home>/prompts` 是共享的）。
   这两个根刻意不同 —— 不要混为一谈。
 - 兼容性门禁现在属于 base：不再有 `mem:compat`/`work:compat` item，也没有受管的
   `~/.avantf/env/compat/**` 下载了。机器上如果还留着 `~/.avantf/env/compat/`（或旧的

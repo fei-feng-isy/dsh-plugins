@@ -11,6 +11,14 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { readBootstrapVersion } from '../../scripts/lib/bootstrap-version.mjs'
+import {
+  INTERFACE_VERSION_FILE,
+  bakeInterfaceVersion,
+  interfaceVersionText,
+  readBaseInterfaceVersion,
+  readBasePackageVersion,
+  readInterfaceVersion,
+} from '../../scripts/lib/interface-version.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pluginDir = join(repo, 'packages', 'plugin')
@@ -170,6 +178,28 @@ if (check) {
       })
     }
   }
+  // The interface version travels in the artifact, not only in the vendored bootstrap: the runtime gate
+  // must be able to say "this build was written for generation N" even if the baked record is the only
+  // thing that survived. `--check` compares BYTES with what a fresh bake would write, so a base that
+  // moved its INTERFACE_VERSION (or its package version) is caught before a build ships the old number.
+  const bakedUrl = new URL(`../packages/plugin/lib/${INTERFACE_VERSION_FILE}`, import.meta.url)
+  const baked = readInterfaceVersion(bakedUrl)
+  if (baked === undefined) {
+    problems.push({ text: `${bakedUrl.pathname} is missing or malformed`, fix: 'node scripts/link-envinit.mjs' })
+  } else {
+    let expected
+    try {
+      expected = interfaceVersionText(readBasePackageVersion(source), await readBaseInterfaceVersion(source))
+    } catch (error) {
+      problems.push({ text: `cannot read the ${mode}'s interface version (${error instanceof Error ? error.message : String(error)})`, fix: 'pnpm --filter @avantf/dsh-plugin-base run build' })
+    }
+    if (expected !== undefined && readFileSync(bakedUrl, 'utf8') !== expected) {
+      problems.push({
+        text: `${bakedUrl.pathname} does not match the ${mode} (${INTERFACE_VERSION_FILE} is stale)`,
+        fix: 'node scripts/link-envinit.mjs',
+      })
+    }
+  }
   for (const problem of problems) console.error(`  FAIL ${problem.text}\n       fix: ${problem.fix}`)
   if (problems.length > 0) process.exit(1)
   console.log(`link-envinit: ok — ${PACKAGE}@${version} (${mode}: ${source})`)
@@ -198,6 +228,18 @@ console.log(`vendored bootstrap ${String(readBootstrapVersion(vendoredJs))} → 
 if (readBootstrapVersion(vendoredJs) !== version) {
   console.error(`link-envinit: the vendored bootstrap declares ${String(readBootstrapVersion(vendoredJs))}, the ${mode} is ${version}`)
   console.error('  the copy is verbatim, so this means the framework was built from a mismatched source tree')
+  process.exit(1)
+}
+
+// 3. the interface version, baked beside the entry. Re-baking rides THIS step (with the vendoring)
+//    rather than a human remembering to run it: `pnpm build:dsh` already runs this script, and the
+//    gate is worthless if the baked number can silently go stale. It lives in `lib/` because that is
+//    the directory the published package ships and `lib/index.js` is the module that reads it back.
+try {
+  const baked = await bakeInterfaceVersion(pluginDir, source)
+  console.log(`baked interface version ${String(baked.interfaceVersion)} (base ${baked.baseVersion}) → lib/${INTERFACE_VERSION_FILE}${baked.changed ? '' : ' (unchanged)'}`)
+} catch (error) {
+  console.error(`link-envinit: cannot bake the interface version (${error instanceof Error ? error.message : String(error)})`)
   process.exit(1)
 }
 

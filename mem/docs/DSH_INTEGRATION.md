@@ -22,8 +22,8 @@ pnpm build:dsh   # links harness packages + publishes the manifest stub, then ts
 > `@avantf/dsh-envinit` and `@avantf/dsh-compat` packages were merged into it and are dead — no new
 > versions, nothing depends on them). There is **no `mem:compat` npm-package item**: the gate is the
 > base itself, and there is no download, no integrity verification and no managed `compat` root. Base
-> is a **`peerDependency`** of the plugin (peer range `^0.2.0`) and is also declared in
-> `devDependencies` (`^0.2.0`) so `pnpm install` puts it in the tree; the model-cache `flat` layout
+> is a **`peerDependency`** of the plugin (peer range `>=0.3.0 <1.0.0`) and is also declared in
+> `devDependencies` (`>=0.3.0 <1.0.0`) so `pnpm install` puts it in the tree; the model-cache `flat` layout
 > this plugin relies on landed in the framework's `0.1.2` (base is a NEW package, so it restarts its
 > own version line at `0.1.0` — the old framework's numbers do not carry over). It is **never bundled** and
 > **never imported by specifier**: a static import would break the whole plugin module when base is absent.
@@ -43,6 +43,16 @@ pnpm build:dsh   # links harness packages + publishes the manifest stub, then ts
 > version difference is only a warning, and it never throws); no resource provisioning (pandoc binary
 > item, embedding model item) → the legacy `@avantf/mem-provision` / legacy-tools-dir path; tools /
 > service / Remote / UI faces are unaffected and still mount.
+>
+> The interface generation is its own axis, judged at runtime by the base: the build bakes
+> `{ baseVersion, interfaceVersion }` into `lib/interface-version.json`, and at startup the plugin
+> reads it back through the base's `readInterfaceRequirement` and asks the base's `checkInterface`.
+> `incompatible` (a base inside the peer range that reports another generation — either direction)
+> is one `WARNING` plus the SAME degradation as "base absent": the base's shared capabilities are not
+> used (own prompt defaults, gate skipped, legacy provisioning) and the plugin still mounts;
+> `cannot-tell` (a base without the gate, a missing/malformed bake) is only a `WARNING` and the base
+> is used normally. An interface change therefore no longer requires the plugins to move their peer
+> range in lockstep.
 >
 > Shared business logic is consumed at RUNTIME from base (taken off the dynamically imported module),
 > never inlined at build time into the plugin — so a fix there ships with ONE base release and no

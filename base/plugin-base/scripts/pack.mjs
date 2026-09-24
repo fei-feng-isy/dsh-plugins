@@ -79,7 +79,13 @@ for (const tarball of tarballs) {
   const bootstrap = spawnSync('tar', ['-xzOf', join(outDir, tarball), 'package/dist/bootstrap.js'], { encoding: 'utf8' }).stdout ?? ''
   check(bootstrap.includes(`VERSION = '${String(manifest.version)}'`), `${tarball}: dist/bootstrap.js does not bake VERSION ${String(manifest.version)}`)
   check(bootstrap.includes("PACKAGE = '@avantf/dsh-plugin-base'"), `${tarball}: dist/bootstrap.js does not resolve @avantf/dsh-plugin-base`)
-  check(/supportedRange = '[~^]?\d+\.\d+\.\d+'/.test(bootstrap), `${tarball}: dist/bootstrap.js does not bake a supportedRange`)
+  // The interval is now a plain comparator set (`>=0.3.0 <1.0.0`), so this cannot be a caret-shaped
+  // regex: assert it is non-empty and names at least one complete version. What the interval MEANS is
+  // checked where it belongs — `test/bootstrap.spec.ts` asserts `satisfiesRange(VERSION, supportedRange)`
+  // against the real semver implementation, which a regex here could never do.
+  const rangeMatch = /supportedRange = '([^']*)'/.exec(bootstrap)
+  const range = rangeMatch?.[1]?.trim() ?? ''
+  check(range !== '' && /\d+\.\d+\.\d+/.test(range), `${tarball}: dist/bootstrap.js does not bake a semver supportedRange (found ${JSON.stringify(range)})`)
   check(!/from ['"]\.\//.test(bootstrap) && !/require\(['"]\.\//.test(bootstrap), `${tarball}: dist/bootstrap.js must have no relative import`)
   for (const line of bootstrap.match(/from ['"][^'"]+['"]/g) ?? []) {
     check(line.includes('node:'), `${tarball}: dist/bootstrap.js imports a non-builtin (${line})`)

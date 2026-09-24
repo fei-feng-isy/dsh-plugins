@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as base from '@avantf/dsh-plugin-base'
 import { PromptFiles } from '@avantf/dsh-plugin-base'
 import {
   GUIDANCE_BUDGET,
@@ -24,6 +25,7 @@ import {
   guidanceTextWarnings,
   promptDir,
   promptFileSpecs,
+  resolveDataHome,
 } from '../src/prompt.js'
 
 describe('the editable guidance file', () => {
@@ -53,17 +55,32 @@ describe('the editable guidance file', () => {
     // degradation path. Pinning the wiring here means a prompt layer that silently stopped taking the
     // base's convention (two resolves could drift) shows up as a failing test, not as text in the
     // wrong directory.
-    const calls: [(string | undefined), (Record<string, string | undefined> | undefined), (string | undefined)][] = []
-    const sentinel = (explicit?: string, env?: Record<string, string | undefined>, common?: string) => {
-      calls.push([explicit, env, common])
+    const calls: { explicit?: string; env?: Record<string, string | undefined>; configured?: string }[] = []
+    const sentinel = (input: { explicit?: string; env?: Record<string, string | undefined>; configured?: string }) => {
+      calls.push(input)
       return '/sentinel/base-data-home'
     }
     expect(promptDir('/configured', { AVANTF_HOME: '/family' }, sentinel)).toBe('/sentinel/base-data-home/prompts')
-    // The configured value travels in the LAYER ② slot, never as the explicit one — that is the whole
-    // point of the third parameter.
-    expect(calls[0]).toEqual([undefined, { AVANTF_HOME: '/family' }, '/configured'])
+    // The configured value travels in the NAMED layer ② slot, never as the explicit one — that is
+    // the whole point of the object.
+    expect(calls[0]).toEqual({ explicit: undefined, env: { AVANTF_HOME: '/family' }, configured: '/configured' })
     // Without a resolver the local fallback answers, so a base-less mount still finds a directory.
     expect(promptDir(undefined, {}, undefined)).toBe(join(homedir(), '.avantf', 'prompts'))
+  })
+
+  it('gives the same answer as the linked BASE for the same named slots', () => {
+    // The base is a REQUIRED peer here, so `base.resolveDataHome` is the linked workspace copy — the
+    // real implementation, not a mock. The local `resolveDataHome` is the base-less degradation path;
+    // a divergence between the two would put this plugin's prompt files in a different directory from
+    // the one every other family member reads.
+    for (const configured of [undefined, '', '  ', '/tmp/configured', '~/custom', '~']) {
+      for (const env of [{}, { AVANTF_HOME: '/tmp/family' }, { AVANTF_HOME: '   ' }, { AVANTF_HOME: '~' }]) {
+        expect(resolveDataHome({ configured, env }), `configured=${String(configured)} env=${JSON.stringify(env)}`)
+          .toBe(base.resolveDataHome({ configured, env }))
+      }
+    }
+    expect(resolveDataHome({ explicit: '/tmp/caller', configured: '/tmp/configured', env: { AVANTF_HOME: '/tmp/family' } }))
+      .toBe(base.resolveDataHome({ explicit: '/tmp/caller', configured: '/tmp/configured', env: { AVANTF_HOME: '/tmp/family' } }))
   })
 
   it('round-trips through a real directory: an edited file wins, a missing one is created', () => {
