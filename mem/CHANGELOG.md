@@ -4,6 +4,28 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-24
+
+### Changed（底座换包：`@avantf/dsh-envinit` → `@avantf/dsh-plugin-base`）
+- **插件声明的底座换成 `@avantf/dsh-plugin-base`**：peer 区间 `>=0.3.0 <1.0.0`（**required**，不在
+  `peerDependenciesMeta` 里标 optional），`devDependencies` 同一条区间；旧的 `@avantf/dsh-envinit` peer
+  作废（它的 optional → required 演变见 0.1.1）。升级时宿主 / profile 里要提供这一份底座，
+  否则按下面的降级路径挂载。
+- **底座由宿主提供、按 file URL 动态加载**：插件对底座**唯一**的静态引用，是 vendor 进
+  `packages/plugin/src/envinit-bootstrap.js` 并**内联**进产物的零依赖 bootstrap（`scripts/link-envinit.mjs`
+  从工作区的底座构建逐字节 vendor，`scripts/copy-envinit-bootstrap.mjs` 拷进 `lib/`）；启动时它用
+  `createRequire(import.meta.url).resolve('@avantf/dsh-plugin-base/package.json')` 解析到那份安装副本、
+  用内联的 `supportedRange` 校验版本，再 `await import()` 它的入口。源码里没有一句静态
+  `import ... from '@avantf/dsh-plugin-base'` —— 那会让底座缺席时插件模块在 import 阶段就失败。
+- **底座缺失或接口世代不同时只降级、照常挂载**：拿不到底座（或版本超出区间）时打一条
+  `envinit: WARNING`，提示词层退回插件**内置的默认正文**、兼容门禁跳过（`compat:` WARNING），
+  工具 / service / Remote / UI 全部照常注册，**绝不拒载**。运行时用底座自己的 `checkInterface` /
+  `readInterfaceRequirement` 比对"构建时所对的世代"与"加载到的世代"：`incompatible` 只是不用底座的共享
+  能力，`cannot-tell` 只告警。
+- **构建期烧入接口世代**：`scripts/link-envinit.mjs` 在 vendor 的同一步把底座版本与接口世代写进
+  `lib/interface-version.json`（当前 `{"baseVersion":"0.3.1","interfaceVersion":1}`，随 `files: ["lib"]` 发布），
+  运行时由 `src/interface_gate.ts` 从 `lib/index.js` 旁读回 —— 产物自己说得出它是为哪一代底座编译的。
+
 ### Changed（数据目录收敛：配置进 configs/，受管根只认族根）
 - **配置集中到 `~/.avantf/configs/`**：`common.yaml`（原 `~/.avantf/config.yaml`）、`memory.yaml`
   （原 `~/.avantf/memory/config.yaml`）、`knowledge.yaml`（原 `~/.avantf/knowledge/config.yaml`）；

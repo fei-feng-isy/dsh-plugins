@@ -145,6 +145,10 @@ try {
   // The artifact half of the base inlining gate: bootstrap really inlined, the base still external,
   // no kit copy inlined, client half clean.
   run('assert the base inlining (envinit artifacts)', process.execPath, ['scripts/assert-envinit-artifacts.mjs'])
+  // The second artifact gate: lib/client.js must be path-independent, so the dev checkout and the
+  // projected release checkout emit byte-identical bytes. The same rule also runs inside tsdown
+  // (`packages/plugin/tsdown.config.ts`, on the emitted chunk); both call `scripts/client-portable.mjs`.
+  run('assert the client artifact is path-independent', process.execPath, ['scripts/assert-client-portable.mjs'])
   // The unit tests that LOAD a `@deepseek-ai/*` peer (`test/provision.spec.ts` + `test/envinit.spec.ts`).
   // They are excluded from the default `vitest run` (`packages/plugin/vitest.config.ts` explains why:
   // CI has no peers, so a default run there would fail to even load them) — which makes this local

@@ -142,7 +142,7 @@ dsh plugin --profile <PROFILE> remove @avantf/dsh-mem
 ```bash
 pnpm install
 pnpm build:dsh mem      # 插件两半（tsc + tsdown → lib/index.js + lib/client.js），随后自动跑挂载冒烟
-pnpm pack:plugin:mem    # 打包成"用户安装的那一个包"（断言引擎已内联、catalog: 已落成真实范围）
+pnpm pack:plugin:mem    # 打包成"用户安装的那一个包"（断言引擎已内联、依赖版本已落成真实范围）
 ```
 
 ## 许可
