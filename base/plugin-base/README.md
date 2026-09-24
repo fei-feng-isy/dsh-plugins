@@ -1,146 +1,101 @@
 # @avantf/dsh-plugin-base
 
-> 家族的**一个** base 包：插件启动期的环境初始化框架 + 启动兼容门禁 + 两个插件共用的 kit。
+给 DSH 插件用的基础包，把三件容易各写一遍的事收在一起：**启动期资源预装**、**宿主兼容门禁**、
+**一组与 DSH 无关的共享工具**。
 
-`@avantf/dsh-plugin-base` 把原来分散在 `@avantf/dsh-envinit`（环境初始化框架）与
-`@avantf/dsh-compat`（启动兼容门禁）两个包里的代码收成**一个可发布包**，并把两个插件共用的纯逻辑
-（prompt 文件层、plugin logger、家族路径、Typert wire 约定）作为 `src/kit/**` 放在同一个包里。
-**发布面因此是三个包**：`@avantf/dsh-plugin-base` + `@avantf/dsh-mem` + `@avantf/dsh-work`；
-改共用逻辑（envinit / compat / kit 任一处）只需要发一版 base，**不需要重建或重发任何插件**。
-旧的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 留在 registry 上不再发新版。
+- **运行期零依赖**：`dependencies` 为空，源码里连 `zod` 都不 import。
+- 唯一一条 peer 是 `zod`（`>=4.4.3 <5`），由宿主 / 上层提供，好让调用方、本包与宿主解析到**同一份**
+  `zod` —— 两份物理副本的 schema 身份不同，strict codec 会因此判不兼容。
+- 要求 **Node.js ≥ 22**。
 
-> 插件启动期的环境初始化：插件只**声明**它需要什么，base 负责把它装到盘上并**报告**。
+## 主要功能
 
-插件在用户机器上启动时往往缺东西——运行期要用的 npm 包、要调用的命令行工具、要读的模型文件。
-`@avantf/dsh-plugin-base` 让插件只写一份清单，其余交给框架：
+### 1. 资源预装（声明式 provisioner）
+
+调用方只写一份清单，其余交给框架：
 
 ```
 声明 → 探测 → 获取 → 校验 → 报告
 ```
 
 - 已经在盘上 / PATH 上的直接用，不重复下载；
-- 需要安装的下载、校验完整性、原子落盘；
-- 每一项给出 `present / installed / skipped / failed`，失败带稳定 `code`。
+- 需要安装的由框架下载、校验完整性、**原子落盘**（同目录临时文件 + rename；跨进程一把族根锁）；
+- 每一项给出 `present / installed / skipped / failed`，失败带稳定 `code`；
+- 三种内置资源种类：`npm-package`、`binary-archive`、`model-cache`。新的种类 = 一个新的 provider，
+  核心不动；
+- 策略可配：离线、镜像、每项的并发与超时、启动预算、下载总闸。
 
-运行期零依赖：`dependencies` 为空，源码里连 `zod` 都不 import —— 兼容门禁的 typert 探针用的是**调用方自己**的 contribution，本包不造探针形状。`peerDependencies` 仍有一条 `zod`（`>=4.4.3 <5`），理由只有一个：让**插件的** wire 面与宿主解析到同一份 zod（见下）。要求 Node.js >= 22。
+### 2. 宿主兼容门禁
 
-## 三部分与"只发 base"
+在挂载之前判断"当前宿主能不能跑这段代码"，语义是**只有被证实的不兼容才拒绝**：
 
-| 部分 | 入口 | 谁在用 |
-| --- | --- | --- |
-| 环境初始化（原 `@avantf/dsh-envinit`） | `.` 上的 `createProvisioner` / 三个内置 provider 工厂 | 插件的 `bootstrap → 声明 item → 等 blocking 集 → 跑门禁` |
-| 兼容门禁（原 `@avantf/dsh-compat`） | `.` 与 `./compat`（同一个模块，`./compat` 复用根导出的那份） | 插件判定"证明不兼容才拒载；测不出来只记一笔；版本差异只警告" |
-| 共用 kit | `.` 上的 `PromptFiles` / `createPluginLogger` / `strictCodec` / `familyHome` 等 | 两个插件在 `apply()` 里从**装载后的 base 模块**取 `PromptFiles`（work 另取 `resolveDataHome`）；`createPluginLogger` / `strictCodec` / `familyHome` 是 base 的**规范副本**，目前两个插件仍各自保留等价实现（判据：这条知识必须能靠**一次 base 发布**修好吗？能 → 运行时从 base 取；不能 → 可以留在插件里，但改它要发插件） |
+- 调用方交出自己真实的 contribution 与契约（服务、工具、方法、wire schema），由探针在**真实宿主**上验；
+- 说不清只是一条备注，版本差异只是警告，**绝不抛错**；
+- `compatReport(verdict, words)` 把裁决渲染成一份报告：**结构归本包，措辞归调用方**；
+- `registerMegaphone` 在拒绝加载的路径上留一条用户可见的命令（那时它是唯一的信息渠道）；
+- `verifyRegisteredFaces` 在挂载后复查"声明的每个 schema / 工具真的注册上了"（只告警）。
 
-**插件绝不在构建期内联 kit，也绝不静态 import base**：否则 base 缺失时插件模块根本加载不出来，
-正是家族禁止的"整行加载失败"。插件只内联**零依赖的 `./bootstrap`**，它动态 `import()` 出 base；
-`prompt_files` / `logger` / `typert` / `family` 的源码都在 base 里，插件在 `apply()` 里从那个模块上
-取用（当前实际取用的是 `PromptFiles`，以及 work 的 `resolveDataHome`）。
-base 缺失或版本不被接受时插件**照常挂载**（WARN + 降级）：prompt 文件层不可用 → 用插件**自带的默认正文**；
-兼容门禁不可用 → 走既有的 `compat:` WARNING 路径。
+### 3. 共享工具（kit）
 
-## 核心概念
+与 DSH 无关的纯逻辑，调用方在运行时复用：
 
-| 概念 | 含义 |
+| 工具 | 作用 |
 | --- | --- |
-| **item** | 插件声明的一条资源：`id / kind / spec / target.root / onMissing / startup / needs` |
-| **kind** | 资源种类。内置 `npm-package`、`binary-archive`、`model-cache`；自定义 kind 由 provider 认领 |
-| **provider** | 认领一种 kind、负责这类资源获取与校验的 npm 包 |
-| **home** | 受管族根，默认 `~/.avantf/env`；所有受管资源都在它下面 |
-| **key** | 资源身份 `kind + name`，多个插件声明同一个资源时只落一份 |
+| `PromptFiles` | "缺失或空白就写入默认、有内容则逐字读回"的用户可编辑文本文件层（含崩溃残留的死临时文件清理） |
+| `createPluginLogger` | 带统一前缀、可镜像到宿主 logger 的 logger |
+| `familyHome` / `familyToolsDir` / `familyModelsDir` / `resolveDataHome` / `expandHome` | 家族根与数据根解析：**⑤ 显式 → ④ 环境变量 → ② 配置值 → 默认**，一律传**具名 slot** |
+| `strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol` | 组装 Typert wire 描述符的几行约定 |
+
+### 4. 接口世代
+
+`.` 上的导出构成本包的**接口**，由世代号冻结：
+
+- `INTERFACE_VERSION`（正整数）+ `api/interface-vN.json` 快照（该代的值名与类型名，随源码在仓库里，
+  不进产物）；
+- `checkInterface(required, module)`：把"调用方构建时所对的世代"与"运行时加载到的本包报告的世代"
+  比一比，返回 `ok` / `incompatible` / `cannot-tell`。纯函数、**双向**、读属性有守卫（取属性就抛的
+  对象读成"没报"）、**永不抛**；
+- `readInterfaceRequirement(url)`：读调用方产物里烘着的那条记录 `{ baseVersion, interfaceVersion }`；
+  缺失或畸形返回 `undefined`（"没烘"），不抛；
+- 拿到 `incompatible` 时的建议动作是**降级**（不使用本包的共享能力）而不是拒绝挂载 —— 本包只把裁决与
+  一句话的 `reason` 交出去，怎么处理由调用方决定。
 
 ## 怎么用
 
-### 1. 声明依赖
+### 安装
 
-插件把 base 声明为 **peer**（不要放 `dependencies`，否则会装出多份 base 副本）。peer 区间要**足够宽**：
-**`>=0.3.0 <1.0.0`** —— 一个普通比较符区间，收得下 base 的每一次 minor/patch，停在下一个大世代。**接口
-变更不再要求插件同批改 peer**：接口有自己的轴（`INTERFACE_VERSION` + `api/interface-vN.json`），由 base 的
-**运行期门禁**裁决（见 [docs/INTERFACE.md](docs/INTERFACE.md) §1、§3）：旧插件会被判 `incompatible`，按降级
-路径挂载（自带 prompt 默认正文、门禁跳过、legacy provisioning，工具/service/Remote/UI 照常），**绝不拒载**。
-base 的**包版本是普通 semver**，只表达包自身（现在是 `0.3.0`）；只有确实要换接口世代时才升
-`INTERFACE_VERSION` 并新增快照。`devDependencies` 里再声明同一条区间（由根 workspace 的
-`linkWorkspacePackages` 指向 `base/`），供 `pnpm install` 装上：
-
-```jsonc
-{
-  "peerDependencies": { "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0" },
-  "devDependencies":  { "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0" }
-}
+```bash
+npm install @avantf/dsh-plugin-base
 ```
 
-base 从**插件自己所在的树**往上解析，所以它必须由那棵树提供，而它**保持 required peer**：npm（以及默认
-`autoInstallPeers: true` 的 pnpm）在装插件时会自动把它一起装上，多个插件共用提升到顶层的那一份；
-pnpm 关掉 `autoInstallPeers` 或 yarn 不会自动装，那时要在宿主/profile 的 `dependencies` 里显式写一条
-`"@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0"`。宿主自己提供的 peer（宿主内部包）才标
-`peerDependenciesMeta.optional`，避免包管理器跑去 registry 拉一份宿主内部实现；缺 base 时插件仍降级挂载。
-
-**版本承诺（见 [docs/INTERFACE.md](docs/INTERFACE.md)）**：`@avantf/dsh-plugin-base` 的公开接口
-是它 `.` 上的导出（值 + 类型，由 `api/interface-vN.json` 快照与接口类型 `BaseRuntimeV1` 机械钉住）以及
-`docs/DESIGN.md` §7 那几张协议面版本表。**接口与包版本是两条轴**：接口变了就升 `INTERFACE_VERSION`、
-新增 `api/interface-vN.json` —— 包版本只按包自身走普通 semver（minor/patch），**不再**"接口变 ⇒ major"。
-**现状**：base 是 **`0.3.0`**，两个插件的 peer 与 `devDependencies` 是 `>=0.3.0 <1.0.0`，
-`src/bootstrap.ts` 的 `VERSION` = `0.3.0`、`supportedRange` = `>=0.3.0 <1.0.0`。写插件时请只依赖 `.`
-上的东西（`./internal` 不承诺稳定），把顺序敏感的参数当具名对象传（`resolveDataHome` 的 slot 就是这个规则
-的产物），并让接口类型（`import type { BaseRuntimeV1 }`）约束你从加载到的 base 上取的东西。
-
-### 2. 内联 bootstrap
-
-唯一需要进入插件产物的是框架的零依赖 `bootstrap`：它只把这份框架解析出来并校验版本，**不安装任何东西**。
-
-- **有打包步骤**：用框架的构建预设，它会强制内联 `./bootstrap`、让框架本包保持外部，并在产物写出后断言这两条：
-
-  ```ts
-  import { envinitPreset, assertEnvinitArtifacts, assertEnvinitPresetChecks } from '@avantf/dsh-plugin-base/preset'
-
-  const preset = envinitPreset({ external: [/* 自己的外部名白名单 */] })
-  assertEnvinitPresetChecks(preset.checks)
-  // bundler：external 用 preset.external，内联 preset.noExternal
-  // 产物写出后：
-  assertEnvinitPresetChecks(assertEnvinitArtifacts({ artifacts: ['dist/plugin.js'], clientArtifacts: ['dist/client.js'] }))
-  ```
-
-- **`tsc` 直出**：把框架发布包里的 `dist/bootstrap.js` 拷进自己的产物，按相对路径 import。
-
-### 3. 启动接线
+### 预装资源
 
 ```ts
-import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { loadFramework, readDependencyRange } from './bootstrap.js'   // 内联进来的那份
-import type { Provisioner } from '@avantf/dsh-plugin-base'               // 只类型，会被擦除
+import type { Provisioner } from '@avantf/dsh-plugin-base'
 
-export async function mount(logger: { warn(message: string): void }): Promise<void> {
-  const home = join(homedir(), '.avantf', 'env')
-  const range = await readDependencyRange(fileURLToPath(import.meta.url))  // 自己的 peerDependencies
+const home = join(homedir(), '.avantf', 'env')
 
-  const framework = await loadFramework<typeof import('@avantf/dsh-plugin-base')>({ logger })
-  if (framework === undefined) {
-    logger.warn('预装设施不可用，降级挂载')   // 拿不到框架也照常挂载
-    return
-  }
+const provisioner: Provisioner = framework.createProvisioner({ home, logger })
+provisioner.register(framework.npmPackageProvider())
+provisioner.register(framework.binaryArchiveProvider())
+provisioner.register(framework.modelCacheProvider())
+provisioner.declare(manifest)
 
-  const provisioner: Provisioner = framework.createProvisioner({ home, logger, envinitRange: range })
-  provisioner.register(framework.npmPackageProvider())
-  provisioner.register(framework.binaryArchiveProvider())
-  provisioner.register(framework.modelCacheProvider())
-  provisioner.declare(manifest)
+// 挂载前必须就绪的项：阻塞等待
+await provisioner.ensure({ only: ['my-plugin:compat'], deadlineMs: 30_000 })
 
-  // 挂载前必须就绪的项：阻塞等待
-  await provisioner.ensure({ only: ['my-plugin:compat'], deadlineMs: 30_000 })
-
-  // 其余项（含 background）后台预装，完成时回调
-  void provisioner.ensure({
-    onSettled: entry => {
-      if (entry.id === 'my-plugin:model' && entry.action === 'installed') useModel()
-      if (entry.action === 'failed') logger.warn(`${entry.id}: ${entry.code}`)
-    },
-  })
-}
+// 其余项（含 background）后台预装，到达终态时回调
+void provisioner.ensure({
+  onSettled: entry => {
+    if (entry.id === 'my-plugin:model' && entry.action === 'installed') useModel()
+    if (entry.action === 'failed') logger.warn(`${entry.id}: ${entry.code}`)
+  },
+})
 ```
 
-### 4. 写清单
+### 写清单
 
 ```jsonc
 {
@@ -177,29 +132,31 @@ export async function mount(logger: { warn(message: string): void }): Promise<vo
 }
 ```
 
-- `startup`：`blocking`（缺省，`ensure` 等它）或 `background`（派发后不占预算）。
-- `onMissing.atStartup`：`degrade`（缺了也挂载）/ `refuse`；`onMissing.atUse`：`degrade` / `error`。
-- `needs`：同一插件内的其它 item id。
+- `startup`：`blocking`（缺省，`ensure` 等它）或 `background`（派发后不占启动预算）。
+- `onMissing.atStartup`：`degrade`（缺了也继续）/ `refuse`；`onMissing.atUse`：`degrade` / `error`。
+- `needs`：同一清单内其它 item 的 id。
 
-`model-cache` 的 `spec.layout` 决定文件怎么落盘，两种取值：
+`model-cache` 的 `spec.layout` 决定文件怎么落盘：
 
 | layout | 落盘形态 | 谁读 |
 | --- | --- | --- |
 | `hub`（缺省） | `<root>/models--<org>--<name>/{blobs,refs,snapshots/<sha>/<file>}` 的内容寻址快照树 | 认这套缓存形状的客户端 |
 | `flat` | `<root>/<org>/<name>/<file>`，文件直接可读；revision 记录与 blob 在 `<root>/.envinit/` 侧车目录 | 直接按 `<repo>/<file>` 路径读取的运行时 |
 
-两种布局共用同一套 revision 解析、文件列表、模型 hub 端点、内容寻址 blobs 与原子落盘；`config.json` 在两种布局里都始终必需，`spec.requiredFiles` 在其上追加。已经落位但内容不对的条目（旧残留、指向错误 blob 的链接、同名目录）会在下次落位时被换成指向正确 blob 的链接。
+两种布局共用同一套 revision 解析、文件列表、模型 hub 端点、内容寻址 blob 与原子落盘；`config.json`
+在两种布局里都必需，`spec.requiredFiles` 在其上追加。已经落位但内容不对的条目（旧残留、指向错误 blob
+的链接、同名目录）会在下次落位时被换成指向正确 blob 的链接。
 
 `probe` 只做廉价的存在性判断（存在、不是目录、大小 > 0），不联网、不改盘；`verify` 才证明内容：
+`hub` 逐项核对链接目标、blob 名与内容哈希；`flat` 按侧车记录里的 sha256 逐项核对（只有文件名的旧记录
+仍然接受，不会把装好的树判成未安装）。落位与完成标记在同一把族根锁内完成。
 
-- `hub`：snapshot 里的每一项都指向 `blobs/<sha256>`，逐项核对链接目标、blob 名与内容哈希一致；
-- `flat`：侧车记录里带每个文件的 sha256，逐项核对；只有文件名的旧记录仍然接受，不会把已经装好的树判成未安装。
+> **只增不减**：受管的模型数据不会回收。`blobs` 与 `snapshots` 永不删除，换一个 revision 就会再存一份；
+> `experimental().prune()` 只是打一条告警的 no-op。
 
-落位与完成标记（`hub` 的 `refs/<revision>`、`flat` 的 `record.json`）在同一把族根锁内完成，所以多个进程安装不同 revision 时，记录与盘上的字节始终一致。
-
-> **只增不减**：受管的模型数据不会回收。`blobs` 与 `snapshots` 永不删除，换一个 revision 就会再存一份；`experimental().prune()` 只是打一条告警的 no-op。
-
-`endpoint` 默认是内置的模型 hub；`policy.mirrors.model` 可以给一组镜像端点（按序尝试，内置端点兜底），`spec.endpoint` 优先于镜像。显式给出空白的 `endpoint`、非法的 `revision`（空、`.`、`..`、绝对路径、反斜杠、控制字符）都会报 `invalid-option`；端点返回的 sha 必须是 40/64 位小写十六进制，内容长度与声明不符的下载会报 `fetch/failed`。例如：
+`endpoint` 默认是内置的模型 hub；`policy.mirrors.model` 可给一组镜像端点（按序尝试、内置端点兜底），
+`spec.endpoint` 优先于镜像。显式给出空白的 `endpoint`、非法的 `revision`（空、`.`、`..`、绝对路径、
+反斜杠、控制字符）都会报 `invalid-option`。
 
 ```ts
 framework.createProvisioner({
@@ -215,7 +172,7 @@ framework.createProvisioner({
 provision lint manifest.json
 ```
 
-### 5. 取用就绪资源
+### 取用就绪资源
 
 ```ts
 const state = provisioner.resolve('my-plugin:tool')
@@ -225,10 +182,70 @@ if (state.state === 'ready') {
 }
 ```
 
-`resolve()` 的五个状态：`ready` / `pending` / `failed` / `skipped` / `missing`。
-`ensure()` 返回的报告里 `ok` **不**把"还在后台装"算成失败。
+`resolve()` 的五个状态：`ready` / `pending` / `failed` / `skipped` / `missing`。`ensure()` 返回的报告里
+`ok` **不**把"还在后台装"算成失败。
 
-### 6. 写 provider（可选）
+### 跑兼容门禁
+
+```ts
+import { compatReport, gatherEvidence, verdictOf } from '@avantf/dsh-plugin-base'
+
+const verdict = verdictOf(gatherEvidence(ctx, spec))
+if (!verdict.load) {
+  log.error(compatReport(verdict, {
+    heading: '插件未加载：与当前宿主的兼容性检查未通过。',
+    warningsLabel: '风险提示：',
+    warnings: verdict.warnings,
+    fix: '升级宿主，或按本插件声明的版本重建。',
+    logPointer: prefix => `完整诊断见日志里 ${prefix} 开头的行。`,
+  }))
+}
+```
+
+### 取用共享工具
+
+```ts
+import { PromptFiles, createPluginLogger } from '@avantf/dsh-plugin-base'
+
+const log = createPluginLogger({ prefix: '@scope/my-plugin' })
+const files = new PromptFiles({ dir: join(dataHome, 'prompts'), logger: log })
+  .load([{ file: 'my-plugin-prompt.md', fallback: '内置默认正文\n' }])
+// files[0].text —— 用户写的正文（逐字），或刚写下的默认正文
+```
+
+### 运行时装载（`./bootstrap`）
+
+如果调用方要在**运行时**装载本包（而不是让它出现在自己的 import 图里），本包提供零依赖的
+`./bootstrap`：解析本包在哪 → 校验版本落在给定区间 → 动态 `import()`。它**不安装任何东西**，
+失败只返回 `undefined` 并给出原因。
+
+```ts
+import { loadFramework, readDependencyRange } from '@avantf/dsh-plugin-base/bootstrap'
+
+const range = await readDependencyRange(import.meta.url)   // 调用方自己声明的区间
+const framework = await loadFramework<typeof import('@avantf/dsh-plugin-base')>({ logger })
+if (framework === undefined) {
+  logger.warn('本包不可用，按自己的默认路径继续')
+} else {
+  // 用 framework.xxx
+}
+```
+
+有打包步骤时，本包提供构建预设把 `./bootstrap` 内联进产物、并断言产物里没有本包的静态引用：
+
+```ts
+import { envinitPreset, assertEnvinitArtifacts, assertEnvinitPresetChecks } from '@avantf/dsh-plugin-base/preset'
+
+const preset = envinitPreset({ external: [/* 自己的外部名白名单 */] })
+assertEnvinitPresetChecks(preset.checks)
+// bundler：external 用 preset.external，内联 preset.noExternal；产物写出后再断言：
+assertEnvinitPresetChecks(assertEnvinitArtifacts({
+  artifacts: ['dist/plugin.js'],
+  clientArtifacts: ['dist/client.js'],
+}))
+```
+
+### 写 provider（可选）
 
 新增资源种类 = 新增一个 provider（不动核心）。provider 是实现五个动作的 npm 包：
 
@@ -261,8 +278,16 @@ assertProviderConformance(report)
 - **不做包管理器**：不推导传递依赖、不生成 lockfile、不做版本求解；每个 item 自包含。
 - **不接管原生模块**：`binding.gyp` / `*.node` / 依赖 `postinstall` 的包会被识别并拒绝。
 - **不跳过校验**：npm 包核对 `dist.integrity`，归档核对 `sha256`。
-- **不做进程内预热**：让文件在盘上是框架的事，读进内存是插件自己的事。
-- **运行期零依赖，peer 只有一条 `zod`**：`dependencies` 为空，本包源码不 import `zod`；`peerDependencies` 里那条 `zod`（`>=4.4.3 <5`）是给**用它的插件**的 wire 面用的 —— 插件、base 与宿主必须解析到**同一份** zod（两份物理副本的 schema 身份不同，strict codec 会因此判不兼容），范围宽到同一份 base 既服务本仓、也服务宿主自带的 4.6.5。**只解析一份**。
+- **不做进程内预热**：让文件在盘上是框架的事，读进内存是调用方自己的事。
+
+## 版本承诺
+
+- 承诺稳定的接口是 `.` 上的导出（值 + 类型）与 `./preset` / `./conformance` / `./bootstrap` 三个子路径；
+  `./internal` 是内部件，不承诺稳定。
+- **接口与包版本是两条轴**：接口换代只升 `INTERFACE_VERSION` 并新增 `api/interface-vN.json`；包版本是
+  普通 semver，只表达包自身（行为变更 minor、修复 patch）。
+- 顺序敏感的参数一律传**具名对象**（如 `resolveDataHome({ explicit, env, configured })`）；可观察的文案
+  由调用方给（如 `compatReport` 的 `words`）。
 
 ## 开发
 
@@ -272,3 +297,7 @@ pnpm build          # tsc → dist/
 pnpm pack           # 打包到 release/ 并断言产物
 pnpm release:check  # 发布门禁：typecheck → build → test → pack
 ```
+
+## 许可
+
+MIT
