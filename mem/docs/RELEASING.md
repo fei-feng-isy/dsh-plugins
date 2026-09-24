@@ -72,9 +72,9 @@ pnpm version:set mem X.Y.Z
 pnpm release:check                 # 必须打印 RELEASE GATE PASSED (X.Y.Z)
 pnpm pack:plugin --mount           # 必须 PACK OK；产物 dist/avantf-dsh-mem-X.Y.Z.tgz
 
-# 4) 发布提交 + tag + 推开发仓
+# 4) 发布提交 + tag + 推开发仓（tag 带组前缀：三个包共用一个仓库，vX.Y.Z 会互相撞）
 git add -A && git commit -m "chore(release): X.Y.Z"
-git tag -a vX.Y.Z -m "avantf-mem X.Y.Z"
+git tag -a mem-vX.Y.Z -m "avantf-mem X.Y.Z"
 git push origin master --follow-tags
 
 # 5) 同步发布树（整仓投影；版本默认取开发树，第 2 步已经改好；--gate 别放这一步，见 §2 的原生依赖说明）
@@ -82,13 +82,14 @@ pnpm sync:rc --yes --commit
 # 发布树装出原生模块，再单独跑它自己的门禁（含三个包的门禁与 pack --mount）
 ( cd ../dsh-plugins-rc && (pnpm install --frozen-lockfile || pnpm rebuild) \
     && pnpm release:check:base && pnpm release:check:mem && pnpm release:check:work )
-# 三个包在同一个 rc 仓库里，tag 带组前缀，避免 vX.Y.Z 撞在一起
+# 发布树的 tag 同样带组前缀（base-vX.Y.Z / mem-vX.Y.Z / work-vX.Y.Z）
 git -C ../dsh-plugins-rc tag -a mem-vX.Y.Z -m "avantf-mem X.Y.Z"
 git -C ../dsh-plugins-rc push --follow-tags
 
-# 6) 只发一个包（registry 必须显式给；token 见 §2）
-( cd ../dsh-plugins-rc && pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks \
-    --registry https://registry.npmjs.org/ )
+# 6) 只发一个包：先在发布树 pack 出 tarball，再用 npm 发它（分工与原因见 §2 的发布前提 1）
+( cd ../dsh-plugins-rc && pnpm -C mem pack:plugin )
+npm publish "$PWD/../dsh-plugins-rc/mem/dist/avantf-dsh-mem-X.Y.Z.tgz" --access public \
+  --registry https://registry.npmjs.org/
 
 # 7) 按 REGISTRY 反向确认，不要只信 CLI 的 ✅
 curl -sS https://registry.npmjs.org/@avantf%2Fdsh-mem \
@@ -100,6 +101,12 @@ curl -sS https://registry.npmjs.org/@avantf%2Fdsh-mem \
 version`。判定以 `dist-tags.latest` 与版本列表为准；staged 时等一会/在 npmjs.com 批准
 （`npm stage list` → `npm stage approve <stageId> --otp=<code>`）；要无人值守，用勾了 **Bypass 2FA** 的
 granular token（§2 的发布前提 2）。
+
+**版本端点 404 有两种，别混淆**：① 上面这种 **staged 待批准**（`npm stage list` 能列出来）；②
+**registry 已收下、正在异步处理**（发布后扫描）——此时 `npm publish` 的请求返回的是
+`HTTP 202 Accepted`，CLI 打印 `Your package is being processed and may take a few minutes to become
+available.`，而 `npm stage list` 会说没有 staged 版本。②只能等（2026-09-24 发 0.2.0 实测：3 分钟后
+仍不可见），**不要重复发布**；鉴别看 `~/.npm/_logs/*-debug-0.log` 里的 `http fetch PUT 202 …`。
 
 **上线后**：profile 里重启一次 `dsh web`（host 半边只在 boot 时加载），浏览器硬刷新或清该 origin 的站点
 数据（client 半边按模块 id 缓存 bundle；模块 id 在改名/换版本时不会自己失效）。
@@ -121,14 +128,25 @@ granular token（§2 的发布前提 2）。
 - semver：破坏性变更进 major，向后兼容的新增进 minor，修 bug 进 patch。候选版用 `X.Y.Z-rc.N`。
 - **CHANGELOG 就是 release notes**：`## [Unreleased]` 里积累，打 tag 时把它改名为 `## [X.Y.Z] - YYYY-MM-DD`
   并在顶部留一个空的 `[Unreleased]`。`release:check` 会检查"第一个版本节 == 包版本"且 `[Unreleased]` 已清空。
-- 打 tag：`git tag -a vX.Y.Z -m "..." && git push origin master --follow-tags`。tag 之前必须先 `pnpm release:check`
+- 打 tag：`git tag -a mem-vX.Y.Z -m "..." && git push origin master --follow-tags`（开发仓与发布仓都带
+  组前缀 `base-` / `mem-` / `work-`：三个包共用一个仓库，`vX.Y.Z` 会互相撞）。tag 之前必须先 `pnpm release:check`
   （见 §1 的原因）。
-- npm 发布是独立动作，且**只发一个包**（`packages/plugin` 的 `prepublishOnly` 会先 `pnpm build`）：
+- npm 发布是独立动作，且**只发一个包**，分两步：**先 `pnpm pack:plugin` 产出 tarball，再用 `npm publish`
+  发它**：
   ```bash
-  pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks \
+  pnpm -C mem pack:plugin        # 产出 mem/dist/avantf-dsh-mem-<ver>.tgz（含挂载冒烟与自包含断言）
+  npm publish "$PWD/mem/dist/avantf-dsh-mem-<ver>.tgz" --access public \
     --registry https://registry.npmjs.org/
   ```
-  **两个必须知道的发布前提**（2026-09-14 首次发布时都踩到了）：
+  **为什么不能直接 `pnpm --filter @avantf/dsh-mem publish`**：本仓的私有 manifest 按根 `AGENTS.md`
+  「版本：每组只记在一个 manifest 里」的约定**不带 version**，pnpm 在 publish 的打包装阶段解析不出
+  `workspace:*` 指向的版本，直接报 `ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL: Cannot resolve
+  workspace protocol of dependency "@avantf/mem" because this dependency is not installed`。
+  `pnpm pack` 走 `scripts/lib/versions.mjs` 的 `withWorkspaceVersions`（打包那一刻把版本临时写进私有
+  manifest、`finally` 还原），所以**只有它产出的 tarball** 已经把 `workspace:`/`catalog:` 落成真实范围；
+  `npm publish <tgz>` 不再跑生命周期脚本、也不需要 workspace 解析。（2026-09-24 发 0.2.0 时踩到；
+  版本载体约定引入后，旧的 `pnpm --filter … publish` 配方即失效。）
+  **四条必须知道的发布前提**（2026-09-14 首次发布时都踩到了）：
   1. **registry 必须显式给**：开发/构建机上 `~/.npmrc` 的默认 registry 常是 `registry.npmmirror.com`
      （只读镜像），不带 `--registry` 的 `pnpm publish` 会打在镜像上并失败。
   2. **token 必须能绕过 2FA**：npm 的 granular access token 要在创建时勾选 **Bypass 2FA**
@@ -234,5 +252,5 @@ pnpm release:check:base && pnpm release:check:mem && pnpm release:check:work
    **并确认一次"坏 dataHome"下的降级挂载**（工具返回 `memory unavailable: …` 而宿主照常起来）。
 4. CHANGELOG 已改名并带日期；`[Unreleased]` 为空；版本与本检出里所有包一致（开发树 8 个 / 发布树 4 个）。
 5. release notes 复制了 §4 的限制。
-6. `git tag -a vX.Y.Z` + push；npm 只发 `@avantf/dsh-mem`（命令见 §2），发之前确认 peer 窗口与真实
+6. `git tag -a mem-vX.Y.Z` + push；npm 只发 `@avantf/dsh-mem`（命令见 §2），发之前确认 peer 窗口与真实
    宿主一致，并确认 preflight 里"可发布的只有 plugin"这条是 PASS。
