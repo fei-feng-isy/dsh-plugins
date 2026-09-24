@@ -48,6 +48,26 @@ release-check `note:`，不是硬失败——checkout 领先于 pin 是重新对
 真的能在一个 DSH 宿主里 mount 起来——只有本地门禁守着**，因此打 tag 必须在跑过 `release:check` 的
 那台机器上做，并把它输出的 `RELEASE GATE PASSED` 贴进 release notes 或发布 issue。
 
+**对旧宿主（区间下限）的跨版本门**：上面所有 LOCAL 步骤都只对着**这台机器**装的 dsh，所以"这份产物在更旧的
+宿主上还能不能跑"从新机器上看不出来——它要等到某个运维真的装了旧版才暴露，而那是最贵的发现时机。
+`pnpm check:old-dsh` 把这件事变成一条命令：从插件自己的 dsh peer 区间取**下限**（当前 `0.1.5-rc.2`），在临时目录
+装一份**全部钉在该版本**的闭包（`cordis` / `schemastery` 钉在本机当前链接的版本，好让 A/B 只差 dsh 包本身），
+用 `npm_config_prefix` 让 `link-dsh` 指向它，然后跑同样三步——`link-dsh` → `typecheck:dsh` → `build:dsh`
+（含 `test:dsh` 与 mount smoke）——最后**无论成败都恢复现场**（重新 link 已安装的 dsh 并重建产物，避免把产物留在
+"对下限编译"的状态）。闭包缓存在 `$TMPDIR/avantf-old-dsh-<floor>`，重复跑不重新下载。
+
+```bash
+pnpm check:old-dsh                              # 下限取自插件的 peer 区间
+pnpm check:old-dsh --list                       # 只打印下限与各 peer 区间
+pnpm check:old-dsh --fresh                      # 重装缓存的闭包
+pnpm check:old-dsh --floor 0.1.5-rc.2           # 显式指定下限
+```
+
+改提示层、加工具、动门禁时值得顺手跑一次：**区间是声明，这条命令是证据**。另外 `test/provision.spec.ts` 的
+"healthy host" 用例改成显式构造"与构建目标一致的宿主"（`declared = runtime`）：src 运行时读不到
+`lib/dsh-build.json`（烘焙落在 `lib/`），`declared` 会回退到区间**下限**，"healthy" 于是隐含假设"本机装的 dsh
+恰好等于下限"——那只在区间刚为该版本抬过时成立，换台机器就把这条用例变红，而红的原因不是插件有问题。
+
 ### 1.1 一次发布的完整顺序（2026-09-21 发 0.1.1 实跑，可直接复刻）
 
 **前置**：① 底座 `@avantf/dsh-plugin-base` 已发布，且插件的 peer 区间接受

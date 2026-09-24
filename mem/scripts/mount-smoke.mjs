@@ -180,9 +180,9 @@ ctx.provide('tools', {
 // this proves is that both land through the real service surface — and that `inject` still lists
 // the dependency.
 const promptSections = []
-// The plugin also contributes two CONDITIONAL contexts (the per-store "相关内容" hints), which
-// need the `context` half of the same service. Both are recorded so the assertions below can pin
-// the pairing: a hint that registers but never renders is the failure mode worth catching.
+// The plugin also contributes ONE CONDITIONAL context (the "相关内容" hint), which needs the
+// `context` half of the same service. It is recorded so the assertions below can pin the pairing:
+// a hint that registers but never renders is the failure mode worth catching.
 const promptContexts = []
 ctx.provide('systemPrompt', {
   section: (s) => { promptSections.push(s); return () => {} },
@@ -359,30 +359,39 @@ try {
   console.error('source picker smoke failed:', error)
 }
 
-// ── the conditional hints, END TO END ─────────────────────────────────────────────────────────
+// ── the conditional hint, END TO END ─────────────────────────────────────────────────────────
 // Registration alone proves nothing here: the chain that can break is a message arriving, the
 // SYNC probe answering, and the contribution rendering — in that order, within one step. So this
 // drives the real event through the real runtime (the doc and the fact above are already stored)
-// and reads the contributions back. The three inputs are the three outcomes that matter:
-// knowledge-only, memory-only, and neither (which must render EMPTY, i.e. cost no tokens).
+// and reads the contribution back. The three outcomes that matter: knowledge-only and memory-only
+// both render the SAME cross-store line (`kb_query` covers both), and neither renders EMPTY (i.e.
+// costs no tokens). A fourth case pins the author filter: a plugin notice is not a user message,
+// so the same words arriving as one must NOT move the verdict.
 let hintsOk = false
 let hintsLine = ''
 try {
   const agent = { id: 'smoke-agent' }
-  const say = (text) => ctx.emit('agent/inbox/inserted', { agent, message: { content: [{ type: 'text', text }] } })
+  const say = (text, source = { kind: 'user' }) =>
+    ctx.emit('agent/inbox/inserted', { agent, message: { source, content: [{ type: 'text', text }] } })
   const rendered = () => promptContexts.map((c) => c.text({ scope: agent }))
+  say('完全无关的一句话')
+  const forNothing = rendered()
+  // A FACT-bearing string arriving as a plugin notice: the probe would fire on these words, so an
+  // unchanged empty verdict is what proves the author filter.
+  say('张伟管理李娜', { kind: 'plugin:avantf-work' })
+  const forNotice = rendered()
   say('统一网关 平台组')
   const forDoc = rendered()
   say('张伟管理李娜')
   const forFact = rendered()
-  say('完全无关的一句话')
-  const forNothing = rendered()
-  hintsOk = forDoc[0] === '' && forDoc[1].includes('kb_query')
-    && forFact[0].includes('mem_recall') && forFact[1] === ''
-    && forNothing.every((line) => line === '')
-  hintsLine = `conditional hints: ${hintsOk ? 'OK (知识库 / 记忆 / 无 三类输入各自渲染正确)' : `FAILED doc=${JSON.stringify(forDoc)} fact=${JSON.stringify(forFact)} none=${JSON.stringify(forNothing)}`}`
+  hintsOk = promptContexts.length === 1
+    && forNothing[0] === ''
+    && forNotice[0] === ''
+    && forDoc[0].includes('kb_query') && !forDoc[0].includes('mem_recall')
+    && forFact[0] === forDoc[0]
+  hintsLine = `conditional hint: ${hintsOk ? 'OK (命中知识 / 命中记忆 / 无 / 非用户消息 四类输入渲染正确)' : `FAILED doc=${JSON.stringify(forDoc)} fact=${JSON.stringify(forFact)} none=${JSON.stringify(forNothing)} notice=${JSON.stringify(forNotice)}`}`
 } catch (error) {
-  hintsLine = `conditional hints: FAILED (${describeError(error)})`
+  hintsLine = `conditional hint: FAILED (${describeError(error)})`
 }
 
 // ── the split knowledge tools, through their real registered `execute()` ──────────────────────
@@ -724,17 +733,17 @@ const ok =
   promptSections[2]?.name === 'avantf:kb-edit' &&
   promptSections.every((s) => typeof s.text === 'string') &&
   promptSections[0].text.includes('mem_remember') &&
-  // `mem_recall` guidance was removed (the per-message hint covers it) — pinned here so a later
-  // edit cannot quietly put the standing rule back.
+  // `mem_recall` guidance was removed from the standing section: the per-message hint is the read
+  // nudge, and it names the CROSS-STORE `kb_query` (whose result already carries memory facts).
+  // The memory-only actions (chain/probe/reason/contradict) live in `mem_recall`'s own description.
   !promptSections[0].text.includes('mem_recall') &&
   promptSections[1].text.includes('kb_query') &&
   promptSections[1].text.includes('用户提供的成篇资料') &&
   promptSections[2].text.includes('不要新建一个补充文档') &&
   promptFilesOk &&
-  promptContexts.length === 2 &&
-  promptContexts[0]?.name === 'avantf:memory-hint' &&
-  promptContexts[1]?.name === 'avantf:knowledge-hint' &&
-  // With no state for the assembling scope both render EMPTY — the token-free "nothing found".
+  promptContexts.length === 1 &&
+  promptContexts[0]?.name === 'avantf:mem-hint' &&
+  // With no state for the assembling scope it renders EMPTY — the token-free "nothing found".
   promptContexts.every((c) => typeof c.text === 'function' && c.text({}) === '') &&
   degradedOk &&
   // The startup gate and the base itself, per profile: the base passed the gate AND served the

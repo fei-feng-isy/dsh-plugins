@@ -41,6 +41,19 @@ const COMPAT_PREFIX = compat.prefix
 const COMPAT_SPEC = compat.spec
 const SCHEMA_NAMES = compat.schemaNames
 
+/**
+ * A host identical to the build target, CONSTRUCTED rather than assumed.
+ *
+ * `declared` is what this build was compiled against; the production derivation reads it from the
+ * JSON the build baked beside the entry, and falls back per package to the peer range's FLOOR. A src
+ * run has no baked file (`src/dsh-build.json` does not exist — the bake lands in `lib/`), so it falls
+ * back to the floor, which equals this machine's installed dsh only on the release the range was last
+ * bumped for. Stating the healthy host explicitly keeps this case about the GATE's rule (identical
+ * versions ⇒ `ok`) instead of about which dsh happens to be installed here; the floor-vs-install
+ * drift a real machine can have is `version-mismatch`, which the next case covers on purpose.
+ */
+const HEALTHY_SPEC = { ...COMPAT_SPEC, declared: COMPAT_SPEC.runtime ?? {} }
+
 /** A logger that keeps its lines, so "did it log the verdict?" is assertable. */
 function recorder(): { lines: string[]; log: { info: (m: string) => void; warn: (m: string) => void; error: (m: string) => void } } {
   const lines: string[] = []
@@ -221,7 +234,7 @@ describe('the gate', () => {
   it('loads on a healthy host, in one line', () => {
     const { ctx, typert } = fakeContext()
     const { lines, log } = recorder()
-    const run = provision(ctx, log, compat)
+    const run = provision(ctx, log, compat, HEALTHY_SPEC)
     expect(run.verdict.load).toBe(true)
     expect(run.verdict.status).toBe('ok')
     expect(lines).toHaveLength(1)
@@ -253,8 +266,8 @@ describe('the gate', () => {
     const { ctx } = fakeContext()
     const { lines, log } = recorder()
     const run = provision(ctx, log, compat, {
-      ...COMPAT_SPEC,
-      runtime: { ...COMPAT_SPEC.runtime, '@deepseek-ai/dsh-tools': '0.9.9' },
+      ...HEALTHY_SPEC,
+      runtime: { ...HEALTHY_SPEC.runtime, '@deepseek-ai/dsh-tools': '0.9.9' },
     })
     expect(run.verdict.load).toBe(true)
     expect(run.verdict.status).toBe('version-mismatch')

@@ -36,10 +36,11 @@ export interface LexicalProbe {
 /**
  * Which stores hold something relevant — the ONE answer the plugin's hint layer consumes.
  *
- * A closed set on purpose: the plugin maps it to text and decides nothing itself, so the bar has
- * exactly one home (here) and every outcome is reachable in a test.
+ * A boolean on purpose: `kb_query` retrieves from BOTH stores, so the hint only has to decide
+ * "worth mentioning or not". Which store matched is nobody's business downstream — and asking for
+ * it cost a distinction the probe would have to keep alive in two places.
  */
-export type RelevanceHit = 'none' | 'memory' | 'knowledge' | 'both'
+export type RelevanceHit = boolean
 
 /** Latin/digit words shorter than this are too common to be evidence (measured: `unit`, `test`). */
 const MIN_LATIN = 5

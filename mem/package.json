@@ -13,6 +13,7 @@
     "test": "pnpm -r --filter \"./packages/*\" run test",
     "test:dsh": "pnpm --filter @avantf/dsh-mem run test:dsh",
     "build:dsh": "pnpm --filter @avantf/dsh-plugin-base run build && node scripts/build-plugin.mjs",
+    "check:old-dsh": "node scripts/check-old-dsh.mjs",
     "pack:plugin": "node scripts/pack-plugin.mjs",
     "release:check": "node scripts/release-check.mjs",
     "bench:vstore": "node scripts/bench-vstore.mjs",

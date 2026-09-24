@@ -4,6 +4,33 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+### Changed（条件提示合并为一条，判定塌成布尔）
+- **记忆 / 知识两个条件上下文合并成一个** `avantf:mem-hint`（order 130）：`kb_query` 本身就是跨库检索
+  （文档切片 + 记忆事实），两库任意一侧命中就渲染同一句
+  （`[avantf-mem] 记忆或知识库里有与上条用户消息相关的内容；需要时用 kb_query 检索。`），否则渲染
+  空串（零 token）。旧的 `avantf:memory-hint` / `avantf:knowledge-hint` 各点一个工具，模型照做就是两次
+  重叠调用——记忆事实从 `mem_recall` 回来一次、又混在 `kb_query` 的融合结果里回来一次；合并后
+  `memory↔knowledge` 翻转也不再追加新快照（实测约占这些会话快照追加总数的四分之一、约 22k 字符）。
+  `mem_recall` 仍是记忆专有动作（chain / probe / reason / contradict）的工具，那件事归常驻的记忆用法段
+  与它自己的描述。
+- **`AvantfRuntime.relevance(text)` 由四值 `RelevanceHit` 改为 `boolean`**：只回答"要不要提示"；两个库的
+  探针仍各自跑（`||` 短路：记忆命中就不再探知识）。
+- **判定只认用户发的消息**：`agent/inbox/inserted` 也承载插件唤醒与子代理通知，非
+  `source.kind === 'user'` 的插入不再改写提示（此前一条"工作 n1 已结束"的唤醒会改写"与上条用户消息
+  相关"的判定）。
+
+### Added（跨版本门：对区间下限跑 LOCAL 三件套）
+- **`pnpm check:old-dsh`**（`scripts/check-old-dsh.mjs`）：从插件自己的 dsh peer 区间取**下限**、
+  在临时目录装一份全部钉在该版本的 dsh 闭包、用 `npm_config_prefix` 让 `link-dsh` 指向它，然后跑
+  `link-dsh` → `typecheck:dsh` → `build:dsh`（含 `test:dsh` 与 mount smoke），**无论成败都恢复现场**。
+  LOCAL 门禁原本只对着本机装的 dsh，所以"新改动是否偷偷要求了更新的宿主"要等到运维装了旧版才暴露；
+  这条命令把发现提前到本地（实测 `0.1.5-rc.2` 下限下：typecheck / 116 单测 / 26 个 peer spec /
+  mount smoke 全绿）。缓存 `$TMPDIR/avantf-old-dsh-<floor>`，支持 `--list` / `--fresh` / `--floor`。
+- **`test/provision.spec.ts` 的 healthy-host 用例改为显式构造**（`declared = runtime`，新增 `HEALTHY_SPEC`）：
+  src 运行时读不到 `lib/dsh-build.json`，`declared` 会回退到 peer 区间**下限**，那条用例于是隐含假设
+  "本机装的 dsh 恰好等于下限"——只在区间刚为该版本抬过时成立，换台机器就变红（本次在 rc.3 机器上实测红、
+  在 rc.2 下限下实测绿），而红的原因不是插件有问题。
+
 ## [0.2.0] - 2026-09-24
 
 ### Changed（底座换包：`@avantf/dsh-envinit` → `@avantf/dsh-plugin-base`）

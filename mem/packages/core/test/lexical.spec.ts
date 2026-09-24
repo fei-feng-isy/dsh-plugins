@@ -71,7 +71,7 @@ describe('lexicalProbe short-circuit (R2-5)', () => {
   })
 })
 
-describe('AvantfRuntime.relevance (the plugin-internal four-valued answer)', () => {
+describe('AvantfRuntime.relevance (the plugin-internal boolean answer)', () => {
   let dir: string
   let rt: AvantfRuntime
 
@@ -85,26 +85,28 @@ describe('AvantfRuntime.relevance (the plugin-internal four-valued answer)', () 
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('answers none for an empty store, and never throws', async () => {
-    expect(rt.relevance('cgroup v2 的内存保护 memory.min memory.low')).toBe('none')
-    expect(rt.relevance('')).toBe('none')
+  it('answers false for an empty store, and never throws', async () => {
+    expect(rt.relevance('cgroup v2 的内存保护 memory.min memory.low')).toBe(false)
+    expect(rt.relevance('')).toBe(false)
   })
 
-  it('answers knowledge / memory / both from where the content actually is', async () => {
+  it('answers true from wherever the content actually is', async () => {
     await rt.knowledge.ingest('Cgroup v2 的内存保护：memory.min 是硬保护，memory.low 是软保护。', 'os', 'summary', 'Cgroup v2 综述')
-    expect(rt.relevance('cgroup v2 的内存保护 memory.min memory.low')).toBe('knowledge')
+    // Knowledge alone, then memory added on top: both answer `true` — which store matched is not a
+    // distinction anything downstream consumes (`kb_query` retrieves from both).
+    expect(rt.relevance('cgroup v2 的内存保护 memory.min memory.low')).toBe(true)
     // A question the document does not cover stays silent — the whole point of the bar.
-    expect(rt.relevance('帮我重构这个函数的错误处理')).toBe('none')
+    expect(rt.relevance('帮我重构这个函数的错误处理')).toBe(false)
 
     // `add` is async: probing before it resolves reads the store before the write lands.
     await rt.memory.add('内核参数 cgroup 的 memory.min 用于硬保护关键进程的内存', 'config')
-    expect(rt.relevance('cgroup 的 memory.min 是怎么保护内存的')).toBe('both')
+    expect(rt.relevance('cgroup 的 memory.min 是怎么保护内存的')).toBe(true)
   })
 
   it('does not fire on a single shared term (the conservative half of the trade)', async () => {
     await rt.memory.add('内核参数 cgroup 的 memory.min 用于硬保护关键进程的内存', 'config')
     // Nothing here is expressible: `内存保` is a 3-gram the fact does not contain, and a lone
     // matching term is not evidence anyway.
-    expect(rt.relevance('内存保')).toBe('none')
+    expect(rt.relevance('内存保')).toBe(false)
   })
 })

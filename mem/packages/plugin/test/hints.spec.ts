@@ -1,32 +1,29 @@
 import { describe, it, expect } from 'vitest'
-import { KNOWLEDGE_HINT, MEMORY_HINT, hintLines, messageText } from '../src/hints.js'
+import { RELEVANCE_HINT, hintText, messageText } from '../src/hints.js'
 
 /**
- * The conditional hints (DESIGN §12).
+ * The conditional hint (DESIGN §12).
  *
- * `RelevanceHit` is a closed set, so the mapping is checked exhaustively rather than by example —
- * the interesting property is which of the two contributions renders, and that "nothing found"
- * renders as EMPTY (which the prompt registry drops, so it costs no tokens).
+ * The verdict is a boolean now — `kb_query` retrieves from BOTH stores, so "which one matched"
+ * changes nothing downstream. The interesting properties are that a hit renders ONE line naming
+ * that cross-store tool, and that "nothing found" renders as EMPTY (which the prompt registry
+ * drops, so it costs no tokens).
  */
-describe('hintLines', () => {
-  it('maps all four answers, one contribution per store', () => {
-    expect(hintLines('none')).toEqual({ memory: '', knowledge: '' })
-    expect(hintLines('memory')).toEqual({ memory: MEMORY_HINT, knowledge: '' })
-    expect(hintLines('knowledge')).toEqual({ memory: '', knowledge: KNOWLEDGE_HINT })
-    expect(hintLines('both')).toEqual({ memory: MEMORY_HINT, knowledge: KNOWLEDGE_HINT })
+describe('hintText', () => {
+  it('renders the one line on a hit, and nothing on a miss', () => {
+    expect(hintText(true)).toBe(RELEVANCE_HINT)
+    expect(hintText(false)).toBe('')
   })
 
-  it('names the store\'s own tool and is authored by the plugin', () => {
+  it('names the cross-store tool and is authored by the plugin', () => {
     // The tool name is what makes the line actionable; the author prefix is what keeps it from
     // reading as something the USER said, since the harness injects this as a user-role snapshot.
-    expect(MEMORY_HINT).toContain('mem_recall')
-    expect(KNOWLEDGE_HINT).toContain('kb_query')
-    for (const line of [MEMORY_HINT, KNOWLEDGE_HINT]) expect(line).toContain('[avantf-mem 插件]')
-  })
-
-  it('does not cross the two stores: the memory line never names kb_query and vice versa', () => {
-    expect(MEMORY_HINT).not.toContain('kb_query')
-    expect(KNOWLEDGE_HINT).not.toContain('mem_recall')
+    expect(RELEVANCE_HINT).toContain('kb_query')
+    expect(RELEVANCE_HINT).toContain('[avantf-mem]')
+    // `mem_recall` is the memory-only ACTION tool (chain / probe / reason / contradict). The line
+    // must not send the model to a second, overlapping retrieval — that is how the same facts came
+    // back twice.
+    expect(RELEVANCE_HINT).not.toContain('mem_recall')
   })
 })
 

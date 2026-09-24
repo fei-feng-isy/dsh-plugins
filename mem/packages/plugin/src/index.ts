@@ -20,7 +20,7 @@ import { join } from 'node:path'
 // in the bundle — the service itself is the host's.
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { buildPromptSections, promptFileSpecs, promptTextWarnings } from './prompt.js'
-import { hintLines, messageText } from './hints.js'
+import { hintText, messageText } from './hints.js'
 import z from '@deepseek-ai/schemastery'
 import { defineTool, type GenericCallView, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
@@ -659,40 +659,40 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     `prompt files: ${promptDir} (${loadedPrompts.map((entry) => `${entry.file}:${entry.source}`).join(', ')})`,
   )
 
-  // The CONDITIONAL hints, one contribution per store (DESIGN §12). Recomputed synchronously the
-  // moment the agent is handed a message, so they are in place before THIS step's prompt is
-  // assembled: the provider below cannot await, which is exactly why the probe is the lexical one
-  // (`@avantf/mem`'s `relevance` — the semantic leg needs an encode and would land a step late).
+  // The CONDITIONAL hint, ONE contribution (DESIGN §12). Recomputed synchronously the moment the
+  // agent is handed a USER message, so it is in place before THIS step's prompt is assembled: the
+  // provider below cannot await, which is exactly why the probe is the lexical one (`@avantf/mem`'s
+  // `relevance` — the semantic leg needs an encode and would land a step late).
   const hints = new WeakMap<object, RelevanceHit>()
   ctx.on('agent/inbox/inserted', (payload: { agent?: object; message?: unknown }) => {
     const agent = payload.agent
     if (agent === undefined) return
+    // Only what the USER sent moves the verdict. The inbox also carries this plugin's own wake-ups
+    // and other plugins' notices; probing those would let a "工作 n1 已结束" wake rewrite a hint
+    // that claims to be about the user's last message.
+    if ((payload.message as { source?: { kind?: string } } | null)?.source?.kind !== 'user') return
     const text = messageText(payload.message)
     // Never let a probe failure reach the event bus: a missing hint is harmless (the usage
     // sections still tell the model to query), a throwing listener is only log noise.
     try {
-      hints.set(agent, text === '' ? 'none' : rt.relevance(text))
+      hints.set(agent, text !== '' && rt.relevance(text))
     } catch {
-      hints.set(agent, 'none')
+      hints.set(agent, false)
     }
   })
-  for (const [name, order, store] of [
-    ['avantf:memory-hint', 130, 'memory'],
-    ['avantf:knowledge-hint', 131, 'knowledge'],
-  ] as const) {
-    ctx.systemPrompt.context({
-      name,
-      order,
-      // The assembly scope IS the agent object (`dsh-agent`'s `assembleContextFor` passes
-      // `scope: agent`), so keying by it keeps two sessions from seeing each other's hint. No
-      // state for this agent (or `none`) renders as empty text, which contributes nothing.
-      text: (context) => {
-        const hit = context.scope === undefined ? undefined : hints.get(context.scope)
-        return hit === undefined ? '' : hintLines(hit)[store]
-      },
-    })
-    logger.info(`prompt context registered: ${name} (order ${String(order)})`)
-  }
+  ctx.systemPrompt.context({
+    name: 'avantf:mem-hint',
+    order: 130,
+    // The assembly scope IS the agent object (`dsh-agent`'s `assembleContextFor` passes
+    // `scope: agent`), so keying by it keeps two sessions from seeing each other's hint. No state
+    // for this agent (or a false verdict) renders as empty text, which contributes nothing.
+    text: (context) => {
+      const hit = context.scope === undefined ? undefined : hints.get(context.scope)
+      return hit === undefined ? '' : hintText(hit)
+    },
+  })
+  logger.info('prompt context registered: avantf:mem-hint (order 130)')
+
 
   // Corpus reconciliation, done PRECISELY rather than on a timer or a watcher: the agent reaches
   // the corpus through tool calls, so a finished tool call is the moment to ask "did anything under

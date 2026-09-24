@@ -192,9 +192,10 @@ export interface AvantfRuntime {
   query(req: QueryRequest): Promise<RecallResult>
   /**
    * Plugin-internal, NOT a tool and not model-facing: does either store already hold something
-   * relevant to `text`? One closed answer (`store/lexical.ts`) so the bar lives in exactly one
-   * place instead of the caller re-deriving it from two counters. Synchronous on purpose — the
-   * caller renders it into a prompt provider that cannot await (DESIGN §12).
+   * relevant to `text`? A boolean (`store/lexical.ts`) because the one tool the hint names
+   * (`kb_query`) retrieves from both stores, so "which one matched" changes no downstream decision.
+   * Synchronous on purpose — the caller renders it into a prompt provider that cannot await
+   * (DESIGN §12).
    */
   relevance(text: string): RelevanceHit
   shutdown(): void
@@ -271,11 +272,10 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
     relevance(text: string): RelevanceHit {
       // The closure consts, not `this`: this method takes no `this` and must not depend on the
       // literal's inferred shape.
-      // `stopAt = 2` because `looksRelevant` asks exactly that: the two probes otherwise run up to
-      // 24 `LIMIT 1` FTS lookups each, on the SYNCHRONOUS path that assembles the prompt.
-      const inMemory = looksRelevant(memory.lexicalProbe(text, 2))
-      const inKnowledge = looksRelevant(knowledge.lexicalProbe(text, 2))
-      return inMemory && inKnowledge ? 'both' : inMemory ? 'memory' : inKnowledge ? 'knowledge' : 'none'
+      // `stopAt = 2` because `looksRelevant` asks exactly that: the probes otherwise run up to
+      // 24 `LIMIT 1` FTS lookups each, on the SYNCHRONOUS path that assembles the prompt. The `||`
+      // is a real short-circuit: a memory hit answers the question without probing knowledge at all.
+      return looksRelevant(memory.lexicalProbe(text, 2)) || looksRelevant(knowledge.lexicalProbe(text, 2))
     },
     async remember(req: RememberRequest) {
       switch (req.action) {
