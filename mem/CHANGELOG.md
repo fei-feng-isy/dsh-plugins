@@ -4,6 +4,8 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-28
+
 ### Changed（条件提示合并为一条，判定塌成布尔）
 - **记忆 / 知识两个条件上下文合并成一个** `avantf:mem-hint`（order 130）：`kb_query` 本身就是跨库检索
   （文档切片 + 记忆事实），两库任意一侧命中就渲染同一句
