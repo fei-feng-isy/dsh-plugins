@@ -15,6 +15,18 @@ async function registeredNames(): Promise<readonly string[]> {
   return mounted.registered.map((entry) => entry.name)
 }
 
+/**
+ * The `agent/created` payload this plugin's listener answers.
+ *
+ * dsh 0.1.7 made `source` a REQUIRED field of that event; the 0.1.5 line declares none. The payload
+ * is therefore passed whole as `never`, the same escape this file already used for the agent: the
+ * listener reads only `agent`, and a literal that satisfies one generation's payload type is an
+ * excess-property error on the other.
+ */
+function created(agent: unknown): never {
+  return { agent, source: 'startup' } as never
+}
+
 describe('the face table', () => {
   it('classifies every registered tool into exactly one face', async () => {
     // A new tool must be placed deliberately: this fails until it is named on one side.
@@ -69,7 +81,7 @@ describe('the worker face at dispatch', () => {
 describe('the owner face', () => {
   it('restricts the executor tools on the agent when it appears', async () => {
     const mounted = await mount()
-    mounted.ctx.emit('agent/created', { agent: mounted.owner as never })
+    mounted.ctx.emit('agent/created', created(mounted.owner))
 
     expect(mounted.restrictions).toHaveLength(1)
     expect(mounted.restrictions[0]?.agentId).toBe('owner')
@@ -78,15 +90,15 @@ describe('the owner face', () => {
 
   it('applies that face once, not on every event', async () => {
     const mounted = await mount()
-    mounted.ctx.emit('agent/created', { agent: mounted.owner as never })
-    mounted.ctx.emit('agent/created', { agent: mounted.owner as never })
+    mounted.ctx.emit('agent/created', created(mounted.owner))
+    mounted.ctx.emit('agent/created', created(mounted.owner))
     expect(mounted.restrictions).toHaveLength(1)
   })
 
   it('leaves a worker alone: its face rides the dispatch request instead', async () => {
     const mounted = await mount()
     const worker = agent('work-1', { origin: 'subagent', delegationDepth: 1 })
-    mounted.ctx.emit('agent/created', { agent: worker as never })
+    mounted.ctx.emit('agent/created', created(worker))
     expect(mounted.restrictions).toEqual([])
   })
 

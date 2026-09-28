@@ -28,7 +28,7 @@ import type {
   TypertCodec,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { TypertContribution, TypertSchema } from '@deepseek-ai/dsh-typert-registry/types'
+import type { TypertContribution } from '@deepseek-ai/dsh-typert-registry/types'
 // The registry package augments TypertRegistryContract (host register) from its
 // main entry; import the module type so the augmentation joins the program.
 import type {} from '@deepseek-ai/dsh-typert-registry'
@@ -217,35 +217,41 @@ export const clientContribution: TypertRemoteContribution = {
 /**
  * One schema entry for the host registry.
  *
- * Same dual-member reason as {@link strict}: 0.1.6's registry calls `schema.create()` and rejects an
- * entry without it, while 0.1.5 only reads `schema`. The registry's own type differs between the two
- * (0.1.5 has no `create` field at all), so the shape is declared structurally here and the value is
- * simply assignable to either revision's `TypertSchema`.
+ * Declared STRUCTURALLY rather than by importing the registry's own type, because that type moved
+ * under us: 0.1.5 has `TypertSchema{name, schema}` and 0.1.6+ has `TypertSchemaFactory{name, create}`
+ * (0.1.7 dropped `TypertSchema` from the module altogether). Carrying BOTH members is what lets one
+ * artifact register on either generation — 0.1.5 reads `schema`, 0.1.6+ calls `create()` — so the
+ * shape is named here and the value is structurally assignable to either revision's entry type.
  */
 interface DeclaredSchema {
   readonly name: string
-  readonly schema: TypertSchema['schema']
-  readonly create: () => TypertSchema['schema']
+  readonly schema: z.ZodType
+  readonly create: () => z.ZodType
 }
 
-/** Declare one registered wire schema: the factory 0.1.6 calls, plus the schema 0.1.5 reads. */
-function declared(name: string, schema: TypertSchema['schema']): DeclaredSchema {
+/** The zod schema a strict codec carries, whichever generation's codec type is in play. */
+function codecSchema(codec: unknown): z.ZodType {
+  // Our own `strict()` always puts `schema` on the value, so this is the local schema even when the
+  // HOST's `TypertCodec` no longer names that member (0.1.7 removed it from the type; the value a
+  // plugin builds still carries it, which is exactly what keeps 0.1.5 hosts validating).
+  return (codec as { readonly schema: z.ZodType }).schema
+}
+
+/** Declare one registered wire schema: the factory 0.1.6+ calls, plus the schema 0.1.5 reads. */
+function declared(name: string, schema: z.ZodType): DeclaredSchema {
   return { name, schema, create: () => schema }
 }
 
 /**
  * Host face: registered by the host half through `ctx.typert.register()`.
  *
- * The schema assertions name `TypertSchema['schema']` — the FIELD they are assigned to — rather
- * than this package's own `z.ZodType`. There are two PHYSICALLY different zod copies in play —
- * the workspace's (root catalog `zod: 4.6.5`, the one the plugin compiles against) and the one
- * inside the installed harness build — and two copies of the same major still have incompatible
- * type identities (the single-`zod` rule in the root `AGENTS.md` is the same lesson), so a
- * cast to the local `z.ZodType` could never be assignable and the annotation said nothing. Never
- * write a version number here again: it moves with the catalog, and a stale pair sends the next
- * reader to reason from the wrong premise. Through
- * `TypertSchema['schema']` the assertion is at least against the type the field actually
- * requires, and a future zod alignment (which would make the cast unnecessary) shows up here.
+ * The schema values are named `z.ZodType` — this package's own zod — not the registry's field type,
+ * for two reasons. There are two PHYSICALLY different zod copies in play (the workspace catalog's and
+ * the one inside the installed harness build), so no imported field type can be both correct and
+ * stable; and the registry's field type is generation-specific (`TypertSchema['schema']` in 0.1.5,
+ * `TypertSchemaFactory['create']`'s return in 0.1.6+, the name gone in 0.1.7), so naming it is what
+ * broke this file's compilation on 0.1.7. The two copies are structurally identical, which is why the
+ * declared entries stay assignable to whichever entry type the installed host declares.
  */
 export const hostContribution: TypertContribution = {
   package: PACKAGE,
@@ -253,11 +259,11 @@ export const hostContribution: TypertContribution = {
   schemas: descriptors.flatMap((descriptor): DeclaredSchema[] => [
     ...descriptor.parameters.map(parameter => declared(
       `${descriptor.method}${parameter.name}`,
-      (parameter.codec as Extract<TypertCodec, { mode: 'strict' }>).schema as unknown as TypertSchema['schema'],
+      codecSchema((parameter.codec as Extract<TypertCodec, { mode: 'strict' }>)),
     )),
     declared(
       `${descriptor.method}Result`,
-      (descriptor.result as Extract<TypertCodec, { mode: 'strict' }>).schema as unknown as TypertSchema['schema'],
+      codecSchema((descriptor.result as Extract<TypertCodec, { mode: 'strict' }>)),
     ),
   ]),
   model: {

@@ -8,7 +8,7 @@
  * does not retry within the session, so the panel stays blank while every host-side gate is green.
  *
  * That is not hypothetical: dsh 0.1.6 dropped `SessionSnapshot.queue`, and the declared peer range
- * (`^0.1.5-rc.2`) admits 0.1.6. The compat gate covers the host half only — services, typert faces,
+ * (`^0.1.5-rc.2 || ^0.1.7-rc.2`) admits 0.1.6. The compat gate covers the host half only — services, typert faces,
  * the version table — so the browser half's seat props need their own guard, and it is this file:
  * every field read off a seat hook goes through a reader, and an absent field yields a NEUTRAL
  * constant (not a fresh value per render, so the derived revision stays stable instead of flapping).

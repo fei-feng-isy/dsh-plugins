@@ -203,11 +203,15 @@ describe('the typert registry probe', () => {
       .toEqual({ ran: true, passed: true, problems: [] })
 
     // A codec the host cannot accept is refused WITH a reason: the probe really did hand it over.
-    // (Which member it complains about is the host's business, so the assertion stays portable.)
+    // BOTH members go: which one this host checks MOVED (0.1.5 reads `schema`, 0.1.6+ calls
+    // `create`, 0.1.7 dropped `schema` from its codec type), so stripping only the older member is
+    // accepted by the newer host and this assertion would pass for the wrong reason. Which member
+    // the host *complains* about stays its business — the assertion below remains portable.
     const broken = buildWireProbe(true)
     const outcome = probeTypertRegistry(typert, PACKAGE, () => {
       const contribution = broken() as { invocations: { parameters: { codec: Record<string, unknown> }[] }[] }
       delete contribution.invocations[0]?.parameters[0]?.codec['schema']
+      delete contribution.invocations[0]?.parameters[0]?.codec['create']
       return contribution
     })
     expect(outcome.ran).toBe(true)

@@ -50,17 +50,20 @@ release-check `note:`，不是硬失败——checkout 领先于 pin 是重新对
 
 **对旧宿主（区间下限）的跨版本门**：上面所有 LOCAL 步骤都只对着**这台机器**装的 dsh，所以"这份产物在更旧的
 宿主上还能不能跑"从新机器上看不出来——它要等到某个运维真的装了旧版才暴露，而那是最贵的发现时机。
-`pnpm check:old-dsh` 把这件事变成一条命令：从插件自己的 dsh peer 区间取**下限**（当前 `0.1.5-rc.2`），在临时目录
+`check:old-dsh` 把这件事变成一条命令：从插件自己的 dsh peer 区间取**下限**（当前 `0.1.5-rc.2`），在临时目录
 装一份**全部钉在该版本**的闭包（`cordis` / `schemastery` 钉在本机当前链接的版本，好让 A/B 只差 dsh 包本身），
-用 `npm_config_prefix` 让 `link-dsh` 指向它，然后跑同样三步——`link-dsh` → `typecheck:dsh` → `build:dsh`
-（含 `test:dsh` 与 mount smoke）——最后**无论成败都恢复现场**（重新 link 已安装的 dsh 并重建产物，避免把产物留在
-"对下限编译"的状态）。闭包缓存在 `$TMPDIR/avantf-old-dsh-<floor>`，重复跑不重新下载。
+用 `npm_config_prefix` 让 `link-dsh` 指向它，然后跑该包的 LOCAL 步骤——`link-dsh` → `typecheck:dsh` →
+`build:dsh`（含 `test:dsh` 与 mount smoke）——最后**无论成败都恢复现场**（重新 link 已安装的 dsh 并重建产物，
+避免把产物留在"对下限编译"的状态）。闭包缓存在 `$TMPDIR/avantf-old-dsh-<floor>`，重复跑不重新下载。
+实现是**工作区共用**的（`scripts/check-old-dsh.mjs <base|mem|work>`），并且已经是 base / mem / work 三个
+`release:check` 的**最后一步**——它要重新链接并重建，所以必须排在 `pack` 之后。
 
 ```bash
-pnpm check:old-dsh                              # 下限取自插件的 peer 区间
+pnpm check:old-dsh                              # 等价于 node ../scripts/check-old-dsh.mjs mem
 pnpm check:old-dsh --list                       # 只打印下限与各 peer 区间
 pnpm check:old-dsh --fresh                      # 重装缓存的闭包
-pnpm check:old-dsh --floor 0.1.5-rc.2           # 显式指定下限
+pnpm check:old-dsh --floor 0.1.5-rc.2           # 显式指定下限（也可用来看某个更高版本，如 0.1.7-rc.2）
+# 另外两组：node ../scripts/check-old-dsh.mjs base | work
 ```
 
 改提示层、加工具、动门禁时值得顺手跑一次：**区间是声明，这条命令是证据**。另外 `test/provision.spec.ts` 的

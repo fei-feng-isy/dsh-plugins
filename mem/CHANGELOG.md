@@ -19,17 +19,31 @@ All notable changes to `avantf-mem` are documented here.
   `source.kind === 'user'` 的插入不再改写提示（此前一条"工作 n1 已结束"的唤醒会改写"与上条用户消息
   相关"的判定）。
 
-### Added（跨版本门：对区间下限跑 LOCAL 三件套）
-- **`pnpm check:old-dsh`**（`scripts/check-old-dsh.mjs`）：从插件自己的 dsh peer 区间取**下限**、
-  在临时目录装一份全部钉在该版本的 dsh 闭包、用 `npm_config_prefix` 让 `link-dsh` 指向它，然后跑
-  `link-dsh` → `typecheck:dsh` → `build:dsh`（含 `test:dsh` 与 mount smoke），**无论成败都恢复现场**。
-  LOCAL 门禁原本只对着本机装的 dsh，所以"新改动是否偷偷要求了更新的宿主"要等到运维装了旧版才暴露；
-  这条命令把发现提前到本地（实测 `0.1.5-rc.2` 下限下：typecheck / 116 单测 / 26 个 peer spec /
-  mount smoke 全绿）。缓存 `$TMPDIR/avantf-old-dsh-<floor>`，支持 `--list` / `--fresh` / `--floor`。
+### Added（跨版本门：对区间下限跑 LOCAL 步骤）
+- **`pnpm check:old-dsh`**（工作区根的 `scripts/check-old-dsh.mjs <base|mem|work>`；mem 侧入口
+  `pnpm -C mem check:old-dsh`）：从插件自己的 dsh peer 区间取**下限**、在临时目录装一份全部钉在该版本的
+  dsh 闭包、用 `npm_config_prefix` 让 `link-dsh` 指向它，然后跑该包的 LOCAL 步骤
+  （`link-dsh` → `typecheck:dsh` → `build:dsh`，含 `test:dsh` 与 mount smoke），**无论成败都恢复现场**。
+  已作为**最后一步挂进 base / mem / work 三个 `release:check`**（它要重新链接并重建产物，所以必须排在
+  `pack` 之后）。LOCAL 门禁原本只对着本机装的 dsh，"新改动是否偷偷要求了更新的宿主"要等运维装了旧版才
+  暴露；这条命令把发现提前到本地（实测 `0.1.5-rc.2` 下限下三个包全绿）。缓存 `$TMPDIR/avantf-old-dsh-<floor>`，
+  支持 `--list` / `--fresh` / `--floor`。
 - **`test/provision.spec.ts` 的 healthy-host 用例改为显式构造**（`declared = runtime`，新增 `HEALTHY_SPEC`）：
   src 运行时读不到 `lib/dsh-build.json`，`declared` 会回退到 peer 区间**下限**，那条用例于是隐含假设
-  "本机装的 dsh 恰好等于下限"——只在区间刚为该版本抬过时成立，换台机器就变红（本次在 rc.3 机器上实测红、
-  在 rc.2 下限下实测绿），而红的原因不是插件有问题。
+  "本机装的 dsh 恰好等于下限"——只在区间刚为该版本抬过时成立，换台机器就变红（在 rc.3 机器上实测红、
+  在下限 rc.2 下实测绿），而红的原因不是插件有问题。
+
+### Fixed（dsh 0.1.7：Typert 契约移动 + peer 区间不含 0.1.7-rc）
+- **wire face 不再 import registry 的 schema 类型**：0.1.7 把 `TypertSchema{name,schema}` 换成
+  `TypertSchemaFactory{name,create}`、并从 `dsh-typert-registry/types` 移除了前者，同一代里 `TypertCodec`
+  也去掉了 `.schema` 成员——`src/remote.ts` 因此在 0.1.7 上编译失败（`TS2305` + 两处 `TS2339`）。现在按
+  work 的既有做法**结构化声明** entry（两个成员都带：0.1.5 读 `schema`、0.1.6+ 调 `create()`），schema 值
+  用本包自己的 `z.ZodType`，从 codec 上取 schema 也改为本地访问器；host 的 `TypertCodec` 类型里还有没有
+  `schema` 这个名字，不再影响本包编译。
+- **dsh peer 区间放宽为 `^0.1.5-rc.2 || ^0.1.7-rc.2`**：按 semver 的预发布规则，`^0.1.5-rc.2` **不接受**
+  `0.1.7-rc.2`（而这正是 registry 上的 `latest`），于是插件实际能跑在 0.1.7-rc 宿主上、声明里却写着
+  "不支持"（安装期表现为 unmet peer 告警）。disjunction 同时保留 0.1.5 线与 0.1.7-rc 线；`floorOf` 仍取
+  `0.1.5-rc.2`，跨版本门的语义不变。
 
 ## [0.2.0] - 2026-09-24
 

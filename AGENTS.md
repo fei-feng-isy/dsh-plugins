@@ -137,7 +137,8 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | `pnpm guard` | 每棵插件树只够得到 base 与自己的包（①不许 import 别棵树 ②相对路径不许出树 ③产物里不许按值 import base ④其余 `@avantf/*` 必须是本树自己的） |
 | `pnpm release:check` | 可发布集合恰好那三个、peer 是 required 且够宽、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base |
 | `pnpm proof:base-swap[:mount]` | 产物里没有静态 base import / 内联 kit；**被替换的** base 仍能提供提示词读写、根解析与接口门禁 |
-| `pnpm release:check:base\|:mem\|:work` | 各包自己的 typecheck → build → test → pack |
+| `pnpm release:check:base\|:mem\|:work` | 各包自己的 typecheck → build → test → pack，**最后一步**是跨版本门 |
+| `pnpm check:old-dsh <base\|mem\|work>` | 在插件声明的 dsh peer 区间**下限**上重跑该包的 LOCAL 步骤（链接 → typecheck → build，含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
 
 **改动 `base/**` 之后两个插件都要回归**（base 自己的测试不会走到挂载）：
 

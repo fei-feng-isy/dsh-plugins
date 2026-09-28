@@ -19,6 +19,9 @@ const steps = [
   ['build', bin('tsc'), ['-p', 'tsconfig.json']],
   ['test', bin('vitest'), ['run']],
   ['pack', node, [join(repo, 'scripts', 'pack.mjs')]],
+  // LAST on purpose: it relinks to the oldest dsh the family declares, re-runs the local steps
+  // against it, and restores the machine (relink + rebuild) — so it must not run before `pack`.
+  ['old-dsh gate (LOCAL: the declared dsh floor)', node, [join(repo, '..', '..', 'scripts', 'check-old-dsh.mjs'), 'base']],
 ]
 
 for (const [label, command, args] of steps) {

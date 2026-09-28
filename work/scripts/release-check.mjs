@@ -33,6 +33,10 @@ const steps = [
   ],
   ['client smoke', process.execPath, [join(repo, 'scripts', 'client-smoke.mjs')], repo],
   ['pack', process.execPath, [join(repo, 'scripts', 'pack-plugin.mjs')], repo],
+  // LAST on purpose: it relinks to the OLDEST dsh the plugin's own peer range declares, re-runs the
+  // plugin's local steps against it, and restores the machine (relink + rebuild) — so it must not
+  // run before the steps above, whose artifact is the one this checkout is built from.
+  ['old-dsh gate (LOCAL: the declared dsh floor)', process.execPath, [join(repo, '..', 'scripts', 'check-old-dsh.mjs'), 'work'], repo],
 ]
 
 for (const [label, command, args, cwd] of steps) {

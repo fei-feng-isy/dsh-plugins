@@ -291,6 +291,10 @@ const STEPS = [
     ['scripts/link-dsh.mjs']],
   ['plugin typecheck (LOCAL: the installed dsh)', 'pnpm', ['typecheck:dsh']],
   ['plugin build + mount smoke (LOCAL: the installed dsh)', 'pnpm', ['build:dsh']],
+  // LAST on purpose: it relinks to the OLDEST dsh the plugin's own peer range declares, re-runs the
+  // plugin's local steps against it, and restores the machine (relink + rebuild) — so it must not
+  // run before the steps above, whose artifact is the one this checkout is built from.
+  ['old-dsh gate (LOCAL: the declared dsh floor)', 'pnpm', ['check:old-dsh']],
 ]
 
 const allowUncut = process.argv.includes('--allow-uncut')
