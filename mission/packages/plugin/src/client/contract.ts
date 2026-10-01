@@ -33,6 +33,11 @@ export interface MissionTreeViewData {
 
 export interface MissionSnapshot {
   readonly trees: readonly MissionTreeViewData[]
+  /**
+   * A version-skew note from the host half — set when the payload's `wire` marker is absent (older
+   * host) or unknown (newer host). The trees are still rendered: the marker is a note, not a failure.
+   */
+  readonly skew?: string
 }
 
 export interface MissionSnapshotState {

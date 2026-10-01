@@ -39,7 +39,7 @@ import {
 } from '@avantf/mission-core'
 import { workDomain, TREES_TABLE } from './domain.js'
 import { createLogger, type MissionLogger } from './log.js'
-import { NAMESPACE } from './wire.js'
+import { NAMESPACE, SNAPSHOT_WIRE_VERSION } from './wire.js'
 import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createTreeStore, type TreesTable } from './store.js'
 
@@ -944,10 +944,14 @@ export class AvantfMissionHost extends TypertRemoteService {
    * Everything the "任务" view renders for one session: one Remote method, so the client makes one call.
    * The session id IS a parameter because a Remote invocation carries no caller identity; the trust
    * model is "the local UI asks for the session it is showing", in the user's own host process.
+   *
+   * `wire` is the panel's version marker (see `wire.ts`): the client reads it to say "the two halves
+   * are out of step" instead of blanking the panel. `trees` keeps its shape, so an older client that
+   * has never heard of `wire` simply drops the extra key.
    */
   @Remote('snapshot')
-  snapshot(args: { sessionId?: string }): Promise<{ trees: readonly TreeView[] }> {
-    return Promise.resolve({ trees: this.treesForSession(args.sessionId) })
+  snapshot(args: { sessionId?: string }): Promise<{ wire: number; trees: readonly TreeView[] }> {
+    return Promise.resolve({ wire: SNAPSHOT_WIRE_VERSION, trees: this.treesForSession(args.sessionId) })
   }
 
   /**

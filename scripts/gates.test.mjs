@@ -25,6 +25,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { baseDependencyProblems, judgeDshLines } from './lib/gates.mjs'
+import { execToolSync } from './lib/win-spawn.mjs'
 import { groupWorkspaceTargets, workspaceTargets, withWorkspaceVersions } from './lib/versions.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -316,7 +317,7 @@ function loadSemver() {
   }
   candidates.push(join(workspace, 'node_modules', 'semver'))
   try {
-    const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim()
+    const globalRoot = execToolSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim()
     candidates.push(join(globalRoot, '@deepseek-ai/dsh', 'node_modules', 'semver'))
   } catch {}
   for (const candidate of candidates) {

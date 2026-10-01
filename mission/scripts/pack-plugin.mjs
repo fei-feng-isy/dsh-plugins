@@ -20,11 +20,11 @@
  * Run `pnpm build:dsh` first (this script never builds). `--mount` needs the installed dsh
  * (`npm i -g @deepseek-ai/dsh`), the peers a real profile resolves.
  */
-import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { withWorkspaceVersions } from '../../scripts/lib/versions.mjs'
+import { spawnToolSync } from '../../scripts/lib/win-spawn.mjs'
 import { assertCheckout, assertTarball, clearTarballs, mountAllVariants, parsePackArgs, report } from '../../scripts/lib/pack-plugin.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -69,7 +69,7 @@ console.log(`\n▶ pack ${manifest.name}`)
 // their version MATERIALIZED around this call and lose it again right after, so a mission pack never
 // stamps its version onto mem's manifests (the M7 defect).
 const result = withWorkspaceVersions(resolve(repo, '..'), manifest.version, () =>
-  spawnSync('pnpm', ['pack', '--pack-destination', outDir], { cwd: pluginDir, stdio: 'inherit', env: process.env }), { group: 'mission' })
+  spawnToolSync('pnpm', ['pack', '--pack-destination', outDir], { cwd: pluginDir, stdio: 'inherit', env: process.env }), { group: 'mission' })
 if (result.status !== 0) problems.push(`${manifest.name}: npm pack failed`)
 
 const tarballs = readdirSync(outDir).filter((file) => file.endsWith('.tgz'))

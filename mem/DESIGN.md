@@ -267,7 +267,7 @@ DSH 的 Typert API 已经在我们脚下动过一次（`TypertSchema { schema }`
 
 **设施层面的现状另见 [docs/PROVISIONING.md](docs/PROVISIONING.md)**：item 清单、两阶段启动、受管根与下载闸、legacy 路径与"迁移已有机器"的配方都在那里；三层架构、provider 契约、发布锁与状态合并等**机制**在底座自己的 `docs/DESIGN.md`（`@avantf/dsh-plugin-base`）——本仓不复制。
 
-**依赖与发布顺序**：`@avantf/dsh-plugin-base` 是**peerDependency**（peer 区间 `>=0.3.0 <1.0.0`，另在 `devDependencies` 里声明同一条 `>=0.3.0 <1.0.0` 以便 `pnpm install` 装上；顺序是**先发 base 再发插件**，插件的发布门禁会断言 registry 上已有落在该区间内的版本），`scripts/link-envinit.mjs`（`pnpm build:dsh` 自动跑）从安装副本 vendor 它零依赖的 `bootstrap`；要就地改底座用 `DSH_ENVINIT=<checkout>` 显式指定。环境初始化框架与兼容门禁现在都在底座**这一个包**里（`@avantf/dsh-envinit` / `@avantf/dsh-compat` 已死，不再发新版本），发布顺序因此是**先发底座、再发插件**：`release-check` 在发布插件前会确认 registry 上已有落在插件 peer 区间内的底座版本。打包 / 投影会拒绝仍带 `link:`/`file:` 的产物（`pack-plugin.mjs` 与 `make-release-tree.mjs`）。底座的 zod peer 放宽到 `>=4.4.3 <5`；`zod` 在**根** `pnpm-workspace.yaml` 的 catalog 里统一成一份（合并后是 `4.6.5`，跟随已安装 dsh 的版本），所以同一份底座既服务本工作区、也服务已安装的 dsh。
+**依赖与发布顺序**：`@avantf/dsh-plugin-base` 是**peerDependency**（peer 区间 `>=0.3.0 <1.0.0`，另在 `devDependencies` 里声明同一条 `>=0.3.0 <1.0.0` 以便 `pnpm install` 装上；顺序是**先发 base 再发插件**，插件的发布门禁会断言 registry 上已有落在该区间内的版本），`scripts/link-envinit.mjs`（`pnpm build:dsh` 自动跑）从安装副本 vendor 它零依赖的 `bootstrap`；要就地改底座用 `DSH_ENVINIT=<checkout>` 显式指定。环境初始化框架与兼容门禁现在都在底座**这一个包**里（`@avantf/dsh-envinit` / `@avantf/dsh-compat` 已死，不再发新版本），发布顺序因此是**先发底座、再发插件**：`release-check` 在发布插件前会确认 registry 上已有落在插件 peer 区间内的底座版本。打包 / 投影会拒绝仍带 `link:`/`file:` 的产物（`pack-plugin.mjs` 与 `make-release-tree.mjs`）。底座的 zod peer 放宽到 `>=4.4.3 <5`；`zod` 在**根** `pnpm-workspace.yaml` 的 catalog 里统一成一份（合并后是 `4.6.5`，跟随已安装 dsh 的版本），所以同一份底座既服务本工作区、也服务已安装的 dsh。**插件自己的 `zod` 也是 required peer**（同一条 `>=4.4.3 <5`，`devDependencies` 用 `catalog:` 让本仓构建与测试有得解析）：运行期用宿主那一份，安装期由包管理器满足；见 §20.11 的实测与理由。
 
 **改共享代码后的回归规矩**：`base/**` 里任何共享逻辑改动，两个插件的完整门禁都要重跑——mem：`pnpm build:dsh` + `node scripts/mount-smoke.mjs`；mission：`pnpm release:check` + mount-smoke。**判据（runtime-base 还是 plugin-local）**：问"这条知识**能不能靠一次底座发布修好**？"——能 → 在运行时从底座取用；不能（只是照抄宿主约定的两三行字面量）→ 可以留在插件里，但必须写明"改它需要发插件"。家族三条硬约束（不变量）：① envinit 式 provision 绝不被 bundle、绝不被插件静态 import；② 底座由框架/宿主提供、按文件 URL 动态加载；③ 发布顺序 base → 两个插件，tarball 不带 `link:`/`file:`。
 
@@ -524,6 +524,8 @@ avantf-mem/
 - **`.default({})` 必须改成 `.prefault({})`**（config 里 10 处）。v4 不仅把 `.default()` 的校验基准改成输出类型，还**不再把默认值过一遍 schema**：`sub.default({})` 现在得到裸 `{}`，而 v3 会填好子 schema 自己的默认值。写成字面量则等于把每一层默认值抄两遍（漂移源），`prefault` 才是等价的。**
 
 **残留**：harness 的 zod（4.6.2）仍是仓库外的另一份 v4，所以 `TypertSchema['schema']` 那句断言保留（§20.10 第 2 条）。要让那句也消失，得把 dsh 变成 workspace 依赖——那是另一个决定。
+
+**2026-10-02 追加：插件的 `zod` 从 `dependencies` 改为 required peer**（`>=4.4.3 <5`，与底座同区间；`devDependencies` 保留 `catalog:` 供本仓构建/测试解析）。判据是"宿主必然提供"：已安装 dsh 自带 `zod@4.6.5`（实测落在 `<globalRoot>/@deepseek-ai/dsh/node_modules/zod`），而作为 dependency 时安装器会把**第二份**放进插件自己的 `node_modules`——两个 v4 副本的 `ZodType` 又会分叉。**下限不照抄就写**：把根 catalog 临时改成 `4.4.3` → `pnpm install --no-frozen-lockfile` → `pnpm -C mem build`、`pnpm -C mem typecheck`、`contract`(51) / `core` / `plugin`(129) 的 `pnpm test` 全绿 → 恢复 catalog `4.6.5` 并重装，`git diff pnpm-workspace.yaml pnpm-lock.yaml` 干净。所以 peer 是 **required**（不是 optional），区间取实测过的那条 `>=4.4.3 <5`。`mission` 的 zod 仍是 optional peer 且零运行期使用，不动。
 
 ### 20.12 第四轮：结果类型入 contract，设置页不再手抄
 

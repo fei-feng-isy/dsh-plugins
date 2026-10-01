@@ -25,8 +25,11 @@ const CSS = `
    (bg-layer-1 = #fff light / #232324 dark): label-primary 18.9:1 and 15.0:1,
    label-secondary 5.8:1 and 10.4:1. Both clear 4.5:1 on both themes; label-tertiary
    (3.7:1 light) is only used for affordances, not for anything that must be read. */
-.avwf-empty, .avwf-error { color: var(--dsw-alias-label-secondary); padding: 8px 2px; line-height: 1.6; }
+.avwf-empty, .avwf-error, .avwf-warn { color: var(--dsw-alias-label-secondary); padding: 8px 2px; line-height: 1.6; }
 .avwf-error { color: var(--dsw-alias-state-error-primary, #d9534f); }
+/* A version-skew note, not a failure: the trees below it are still rendered, so it must not read as
+   the error colour. Same token family as the error, one step softer, with a readable fallback. */
+.avwf-warn { color: var(--dsw-alias-state-warning-primary, #b8860b); }
 /* Item colours come from the same design tokens @avantf/mem-dsh uses for its 记忆 items, so
    the two tabs read as one surface: fill from bg-layer-1, text from label-primary. Both tokens
    are defined by the shell for light and dark; an absent token makes the declaration invalid at

@@ -18,8 +18,10 @@
   `--allow-missing-base` 试跑。
 - 插件把 base 声明为 **required peer**（`>=0.3.0 <1.0.0`）+ `devDependencies` 同一条区间；发布的
   tarball 里绝不出现 `link:`/`file:`；`publishConfig.access` 是 `public`。
-- **只有一份 `zod`**：从根 `pnpm-workspace.yaml` 的 `catalog:` 解析（改 catalog，不改 `package.json`）；
-  base 的 zod peer 保持 `>=4.4.3 <5`，同一份 base 既服务本仓、也服务宿主自带的那份。
+- **只有一份 `zod`**：运行期那份由**宿主**提供——base 与 `@avantf/dsh-mem` 都把 `zod` 声明成 **required peer**
+  `>=4.4.3 <5`（下限已实测跑通），安装期由宿主/profile 满足；本仓自己解析的那份从根 `pnpm-workspace.yaml` 的
+  `catalog:` 来（`contract` 的 `dependencies` 与插件的 `devDependencies`，改 catalog、不改发布区间），免得第二份
+  副本分叉 schema 类型身份。mission 的 zod 是 optional peer 且零运行期使用。
 - **dsh 的启动门按 `peerDependencies` 判插件兼容，不兼容就禁用那一行**（dsh ≥ 0.2.0-rc.2；是禁用而非告警）。
   判定实为 `semver.satisfies(runtime, range, { includePrerelease: true })`（`dsh-app-boot`），该选项把 caret 上界
   写成 `-0`，所以 `^0.2.0-rc.2` = `>=0.2.0-rc.2 <0.3.0-0` **覆盖整条 0.2.x 线**（`0.2.1-rc.1`、0.2.x 正式版都放行）
@@ -140,10 +142,10 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | 命令 | 它证明什么 |
 | --- | --- |
 | `pnpm version:check` | 每个组的版本只记在它的可发布 manifest 里，私有 manifest 不带版本 |
-| `pnpm guard` | 每棵插件树只够得到 base 与自己的包（①不许 import 别棵树 ②相对路径不许出树 ③产物里不许按值 import base ④其余 `@avantf/*` 必须是本树自己的） |
+| `pnpm guard` | 每棵插件树只够得到 base 与自己的包（①不许 import 别棵树 ②相对路径不许出树——唯一例外是工作区共用的 `scripts/lib/` ③产物里不许按值 import base ④其余 `@avantf/*` 必须是本树自己的） |
 | `pnpm release:check` | 可发布集合恰好那三个、peer 是 required 且够宽、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base |
 | `pnpm proof:base-swap[:mount]` | 产物里没有静态 base import / 内联 kit；**被替换的** base 仍能提供提示词读写、根解析与接口门禁 |
-| `pnpm release:check:base\|:mem\|:mission` | 各包自己的 typecheck → build → test → pack，**最后一步**是跨版本门 |
+| `pnpm release:check:base\|:mem\|:mission` | 各包自己的门禁：链接 → 编译 → 类型检查 → 测试 → pack，`old-dsh` 跨版本门**最后**跑（要重新链接并重建）。mem 的顺序是 build 先于 typecheck：它的 `typecheck` 通过产出的 `lib/*.d.ts` 读依赖 |
 | `pnpm check:old-dsh <base\|mem\|mission>` | 在插件声明的 dsh peer 区间**下限**上重跑该包的 LOCAL 步骤（链接 → typecheck → build，含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
 | `pnpm check:dsh-lines` | dsh **已发布**的版本里有没有我们的 peer 声明覆盖不到的（用 dsh 启动门同一份 semver + `includePrerelease: true` 判；有新 minor 线或 dist-tag 落到未覆盖线就退出 1，并给出该补的 `\|\|` 条款） |
 

@@ -32,10 +32,10 @@
  *   pnpm build:dsh --skip-deps     # never touch the engine packages
  *   pnpm build:dsh --no-verify     # skip the mount smoke
  */
-import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnToolSync } from '../../scripts/lib/win-spawn.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
@@ -81,7 +81,7 @@ const mode = flags.has('--fresh') || !compiled ? 'fresh' : 'rebuild'
 function run(label, command, commandArgs, env = process.env) {
   console.log(`\n▶ ${label}`)
   console.log(`  $ ${[command, ...commandArgs].join(' ')}`)
-  const result = spawnSync(command, commandArgs, { cwd: repo, stdio: 'inherit', env })
+  const result = spawnToolSync(command, commandArgs, { cwd: repo, stdio: 'inherit', env })
   if (result.error) throw new Error(`${label}: cannot run ${command} (${result.error.message})`)
   if (result.status !== 0) throw new Error(`${label}: exited with code ${String(result.status)}`)
 }

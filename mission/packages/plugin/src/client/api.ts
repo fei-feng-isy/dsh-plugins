@@ -1,7 +1,7 @@
 /** The client half's data path, kept away from React so the transport edge stays testable.
  * @module @avantf/dsh-mission/client/api
  */
-import { detailResultSchema, snapshotResultSchema } from '../wire.js'
+import { SNAPSHOT_WIRE_VERSION, detailResultSchema, snapshotResultSchema } from '../wire.js'
 import type { MissionNodeDetail, MissionSnapshot } from './contract.js'
 
 /** Safety-net re-read interval; slow on purpose, since the session itself is the primary trigger. */
@@ -123,13 +123,44 @@ function textOf(reason: unknown): string {
   return JSON.stringify(reason)
 }
 
+/**
+ * The version-skew note for one `snapshot` payload, or `undefined` when the two halves agree.
+ *
+ * WHY A NOTE AND NOT A THROW. The host half is loaded ONCE when `dsh web` starts; this bundle is
+ * re-read on every page load. So a rebuilt client routinely talks to an older host, and the ONE thing
+ * the marker must never do is blank the panel: `snapshot` is the entry point every other read hangs
+ * off, and an unrecognised revision usually still carries the fields the panel renders. So an absent
+ * marker ("host predates it") and an unknown one ("host is newer") both come back as a note beside the
+ * tree, never as a failed read.
+ *
+ * `wire` is read off the RAW payload rather than a validated field: the schema accepts any number, and
+ * a payload whose `wire` is missing must not be reported as a shape failure.
+ */
+export function snapshotSkew(value: unknown): string | undefined {
+  const wire = value !== null && typeof value === 'object'
+    ? (value as { wire?: unknown }).wire
+    : undefined
+  if (wire === SNAPSHOT_WIRE_VERSION) return undefined
+  if (wire === undefined) {
+    return `宿主没有回报 wire 版本（它比本客户端旧）：面板可能缺少新字段，重启 dsh web 让两半对齐。`
+      + `（本客户端说 wire=${String(SNAPSHOT_WIRE_VERSION)}）`
+  }
+  return `宿主回报的 wire 版本是 ${String(wire)}，本客户端只认识 ${String(SNAPSHOT_WIRE_VERSION)}：`
+    + '面板继续显示，但两半可能已经错位——重启 dsh web 后再试。'
+}
+
 /** Read one session's trees; throws with the reason when the read cannot be trusted. */
 export async function fetchSnapshot(remote: MissionRemote, sessionId: string): Promise<MissionSnapshot> {
   const { value, error } = unwrap(await remote.snapshot({ sessionId }))
   if (error !== undefined) throw new Error(error)
   const parsed = snapshotResultSchema.safeParse(value)
   if (!parsed.success) throw new Error(skewHint('任务树', issueText(parsed.error)))
-  return { trees: parsed.data.trees as MissionSnapshot['trees'] }
+  // A version skew is a NOTE on a usable snapshot, not a failure: see `snapshotSkew`.
+  const skew = snapshotSkew(value)
+  return {
+    trees: parsed.data.trees as MissionSnapshot['trees'],
+    ...skew === undefined ? {} : { skew },
+  }
 }
 
 /**

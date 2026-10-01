@@ -24,9 +24,9 @@
  * that rejects it would abort the run after another plugin had already been rebuilt. What each plugin
  * accepts is its own business — ask it: `pnpm build:dsh mem --help`.
  */
-import { spawnSync } from 'node:child_process'
 import { join, relative } from 'node:path'
 import { BASE_PACKAGE, discoverBase, discoverPlugins, repoRoot } from './lib/plugins.mjs'
+import { spawnToolSync } from './lib/win-spawn.mjs'
 
 const plugins = discoverPlugins()
 const base = discoverBase()
@@ -107,7 +107,7 @@ const started = Date.now()
 for (const step of steps) {
   const command = ['pnpm', '-C', step.dir, step.script, ...step.flags].join(' ')
   console.log(`\n▶ build:dsh ${step.label}: ${command}`)
-  const result = spawnSync('pnpm', ['-C', join(repoRoot, step.dir), step.script, ...step.flags], {
+  const result = spawnToolSync('pnpm', ['-C', join(repoRoot, step.dir), step.script, ...step.flags], {
     cwd: repoRoot,
     stdio: 'inherit',
     env: process.env,

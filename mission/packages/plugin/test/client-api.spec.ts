@@ -6,6 +6,7 @@
  * costs the most and is hardest to see in a browser.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { SNAPSHOT_WIRE_VERSION, snapshotResultSchema } from '../src/wire.js'
 import {
   POLL_INTERVAL_MS,
   REFRESH_COALESCE_MS,
@@ -16,6 +17,7 @@ import {
   fetchDetail,
   fetchFullResult,
   fetchSnapshot,
+  snapshotSkew,
   startPolling,
   watchChanges,
   type MissionRemote,
@@ -61,6 +63,51 @@ describe('fetchSnapshot', () => {
   it('rejects a payload it cannot recognise', async () => {
     const remote = remoteReturning({ ok: true, value: { nope: true } })
     await expect(fetchSnapshot(remote, 'session-1')).rejects.toThrow('无法识别的数据')
+  })
+})
+
+/**
+ * The `wire` marker on the `snapshot` result. Three combinations, because the two halves update
+ * separately (the bundle per page load, the host per `dsh web` start) and NONE of them may blank the
+ * panel: a skew is a note beside the trees.
+ */
+describe('the snapshot wire version', () => {
+  const tree = { rootId: 'r1', nodes: [], closedAt: null }
+
+  it('both halves carry the version: the trees come back with NO note', async () => {
+    const remote = remoteReturning({ ok: true, value: { wire: SNAPSHOT_WIRE_VERSION, trees: [tree] } })
+    const snapshot = await fetchSnapshot(remote, 'session-1')
+    expect(snapshot.trees[0]?.rootId).toBe('r1')
+    expect(snapshot.skew).toBeUndefined()
+    expect(snapshotSkew({ wire: SNAPSHOT_WIRE_VERSION, trees: [] })).toBeUndefined()
+  })
+
+  it('only the HOST carries it (the client is older): the payload still parses, the key is dropped', () => {
+    // This is literally what the already-shipped older bundle does — its schema predates `wire` and
+    // zod drops the unknown key. Rebuilt here by omitting the marker from today's schema, so the
+    // assertion stays honest if the schema's other fields move.
+    const olderClientSchema = snapshotResultSchema.omit({ wire: true })
+    const parsed = olderClientSchema.safeParse({ wire: SNAPSHOT_WIRE_VERSION, trees: [tree] })
+    expect(parsed.success).toBe(true)
+    expect(parsed.data?.trees[0]?.rootId).toBe('r1')
+  })
+
+  it('only the CLIENT expects it (the host is older): trees PLUS a skew note, not a blank panel', async () => {
+    const remote = remoteReturning({ ok: true, value: { trees: [tree] } })
+    const snapshot = await fetchSnapshot(remote, 'session-1')
+    expect(snapshot.trees[0]?.rootId).toBe('r1')
+    expect(snapshot.skew).toContain('没有回报 wire 版本')
+    expect(snapshot.skew).toContain('重启 dsh web')
+  })
+
+  it('an unrecognised revision is a note on a usable snapshot, never a parse failure', async () => {
+    // The failure this rules out: `z.literal(1)` would fail `safeParse`, `fetchSnapshot` would throw,
+    // and the whole 任务 panel would be an error message even though the trees arrived intact.
+    const remote = remoteReturning({ ok: true, value: { wire: SNAPSHOT_WIRE_VERSION + 1, trees: [tree] } })
+    const snapshot = await fetchSnapshot(remote, 'session-1')
+    expect(snapshot.trees[0]?.rootId).toBe('r1')
+    expect(snapshot.skew).toContain(`wire 版本是 ${SNAPSHOT_WIRE_VERSION + 1}`)
+    expect(snapshot.skew).toContain(`只认识 ${SNAPSHOT_WIRE_VERSION}`)
   })
 })
 

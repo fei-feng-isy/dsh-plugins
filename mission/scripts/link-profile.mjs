@@ -11,11 +11,13 @@
  *
  *   node scripts/link-profile.mjs [--profile <name>] [--check]
  */
-import { execFileSync, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { execToolSync, spawnToolSync } from '../../scripts/lib/win-spawn.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -41,7 +43,7 @@ const installed = join(profileDir, 'node_modules', '@avantf', 'dsh-mission')
 /** The `@deepseek-ai/*` directory of the dsh install the live profile runs. */
 function installedDshPeers() {
   try {
-    const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim()
+    const globalRoot = execToolSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim()
     return join(globalRoot, '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai')
   } catch {
     return undefined
@@ -260,7 +262,7 @@ if (!check) {
   }
 
   console.log(`\n▶ install @avantf/dsh-mission into profile "${profileName}"`)
-  const added = spawnSync(
+  const added = spawnToolSync(
     'dsh',
     ['plugin', '--profile', profileName, 'add', `link:${pluginDir}`],
     { cwd: repo, stdio: 'inherit', env: process.env },

@@ -16,7 +16,6 @@
  *   node scripts/toolchain.test.mjs
  */
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -24,12 +23,14 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { cacheRootFor, fakeDshDir, groupRoots, npmGlobalRoot } from './check-old-dsh.mjs'
+import { spawnToolSync } from './lib/win-spawn.mjs'
 import { judgeTrees } from './boundary-guard.mjs'
 import { discoverGuardTrees, discoverPlugins } from './lib/plugins.mjs'
 import { PRESET_FILES, presetDriftWarning } from '../mem/scripts/check-preset-drift.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+// The tool NAME; `spawnToolSync` picks the platform's launch shape (win32 `cmd.exe /c npm.cmd`).
+const npm = 'npm'
 
 function makeTemp(prefix) {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -90,7 +91,7 @@ test('check-old-dsh: a run of one group deletes only its own scratch roots', () 
 test('check-old-dsh: the fake global root is laid out where `npm root -g` says', () => {
   const prefix = makeTemp('old-dsh-prefix-')
   try {
-    const reported = spawnSync(npm, ['root', '-g'], {
+    const reported = spawnToolSync(npm, ['root', '-g'], {
       encoding: 'utf8', env: { ...process.env, npm_config_prefix: prefix },
     })
     assert.equal(reported.status, 0, `\`${npm} root -g\` must answer: ${reported.stderr ?? ''}`)
@@ -220,7 +221,7 @@ test('boundary-guard: a reverse import from the base is a violation (constructed
 })
 
 test('boundary-guard: the real workspace is clean with the base included', () => {
-  const result = spawnSync(process.execPath, [join(workspace, 'scripts', 'boundary-guard.mjs'), '--verbose'], {
+  const result = spawnToolSync(process.execPath, [join(workspace, 'scripts', 'boundary-guard.mjs'), '--verbose'], {
     cwd: workspace, encoding: 'utf8',
   })
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`

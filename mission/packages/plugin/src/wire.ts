@@ -123,8 +123,22 @@ export const descriptors: readonly InvocationDescriptor[] = [
   direct('watch', z.object({ sessionId: z.string().optional() }), [], { stream: true }),
 ]
 
-/** The `snapshot` result, mirrored by the client-side contract. */
+/**
+ * The `snapshot` result, mirrored by the client-side contract.
+ *
+ * THE VERSION FIELD. `snapshot` is the panel's ONE entry point (every other call is on demand behind a
+ * click), so the version marker lives here and nowhere else: one number that tells the browser half
+ * which host it is talking to, without adding a field to every method's arguments.
+ *
+ * `wire` is a plain optional number, NOT `z.literal(1)`: an unrecognized revision has to reach the
+ * client as a HINT (`client/api.ts` compares it against `SNAPSHOT_WIRE_VERSION`), and a literal would
+ * make `safeParse` fail and blank the whole panel — exactly the degradation the marker exists to
+ * avoid. Absent means "an older host that predates the marker": still readable, with a hint.
+ */
+export const SNAPSHOT_WIRE_VERSION = 1
+
 export const snapshotResultSchema = z.object({
+  wire: z.number().optional(),
   trees: z.array(treeSchema),
 })
 

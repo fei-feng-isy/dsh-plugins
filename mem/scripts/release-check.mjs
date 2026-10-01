@@ -25,11 +25,11 @@
  * tarball-level assertions (self-contained bundle, shipped declaration surface, README/LICENSE,
  * `workspace:`/`catalog:` leftovers, lib strays) run in both checkouts, from one definition.
  */
-import { spawnSync } from 'node:child_process'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findHarness } from '../../scripts/lib/harness-path.mjs'
+import { spawnToolSync } from '../../scripts/lib/win-spawn.mjs'
 import { versionState } from '../../scripts/lib/versions.mjs'
 import { presetDriftWarning } from './check-preset-drift.mjs'
 
@@ -319,7 +319,7 @@ for (const warning of warnings) console.log(`note: ${warning}`)
 const results = []
 for (const [label, command, args] of STEPS) {
   process.stdout.write(`\n=== ${label} ===\n`)
-  const result = spawnSync(command, args, { cwd: repo, stdio: 'inherit', shell: process.platform === 'win32' })
+  const result = spawnToolSync(command, args, { cwd: repo, stdio: 'inherit' })
   results.push([label, result.status === 0])
 }
 

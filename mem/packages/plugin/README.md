@@ -98,6 +98,9 @@ SQLite 绑定的原因：存储层用运行时自带的 `node:sqlite`，它就�
 - 插件的 `@deepseek-ai/*` peer 由宿主提供（profile 上层的运行时解析表），`dsh plugin add` 不会另装一份。
   **不要在 profile 里再装** `cordis` / `schemastery` / `dsh-tools`——两份对象身份会让工具与 typert
   注册表对不上。
+- `zod` 同样是**宿主提供的 required peer**（区间 `>=4.4.3 <5`，宿主的 dsh 自带）：工具的 wire 与参数
+  schema 都用**这一份**。**不要在 profile 里单独装一份 `zod`**——两个副本的 schema 类型身份不同，
+  跨副本传 schema 对象会在运行期对不上。
 
 ## 怎么用
 
@@ -170,8 +173,8 @@ dsh plugin --profile <PROFILE> remove @avantf/dsh-mem
   `memory unavailable` 并给出原因，不会拖垮宿主启动
 - `nodejieba` / `hnswlib-node` / `@huggingface/transformers` 都可选：缺失时分别降级为正则抽取 /
   numpy 向量库 / 纯词法检索
-- 插件自包含：检索与知识引擎在构建时已内联进产物，安装不需要额外的家族包（只要底座，
-  由宿主以 peer 提供）
+- 插件自包含：检索与知识引擎在构建时已内联进产物，安装不需要额外的家族包。宿主提供的 peer 有两个：
+  底座 `@avantf/dsh-plugin-base`（安装时随插件一起装）与 `zod`（宿主的 dsh 自带那份）
 
 ## 从源码构建
 

@@ -13,10 +13,10 @@
  *
  *   pnpm build:dsh [--skip-link] [--no-verify]
  */
-import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnToolSync } from '../../scripts/lib/win-spawn.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const flags = new Set(process.argv.slice(2))
@@ -41,7 +41,7 @@ let failed = false
 /** Run one step; failure is recorded (not thrown) so later diagnostics still run. */
 function run(label, command, args) {
   console.log(`\n▶ ${label}`)
-  const result = spawnSync(command, args, { cwd: repo, stdio: 'inherit', env: process.env })
+  const result = spawnToolSync(command, args, { cwd: repo, stdio: 'inherit', env: process.env })
   if (result.error) {
     console.error(`  cannot run ${command}: ${result.error.message}`)
     failed = true
@@ -59,8 +59,9 @@ if (!skipLink) {
     node,
     [join(repo, 'scripts', 'link-dsh.mjs'), '--runtime'],
   )
-  // The framework is a peer too (and a devDependency, so `pnpm install` fetches it from the
-  // registry): this vendors `bootstrap.js` (the one inlined piece) from that install.
+  // The framework is a peer too, and a devDependency whose range `pnpm-workspace.yaml`'s
+  // `linkWorkspacePackages: true` resolves to the sibling `base/plugin-base` — not to a registry copy.
+  // This vendors `bootstrap.js` (the one inlined piece) from that workspace link.
   run(
     'vendor @avantf/dsh-plugin-base bootstrap (from the install)',
     node,

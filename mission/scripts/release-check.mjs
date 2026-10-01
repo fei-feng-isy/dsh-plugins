@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process'
 import { readdirSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnToolSync } from '../../scripts/lib/win-spawn.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -41,7 +42,7 @@ const steps = [
 
 for (const [label, command, args, cwd] of steps) {
   console.log(`\n▶ ${label}`)
-  const result = spawnSync(command, args, { cwd, stdio: 'inherit', env: process.env })
+  const result = spawnToolSync(command, args, { cwd, stdio: 'inherit', env: process.env })
   if (result.error) {
     console.error(`  cannot run ${command}: ${result.error.message}`)
     process.exit(1)

@@ -35,18 +35,20 @@
  * fails. The machine is restored (relink + rebuild against the installed dsh) even then, so a failed
  * run never leaves a package compiled against the floor.
  */
-import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import { spawnToolSync } from './lib/win-spawn.mjs'
+
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-// [win] A bare `npm` is not spawnable on win32 without a shell: the installed shim is `npm.cmd`, and
-// since the CVE-2024-27980 fix Node refuses to spawn a `.cmd` through the no-shell path. 待 Windows
-// 实机复核.
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+// [win] Bare `npm`/`pnpm` are not spawnable on win32 without a shell (CVE-2024-27980 forbids the
+// no-shell `.cmd` spawn, and naming `npm.cmd` does not help — measured). Every spawn below goes
+// through `scripts/lib/win-spawn.mjs`, which owns the `cmd.exe /c` shape; the names stay bare because
+// `spawnToolSync` is what decides. 待 Windows 实机复核。
+const pnpm = 'pnpm'
+const npm = 'npm'
 
 /** One package's LOCAL steps: `[label, command, args, cwd]`, mirroring its own `release:check`. */
 const GROUPS = {
@@ -120,7 +122,7 @@ export function groupRoots(floor, groupName) {
  * win32 `node_modules`), not this script's to assume. `[win]` 待 Windows 实机复核.
  */
 export function npmGlobalRoot(prefix) {
-  const result = spawnSync(npm, ['root', '-g'], { encoding: 'utf8', env: { ...process.env, npm_config_prefix: prefix } })
+  const result = spawnToolSync('npm', ['root', '-g'], { encoding: 'utf8', env: { ...process.env, npm_config_prefix: prefix } })
   if (result.error !== undefined || result.status !== 0) return undefined
   const root = (result.stdout ?? '').trim()
   return root === '' ? undefined : root
@@ -151,7 +153,7 @@ function floorOf(range) {
 
 function run(label, command, commandArgs, cwd = '.', env = process.env) {
   console.log(`\n▶ ${label}`)
-  const result = spawnSync(command, commandArgs, { cwd: join(workspace, cwd), stdio: 'inherit', env })
+  const result = spawnToolSync(command, commandArgs, { cwd: join(workspace, cwd), stdio: 'inherit', env })
   if (result.error !== undefined) {
     console.log(`  FAIL ${label}: cannot run ${command} (${result.error.message})`)
     return false
@@ -253,7 +255,7 @@ function main(argv = process.argv.slice(2)) {
     writeFileSync(join(setDir, 'package.json'), `${JSON.stringify(project, null, 2)}\n`)
     // Pass 1 gets a tree; pass 2 pins every dsh package in it to the floor. The umbrella's own ranges
     // are `^<floor>`, so npm would otherwise resolve the transitive ones to the newest release.
-    const first = spawnSync(npm, ['i', '--prefix', setDir, '--no-audit', '--no-fund', '--ignore-scripts'], { cwd: setDir, stdio: 'inherit' })
+    const first = spawnToolSync('npm', ['i', '--prefix', setDir, '--no-audit', '--no-fund', '--ignore-scripts'], { cwd: setDir, stdio: 'inherit' })
     if (first.status !== 0) fail(`npm could not install @deepseek-ai/dsh@${floor} (is that release published?)`)
     const overrides = {}
     for (const name of dshPackageNames(join(setDir, 'node_modules'))) overrides[name] = floor
@@ -265,7 +267,7 @@ function main(argv = process.argv.slice(2)) {
     writeFileSync(join(setDir, 'package.json'), `${JSON.stringify({ ...project, overrides }, null, 2)}\n`)
     rmSync(join(setDir, 'node_modules'), { recursive: true, force: true })
     rmSync(join(setDir, 'package-lock.json'), { force: true })
-    const second = spawnSync(npm, ['i', '--prefix', setDir, '--no-audit', '--no-fund', '--ignore-scripts'], { cwd: setDir, stdio: 'inherit' })
+    const second = spawnToolSync('npm', ['i', '--prefix', setDir, '--no-audit', '--no-fund', '--ignore-scripts'], { cwd: setDir, stdio: 'inherit' })
     if (second.status !== 0) fail(`npm could not install the pinned ${floor} closure (see its output above)`)
     for (const [name] of dshPeers) {
       const version = versionFrom(setDir, name)

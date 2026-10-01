@@ -736,6 +736,8 @@ export function MissionTreeView({ useSnapshot, onDeleteTree, loadDetail, loadRes
   return (
     <div className="avwf-root">
       {state.error !== undefined ? <div className="avwf-error">{state.error}</div> : null}
+      {/* Version skew is a NOTE, not a failure: the snapshot still renders below it. */}
+      {state.data?.skew !== undefined ? <div className="avwf-warn">{state.data.skew}</div> : null}
       {failure !== undefined ? <div className="avwf-error">删除失败：{failure}</div> : null}
       {state.loading && state.data === undefined ? <div className="avwf-empty">读取中…</div> : null}
       {/* No empty-state message: a session with no trees shows an empty panel. */}

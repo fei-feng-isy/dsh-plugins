@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RefusalCode } from '@avantf/mission-core'
 import { agent, callTool, executorFor, mount, noteAndSplit } from './mount.js'
-import { clientContribution } from '../src/wire.js'
+import { clientContribution, SNAPSHOT_WIRE_VERSION } from '../src/wire.js'
 import { WORKER_TOOL_DENY } from '../src/faces.js'
 
 /** A mission unit: the child session the engine reserved for one node. */
@@ -720,6 +720,9 @@ describe('the snapshot the 任务 view reads', () => {
     // what matters here is the payload the view renders.
     const snapshot = await mounted.host.snapshot({ sessionId: mounted.owner.id })
     expect(snapshot.trees).toHaveLength(1)
+    // The panel's version marker travels on this ONE payload (see `wire.ts`): an older client drops
+    // the extra key, a newer client reads it to say "the two halves are out of step".
+    expect(snapshot.wire).toBe(SNAPSHOT_WIRE_VERSION)
     const tree = snapshot.trees[0]
     expect(tree?.rootId).toBe(root)
     expect(tree?.closedAt).toBeNull()

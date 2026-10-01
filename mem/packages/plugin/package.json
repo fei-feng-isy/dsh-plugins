@@ -55,7 +55,8 @@
     "@deepseek-ai/dsh-system-prompt": "^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2",
-    "@deepseek-ai/schemastery": "^3.18.0"
+    "@deepseek-ai/schemastery": "^3.18.0",
+    "zod": ">=4.4.3 <5"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -77,8 +78,7 @@
   "dependencies": {
     "exceljs": "catalog:",
     "unpdf": "catalog:",
-    "yaml": "catalog:",
-    "zod": "catalog:"
+    "yaml": "catalog:"
   },
   "optionalDependencies": {
     "@huggingface/transformers": "catalog:",
@@ -99,7 +99,8 @@
     "react-dom": "catalog:",
     "tsdown": "0.22.2",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   },
   "license": "MIT",
   "publishConfig": {

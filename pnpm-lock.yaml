@@ -363,9 +363,6 @@ importers:
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
-      zod:
-        specifier: 'catalog:'
-        version: 4.6.5
     devDependencies:
       '@avantf/dsh-plugin-base':
         specifier: '>=0.3.0 <1.0.0'
@@ -409,6 +406,9 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 2.1.9(@types/node@22.20.4)(lightningcss@1.33.0)
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
     optionalDependencies:
       '@huggingface/transformers':
         specifier: 'catalog:'

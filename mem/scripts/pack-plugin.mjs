@@ -25,13 +25,13 @@
  * assertions describe. `--mount` needs the installed global dsh (the peers a real profile would
  * resolve), exactly like `scripts/link-dsh.mjs`.
  */
-import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { withWorkspaceVersions } from '../../scripts/lib/versions.mjs'
 import { assertCheckout, assertTarball, clearTarballs, mountAllVariants, parsePackArgs, report } from '../../scripts/lib/pack-plugin.mjs'
+import { spawnToolSync } from '../../scripts/lib/win-spawn.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pluginDir = join(repo, 'packages', 'plugin')
@@ -89,7 +89,7 @@ console.log(`\n▶ pnpm pack → ${outDir}`)
 // the default spans every group, so a `mem` pack would briefly stamp its version onto mission's
 // manifests too (the M7 defect).
 const packStatus = withWorkspaceVersions(resolve(repo, '..'), manifest.version, () =>
-  spawnSync('pnpm', ['--filter', manifest.name, 'pack', '--pack-destination', outDir], { cwd: repo, stdio: 'inherit', env: process.env }), { group: 'mem' })
+  spawnToolSync('pnpm', ['--filter', manifest.name, 'pack', '--pack-destination', outDir], { cwd: repo, stdio: 'inherit', env: process.env }), { group: 'mem' })
 if (packStatus.status !== 0) problems.push('pnpm pack failed')
 
 // pnpm names the tarball after the manifest, so the expected path is known rather than guessed.
@@ -104,7 +104,7 @@ problems.push(...assertTarball(config, tarball).problems)
 const notes = []
 if (mount && problems.length === 0) {
   // Peers come from the installed dsh — the same copies a live profile would hand the plugin.
-  const globalRoot = spawnSync('npm', ['root', '-g'], { encoding: 'utf8' }).stdout.trim()
+  const globalRoot = spawnToolSync('npm', ['root', '-g'], { encoding: 'utf8' }).stdout.trim()
   const runtimeSource = join(globalRoot, '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai')
   mountAllVariants({
     tarball,
@@ -138,6 +138,12 @@ if (mount && problems.length === 0) {
         if (!existsSync(from)) { note(`scratch: @deepseek-ai/${name} not found in ${runtimeSource}`); continue }
         symlinkSync(from, join(scratch, 'node_modules', '@deepseek-ai', name))
       }
+      // `zod` is a REQUIRED peer (W5): the plugin's wire codecs use the HOST's copy, or a second copy
+      // forks the schema type identity. A live profile finds it by walking up from the plugin; the
+      // scratch profile has no such parent, so link the installed dsh's copy explicitly.
+      const hostZod = join(globalRoot, '@deepseek-ai', 'dsh', 'node_modules', 'zod')
+      if (!existsSync(hostZod)) note(`scratch: the installed dsh ships no zod at ${hostZod} — the mount may fail`)
+      else symlinkSync(hostZod, join(scratch, 'node_modules', 'zod'))
     },
   })
 }

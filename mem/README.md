@@ -54,7 +54,9 @@
 > "底座缺席时"的降级 fallback；底座 kit 另外导出 `createPluginLogger`、`familyHome` 等，插件可在运行时取用。`scripts/link-envinit.mjs`（`pnpm build:dsh` 会自动跑）
 > 从**安装副本** vendor `bootstrap`；只有要就地联调底座时才用 `DSH_ENVINIT=<checkout>` 显式指定，不再隐式
 > 发现兄弟 checkout。**发布顺序是底座先于插件**；`zod` 由根 `pnpm-workspace.yaml` 的 catalog 统一成一份
-> （`zod: 4.6.5`，跟随已安装 dsh 的版本），底座的 `zod` peer 保持 `>=4.4.3 <5`。改 `base/**` 里的共享代码后，
+> （`zod: 4.6.5`，跟随已安装 dsh 的版本），底座的 `zod` peer 保持 `>=4.4.3 <5`。插件自己也把 `zod` 声明成
+> **required peer**（同一条 `>=4.4.3 <5`，`devDependencies` 用 `catalog:` 供本仓构建与测试解析）：运行期用
+> **宿主那一份**，免得第二份 zod 造成 schema 类型身份分叉（DESIGN §20.11）。改 `base/**` 里的共享代码后，
 > **两个插件的完整门禁都要重跑**（mem：`pnpm build:dsh` + `node scripts/mount-smoke.mjs`；mission：
 > `pnpm release:check` + mount-smoke）；判据是"这条知识能不能靠**一次底座发布**修好"——能就在运行时从底座
 > 取用，不能（只是两三行照抄宿主约定的字面量）可以留在插件里，但要写明"改它需要发插件"。详见
@@ -361,7 +363,7 @@ node packages/cli/lib/index.js query "张伟" --kind all
 | `pnpm bench:indexes` | 索引 A/B 实验台——`docs/PERFORMANCE_REVIEW.md` §5 的依据，含一个被实验证伪的部分索引反例 |
 | `pnpm bench:reinforce` | 读路径写放大——`search`（`track: true`）触发的语句数与 WAL 字节、开/关 `track` 的延迟对比 |
 | `node scripts/mount-smoke.mjs` | 独立挂载自检：真实 Cordis 上下文挂载插件 + 降级挂载（坏 `dataHome`）；peer 恒取自已安装的全局 dsh，期望输出 `MOUNT SMOKE OK` |
-| `node scripts/link-dsh.mjs` | 重建插件的 `@deepseek-ai/*` 软链接，**来源恒为已安装的全局 dsh**（`npm root -g`），让插件与宿主共用同一批 cordis/schemastery 实例；不接受任何模式参数。同时给自带 preset 根发布 manifest stub（`packages/plugin/vendor/dsh-client-preset/packages/client/avantf-dsh-mem/package.json`，指向本插件 `package.json` 的软链） |
+| `node scripts/link-dsh.mjs [--runtime [dir]] [--no-bake]` | 重建插件的 `@deepseek-ai/*` 软链接，**来源恒为已安装的全局 dsh**（`npm root -g`；`--runtime <dir>` 显式换成另一份安装，`--no-bake` 只链接、不写"编译对着谁"的记录），让插件与宿主共用同一批 cordis/schemastery 实例。同时给自带 preset 根发布 manifest stub（`packages/plugin/vendor/dsh-client-preset/packages/client/avantf-dsh-mem/package.json`，指向本插件 `package.json` 的软链） |
 | `node scripts/check-preset-drift.mjs` | 逐个字节比较自带的 8 个 client-preset 文件与 harness checkout；有漂移时列出文件与两侧 revision 并 exit 1，没有 checkout 时什么都不比、exit 0 |
 | `pnpm clean` | 删 `packages/*/{lib,dist}` 与 `node_modules/{.cache,.vite}`；之后 `pnpm build:dsh` 会走首次编译路径 |
 | `pnpm cleanup:dsh [--dry-run\|--yes\|--keep-deps\|--profile <p>]` | 从 dsh profile 卸载插件并清 `cordis.patch.yml`（不动 `~/.avantf`，也不动仓库） |
@@ -557,8 +559,7 @@ rm -rf ~/.avantf/memory ~/.avantf/knowledge ~/.avantf/configs/common.yaml ~/.ava
   `@deepseek-ai/dsh/node_modules/@deepseek-ai/*` 软链）。插件与运行中的 profile 共用同一批
   cordis/schemastery 实例，`ctx.typert.register` 与工具注册表都靠对象身份，链一份而跑另一份会在运行时
   对不上。`pnpm build:dsh` 的第一步就是它，链接保持不动（不再有"构建时切到 checkout、之后再切回"）。
-- 编译**不需要 harness 源码**，也就没有第二种链接来源：`tsc` 与 mount smoke 都对着
-  已安装的 dsh，`node scripts/link-dsh.mjs` 不接受任何模式参数。
+- 编译**不需要 harness 源码**，也就没有第二种链接来源：`tsc` 与 mount smoke 都对着已安装的 dsh。`node scripts/link-dsh.mjs` 默认就是那份安装（`--runtime` 不带值时显式写同一个意思）；只有 `--runtime <dir>` 会换成另一份安装，那是 `check:old-dsh` 的跨版本门在用（在临时目录里装一份下限 dsh），不是日常构建的第二来源；`--no-bake` 只链接不写"编译对着谁"的记录。
 
 client preset 的来源同样是固定的：仓库自带的 pin 住的副本
 （`packages/plugin/vendor/dsh-client-preset/`，8 个文件 / 2334 行，逐字节拷贝；来源与重新对齐见

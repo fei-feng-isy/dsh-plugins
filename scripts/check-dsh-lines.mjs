@@ -29,13 +29,13 @@
  * 之一——都意味着"dsh 一升级，那棵树的插件行就会被启动门禁用"。低于已覆盖线的历史未覆盖线（例如
  * 0.0.x）只是备注。
  */
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { judgeDshLines } from './lib/gates.mjs'
+import { execToolSync } from './lib/win-spawn.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** 声明 dsh peer 的两棵树；base 自己不声明（它由插件加载）。 */
@@ -43,18 +43,14 @@ const MANIFESTS = ['mem/packages/plugin/package.json', 'mission/packages/plugin/
 const PACKAGE = '@deepseek-ai/dsh'
 
 /**
- * The npm executable to run on `platform`.
+ * Every `npm` call below goes through `scripts/lib/win-spawn.mjs`.
  *
- * On Windows `npm` is a `.cmd` shim, and Node refuses to spawn a `.cmd` without a shell
- * (CVE-2024-27980): a bare `execFileSync('npm', …)` there fails with EINVAL, so the whole gate
- * dies with "cannot run `npm root -g`". Naming the platform's file is the fix that keeps the
- * shell — and with it argument quoting and the injection surface — out of the picture entirely.
- * A function rather than a constant so the win32 form is assertable from Linux (`[win]`, still to
- * be re-checked on a real Windows box).
+ * WHY. On win32 `npm` is a `.cmd` shim and Node refuses to spawn one without a shell (CVE-2024-27980),
+ * so `npm root -g` here failed with EINVAL and the whole gate died with "cannot run `npm root -g`".
+ * Naming the file (`npm.cmd`) does NOT fix it — measured on Windows node v25.2.1: the no-shell spawn
+ * of a `.cmd` is still EINVAL, `{ shell: true }` works but emits DEP0190, and `cmd.exe /c npm.cmd …`
+ * works with no warning. The helper owns that choice; this file no longer keeps its own copy.
  */
-export function npmCommand(platform = process.platform) {
-  return platform === 'win32' ? 'npm.cmd' : 'npm'
-}
 
 /** Assigned by `main()`; the helpers below run only from there. */
 let registry
@@ -105,7 +101,7 @@ function main() {
     const require = createRequire(import.meta.url)
     let globalRoot
     try {
-      globalRoot = execFileSync(npmCommand(), ['root', '-g'], { encoding: 'utf8' }).trim()
+      globalRoot = execToolSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim()
     } catch (error) {
       fail(`cannot run \`npm root -g\` to find the installed dsh (${error.message})`)
     }
@@ -126,7 +122,7 @@ function main() {
     const args = ['view', PACKAGE, field, '--json']
     if (registry !== undefined) args.push('--registry', registry)
     try {
-      return JSON.parse(execFileSync(npmCommand(), args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
+      return JSON.parse(execToolSync('npm', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
     } catch (error) {
       fail(`\`npm view ${PACKAGE} ${field}\` failed (${error.message.split('\n')[0]})`)
     }
@@ -136,7 +132,7 @@ function main() {
   function effectiveRegistry() {
     if (registry !== undefined) return registry
     try {
-      return execFileSync(npmCommand(), ['config', 'get', 'registry'], { encoding: 'utf8' }).trim()
+      return execToolSync('npm', ['config', 'get', 'registry'], { encoding: 'utf8' }).trim()
     } catch {
       return '(npm config get registry 失败)'
     }
