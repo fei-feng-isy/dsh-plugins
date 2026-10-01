@@ -630,10 +630,18 @@ export class MissionTree {
    * `spawnFailures` and pushes the next dispatch back by a cooldown. `wake-failed`: an adoption
    * that could not be delivered — back to `ready`, charging neither budget, so the caller's fresh
    * dispatch proceeds. `attempts` is never rolled back: it is the `note_mission` generation marker,
-   * not a budget. */
+   * not a budget.
+   *
+   * `expectedHolder` is a compare-and-swap for a caller that judged the node from a snapshot taken
+   * OUTSIDE this lock — `MissionEngine.reclaimStale` takes one, then awaits `interruptWorker` per
+   * node. If a second sweep reclaimed and re-dispatched the node in that window, the binding has
+   * moved on and this stale verdict must be refused: acting on it would unbind a LIVE worker (whose
+   * `submit_mission` then answers `not-owner`) and charge `failures` a second time for one attempt.
+   * `undefined` means "no expectation" — the callers that act on a value they just read use that. */
   async reclaim(
     nodeId: string,
     cause: 'vanished' | 'stalled' | 'spawn-failed' | 'wake-failed' = 'vanished',
+    expectedHolder?: string | null,
   ): Promise<MutationResult<NodeRecord>> {
     return this.withLock(async () => {
       const found = this.locate(nodeId)
@@ -641,6 +649,12 @@ export class MissionTree {
       const { state, node } = found
       if (node.status !== 'running') {
         return refuse('not-dispatchable', `任务 ${nodeId} 处于 ${statusLabel(node.status)}，并非运行中`)
+      }
+      if (expectedHolder !== undefined && node.claimedBy !== expectedHolder) {
+        return refuse(
+          'not-dispatchable',
+          `任务 ${nodeId} 的持有者已从 ${String(expectedHolder)} 变为 ${String(node.claimedBy)}；这次回收已过期`,
+        )
       }
       if (cause === 'wake-failed') {
         // Undo the adoption: the address is already consumed, so the node is an ordinary `ready`

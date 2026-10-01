@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { expandHome } from './env.js'
 
 /**
  * The family root and the two managed directories under it — ONE definition of a convention that
@@ -16,10 +17,14 @@ import { join } from 'node:path'
  * `provision` mirrors {@link familyHome} (it is deliberately dependency-free, so it cannot import
  * this module); `packages/core/test/family_paths.spec.ts` pins the two copies together so the
  * convention cannot drift.
+ *
+ * The `~/` expansion is NOT a private copy any more: this module and `env.ts` used to carry two
+ * literally identical `expandTilde`/`expandHome` bodies in the same package, and only the exported
+ * one was pinned — so the un-pinned copy could drift silently. It now calls {@link expandHome}.
  */
 export function familyHome(env: Record<string, string | undefined> = process.env): string {
   const configured = env['AVANTF_HOME']?.trim() ?? ''
-  return configured !== '' ? expandTilde(configured) : join(homedir(), '.avantf', 'env')
+  return configured !== '' ? expandHome(configured) : join(homedir(), '.avantf', 'env')
 }
 
 /** The managed external-binary root (`<family root>/tools`). */
@@ -30,10 +35,4 @@ export function familyToolsDir(env: Record<string, string | undefined> = process
 /** The managed model-cache root (`<family root>/models`). */
 export function familyModelsDir(env: Record<string, string | undefined> = process.env): string {
   return join(familyHome(env), 'models')
-}
-
-/** `~/x` → `<home>/x`, `~` → `<home>`; anything else is used as given. */
-function expandTilde(path: string): string {
-  if (path === '~') return homedir()
-  return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path
 }

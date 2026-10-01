@@ -1038,6 +1038,34 @@ describe('lifecycle maintenance (active-day trust model)', () => {
     expect(full.purged_deferred).toBe(0)
   })
 
+  it('spends ONE purge budget across both branches and reports the real backlog', () => {
+    // `purgeArchived` has two mutually exclusive branches (active-day clock vs calendar). Each used
+    // to splice its OWN `LIMIT :budget`, so a pass with rows in both could delete 2 × budget — the
+    // unbounded write-lock hold the budget exists to prevent — and `purged.length === budget` (the
+    // tick's deferral test) stayed false, so the leftover backlog went unreported.
+    const cfg: Config = ConfigSchema.parse({ lifecycle: { purge_after_archived_days: 30 } })
+    const ins = rt.db.prepare(
+      `INSERT INTO facts (content, category, settle_clock, status, archived_clock, archived_at, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    )
+    // Branch 1 (trust on, clock set): due on ACTIVE days. 2 rows — under the budget of 3.
+    for (let i = 0; i < 2; i++) ins.run(`时钟分支 ${i}`, 'bench', 0, 'archived', -400, '2024-01-01 00:00:00', '2020-01-01 00:00:00', '2020-01-01 00:00:00')
+    // Branch 2 (archived_clock NULL): due on CALENDAR days. 5 rows — so the SHARED budget of 3 runs
+    // out partway through this branch, and the other 4 rows are the backlog the tick must report.
+    for (let i = 0; i < 5; i++) ins.run(`日历分支 ${i}`, 'bench', 0, 'archived', null, '2020-01-01 00:00:00', '2020-01-01 00:00:00', '2020-01-01 00:00:00')
+
+    const res = runMaintenance(rt.db, cfg, { clock: 0, budget: 3 })
+    // 2 (branch 1) + at most 1 (branch 2) — never 2 × budget.
+    expect(res.purged).toBe(3)
+    expect(res.purged_ids).toHaveLength(3)
+    expect(res.purged_deferred).toBe(4)
+
+    // A full pass drains both branches: nothing is lost to the shared accounting.
+    const full = runMaintenance(rt.db, cfg, { clock: 0, budget: 0 })
+    expect(full.purged).toBe(4)
+    expect(full.purged_deferred).toBe(0)
+  })
+
   it('enabled=false stops decay but still runs TTL / idle / purge (D12)', async () => {
     const decayTarget = await rt.remember({ action: 'add', content: '信任关闭时不该衰减的事实' })
     const idleTarget = await rt.remember({ action: 'add', content: '信任关闭时仍会被 idle 清理的事实' })

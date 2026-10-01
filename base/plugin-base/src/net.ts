@@ -25,20 +25,34 @@ export function signalFor(ctx: ProviderContext, timeoutMs: number = DEFAULT_REQU
   return ctx.signal === undefined ? timeout : AbortSignal.any([ctx.signal, timeout])
 }
 
-/** Read a response body with a hard byte cap; throws `fetch/failed` when the cap is crossed. */
+/**
+ * Read a response body with a hard byte cap.
+ *
+ * Two failures that used to share `fetch/failed` are deliberately DIFFERENT codes, because a caller
+ * has to treat them differently:
+ *
+ *   - the cap is crossed (declared `content-length`, or bytes actually read) → `fetch/too-large`, a
+ *     TERMINAL failure: another mirror serves the same oversized object, so falling through cannot
+ *     help;
+ *   - the declared length does not match what was read → `fetch/failed`, a TRANSPORT failure: that is
+ *     a truncated download, exactly the shape that should try the next candidate source.
+ *
+ * `docs/DESIGN.md` §6 states the same invariant; `providers/model.ts` and `downloadBytes` below are the
+ * two places that branch on it.
+ */
 export async function readCapped(
   response: Response,
   maxBytes: number = DEFAULT_MAX_BYTES,
 ): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length') ?? Number.NaN)
   if (Number.isFinite(declared) && declared > maxBytes) {
-    throw new ProvisionError('fetch/failed', `响应声明 ${String(declared)} 字节，超过上限 ${String(maxBytes)}`)
+    throw new ProvisionError('fetch/too-large', `响应声明 ${String(declared)} 字节，超过上限 ${String(maxBytes)}`)
   }
   const body = response.body
   if (body === null) {
     const bytes = new Uint8Array(await response.arrayBuffer())
     if (bytes.byteLength > maxBytes) {
-      throw new ProvisionError('fetch/failed', `响应 ${String(bytes.byteLength)} 字节，超过上限 ${String(maxBytes)}`)
+      throw new ProvisionError('fetch/too-large', `响应 ${String(bytes.byteLength)} 字节，超过上限 ${String(maxBytes)}`)
     }
     if (Number.isFinite(declared) && declared !== bytes.byteLength) {
       throw new ProvisionError('fetch/failed', `响应声明 ${String(declared)} 字节，实际收到 ${String(bytes.byteLength)} 字节`)
@@ -55,7 +69,7 @@ export async function readCapped(
     total += value.byteLength
     if (total > maxBytes) {
       await reader.cancel().catch(() => undefined)
-      throw new ProvisionError('fetch/failed', `响应超过上限 ${String(maxBytes)} 字节（已读 ${String(total)}）`)
+      throw new ProvisionError('fetch/too-large', `响应超过上限 ${String(maxBytes)} 字节（已读 ${String(total)}）`)
     }
     chunks.push(value)
   }
@@ -82,7 +96,8 @@ export function candidateUrls(url: string, mirrors: readonly string[] | undefine
 }
 
 /**
- * Download the first candidate that answers 2xx; throws `fetch/failed` when none does.
+ * Download the first candidate that answers 2xx; throws `fetch/failed` when none does (and
+ * `fetch/too-large` immediately when a body crosses the hard cap — see {@link readCapped}).
  *
  * DOWNLOADING IS THE SLOWEST THING THIS FRAMEWORK DOES and it used to be completely silent: a 223 MB
  * archive on a mirror that eventually times out looked like eight minutes of nothing, and the first
@@ -118,6 +133,10 @@ export async function downloadBytes(
       ctx.logger.info(`${key}：下载完成 ${String(bytes.byteLength)} 字节（${url}）`)
       return { bytes, url }
     } catch (error) {
+      // The byte cap is the one fetch failure that is TERMINAL: every mirror serves the same
+      // oversized object, so retrying just burns the remaining candidates. `readCapped` separates it
+      // from a truncated body (`fetch/failed`) for exactly this branch.
+      if (error instanceof ProvisionError && error.code === 'fetch/too-large') throw error
       const reason = error instanceof Error ? error.message : String(error)
       problems.push(`${url} → ${reason}`)
       ctx.logger.warn(`${key}：${url} 失败（${reason}）${next}`)

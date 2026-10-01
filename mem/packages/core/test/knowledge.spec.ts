@@ -254,6 +254,35 @@ describe('knowledge store', () => {
     expect(hits.filter((x) => x.text.includes('旧内容'))).toHaveLength(0)
   })
 
+  it('takes the write lock UP FRONT for the ingest replace transaction (IMMEDIATE)', async () => {
+    // The replace is a read-modify-write: upsert the document → read the old chunk ids → delete →
+    // re-insert. Under the default DEFERRED the write lock is taken only at the first WRITE, so with
+    // a shared data home (an explicitly supported shape: plugin and CLI at once) two ingestions of
+    // one document could both read before either wrote; the later committer then deletes the earlier
+    // one's chunk rows while the earlier one still encodes and `setVector`s those now-dead ids,
+    // leaving phantom vectors in the live index. `memory.ts` takes IMMEDIATE for the same shape;
+    // this pins that the knowledge store does too, by recording how its transaction is invoked.
+    const db = (rt.knowledge as unknown as { db: Db }).db
+    const proto = Object.getPrototypeOf(db) as { transaction: Db['transaction'] }
+    const original = proto.transaction
+    const modes: string[] = []
+    proto.transaction = ((fn: () => unknown) => {
+      const tx = original.call(db, fn)
+      const wrapped = ((): unknown => { modes.push('deferred'); return tx() }) as unknown as typeof tx
+      wrapped.immediate = () => { modes.push('immediate'); return tx.immediate() }
+      return wrapped
+    }) as unknown as Db['transaction']
+    try {
+      await rt.knowledge.ingest('并发摄入的正文：网关由平台组维护。', 'tech', 'race.md', 'race')
+    } finally {
+      proto.transaction = original
+    }
+    // The ingest transaction is the FIRST one opened (it wraps upsert → read old ids → delete →
+    // insert); a later DEFERRED entry is the write-only `ChunksDao.setVectors` batch, which is
+    // correct as DEFERRED. The pinned fact is that the read-modify-write is not.
+    expect(modes[0]).toBe('immediate')
+  })
+
   it('two untitled pastes into one domain produce two documents (no silent overwrite)', async () => {
     const firstReq = paste('第一篇：网关由平台组维护。', 'ops')
     // The contract defaults `source`; the title is what the store must derive from the body.

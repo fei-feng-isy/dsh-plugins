@@ -430,6 +430,33 @@ describe('MissionTreeView', () => {
     expect(html).not.toContain('the sub-part')
   })
 
+  it('stops at a cycle in a corrupted document instead of recursing forever', () => {
+    // `children` is an arbitrary id list in a persisted/wire document. The core never BUILDS a cycle,
+    // but a document corrupted from outside could point a node back at an ancestor; descending
+    // blindly would recurse until the browser's stack died, taking the whole panel with it. The guard
+    // renders each node once and refuses to descend into a child already on the path.
+    const row = (id: string, parentId: string | null, children: readonly string[]): MissionNodeView => ({
+      id, parentId, children, depth: 1, title: id, context: [], corrections: [],
+      status: 'running', attempts: 1, createdAt: 0, hasResult: false, resultRef: null,
+    })
+    const state: MissionSnapshotState = {
+      data: { trees: [{ rootId: 'r1', closedAt: null, nodes: [row('r1', null, ['c1']), row('c1', 'r1', ['r1'])] }] },
+      loading: false,
+      error: undefined,
+      refresh: () => Promise.resolve(),
+    }
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => state}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+      />,
+    )
+    // Both rows render, and the back-edge does not add a second copy of the root.
+    expect(html.match(/class="avwf-title"/gu) ?? []).toHaveLength(2)
+  })
+
   it('reads no detail until a row is clicked', () => {
     // The detail read is on demand: a dialog opened for every row would fire one request per
     // row on every snapshot, which is exactly what the `detail` RPC exists to avoid.

@@ -40,6 +40,11 @@ export type ProvisionCode =
   | 'lock/timeout'
   | 'publish/cross-device'
   | 'fetch/failed'
+  /** A response body crossed a hard byte cap — either the declared `content-length` or the bytes
+   *  actually read. Unlike a short read (which is a truncated DOWNLOAD and retries the next mirror),
+   *  this is TERMINAL: every mirror serves the same oversized object, so trying another one cannot
+   *  help. Providers branch on this code to decide whether to fall through. */
+  | 'fetch/too-large'
   | 'extract/failed'
   | 'verify/failed'
   // ── catch-all ──────────────────────────────────────────────────────────────

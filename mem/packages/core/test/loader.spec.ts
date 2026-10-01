@@ -206,6 +206,36 @@ describe('config layering', () => {
     expect(cfg.common.semantic.backend).toBe('local_bge')
   })
 
+  it('warns — and still falls back to defaults — when a config file is not valid YAML (M4)', () => {
+    // A broken file is treated as "no configuration" (the process must keep starting), but what it
+    // silently drops includes the security knobs (`knowledge.ingest.local_roots`,
+    // `allow_outside_workspace`, `trust.*`), so the drop has to be audible. `catch { return null }`
+    // used to make one bad indent change the ingestion boundary with zero log lines — while the
+    // milder "partly ignored" branch (`warnUnknownKeys`) did announce itself.
+    const warnings: string[] = []
+    const logger = { info: (): void => {}, warn: (m: string): void => { warnings.push(m) }, error: (): void => {} }
+    writeFileSync(join(dir, 'configs', 'common.yaml'), ':\n\t- bad: [unclosed')
+    writeFileSync(join(dir, 'configs', 'memory.yaml'), 'db:\n\t- bad: [unclosed')
+    writeFileSync(join(dir, 'configs', 'knowledge.yaml'), 'ingest:\n\t- bad: [unclosed')
+    const cfg = loadConfig({ dataHome: dir, logger })
+
+    const joined = warnings.join('\n')
+    // Path + reason + "the whole file is ignored", once per file.
+    expect(joined).toContain(join(dir, 'configs', 'common.yaml'))
+    expect(joined).toContain(join(dir, 'configs', 'memory.yaml'))
+    expect(joined).toContain(join(dir, 'configs', 'knowledge.yaml'))
+    expect(joined).toContain('YAML parse failed')
+    expect(joined).toContain('the WHOLE file is ignored')
+    // The warning goes to the INJECTED sink (the DSH host surfaces only that one), and the behaviour
+    // is unchanged: every value falls back to its default — deliberately not fail-closed, which would
+    // turn a typo into a host that refuses to start.
+    expect(cfg.common.semantic.backend).toBe('local_bge')
+    expect(cfg.memory.db.path).toBe(join(dir, 'memory', 'memory.db'))
+    expect(cfg.knowledge.ingest.allow_outside_workspace).toBe(false)
+    expect(cfg.knowledge.ingest.local_roots).toEqual([])
+    expect(cfg.knowledge.chunk_size).toBe(500)
+  })
+
   it('lets an explicit dataHome (⑤) outrank AVANTF_HOME (④)', () => {
     // The env var used to win outright: `common.dataHome` always holds a value (the
     // schema default), so the loader could not tell "explicit" from "default" and an

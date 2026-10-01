@@ -248,3 +248,33 @@ describe('the aggregate start-up report', () => {
     expect(treeAlive(mounted, mounted.seededRoots[3]!)).toBe(true)
   })
 })
+
+describe('the /clean orphans audit line', () => {
+  const lines: string[] = []
+
+  beforeEach(() => {
+    lines.length = 0
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '))
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('names the SKIPPED trees after `skipped`, not the removed ones', async () => {
+    // The comment above the call calls this "the only record of a destructive act that leaves no
+    // session log behind", so its content must not lie. It used to print `removed`'s ids after
+    // `skipped N:`; here nothing is removed and one target is skipped because its tree is already
+    // gone, so the old code printed an empty list after the count.
+    const mounted = await mount()
+    const absent = 'deadbeef'
+    const result = await mounted.runCommand('clean', `orphans ${absent}`)
+    expect(result.kind).toBe('error')
+    const audit = lines.filter((line) => line.includes('/clean orphans from'))
+    expect(audit).toHaveLength(1)
+    expect(audit[0]).toContain('removed 0 tree(s)')
+    expect(audit[0]).toContain(`skipped 1: ${absent}（任务树已不存在）`)
+  })
+})

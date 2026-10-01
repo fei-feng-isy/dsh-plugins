@@ -901,8 +901,18 @@ export class FactsDao {
    */
   purgeArchived(p: { clock: number; enabled: number; purgeAfterDays: number; skipPinned: boolean; budget?: number }): number[] {
     const baseParams = FactsDao.purgeParams(p)
+    // ONE budget shared by BOTH branches. Each branch used to splice its own `LIMIT :budget`, so a
+    // pass whose rows straddled the two (clock-based vs calendar-based) branches could delete up to
+    // 2 × `tick_max_facts` rows — exactly the unbounded write-lock hold the budget exists to prevent,
+    // and the reason `tick.ts` could never trust `purged.length === budget` as its deferral test.
+    // `0` (or absent) still means "no budget", like ②③④.
+    const bounded = p.budget !== undefined && p.budget > 0
+    let remaining = bounded ? Math.floor(p.budget!) : 0
     const purged = new Set<number>()
     for (const branch of FactsDao.purgeBranches(p)) {
+      // The branches are mutually exclusive, so an exhausted budget means there is nothing left this
+      // pass may delete: stop without even issuing the statements.
+      if (bounded && remaining <= 0) break
       // `budget` (0 = none) bounds how many rows ONE pass deletes, like ②③④: purge is the most
       // expensive single step (its FK cascades seek per deleted row on old databases) and it runs
       // inside the tick's single IMMEDIATE transaction, so an unbudgeted backlog holds the write
@@ -912,11 +922,10 @@ export class FactsDao {
       // it was the one place in the codebase that spelled a value into SQL text. `Math.floor` made it
       // safe (a non-number would have been a syntax error, not an injection) but the shape was the
       // thing worth removing.
-      const bounded = p.budget !== undefined && p.budget > 0
       const predicate = bounded
         ? `${branch} AND fact_id IN (SELECT fact_id FROM facts WHERE ${branch} LIMIT :budget)`
         : branch
-      const params = bounded ? { ...baseParams, budget: Math.floor(p.budget!) } : baseParams
+      const params = bounded ? { ...baseParams, budget: remaining } : baseParams
       // Unlink BEFORE deleting, against the SAME predicate text: `supersedes_id` self-references
       // `facts` and an ACTIVE revision points at the archived one it replaced, so a bare DELETE
       // raised SQLITE_CONSTRAINT_FOREIGNKEY, rolled back the whole tick and left the process
@@ -927,11 +936,14 @@ export class FactsDao {
             WHERE supersedes_id IN (SELECT fact_id FROM facts WHERE ${predicate})`,
         )
         .run(params)
+      let deleted = 0
       for (const row of this.db
         .prepare<{ fact_id: number }>(`DELETE FROM facts WHERE ${predicate} RETURNING fact_id`)
         .all(params)) {
         purged.add(row.fact_id)
+        deleted += 1
       }
+      remaining -= deleted
     }
     return [...purged]
   }

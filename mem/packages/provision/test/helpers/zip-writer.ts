@@ -16,6 +16,11 @@ export interface ZipFileSpec {
   data: Buffer
   /** Force STORE (method 0) instead of DEFLATE (method 8). */
   store?: boolean
+  /**
+   * Write a size that does NOT match `data.length` into both size fields — the "lying archive" a
+   * size check exists for. Omitted, the real length is written, as a correct writer would.
+   */
+  declaredUncompressedSize?: number
 }
 
 function crc32(bytes: Buffer): number {
@@ -39,6 +44,7 @@ export function zipSync(files: readonly ZipFileSpec[]): Buffer {
     const compressed = file.store === true ? file.data : deflateRawSync(file.data, { level: 9 })
     const method = file.store === true ? 0 : 8
     const crc = crc32(file.data)
+    const uncompressedSize = file.declaredUncompressedSize ?? file.data.length
 
     const local = Buffer.alloc(30)
     local.writeUInt32LE(0x04034b50, 0)
@@ -49,7 +55,7 @@ export function zipSync(files: readonly ZipFileSpec[]): Buffer {
     local.writeUInt16LE(0, 12) // date
     local.writeUInt32LE(crc, 14)
     local.writeUInt32LE(compressed.length, 18)
-    local.writeUInt32LE(file.data.length, 22)
+    local.writeUInt32LE(uncompressedSize, 22)
     local.writeUInt16LE(name.length, 26)
     local.writeUInt16LE(0, 28) // extra length
     localParts.push(local, name, compressed)
@@ -64,7 +70,7 @@ export function zipSync(files: readonly ZipFileSpec[]): Buffer {
     central.writeUInt16LE(0, 14)
     central.writeUInt32LE(crc, 16)
     central.writeUInt32LE(compressed.length, 20)
-    central.writeUInt32LE(file.data.length, 24)
+    central.writeUInt32LE(uncompressedSize, 24)
     central.writeUInt16LE(name.length, 28)
     central.writeUInt16LE(0, 30) // extra
     central.writeUInt16LE(0, 32) // comment

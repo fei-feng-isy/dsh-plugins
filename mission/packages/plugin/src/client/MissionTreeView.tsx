@@ -81,6 +81,9 @@ function childrenOf(nodes: readonly MissionNodeView[], parent: MissionNodeView):
     .filter((node): node is MissionNodeView => node !== undefined)
 }
 
+/** The empty ancestor path, shared so a root row does not allocate one. */
+const NO_ANCESTORS: ReadonlySet<string> = new Set<string>()
+
 /** How one on-demand full-result read is going, or `undefined` before it has been asked for. */
 export interface FullResultState {
   readonly status: 'loading' | 'ready' | 'error'
@@ -483,16 +486,25 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult }: {
   )
 }
 
-function NodeRow({ node, nodes, depth, viaParentId, actions }: {
+function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, actions }: {
   node: MissionNodeView
   nodes: readonly MissionNodeView[]
   depth: number
   /** The parent that listed this node; absent for a tree's root. */
   viaParentId?: string
+  /**
+   * The ids on the path from the root down to this row. `children` is an arbitrary id list in a
+   * persisted document, and the core's own dedup only excludes ancestors while BUILDING a tree —
+   * a document corrupted from outside (or a wire payload from a wildly skewed host) could point a
+   * node back at one of its ancestors, and the recursion would run until the browser's stack died,
+   * taking the whole panel with it. Dropping an already-visited child is the cheap guard.
+   */
+  ancestors?: ReadonlySet<string>
   actions: RowActions
 }): ReactNode {
   const { openId, onOpenDetail } = actions
-  const children = childrenOf(nodes, node)
+  // A child already on this path is a cycle, not a dependency: it stops here instead of descending.
+  const children = childrenOf(nodes, node).filter((child) => !ancestors.has(child.id))
   // Listed here as a prerequisite: marked so a repeated row does not read as a duplicate.
   const reused = viaParentId !== undefined && node.parentId !== viaParentId
   // The default follows the node: open while its mission is in play, folded once it finished.
@@ -563,6 +575,7 @@ function NodeRow({ node, nodes, depth, viaParentId, actions }: {
             nodes={nodes}
             depth={depth + 1}
             viaParentId={node.id}
+            ancestors={new Set([...ancestors, node.id])}
             actions={actions}
           />
         ))

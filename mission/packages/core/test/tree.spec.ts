@@ -151,6 +151,31 @@ describe('dispatch', () => {
     expect(tree.node(id)?.attempts).toBe(2)
   })
 
+  it('refuses a reclaim whose expected holder no longer holds the node', async () => {
+    // The compare-and-swap the engine's concurrent sweep relies on: `reclaimStale` judges a node from
+    // a snapshot taken OUTSIDE the lock and then awaits `interruptWorker`, so a second sweep may have
+    // reclaimed and re-dispatched it by the time the first one acts. Without this rejection the stale
+    // verdict unbinds the live worker and charges `failures` a second time for one attempt.
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-1')
+
+    const stale = await tree.reclaim(id, 'stalled', 'mission-other')
+    expect(stale.ok).toBe(false)
+    expect(stale.ok === false && stale.code).toBe('not-dispatchable')
+    // Nothing moved: the real holder is intact and no budget was charged.
+    expect(tree.node(id)?.status).toBe('running')
+    expect(tree.node(id)?.claimedBy).toBe('mission-1')
+    expect(tree.node(id)?.failures).toBe(0)
+    expect(tree.node(id)?.stalls).toBe(0)
+
+    // The same pass's own holder still reclaims normally.
+    const fresh = await tree.reclaim(id, 'stalled', 'mission-1')
+    expect(fresh.ok).toBe(true)
+    expect(tree.node(id)?.status).toBe('interrupted')
+    expect(tree.node(id)?.stalls).toBe(1)
+  })
+
   it(`fails a node after ${String(CAPACITY.maxAttempts)} failed executions`, async () => {
     const { tree, live } = makeTree()
     const id = await rootOf(tree)

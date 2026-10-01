@@ -86,6 +86,10 @@ export function runTrustTick(db: Db, cfg: Config, opts: { clock: number; budget?
       skipPinned: cfg.trust.purge_skips_pinned,
     }
     const purgedIds = facts.purgeArchived({ ...purgeArgs, budget: archiveBudget })
+    // `purgeArchived` spends ONE budget across its two mutually exclusive branches, so "deleted
+    // exactly the budget" is the exact condition for "there may be more due" — the test this line
+    // needs. With the old per-branch `LIMIT` the same pass could delete 2 × budget rows and still
+    // fail this equality (each branch short of the budget), which is how a backlog went unreported.
     const purgedDeferred = archiveBudget > 0 && purgedIds.length === archiveBudget
       ? facts.countPurgeBacklog(purgeArgs)
       : 0

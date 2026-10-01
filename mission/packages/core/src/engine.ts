@@ -133,7 +133,10 @@ export class MissionEngine {
           if (!stalled) continue
           await this.hooks.interruptWorker(holder)
         }
-        const result = await this.tree.reclaim(node.id, stalled ? 'stalled' : 'vanished')
+        // The holder from THIS pass's snapshot, checked under the tree lock: an `interruptWorker`
+        // wait can span a whole second sweep that reclaimed and re-dispatched the node, and acting
+        // on the stale verdict would strip the fresh binding and charge `failures` twice.
+        const result = await this.tree.reclaim(node.id, stalled ? 'stalled' : 'vanished', holder)
         if (!result.ok) continue
         reclaimed += 1
         if (stalled) await this.reportStall(result.value, silentMs)

@@ -1,6 +1,8 @@
 /**
- * Regression cover for the download byte cap: a declared `content-length` that disagrees with the
- * body is an integrity failure, not a silent short read.
+ * Regression cover for the download byte cap. Two shapes that used to share one code are now distinct,
+ * because a caller has to branch on them: crossing the hard cap is TERMINAL (`fetch/too-large`), while a
+ * declared `content-length` that disagrees with the body is a truncated DOWNLOAD (`fetch/failed`) and
+ * retries the next mirror.
  *
  * @module test/net
  */
@@ -31,14 +33,14 @@ describe('readCapped：声明长度与实际上限', () => {
     await expect(readCapped(response)).rejects.toMatchObject({ code: 'fetch/failed' })
   })
 
-  it('声明长度超过上限 ⇒ 在读之前就 fetch/failed', async () => {
+  it('声明长度超过上限 ⇒ 在读之前就 fetch/too-large（终局）', async () => {
     const response = new Response('x', { status: 200, headers: { 'content-length': String(DEFAULT_MAX_BYTES + 1) } })
-    await expect(readCapped(response, DEFAULT_MAX_BYTES)).rejects.toMatchObject({ code: 'fetch/failed' })
+    await expect(readCapped(response, DEFAULT_MAX_BYTES)).rejects.toMatchObject({ code: 'fetch/too-large' })
   })
 
-  it('声明长度小于上限但实读超过上限 ⇒ fetch/failed', async () => {
+  it('声明长度小于上限但实读超过上限 ⇒ fetch/too-large（终局）', async () => {
     const response = new Response('0123456789', { status: 200, headers: { 'content-length': '3' } })
-    await expect(readCapped(response, 4)).rejects.toMatchObject({ code: 'fetch/failed' })
+    await expect(readCapped(response, 4)).rejects.toMatchObject({ code: 'fetch/too-large' })
   })
 
   it('无 body 时也核对声明长度', async () => {
@@ -91,5 +93,25 @@ describe('downloadBytes：下载期的进度可见（DSH Desktop 上曾空转 8 
     expect(lines.filter((line) => line.startsWith('info '))).toHaveLength(2)
     expect(lines.at(-1)).toContain('没有更多候选源')
     expect(lines.at(-1)).not.toContain('改用下一个候选源')
+  })
+
+  it('超过硬上限是终局：立即 fetch/too-large，不再试下一个候选源', async () => {
+    const lines: string[] = []
+    const tried: string[] = []
+    const first = 'https://mirror-a.test/demo.tgz'
+    const second = 'https://mirror-b.test/demo.tgz'
+    const ctx = {
+      home: '/tmp/unused',
+      logger: { debug: () => undefined, info: () => undefined, warn: (m: string) => lines.push(m), error: () => undefined },
+      policy: {},
+      fs: undefined as never,
+      fetch: async (input: Parameters<typeof fetch>[0]) => {
+        tried.push(String(input))
+        // The declared length alone crosses the cap; readCapped throws before reading a body.
+        return new Response('x', { status: 200, headers: { 'content-length': String(DEFAULT_MAX_BYTES + 1) } })
+      },
+    } as unknown as ProviderContext
+    await expect(downloadBytes(ctx, [first, second], 'binary-archive+demo')).rejects.toMatchObject({ code: 'fetch/too-large' })
+    expect(tried).toEqual([first])
   })
 })

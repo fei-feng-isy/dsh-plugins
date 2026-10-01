@@ -31,6 +31,9 @@
   },
   "files": [
     "lib",
+    "!lib/client.js.map",
+    "!lib/types/**/*.js",
+    "!lib/types/**/*.js.map",
     "cordis.patch.yml",
     "README.md"
   ],
@@ -38,12 +41,13 @@
     "node": ">=22.15.0 <23 || >=23.11.0"
   },
   "scripts": {
-    "build": "node ../../scripts/link-dsh.mjs && node ../../scripts/link-envinit.mjs && tsc -p tsconfig.json && node ../../scripts/copy-envinit-bootstrap.mjs && tsdown",
+    "build": "node ../../scripts/link-dsh.mjs && node ../../scripts/link-envinit.mjs && tsc -p tsconfig.json && node ../../scripts/copy-envinit-bootstrap.mjs && node ../../scripts/carry-engine-types.mjs && tsdown",
     "bundle": "tsdown",
     "watch": "tsdown --watch",
     "typecheck": "node ../../scripts/link-dsh.mjs && tsc -p tsconfig.test.json",
     "test": "vitest run",
-    "test:dsh": "vitest run --config vitest.dsh.config.ts"
+    "test:dsh": "vitest run --config vitest.dsh.config.ts",
+    "prepublishOnly": "node ../../scripts/pack-plugin.mjs"
   },
   "peerDependencies": {
     "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",

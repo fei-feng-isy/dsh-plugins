@@ -446,13 +446,13 @@ describe('修复回归：内部件不在公开入口', () => {
 })
 
 describe('修复回归：下载体上限', () => {
-  it('声明或实际超过上限的响应体被拒绝（fetch/failed）', async () => {
+  it('声明或实际超过上限的响应体被拒绝（fetch/too-large，终局）', async () => {
     const { readCapped } = await import('../src/net.js')
     const declared = new Response(new Uint8Array(4), { status: 200, headers: { 'content-length': '2048' } })
-    await expect(readCapped(declared, 1024)).rejects.toMatchObject({ code: 'fetch/failed' })
+    await expect(readCapped(declared, 1024)).rejects.toMatchObject({ code: 'fetch/too-large' })
 
     const actual = new Response(new Uint8Array(2048), { status: 200 })
-    await expect(readCapped(actual, 1024)).rejects.toMatchObject({ code: 'fetch/failed' })
+    await expect(readCapped(actual, 1024)).rejects.toMatchObject({ code: 'fetch/too-large' })
 
     const ok = new Response(new Uint8Array(16), { status: 200, headers: { 'content-length': '16' } })
     await expect(readCapped(ok, 1024)).resolves.toHaveLength(16)
@@ -722,9 +722,9 @@ describe('第二轮修复回归', () => {
           },
         }),
       )
-    await expect(readCapped(streamed(64), 16)).rejects.toMatchObject({ code: 'fetch/failed' })
+    await expect(readCapped(streamed(64), 16)).rejects.toMatchObject({ code: 'fetch/too-large' })
     expect((await readCapped(streamed(4), 16)).byteLength).toBe(8)
-    await expect(readCapped(new Response(new Uint8Array(64), { headers: { 'content-length': '64' } }), 16)).rejects.toMatchObject({ code: 'fetch/failed' })
+    await expect(readCapped(new Response(new Uint8Array(64), { headers: { 'content-length': '64' } }), 16)).rejects.toMatchObject({ code: 'fetch/too-large' })
   })
 
   it('F6 归档落盘的 integrity 是 SRI base64，且能被 verifyIntegrity 校验', async () => {

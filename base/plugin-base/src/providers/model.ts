@@ -270,8 +270,21 @@ async function listFiles(ctx: ProviderContext, spec: ModelCacheSpec): Promise<re
 }
 
 /**
- * Download one file, trying each endpoint in order. A length or integrity failure is final: only
- * transport-level failures fall through to the next mirror.
+ * Download one file, trying each endpoint in order.
+ *
+ * `readCapped` reports the two fetch failure shapes with different codes precisely so this branch can
+ * be exact instead of collapsing them, because they mean different things here:
+ *
+ *   - `fetch/too-large` — the body crosses the hard byte cap. TERMINAL: every mirror serves the same
+ *     oversized object, so the remaining endpoints are not tried.
+ *   - `fetch/failed` — a truncated body whose declared length did not match. A TRANSPORT failure that
+ *     falls through to the next endpoint. This is the case that matters most here: this is the 4 GiB
+ *     model path, the largest thing the framework downloads, and a slow/flaky mirror that truncates
+ *     must not permanently fail the item.
+ *
+ * A complete-but-wrong body stays final, but that is a different failure: the caller's `verifyHub` /
+ * `verifyFlat` sha256-checks the landed snapshot and raises `verify/failed`, which the provisioner does
+ * not retry (another mirror cannot make wrong bytes right).
  */
 async function downloadFile(
   ctx: ProviderContext,
@@ -291,7 +304,7 @@ async function downloadFile(
       }
       return await readCapped(response, MAX_MODEL_BYTES)
     } catch (error) {
-      if (error instanceof ProvisionError) throw error
+      if (error instanceof ProvisionError && error.code === 'fetch/too-large') throw error
       problems.push(`${url} → ${error instanceof Error ? error.message : String(error)}`)
     }
   }

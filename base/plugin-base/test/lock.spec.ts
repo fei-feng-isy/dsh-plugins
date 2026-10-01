@@ -1,10 +1,16 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultLock, pidIsAlive } from '../src/lock.js'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+
+/** Backdate a path's mtime so it reads as a lock nobody has touched for `ageMs`. */
+async function age(path: string, ageMs: number): Promise<void> {
+  const when = new Date(Date.now() - ageMs)
+  await utimes(path, when, when)
+}
 
 describe('发布锁', () => {
   let root: string
@@ -61,5 +67,43 @@ describe('发布锁', () => {
     // A clock that keeps advancing, so the waiter's own timeout can be reached.
     const lock = defaultLock({ clock: () => Date.now() + 10_000_000 })
     await expect(lock.acquire(path, { timeoutMs: 100, staleMs: 1_000 })).rejects.toMatchObject({ code: 'lock/timeout' })
+  })
+
+  it('陈旧的空锁（0 字节，SIGKILL/ENOSPC 的残留）被按 mtime 回收，不再楔死所有人', async () => {
+    const path = join(root, '.lock')
+    await writeFile(path, '', 'utf8')
+    await age(path, 60_000)
+    const lock = defaultLock()
+    const handle = await lock.acquire(path, { timeoutMs: 500, staleMs: 1_000 })
+    handle.dispose()
+  })
+
+  it('陈旧的垃圾内容（无法解析为 holder）同样被回收', async () => {
+    const path = join(root, '.lock')
+    await writeFile(path, '{"pid":', 'utf8')
+    await age(path, 60_000)
+    const lock = defaultLock()
+    const handle = await lock.acquire(path, { timeoutMs: 500, staleMs: 1_000 })
+    handle.dispose()
+  })
+
+  it('新鲜的空锁仍然超时 —— 不把互斥打破', async () => {
+    const path = join(root, '.lock')
+    await writeFile(path, '', 'utf8')
+    // Fresh mtime, large staleMs: this is indistinguishable from a live writer mid-write, so the
+    // budget must still be honoured rather than the file yanked.
+    await expect(defaultLock({ pollMs: 5 }).acquire(path, { timeoutMs: 120, staleMs: 60_000 }))
+      .rejects.toMatchObject({ code: 'lock/timeout' })
+  })
+
+  it('mtime 陈旧时即使 pid 仍存活（pid 被复用）也回收 —— mtime 是权威信号', async () => {
+    const path = join(root, '.lock')
+    // A perfectly "live" pid (this very process) whose lock file has not been touched for a while: a
+    // DEAD holder's pid reused by an unrelated process must not wedge the lock forever.
+    await writeFile(path, JSON.stringify({ pid: process.pid, startedAt: Date.now() }), 'utf8')
+    await age(path, 60_000)
+    const lock = defaultLock()
+    const handle = await lock.acquire(path, { timeoutMs: 500, staleMs: 1_000 })
+    handle.dispose()
   })
 })

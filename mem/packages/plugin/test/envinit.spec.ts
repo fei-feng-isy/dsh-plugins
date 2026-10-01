@@ -11,7 +11,7 @@
  * so sharing one module instance across tests would leak the first fake into every later one.
  */
 import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import * as base from '@avantf/dsh-plugin-base'
@@ -164,6 +164,29 @@ describe('envinit loader', () => {
     expect(calls.declare).toEqual([])
     expect(calls.ensure).toEqual([])
     expect(calls.resolve).toEqual([])
+  })
+
+  it('expands the $AVANTF_HOME default branch — `~/x` becomes an ABSOLUTE family root (M3)', async () => {
+    // Every other test passes `home`, so this production branch (`options.home ?? resolveHome()`)
+    // was never executed. `resolveHome` returned the raw env value, so `AVANTF_HOME=~/x` reached the
+    // base's layout verbatim and the provisioner wrote into the RELATIVE path `<cwd>/~/x/…` (a
+    // directory literally named `~`), while the engine expanded the same string and read
+    // `/home/<user>/x/…`. Trim + `~` expansion is the family's one rule (`familyHome`/`expandHome`);
+    // returning an absolute path here is what keeps the two halves on the same root.
+    const env = await freshEnvinit()
+    const calls = emptyCalls()
+    const framework = fakeFramework(calls, undefined)
+    const module = fakeCompat(calls, { load: true, skipped: false, status: 'ok', problems: [], warnings: [], notes: [], lines: [], reason: '' })
+    const saved = process.env['AVANTF_HOME']
+    process.env['AVANTF_HOME'] = '~/x'
+    try {
+      const runtime = await env.loadEnvinit({ autoDownload: false, framework: framework as never, compatModule: module as never })
+      expect(runtime?.home).toBe(join(homedir(), 'x'))
+      expect(runtime?.roots).toEqual({ tools: join(homedir(), 'x', 'tools'), models: join(homedir(), 'x', 'models') })
+    } finally {
+      if (saved === undefined) delete process.env['AVANTF_HOME']
+      else process.env['AVANTF_HOME'] = saved
+    }
   })
 
   it('declares pandoc and the flat model as background items', async () => {

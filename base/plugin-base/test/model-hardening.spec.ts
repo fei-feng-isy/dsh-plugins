@@ -517,7 +517,7 @@ describe('model-cache：requiredFiles 与镜像失败语义', () => {
     }
   })
 
-  it('长度/完整性失败是终局：不再落到下一个镜像', async () => {
+  it('字节上限超出是终局：不再落到下一个镜像', async () => {
     const live: string[] = []
     const impl = (async (input: Parameters<typeof fetch>[0]) => {
       const url = String(input)
@@ -535,19 +535,36 @@ describe('model-cache：requiredFiles 与镜像失败语义', () => {
     declare(created, item({ spec: { repo: REPO, files: ['config.json'] } }))
 
     const report = await created.ensure()
-    expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/failed' })
+    // The declared 5 GiB content-length crosses the 4 GiB cap: TERMINAL. Every mirror serves the same
+    // oversized object, so the second mirror is never asked for the body.
+    expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/too-large' })
     expect(live.some(url => url.includes('/resolve/'))).toBe(false)
+  })
 
-    const short = (async (input: Parameters<typeof fetch>[0]) => {
+  it('截断的 body（声明长度与实读不符）是传输失败：落到下一个镜像并装成功', async () => {
+    const hit: string[] = []
+    const impl = (async (input: Parameters<typeof fetch>[0]) => {
       const url = String(input)
+      hit.push(url)
+      const origin = new URL(url).origin
+      if (origin === 'https://trunc.test') {
+        // The FIRST mirror announces 1 MiB and delivers 12 bytes — a truncated download, the shape
+        // that must fall through rather than fail the item forever.
+        if (/\/resolve\//.test(url)) return new Response('{"trunc":1}', { status: 200, headers: { 'content-length': String(1024 * 1024) } })
+        if (/\/api\/models\/.+\/revision\//.test(url)) return new Response(JSON.stringify({ sha: SHA }), { status: 200 })
+        return new Response(JSON.stringify({ siblings: [{ rfilename: 'config.json' }] }), { status: 200 })
+      }
       if (/\/api\/models\/.+\/revision\//.test(url)) return new Response(JSON.stringify({ sha: SHA }), { status: 200 })
-      if (/\/resolve\//.test(url)) return new Response('{"trunc":1}', { status: 200, headers: { 'content-length': String(1024 * 1024) } })
-      return new Response(JSON.stringify({ siblings: [{ rfilename: 'config.json' }] }), { status: 200 })
+      if (/\/api\/models\/[^/]+\/[^/]+$/.test(url)) return new Response(JSON.stringify({ siblings: [{ rfilename: 'config.json' }] }), { status: 200 })
+      return new Response(CONFIG, { status: 200, headers: { 'content-length': String(CONFIG.length) } })
     }) as unknown as typeof fetch
-    const created2 = provisioner({ fetch: short })
-    declare(created2, item({ spec: { repo: REPO, files: ['config.json'] } }))
-    expect((await created2.ensure()).entries[0]).toMatchObject({ action: 'failed', code: 'fetch/failed' })
-    expect(await exists(fs, join(home, 'models', `models--${REPO.replaceAll('/', '--')}`, 'snapshots', SHA, 'config.json'))).toBe(false)
+    const created = provisioner({ fetch: impl, modelMirrors: ['https://trunc.test', 'https://live.test'] })
+    declare(created, item({ spec: { repo: REPO, files: ['config.json'] } }))
+
+    const report = await created.ensure()
+    expect(report.entries[0]).toMatchObject({ action: 'installed' })
+    expect(hit.some(url => url.startsWith('https://trunc.test') && url.includes('/resolve/'))).toBe(true)
+    expect(hit.some(url => url.startsWith('https://live.test') && url.includes('/resolve/'))).toBe(true)
   })
 })
 

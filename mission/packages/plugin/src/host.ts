@@ -57,6 +57,11 @@ function isSubagentSession(agent: Agent): boolean {
 
 const SWEEP_INTERVAL_MS = 60_000
 
+/** How often a background sweep that keeps failing may say so: the first failure always speaks, then
+ *  at most one line per window carrying the count it folded in. A 60 s interval against a full disk
+ *  would otherwise be 1440 identical lines a day. */
+const SWEEP_FAILURE_WARN_MS = 10 * 60_000
+
 /** How long a durable owner-existence answer is trusted; a deleted session's trees retire within this window. */
 const OWNER_CHECK_TTL_MS = 5 * 60_000
 
@@ -217,6 +222,9 @@ export class AvantfMissionHost extends TypertRemoteService {
    *  leaves the parked state, so it never outlives its condition. In-memory on purpose: after a restart
    *  one extra signal is harmless. */
   private readonly parkedSignaled = new Set<string>()
+  /** Sweep failures fold into the next warning; `undefined` means none has been logged yet. */
+  private sweepFailureWarnedAt: number | undefined
+  private sweepFailuresSinceWarn = 0
 
   private readonly log: MissionLogger
 
@@ -362,7 +370,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     await this.reconcileOrphans()
     // `ctx.interval` is the timer plugin's effect-scoped timer, cancelled when the fiber unloads.
     this.sweepDispose = this.ctx.interval(() => {
-      void this.sweep().catch(() => undefined)
+      void this.sweep().catch((error: unknown) => { this.reportSweepFailure(error) })
     }, SWEEP_INTERVAL_MS)
     this.log.info(
       `engine ready: concurrency=${String(this.concurrency())} depth=${String(CAPACITY.maxDepth)}`
@@ -418,6 +426,28 @@ export class AvantfMissionHost extends TypertRemoteService {
     // A sweep is the engine acting on its own — the one change no session-side signal can carry.
     if (result.reclaimed + result.dispatched > 0) this.announceAllTrees()
     return result
+  }
+
+  /**
+   * Report a background sweep that threw. The chain the two fire-and-forget callers start is not
+   * cosmetic: it flushes progress (a durable write), probes storage for orphans and then reclaims
+   * and dispatches. Silently swallowing it hid a store that refuses `put` (a full disk, a domain
+   * gone) failing once a minute with zero evidence. Rate-limited, because the same condition
+   * repeats on every 60 s tick: the first failure speaks, later ones fold into one line per window.
+   */
+  private reportSweepFailure(error: unknown): void {
+    this.sweepFailuresSinceWarn += 1
+    const now = Date.now()
+    if (this.sweepFailureWarnedAt !== undefined && now - this.sweepFailureWarnedAt < SWEEP_FAILURE_WARN_MS) {
+      return
+    }
+    const folded = this.sweepFailuresSinceWarn
+    this.sweepFailureWarnedAt = now
+    this.sweepFailuresSinceWarn = 0
+    const detail = error instanceof Error ? error.message : String(error)
+    this.log.warn(
+      `sweep failed${folded > 1 ? ` (${String(folded)} failures since the last report)` : ''}: ${detail}`,
+    )
   }
 
   // ── orphans: what the engine destroys, and what only a person may ────────
@@ -525,9 +555,16 @@ export class AvantfMissionHost extends TypertRemoteService {
   }
 
   /** Record one worker's activity if the session is ours. The feed carries every session in the
-   *  process, so the claim check comes first; only "making no progress" is a stall. */
+   *  process, so the claim check comes first; only "making no progress" is a stall.
+   *
+   *  The check is `isWorkerClaim`, NOT membership in `issuedClaims`: that set is in-memory and is
+   *  never refilled from the durable tree at start-up, while `MissionTree.reconcileOnOpen` explicitly
+   *  keeps a hot-reload survivor `running` and resets its `progressAt`. A worker that survived the
+   *  reload therefore had every later progress event dropped, and after `staleMs` was interrupted and
+   *  reclaimed as stalled — burning one attempt and a `failures` slot on a worker that was working.
+   *  `nodeHeldBy` below still requires an actual binding, so the shape check cannot touch a stranger. */
   touchWorkerProgress(sessionId: string, at: number): void {
-    if (!this.issuedClaims.has(sessionId)) return
+    if (!this.isWorkerClaim(sessionId)) return
     const tree = this.tree
     if (tree === undefined) return
     const node = tree.nodeHeldBy(sessionId)
@@ -538,8 +575,9 @@ export class AvantfMissionHost extends TypertRemoteService {
    *  reclaim now, not at the next sweep; the claim check comes first so foreign runs cost nothing. */
   onSubagentEnd(childSessionId: string): void {
     if (!this.isWorkerClaim(childSessionId)) return
-    // Settlement and binding are different records; let the sweep resolve liveness instead.
-    void this.sweep().catch(() => undefined)
+    // Settlement and binding are different records; let the sweep resolve liveness instead. A
+    // failure here is reported rather than swallowed: see `reportSweepFailure`.
+    void this.sweep().catch((error: unknown) => { this.reportSweepFailure(error) })
   }
 
   /**

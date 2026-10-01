@@ -40,6 +40,12 @@ function makeWorld(options: {
   /** Owner sessions the host cannot answer for at all: orphaned, but never destroyed. */
   unobservable?: Set<string>
   materializeLazily?: boolean
+  /**
+   * Awaited before `interruptWorker` records its call. A test parks one sweep inside the await whose
+   * width is the M5 window: a concurrent sweep reclaims and re-dispatches the node while the first
+   * one is still holding its pre-interrupt snapshot.
+   */
+  beforeInterrupt?: (sessionId: string) => Promise<void>
 }) {
   const store = memoryStore()
   const live = new Set<string>(['owner'])
@@ -90,9 +96,9 @@ function makeWorld(options: {
         }
         return Promise.resolve()
       },
-      interruptWorker: (sessionId) => {
+      interruptWorker: async (sessionId) => {
+        await options.beforeInterrupt?.(sessionId)
         interrupted.push(sessionId)
-        return Promise.resolve()
       },
       notifyOwner: (rootId, reason) => notified.push(`${rootId}:${reason}`),
       notifyStalled: (info) => stalled.push(info),
@@ -216,6 +222,54 @@ describe('reclamation', () => {
     await world.engine.reclaimStale()
     expect(world.interrupted).toEqual([])
     expect(world.tree.node(id)?.status).toBe('running')
+  })
+
+  it('refuses a stale snapshot reclaim once a concurrent sweep re-dispatched the node', async () => {
+    // The M5 window, exactly: sweep1 snapshots the binding and parks inside `interruptWorker(A)`;
+    // sweep2 runs end to end in that gap — reclaims X and pumps it back out to claim B. Acted on
+    // blindly, sweep1's stale `stalled` verdict would strip B's binding (B's `submit_mission` then
+    // answers `not-owner`, so it is an orphan) and charge `failures` a second time for one attempt.
+    let now = 1_000
+    let releaseFirst: (() => void) | undefined
+    let gated = false
+    const world = makeWorld({
+      maxConcurrent: 1,
+      staleMs: 10,
+      clock: () => now,
+      beforeInterrupt: () => {
+        if (gated) return Promise.resolve()
+        gated = true
+        return new Promise<void>((resolve) => { releaseFirst = resolve })
+      },
+    })
+    const [id] = await roots(world.tree, 1)
+    if (id === undefined) throw new Error('no root')
+    await world.engine.pump()
+    const claimA = world.tree.node(id)?.claimedBy ?? ''
+    expect(claimA).not.toBe('')
+
+    // Past the stale window: sweep1 will judge A stalled and suspend on the interrupt.
+    now += 11
+    const sweepOne = world.engine.sweep()
+    expect(gated, 'sweep1 must be parked inside interruptWorker for the window to exist').toBe(true)
+
+    // sweep2 finishes while sweep1 is parked: reclaim X as stalled, then re-dispatch it.
+    const second = await world.engine.sweep()
+    expect(second).toEqual({ reclaimed: 1, dispatched: 1 })
+    const claimB = world.tree.node(id)?.claimedBy ?? ''
+    expect(claimB).not.toBe(claimA)
+    expect(world.tree.node(id)?.failures).toBe(1)
+
+    releaseFirst?.()
+    // sweep1's stale verdict is refused: nothing left for it to reclaim or dispatch.
+    expect(await sweepOne).toEqual({ reclaimed: 0, dispatched: 0 })
+    expect(world.tree.node(id)).toMatchObject({
+      status: 'running',
+      claimedBy: claimB,
+      attempts: 2,
+      failures: 1,
+      stalls: 1,
+    })
   })
 })
 

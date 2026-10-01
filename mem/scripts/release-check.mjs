@@ -18,10 +18,12 @@
  * (see `scripts/link-dsh.mjs`). Exits non-zero if any step fails. No harness source checkout is
  * needed to compile, type-check or mount — the client preset is pinned in this repository.
  *
- * The RELEASE repository's gate adds one more step — packing the single installable package
- * (`scripts/pack-plugin.mjs`) and, with a global dsh, installing and mounting that tarball. That step
- * holds here too: the plugin manifest is the same shape in both trees (engine in `devDependencies`,
- * so tsdown inlines it), which `scripts/make-release-tree.mjs` now ASSERTS rather than performs.
+ * Packing the single installable package (`scripts/pack-plugin.mjs`) is one of the steps BELOW, not a
+ * step the release repository adds. `scripts/sync-release-repo.sh --gate` and the RC's
+ * `pnpm release:check:mem` run a projected copy of THIS script, so if the pack step lived only in RC
+ * the two would either double-pack or each assume the other did it. Keeping it here means the
+ * tarball-level assertions (self-contained bundle, shipped declaration surface, README/LICENSE,
+ * `workspace:`/`catalog:` leftovers, lib strays) run in both checkouts, from one definition.
  */
 import { spawnSync } from 'node:child_process'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
@@ -291,6 +293,11 @@ const STEPS = [
     ['scripts/link-dsh.mjs']],
   ['plugin typecheck (LOCAL: the installed dsh)', 'pnpm', ['typecheck:dsh']],
   ['plugin build + mount smoke (LOCAL: the installed dsh)', 'pnpm', ['build:dsh']],
+  // The tarball a user actually installs: `build:dsh` above is what it packs, so this MUST come after
+  // it. It is what runs the artifact-level assertions (single self-contained package, shipped
+  // declarations free of unpublished `@avantf/*`, no sourcemap strays) that no test or type-checker
+  // can see — the shape H2/M9 shipped in 0.3.1 precisely because this step was missing here.
+  ['pack the installable tarball + assert its bytes', process.execPath, ['scripts/pack-plugin.mjs']],
   // LAST on purpose: it relinks to the OLDEST dsh the plugin's own peer range declares, re-runs the
   // plugin's local steps against it, and restores the machine (relink + rebuild) — so it must not
   // run before the steps above, whose artifact is the one this checkout is built from.

@@ -700,6 +700,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // reading nothing. Only the files whose stamp moved get re-ingested, which is what makes this
   // cheap enough to run after EVERY tool result.
   let reconciling = false
+  // Set by the unmount effect below. Without it, the trailing timer (and the mount-time full
+  // reconcile) could still call `corpusDrift()`/`sync()` after `shutdown()` closed the databases —
+  // the timer also kept the event loop alive for up to `RECONCILE_MIN_INTERVAL_MS`.
+  let reconcileStopped = false
   // THROTTLE, with a trailing run. Drift checks run after EVERY tool result — including other
   // plugins' — so on a busy session a full stat pass plus a recursive readdir would fire many times
   // a second. Skipping alone would risk dropping the LAST edit (the one that matters), so a
@@ -707,12 +711,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   let lastDriftAt = 0
   let trailingDrift: ReturnType<typeof setTimeout> | null = null
   const reconcile = async (full: boolean): Promise<void> => {
+    if (reconcileStopped) return
     if (reconciling) return
     if (!full) {
       const wait = RECONCILE_MIN_INTERVAL_MS - (Date.now() - lastDriftAt)
       if (wait > 0) {
         if (trailingDrift === null) {
           trailingDrift = setTimeout(() => { trailingDrift = null; void reconcile(false) }, wait)
+          // Not a reason for the process to stay alive: nothing promises the check runs.
+          const unref = (trailingDrift as unknown as { unref?: () => void }).unref
+          if (typeof unref === 'function') unref.call(trailingDrift)
         }
         return
       }
@@ -743,6 +751,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       reconciling = false
     }
   }
+  // The reconciler's own fiber-owned resources: the trailing timer must not outlive the plugin, and
+  // a check that is already in flight must not start another step against a closed database.
+  ctx.effect(() => () => {
+    reconcileStopped = true
+    if (trailingDrift !== null) {
+      clearTimeout(trailingDrift)
+      trailingDrift = null
+    }
+  })
   // Once at mount, for whatever changed while the host was not running; then after every tool call.
   void reconcile(true)
   ctx.on('tools/result', () => {

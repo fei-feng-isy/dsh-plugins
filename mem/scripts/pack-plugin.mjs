@@ -27,7 +27,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { readBootstrapVersion } from '../../scripts/lib/bootstrap-version.mjs'
@@ -163,11 +163,12 @@ function packageName(specifier) {
   return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]
 }
 
-/** Every bare specifier a bundle reaches at runtime: static imports, dynamic imports, requires. */
+/** Every bare specifier a bundle reaches at runtime: static imports, re-exports, dynamic imports, requires. */
 function specifiersIn(code) {
   const found = new Set()
   for (const pattern of [
     /^\s*import\s[^;]*?from\s*["']([^"']+)["']/gm,
+    /^\s*export\s[^;]*?from\s*["']([^"']+)["']/gm,
     /import\(\s*["']([^"']+)["']\s*\)/g,
     /require\(\s*["']([^"']+)["']\s*\)/g,
   ]) {
@@ -177,23 +178,33 @@ function specifiersIn(code) {
 }
 
 /**
- * Assert one bundle only reaches specifiers a user's install can answer for.
+ * Assert one shipped file only reaches specifiers a user's install can answer for.
  *
  * The `@avantf/*` rule is the load-bearing one and it is reported separately: a DSH user installs
  * THIS one package, so the engine (`@avantf/mem`, `@avantf/mem-contract`, `@avantf/mem-core`) must
- * arrive inlined — a surviving `@avantf/*` import means it did not. There is no family exception any
- * more: the framework is a peer loaded through the inlined bootstrap, and the compatibility base is
- * provisioned by it.
+ * arrive inlined in the bundles and carried into `lib/engine/` for the declarations — a surviving
+ * `@avantf/*` specifier means it did not. There is no family exception any more: the framework is a
+ * peer loaded through the inlined bootstrap, and the compatibility base is provisioned by it.
+ *
+ * Two callers pass different shape expectations:
+ *   - the two BUNDLES: relative specifiers are an error (the artifact must be a single file) and the
+ *     framework peer may not appear at all (it is reached only through the inlined bootstrap).
+ *   - a shipped DECLARATION file: relative specifiers are expected (the closure check below resolves
+ *     them) and the framework peer is a legitimate type import — it is the one published `@avantf/*`
+ *     package a consumer resolves.
  */
-function assertSelfContained(label, code, declared, { client }) {
+function assertSelfContained(label, code, declared, { client, allowFramework = false, allowRelative = false, types = false }) {
   for (const specifier of specifiersIn(code)) {
     const name = packageName(specifier)
     if (specifier.startsWith('.') || specifier.startsWith('/')) {
-      fail(`${label}: relative specifier "${specifier}" — the artifact must be a single file`)
+      if (!allowRelative) fail(`${label}: relative specifier "${specifier}" — the artifact must be a single file`)
       continue
     }
     if (specifier.startsWith('@avantf/')) {
-      fail(`${label}: imports "${specifier}" — the engine is not inlined (keep @avantf/* in devDependencies)`)
+      if (allowFramework && name === FRAMEWORK_PEER) continue
+      fail(types
+        ? `${label}: names "${specifier}" — a shipped declaration may only reference the ${FRAMEWORK_PEER} peer; carry the engine's declarations and repoint (see scripts/carry-engine-types.mjs)`
+        : `${label}: imports "${specifier}" — the engine is not inlined (keep @avantf/* in devDependencies)`)
       continue
     }
     if (specifier.startsWith('node:') || declared.has(name)) continue
@@ -201,6 +212,12 @@ function assertSelfContained(label, code, declared, { client }) {
     // family. A require() the table cannot answer is a guaranteed runtime throw, so anything else
     // is a build error even though the node half would resolve it from node_modules.
     if (client && (name === 'react' || name === 'react-dom' || name.startsWith('@deepseek-ai/'))) continue
+    // A declaration may type-import ANY harness module: the host provides the whole `@deepseek-ai/*`
+    // module tree (they are all optional peers, and a `import type {}` used only to reach an
+    // augmentation is erased from the bundle but kept in the `.d.ts`). Requiring a manifest entry here
+    // would force a peer-declaration change for a type-only edge; the load-bearing rule for
+    // declarations is the `@avantf/*` one above.
+    if (types && name.startsWith('@deepseek-ai/')) continue
     fail(`${label}: imports "${specifier}" but no dependency/peer declares it`)
   }
 }
@@ -257,9 +274,11 @@ console.log(`\n▶ pnpm pack → ${outDir}`)
 // `pnpm pack` rewrites `workspace:*` into the TARGET's version, and the engines deliberately carry none
 // in the tree (the version is recorded once, in this package's manifest) — so the private targets get it
 // materialized for the duration of the pack and lose it again right after. Nothing is committed;
-// `version:check` fails on a leftover.
+// `version:check` fails on a leftover. `{ group: 'mem' }` narrows that to THIS tree's private packages:
+// the default spans every group, so a `mem` pack would briefly stamp its version onto mission's
+// manifests too (the M7 defect).
 const packStatus = withWorkspaceVersions(resolve(repo, '..'), manifest.version, () =>
-  run('pnpm', ['--filter', manifest.name, 'pack', '--pack-destination', outDir]))
+  run('pnpm', ['--filter', manifest.name, 'pack', '--pack-destination', outDir]), { group: 'mem' })
 if (packStatus !== 0) {
   console.error('pack-plugin: pnpm pack failed')
   process.exit(1)
@@ -336,7 +355,20 @@ for (const entry of ['package/lib/index.js', 'package/lib/client.js', 'package/l
 // at startup (the compatibility gate's "compiled against" side and the interface generation this build
 // was written for). They must ship with the package — hence the presence checks above as well as the
 // exemptions here.
-const LIB_OK = /^package\/lib\/(index\.js|client\.js|client\.js\.map|dsh-build\.json|interface-version\.json|types\/.*)$/
+//
+// Two exclusions are deliberate and load-bearing:
+//
+//   * `lib/types/**/*.js` (+ its `.js.map`) is the tsc INTERMEDIATE the tsdown preset consumes (its
+//     node entry is `lib/types/index.js`). It is a build input, not a published surface: it still
+//     names the engine by package specifier, and shipping it would leak dead code AND give the
+//     declaration scan below a second thing to fix. `package.json`'s `files` negations keep it out of
+//     the tarball; this regex makes a `files` edit that lets it back in a STRAY (a hard failure),
+//     never a silent ship.
+//   * `lib/client.js.map` is deliberately NOT shipped. The client bundle keeps its sourcemap so local
+//     debugging still works, so `lib/client.js` ends in `//# sourceMappingURL=client.js.map` — an
+//     intentionally dangling comment, not a file someone forgot to include. The map is ~636 KB of
+//     inlined `sourcesContent` (zod internals + plugin sources) no consumer reads; 0.3.1 shipped it.
+const LIB_OK = /^package\/lib\/(index\.js|client\.js|dsh-build\.json|interface-version\.json|types\/.*\.d\.ts(?:\.map)?|engine\/.*\.d\.ts)$/
 const strays = contents.filter((entry) => entry.startsWith('package/lib/') && !LIB_OK.test(entry))
 if (strays.length > 0) {
   fail(`tarball carries ${String(strays.length)} file(s) under lib/ that no bundle references (a stale build — rerun \`pnpm build:dsh\` on a clean lib/): ${strays.join(', ')}`)
@@ -355,6 +387,51 @@ assertFrameworkInlining('tarball:lib/index.js', tarFile('package/lib/index.js'))
     fail(`tarball:lib/client.js: carries the base kit's implementation ("${KIT_MARKER}") — the browser half must not inline the kit`)
   }
 }
+
+// ── the shipped DECLARATION surface ────────────────────────────────────────────────────────────
+// `exports["."].types` and `exports["./client"].types` point into `lib/types/**`, and the engine's
+// declarations are carried next to it under `lib/engine/**`. Every specifier in there is resolved by
+// the CONSUMER's type-checker, so it must name only what their install provides: the base peer,
+// `@deepseek-ai/*` peers, `zod`, and relative paths inside this package. Both extensions are scanned
+// on purpose: if a `.js` intermediate ever slips past `files`, this fails it rather than shipping an
+// engine package name inside the tarball. This is the gate H2 shipped past.
+const shippedDeclarations = contents
+  .filter((entry) => /^package\/lib\/(?:types|engine)\/.*\.(?:d\.ts|js)$/.test(entry))
+for (const entry of shippedDeclarations) {
+  assertSelfContained(`tarball:${entry}`, tarFile(entry), packedDeclared, { client: false, allowFramework: true, allowRelative: true, types: true })
+}
+// Non-vacuity, tied to a declaration the presence check above already requires: `lib/types/index.d.ts`
+// imports engine types, so a tarball with no carried engine declaration is a broken build, not a
+// clean one.
+const shippedEngine = shippedDeclarations.filter((entry) => entry.startsWith('package/lib/engine/'))
+if (shippedEngine.length === 0) {
+  fail('tarball: no lib/engine/**/*.d.ts shipped — `scripts/carry-engine-types.mjs` did not run (or `files` dropped it), so the declared types still point at unpublished packages')
+}
+// The repointing is only correct if every relative specifier it produced lands on a file the tarball
+// ALSO carries. Nothing above checks the other end (declaration scan skips relative specifiers on
+// purpose), so a partial copy or a `files` pattern that dropped a subdirectory would ship a specifier
+// that resolves to nothing. Ported from `mission/scripts/pack-plugin.mjs` §2b.
+const shippedEntries = new Set(contents)
+const dangling = []
+let relativeSpecifiers = 0
+for (const entry of shippedDeclarations) {
+  for (const specifier of specifiersIn(tarFile(entry))) {
+    if (!specifier.startsWith('.')) continue
+    relativeSpecifiers += 1
+    const target = posix.normalize(posix.join(posix.dirname(entry), specifier))
+    const candidates = specifier.endsWith('.js')
+      ? [target, target.replace(/\.js$/u, '.d.ts'), `${target}.d.ts`]
+      : [target, `${target}.d.ts`, `${target}/index.js`, `${target}/index.d.ts`]
+    if (!candidates.some((candidate) => shippedEntries.has(candidate))) dangling.push(`${entry} → ${specifier}`)
+  }
+}
+if (relativeSpecifiers === 0 && shippedEngine.length > 0) {
+  fail('tarball: the shipped declaration tree carries lib/engine/ but no relative specifier was found — the closure scan is broken, not the package')
+}
+if (dangling.length > 0) {
+  fail(`tarball: ${String(dangling.length)} dangling relative import(s) in the shipped declarations — a repoint or a \`files\` pattern would ship a specifier that resolves to nothing: ${dangling.slice(0, 5).join(', ')}`)
+}
+
 if (packed.peerDependencies?.[FRAMEWORK_PEER] === undefined) {
   fail(`tarball manifest: "${FRAMEWORK_PEER}" must be a peerDependency (the host provides the framework)`)
 }

@@ -104,7 +104,7 @@ function safeDestination(root: string, name: string, artifact: string): string |
   return destination
 }
 
-/** Extract one entry's bytes to `destination`, verifying both sizes. */
+/** Extract one entry's bytes to `destination`, verifying both sizes on BOTH methods. */
 async function writeEntry(
   data: Uint8Array,
   view: DataView,
@@ -124,19 +124,48 @@ async function writeEntry(
     throw new ProvisionError('extract', artifact, `条目「${entry.name}」的数据被截断`)
   }
   const compressed = data.subarray(dataStart, dataEnd)
-  mkdirSync(dirname(destination), { recursive: true })
-  const out = createWriteStream(destination)
+  // Validate BEFORE creating the output stream: a rejected entry used to leave an orphaned
+  // `WriteStream` behind (its async open then raced the caller's scratch cleanup, surfacing as an
+  // unhandled ENOENT), and a method/size mismatch wrote an empty file that only the caller's
+  // rollback removed.
   if (entry.method === 0) {
     if (entry.compressedSize !== entry.uncompressedSize) {
       throw new ProvisionError('extract', artifact, `条目「${entry.name}」声明 STORE 但两个大小不一致`)
     }
+  } else if (entry.method !== 8) {
+    throw new ProvisionError('extract', artifact, `条目「${entry.name}」的压缩方式 ${String(entry.method)} 不受支持（只支持 STORE/DEFLATE）`)
+  }
+  mkdirSync(dirname(destination), { recursive: true })
+  const out = createWriteStream(destination)
+  if (entry.method === 0) {
     await pipeline(async function* () { yield compressed }(), out)
     return
   }
-  if (entry.method !== 8) {
-    throw new ProvisionError('extract', artifact, `条目「${entry.name}」的压缩方式 ${String(entry.method)} 不受支持（只支持 STORE/DEFLATE）`)
+  // DEFLATE used to be the unchecked method: it inflated straight to disk, so an archive that
+  // understated `uncompressedSize` could expand without limit (the caller pins the archive's own
+  // byte count and sha256, but that bounds the COMPRESSED bytes only). Count on the way through,
+  // abort the moment the declared size is exceeded — the inflater is destroyed by the rejected
+  // pipeline, so the excess never lands — and require the final count to match exactly, which also
+  // rejects a size that merely overSTATES the payload.
+  const expected = entry.uncompressedSize
+  let written = 0
+  await pipeline(
+    async function* () { yield compressed }(),
+    createInflateRaw(),
+    async function* (source: AsyncIterable<Buffer>) {
+      for await (const chunk of source) {
+        written += chunk.length
+        if (written > expected) {
+          throw new ProvisionError('extract', artifact, `条目「${entry.name}」解压后超过声明大小 ${String(expected)} 字节`)
+        }
+        yield chunk
+      }
+    },
+    out,
+  )
+  if (written !== expected) {
+    throw new ProvisionError('extract', artifact, `条目「${entry.name}」解压大小与声明不一致（声明 ${String(expected)}，实际 ${String(written)} 字节）`)
   }
-  await pipeline(async function* () { yield compressed }(), createInflateRaw(), out)
 }
 
 /** On-disk size of a directory tree, for the "did anything land" check and the install log. */

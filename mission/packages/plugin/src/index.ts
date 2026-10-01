@@ -521,11 +521,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const count = (kind: OwnerProbe['kind']): number =>
       removed.filter((entry) => entry.probe.kind === kind).length
     // Audit trail: who asked, how many went, and by which verdict — the only record of a destructive
-    // act that leaves no session log behind.
+    // act that leaves no session log behind. The skipped list is what goes after `skipped`: it used to
+    // print `removed`'s ids there, so the one durable record of the act named the wrong trees.
     log.info(
       `/clean orphans from ${callerId}: removed ${String(removed.length)} tree(s) `
       + `(missing: ${String(count('missing'))}, unobservable: ${String(count('unobservable'))}), `
-      + `skipped ${String(skipped.length)}: ${removed.map((entry) => entry.rootId).join(', ')}`,
+      + `skipped ${String(skipped.length)}: ${skipped.join(', ')}`,
     )
     if (removed.length === 0) {
       return {

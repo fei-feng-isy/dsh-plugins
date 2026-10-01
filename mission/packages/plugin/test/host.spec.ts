@@ -417,6 +417,57 @@ describe('worker lifecycle', () => {
     expect(mounted.dispatched[1]?.prompt).not.toContain('前几次没有完成')
   })
 
+  it('keeps refreshing progress for a claim issued before a restart', async () => {
+    // Hot reload: the durable tree still binds this worker (`reconcileOnOpen` keeps a live survivor
+    // `running` and resets `progressAt`), but `issuedClaims` is in-memory and start-up never refills
+    // it. Filtering the progress feed on that set dropped every later event, so past `staleMs` a
+    // worker that had been working the whole time was interrupted and reclaimed as stalled — one
+    // burnt attempt and one `failures` slot. The claim id's own shape is the fallback provenance.
+    const mounted = await mount()
+    const rootId = await createTree(mounted, 'a long run')
+    const claim = String(mounted.dispatched[0]?.childId ?? '')
+    expect(claim).not.toBe('')
+
+    // A restart: the in-memory set empties while the persisted binding stays.
+    await mounted.host.stop()
+    expect(mounted.host.claimCounts().issued).toBe(0)
+    expect(mounted.nodeFor(rootId)?.claimedBy).toBe(claim)
+
+    const before = mounted.nodeFor(rootId)?.progressAt ?? 0
+    // Through the feed the plugin actually registers, not by calling the host method directly.
+    mounted.ctx.emit('session/event', { id: claim } as never, { time: before + 1 } as never)
+    expect(mounted.nodeFor(rootId)?.progressAt).toBe(before + 1)
+  })
+
+  it('warns — rate-limited — when a background sweep fails, instead of swallowing it', async () => {
+    // The chain the two fire-and-forget callers start persists progress (a durable write), probes
+    // storage for orphans and then reclaims/dispatches. `.catch(() => undefined)` hid a store that
+    // keeps refusing writes: a failure a minute, zero evidence. The first failure must speak, and
+    // the 60 s interval must not turn one condition into a line a minute.
+    const mounted = await mount()
+    await createTree(mounted)
+    const claim = String(mounted.dispatched[0]?.childId ?? '')
+    const lines: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '))
+    })
+    try {
+      mounted.host.sweep = () => Promise.reject(new Error('stubbed: the store refuses the write'))
+      const settle = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0) })
+      const end = { runId: claim, provider: 'spawn', id: claim, local: true, stopReason: 'completed' } as never
+      mounted.ctx.emit('subagent/end', end)
+      await settle()
+      // Same condition, inside the throttle window: folded, not printed again.
+      mounted.ctx.emit('subagent/end', end)
+      await settle()
+    } finally {
+      spy.mockRestore()
+    }
+    const warnings = lines.filter((line) => line.includes('sweep failed'))
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('stubbed: the store refuses the write')
+  })
+
   it('ignores another agent settling', async () => {
     const mounted = await mount()
     await createTree(mounted)

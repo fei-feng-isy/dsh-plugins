@@ -58,10 +58,10 @@ export function defaultLock(options: DefaultLockOptions = {}): ProvisionLock {
       const deadline = clock() + timeoutMs
       for (;;) {
         const mine: LockHolder = { pid: process.pid, startedAt: clock() }
+        let handle: Awaited<ReturnType<typeof open>> | undefined
         try {
-          const handle = await open(path, 'wx')
+          handle = await open(path, 'wx')
           await handle.writeFile(JSON.stringify(mine), 'utf8')
-          await handle.close()
           return {
             dispose: () => {
               // Remove the lock only while it is still ours.
@@ -74,29 +74,51 @@ export function defaultLock(options: DefaultLockOptions = {}): ProvisionLock {
             },
           }
         } catch (error) {
+          // The file we just created is OURS even though the write failed. Leaving a zero-byte
+          // `.lock` behind is exactly the wedge this function has to recover from, so remove it
+          // before rethrowing. Close first: Windows refuses to unlink an open handle.
+          if (handle !== undefined) {
+            await handle.close().catch(() => undefined)
+            handle = undefined
+            await unlink(path).catch(() => undefined)
+          }
           // Only EEXIST is contention; any other error is rethrown.
           if ((error as { code?: string }).code !== 'EEXIST') {
             throw new ProvisionError('unknown-error', `无法创建锁 ${path}：${error instanceof Error ? error.message : String(error)}`)
           }
+        } finally {
+          // The success path returns from inside the `try`, so the handle is released here — a
+          // `writeFile`/`close` failure must never leak it.
+          if (handle !== undefined) await handle.close().catch(() => undefined)
         }
 
         const holder = await readHolder(path)
+        // The lock file's own mtime, read from the filesystem. It is compared against the WALL clock
+        // rather than the injectable one: `clock` drives the timeout budget and the recorded
+        // `startedAt`, but an injected clock that is deliberately far from wall time would make a
+        // freshly written lock look arbitrarily old and reclaim a live one.
+        const info = await stat(path).then(value => value, () => undefined)
+        const fileStale = info !== undefined && Date.now() - info.mtimeMs > staleMs
         if (holder === undefined) {
-          // A missing or unreadable holder still honours the timeout budget.
+          // No readable holder. mtime is the only trustworthy signal that this is a corrupt /
+          // half-written lock rather than a live writer caught mid-write, so a stale file is
+          // reclaimed and a fresh one still honours the timeout budget.
+          if (fileStale && await unlink(path).then(() => true, () => false)) continue
           if (clock() >= deadline) {
             throw new ProvisionError(
               'lock/timeout',
               `等待发布锁超时（${String(timeoutMs)} ms）：${path} 存在但不是可读的锁文件`,
             )
           }
-          const stillThere = await stat(path).then(() => true, () => false)
-          if (stillThere) await sleep(pollMs)
+          if (info !== undefined) await sleep(pollMs)
           continue
         }
-        if (!pidIsAlive(holder.pid) && clock() - holder.startedAt > staleMs) {
-          await unlink(path).catch(() => undefined)
-          continue
-        }
+        // A readable holder. mtime is AUTHORITATIVE here: a pid can be reused by an unrelated live
+        // process, and requiring "the pid is dead" then means a dead holder's lock is never
+        // reclaimed. The recorded start time stays a secondary signal for a provably dead pid, which
+        // keeps recovery working under an injected clock or where mtime is not meaningful.
+        const recordedStale = !pidIsAlive(holder.pid) && clock() - holder.startedAt > staleMs
+        if ((fileStale || recordedStale) && await unlink(path).then(() => true, () => false)) continue
         if (clock() >= deadline) {
           throw new ProvisionError(
             'lock/timeout',

@@ -237,10 +237,18 @@ export interface EnvinitLoadOptions {
  * and that is deliberate: setting it redirects a whole tree (data AND managed resources), which is
  * exactly what a test or a sandboxed host needs. Unset — the normal case — the family root is the
  * framework's documented default and the data home stays `~/.avantf`.
+ *
+ * The value is TRIMMED and `~`-EXPANDED, exactly like the family kit's `familyHome()` and the
+ * engine's own `expandHome`. Returning the raw string was a silent divergence from the other three
+ * copies of this rule: `AVANTF_HOME=~/x` reached the base's layout verbatim, so the provisioner
+ * wrote pandoc/models into the RELATIVE path `<cwd>/~/x/…` (a directory literally named `~`) while
+ * the engine expanded the same string and read `/home/<user>/x/…` — model re-downloaded, semantic
+ * leg degraded, pandoc not found. The kit is loaded dynamically (never a static import, see the
+ * module header), so the local `expandHome` from the contract is the one used here.
  */
 function resolveHome(): string {
-  const configured = process.env['AVANTF_HOME']
-  return configured !== undefined && configured.trim() !== '' ? configured : join(homedir(), '.avantf', 'env')
+  const configured = process.env['AVANTF_HOME']?.trim() ?? ''
+  return configured !== '' ? expandHome(configured) : join(homedir(), '.avantf', 'env')
 }
 
 /**

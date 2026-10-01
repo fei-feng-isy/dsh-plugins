@@ -596,6 +596,13 @@ export class KnowledgeStore {
     // title would land on one identity per domain. The title is DERIVED from the body instead
     // (`ingestUri`/`importPaths` pass an explicit basename or URL, so they never reach this fallback).
     const docTitle = title ?? deriveDocTitle(text)
+    // IMMEDIATE, not the default DEFERRED: this is a read-modify-write (upsert the doc → read the
+    // old chunk ids → delete → re-insert) and a DEFERRED transaction takes its write lock only at the
+    // first write, AFTER the reads. A shared data home is a supported shape (plugin and CLI at once),
+    // so two processes ingesting the same document could both read, then commit in either order: the
+    // later committer deletes the earlier one's chunk rows while the earlier one still encodes and
+    // `setVector`s those now-dead chunk ids — leaving phantom vectors in the live index. Taking the
+    // write lock up front serializes the pair, like `memory.ts` does for the same shape.
     const tx = this.db.transaction(() => {
       const docId = this.docs.upsert(domain, source, docTitle, sourceUri)
       const oldChunkIds = this.chunks.idsForDoc(docId)
@@ -618,7 +625,7 @@ export class KnowledgeStore {
       )
       return { doc_id: docId, oldChunkIds, newChunkIds, reusable }
     })
-    const result = tx()
+    const result = tx.immediate()
     this.evictVectors(result.oldChunkIds)
     const indexed = await this.indexChunks(result.newChunkIds, result.reusable)
     return {

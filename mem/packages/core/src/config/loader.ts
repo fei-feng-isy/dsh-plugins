@@ -47,13 +47,31 @@ export interface LoadedConfig {
   knowledge: KnowledgeConfig
 }
 
-function readYamlOrNull(path: string): Record<string, unknown> | null {
+/**
+ * Read one config YAML, or `null` when it is absent / unreadable / not a mapping.
+ *
+ * A PARSE FAILURE IS NOT SILENT. Treating a broken file as "no configuration" is the right behaviour
+ * — the process must keep starting — but the settings it silently drops include the security knobs
+ * (`knowledge.ingest.local_roots`, `allow_outside_workspace`, `allow_private_network`, `trust.*`), so
+ * one bad indent used to change the ingestion boundary with no trace anywhere. `warnUnknownKeys`
+ * below calls itself "the one message that tells an operator their config file is partly ignored";
+ * the branch where the WHOLE file is ignored was the one with no message at all.
+ *
+ * Still returns `null` (behaviour unchanged, every value falls back to its default). This is a
+ * warning, deliberately not a fail-closed: refusing to start on a syntax error is a host-behaviour
+ * change that needs a user decision, not a drive-by fix.
+ */
+function readYamlOrNull(path: string, logger: AvantfLogger): Record<string, unknown> | null {
   try {
     if (!existsSync(path)) return null
     const raw = readFileSync(path, 'utf8')
     const parsed = parse(raw)
     return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
-  } catch {
+  } catch (error) {
+    logger.warn(
+      `${path}: YAML parse failed (${error instanceof Error ? error.message : String(error)})`
+      + ' — the WHOLE file is ignored and every setting falls back to its default',
+    )
     return null
   }
 }
@@ -274,7 +292,7 @@ export function loadConfig(opts?: LoadConfigOptions): LoadedConfig {
   // default so the knobs are discoverable. A file with any content is the user's and is left alone.
   ensureCommonConfigFile(commonConfigPath(home), logger)
 
-  const commonYaml = readYamlOrNull(commonConfigPath(home))
+  const commonYaml = readYamlOrNull(commonConfigPath(home), logger)
   if (commonYaml) {
     // Managed keys are removed BEFORE parsing: a stale config.yaml must not become a second source
     // of truth for where models land or where they come from.
@@ -286,12 +304,12 @@ export function loadConfig(opts?: LoadConfigOptions): LoadedConfig {
 
   // Layer ③: per-store YAML overrides ARE merged into the store schema defaults
   // (they were previously parsed and thrown away).
-  const memYaml = readYamlOrNull(memoryConfigPath(home))
+  const memYaml = readYamlOrNull(memoryConfigPath(home), logger)
   if (memYaml) warnUnknownKeys(memoryConfigPath(home), memYaml, zodShape(MemoryConfigSchema) ?? {}, logger)
   let memory = MemoryConfigSchema.parse(memYaml ?? {})
   memory = { ...memory, db: { ...memory.db, path: resolveStorePath(memory.db.path, memoryDbPath(home)) } }
 
-  const kbYaml = readYamlOrNull(knowledgeConfigPath(home))
+  const kbYaml = readYamlOrNull(knowledgeConfigPath(home), logger)
   if (kbYaml) warnUnknownKeys(knowledgeConfigPath(home), kbYaml, zodShape(KnowledgeConfigSchema) ?? {}, logger)
   let knowledge = KnowledgeConfigSchema.parse(kbYaml ?? {})
   knowledge = {

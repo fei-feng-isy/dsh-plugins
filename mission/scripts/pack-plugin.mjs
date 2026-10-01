@@ -454,12 +454,14 @@ for (const name of packages) {
   // TARGET's version, and the engines deliberately carry none in the tree (the version is recorded once,
   // in this package's manifest). Nothing is committed — `version:check` fails on a leftover.
   // The workspace root, not this subtree: `workspaceTargets` scans every group's manifests.
+  // `{ group: 'mission' }` narrows the materialization to THIS group's private packages, so a mission
+  // pack never stamps its version onto mem's manifests (the M7 defect).
   const result = withWorkspaceVersions(resolve(repo, '..'), manifest.version, () =>
     spawnSync('pnpm', ['pack', '--pack-destination', outDir], {
       cwd: dir,
       stdio: 'inherit',
       env: process.env,
-    }))
+    }), { group: 'mission' })
   if (result.status !== 0) {
     failures.push(`${manifest.name}: npm pack failed`)
   }

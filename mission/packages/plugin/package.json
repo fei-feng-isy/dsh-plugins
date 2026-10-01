@@ -31,7 +31,8 @@
   "scripts": {
     "build": "node ../../scripts/build.mjs",
     "typecheck": "node ../../scripts/link-dsh.mjs --no-bake && tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "node ../../scripts/pack-plugin.mjs"
   },
   "peerDependencies": {
     "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",
