@@ -115,7 +115,7 @@ describe('store schema lifecycle', () => {
     const upgraded = openMemoryStore(path)
     try {
       // v1 is the base schema, so on this database it is a no-op that only stamps the version;
-      // every later step still has to run (their work is what adoption is FOR).
+      // every later step still has to run (their mission is what adoption is FOR).
       expect(upgraded.migration.applied).toEqual(MEMORY_SCHEMA.migrations.map((m) => m.version))
       expect(readUserVersion(upgraded.db)).toBe(MEMORY_SCHEMA.migrations.length)
       expect(upgraded.db.prepare('SELECT COUNT(*) AS n FROM contradiction_log WHERE resolved = 0').get()).toEqual({ n: 1 })
@@ -410,7 +410,7 @@ describe('store schema lifecycle', () => {
     }
   })
 
-  it('a failing step rolls back its own work and its version bump', () => {
+  it('a failing step rolls back its own mission and its version bump', () => {
     const db = openSqlite(':memory:')
     const failing: Migration[] = [
       { version: 1, name: 'ok', up: (d) => d.exec('CREATE TABLE t (x)') },

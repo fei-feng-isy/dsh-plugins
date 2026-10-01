@@ -44,20 +44,20 @@ const SOURCE = [
 ].join('\n')
 
 describe.skipIf(!hasPandoc)('a real .docx through pandoc', () => {
-  let work: string
+  let mission: string
   let docx: string
 
   beforeAll(() => {
-    work = mkdtempSync(join(process.cwd(), '.convert-docx-'))
-    const source = join(work, 'source.md')
-    docx = join(work, '网关设计规范.docx')
+    mission = mkdtempSync(join(process.cwd(), '.convert-docx-'))
+    const source = join(mission, 'source.md')
+    docx = join(mission, '网关设计规范.docx')
     writeFileSync(source, SOURCE, 'utf8')
     execFileSync(PANDOC, ['-f', 'markdown', '-t', 'docx', '-o', docx, source], { stdio: 'pipe' })
   })
 
   afterAll(() => {
     resetPandocResolution()
-    rmSync(work, { recursive: true, force: true })
+    rmSync(mission, { recursive: true, force: true })
   })
 
   it('converts to GFM with the heading hierarchy, the table and the emphasis intact', async () => {
@@ -96,7 +96,7 @@ describe.skipIf(!hasPandoc)('a real .docx through pandoc', () => {
     process.env['AVANTF_PANDOC'] = PANDOC
     resetPandocResolution()
     try {
-      setPandocProvisioning({ toolsDir: join(work, 'no-such-tools'), mirror: [], autoInstall: false })
+      setPandocProvisioning({ toolsDir: join(mission, 'no-such-tools'), mirror: [], autoInstall: false })
       const result = await convertToMarkdown({ bytes: readFileSync(docx), path: docx })
       expect(result?.converter).toBe('pandoc-3.11')
     } finally {

@@ -601,7 +601,7 @@ describe('reindex is incremental and can be planned', () => {
     await rt.kb({ action: 'ingest', text: '平台组负责统一网关的维护与发布。', domain: 'tech', source: 'a.md' })
     const report = (await rt.kb({ action: 'reindex' })) as { semantic_available: boolean; vectors_stale: number; vectors_encoded: number }
     // The suite disables downloads, so the semantic leg is down by construction: the plan must
-    // still show the outstanding work (not "0 to do"), and nothing may claim to be encoded.
+    // still show the outstanding mission (not "0 to do"), and nothing may claim to be encoded.
     expect(report.semantic_available).toBe(false)
     expect(report.vectors_stale).toBeGreaterThan(0)
     expect(report.vectors_encoded).toBe(0)
@@ -749,7 +749,7 @@ describe('ingestion boundary: file kind and size', () => {
 
 /**
  * A cross-store query encodes the query ONCE. Both legs share one backend and one model,
- * so each computing its own vector was the same 4 ms of work done twice — and with a
+ * so each computing its own vector was the same 4 ms of mission done twice — and with a
  * cross-encoder reranker, per-store reranking then paid for its own pass as well (that part
  * is by design, DESIGN §7: rerank belongs to each store's retriever).
  */

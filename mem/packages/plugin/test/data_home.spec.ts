@@ -3,7 +3,7 @@
  *
  * `mem/packages/plugin/test/family_pin.spec.ts` already pins the resolvers against each other; what
  * this spec pins is the layer the PLUGIN hands its own `config.dataHome` to. It used to hand it to the
- * engine's explicit slot, which made the profile's value outrank `$AVANTF_HOME` here while the work
+ * engine's explicit slot, which made the profile's value outrank `$AVANTF_HOME` here while the mission
  * plugin let the environment outrank it — so with both set, the two halves read DIFFERENT `<data
  * home>/prompts` directories, and the prompt file a user edited was read by one plugin only.
  */
@@ -26,7 +26,7 @@ function withEnv(value: string | undefined, body: () => void): void {
 }
 
 describe('the profile dataHome is a configured value (layer ②)', () => {
-  it('lets $AVANTF_HOME (④) outrank it — the same answer the work plugin gives', () => {
+  it('lets $AVANTF_HOME (④) outrank it — the same answer the mission plugin gives', () => {
     withEnv('/tmp/from-env', () => {
       expect(configDataHome('/tmp/from-config')).toBe('/tmp/from-env')
       expect(configDataHome(undefined)).toBe('/tmp/from-env')

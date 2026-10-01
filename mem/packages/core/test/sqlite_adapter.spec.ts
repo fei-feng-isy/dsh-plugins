@@ -161,7 +161,7 @@ describe('the capability probe', () => {
   /**
    * A `node:sqlite` module that behaves, so each fake below differs from it in exactly one way.
    * `probeModule` takes the module as an argument for precisely this: the refusals cannot be reached
-   * on a machine whose builtin works.
+   * on a machine whose builtin missions.
    */
   function fakeModule(options: { throwOnConstruct?: string; throwOnExec?: string; tolerate?: boolean } = {}): NodeSqliteModule {
     class FakeDatabase {

@@ -5,10 +5,10 @@ on:
     branches: [master]
   pull_request:
 
-# The merged workspace: base/ (one published package), mem/ and work/ (one published plugin each).
+# The merged workspace: base/ (one published package), mem/ and mission/ (one published plugin each).
 #
 # What runs here: `pnpm install` → build → typecheck → test → guard → version:check, plus the
-# publish-surface check. The PLUGIN host gates (`pnpm build:dsh mem`, `pnpm release:check:work`,
+# publish-surface check. The PLUGIN host gates (`pnpm build:dsh mem`, `pnpm release:check:mission`,
 # `pnpm pack:plugin:*`, the mount smokes, `pnpm proof:base-swap:mount`) additionally need a harness
 # CHECKOUT and a profile, so they stay LOCAL — run them by hand before releasing; see AGENTS.md
 # §"After changing ANY shared code under base/**".
@@ -16,7 +16,7 @@ on:
 # An installed dsh IS needed, though, and this workflow used to claim otherwise while calling scripts
 # that hard-require it: base's `typecheck`/`test` run `link-dsh.mjs`, which exits 1 without one, and 3
 # of base's 29 specs mount the host's REAL registries on purpose (that is what proves the compat
-# probes work against a real host rather than a stub). Installing it keeps those tests running —
+# probes mission against a real host rather than a stub). Installing it keeps those tests running —
 # skipping them would quietly turn "354 tests are covered" into "the ones that fit are".
 jobs:
   build-test:
@@ -47,7 +47,7 @@ jobs:
         run: pnpm -r typecheck
       - name: Test (all packages)
         run: pnpm -r test
-      - name: Boundary guard (mem/ and work/ never import each other)
+      - name: Boundary guard (mem/ and mission/ never import each other)
         run: pnpm guard
       # Each group records its version in exactly ONE carrier manifest; this catches a second copy
       # or a bump that missed the carrier.

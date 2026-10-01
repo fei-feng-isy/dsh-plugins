@@ -163,7 +163,7 @@ export function pandocClaim(input: ConvertInput): PandocClaim {
   return looksLikeHtml(input.bytes) ? { read: 'html+native_divs' } : undefined
 }
 
-/** How long pandoc may run on one document. Generous: a large ODT is a few seconds of work. */
+/** How long pandoc may run on one document. Generous: a large ODT is a few seconds of mission. */
 const CONVERT_TIMEOUT_MS = 120_000
 
 /** Cap on the Markdown pandoc may emit, so a pathological document cannot exhaust memory. */

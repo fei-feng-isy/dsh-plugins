@@ -4,7 +4,7 @@
  *
  * TEST-TIME ONLY. The shipped code (`src/`) imports no `@deepseek-ai/*` package at all — that is what
  * keeps this base module independent of any dsh version — but its test suite mounts the host's REAL
- * registries to prove the probes work there. These symlinks are how those tests reach whatever dsh is
+ * registries to prove the probes mission there. These symlinks are how those tests reach whatever dsh is
  * installed, with no version pinned anywhere in this repo.
  *
  * `--dsh <dir>` links a different install (any directory holding `node_modules/@deepseek-ai`);

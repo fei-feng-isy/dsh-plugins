@@ -89,7 +89,7 @@ describe('zh relations eval (degraded FTS+entity path)', () => {
     // MEASURED, and it corrects an earlier reading of this gap: the terms that go missing are not
     // "unknown to the tagger" — `缓存` is tagged `v` (a verb), and so are 维护/负责/加入/离开/审核/
     // 发布/值班. `风控` is `x`, which IS accepted (`ENTITY_EXTRA`), which is why the eval's 风控
-    // query works. So the gap is precisely "a term the tagger classifies as a verb", and the
+    // query missions. So the gap is precisely "a term the tagger classifies as a verb", and the
     // obvious extraction-layer fix — accept bare multi-char CJK runs — would admit EVERY verb and
     // pollute the entity leg (and the Jaccard denominators it feeds). The honest fixes are at the
     // lexical layer instead: a `LIKE '%…%'` fallback (no index can serve a 2-char trigram query, so

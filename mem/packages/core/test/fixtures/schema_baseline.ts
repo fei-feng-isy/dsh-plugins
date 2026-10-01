@@ -1,7 +1,7 @@
 /**
  * The OLDEST schema this build promises to be able to upgrade from: a database at
  * `user_version` 1 — the base DDL with every object that a numbered migration introduced
- * removed, so the numbered steps have real work to do when the guard upgrades it. Captured from
+ * removed, so the numbered steps have real mission to do when the guard upgrades it. Captured from
  * `sqlite_master` (comments stripped, creation order).
  *
  * This file is the fixed reference the upgrade-parity guard (`db_upgrade_parity.spec.ts`) builds
@@ -29,7 +29,7 @@ export interface BaselineSchemaObject {
   readonly sql: string
 }
 
-/** Step 1 of `MEMORY_SCHEMA` as this fixture froze it: the base DDL minus every later step's work. */
+/** Step 1 of `MEMORY_SCHEMA` as this fixture froze it: the base DDL minus every later step's mission. */
 export const MEMORY_BASELINE_V1: readonly BaselineSchemaObject[] = [
   { type: "table", name: "facts", sql: "CREATE TABLE facts (fact_id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL UNIQUE, category TEXT DEFAULT 'general', tags TEXT DEFAULT '', trust_score REAL DEFAULT 0.5, settle_clock REAL NOT NULL, pinned INTEGER DEFAULT 0, pinned_at TIMESTAMP, bonus_count INTEGER DEFAULT 0, bonus_window_at TIMESTAMP, last_reinforced_at TIMESTAMP, archived_clock REAL, retrieval_count INTEGER DEFAULT 0, helpful_count INTEGER DEFAULT 0, last_retrieved_at TIMESTAMP, hrr_vector BLOB, semantic_vector BLOB, embedding_model TEXT, vector_store TEXT DEFAULT 'local_numpy', status TEXT DEFAULT 'active', supersedes_id INTEGER, archived_at TIMESTAMP, archive_reason TEXT, ttl_days INTEGER DEFAULT 0, mirror_source TEXT, mirror_target TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)" },
   { type: "index", name: "idx_facts_status_category", sql: "CREATE INDEX idx_facts_status_category ON facts(status, category)" },

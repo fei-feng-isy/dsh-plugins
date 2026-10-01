@@ -1,7 +1,7 @@
 /**
  * The three release versions, and the ONE manifest that records each of them.
  *
- * A version group is a top-level subtree (`base` | `mem` | `work`) and its version lives in exactly one
+ * A version group is a top-level subtree (`base` | `mem` | `mission`) and its version lives in exactly one
  * place: the manifest of that group's **publishable** package —
  *
  *   base → base/plugin-base/package.json
@@ -29,7 +29,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** The version groups: one per top-level subtree, in the order the family publishes them. */
-export const VERSION_GROUPS = ['base', 'mem', 'work']
+export const VERSION_GROUPS = ['base', 'mem', 'mission']
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
 
 /** Every tracked `package.json` of one group, relative to `root` (subtree root manifest included). */

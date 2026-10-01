@@ -6,7 +6,7 @@
  *  - the memory side's `createConsoleLogger(prefix)` (`@avantf/mem-contract`): a stable
  *    `[avantf-mem] LEVEL message` line on STDERR, because the CLI and the MCP server own stdout for
  *    JSON / JSON-RPC;
- *  - the work side's `createLogger(host, sink)`: the same stderr line, PLUS a mirror into the host's
+ *  - the mission side's `createLogger(host, sink)`: the same stderr line, PLUS a mirror into the host's
  *    `ctx.logger` (`ctx.logger` alone never reaches the terminal).
  *
  * Both planes are kept, and each is independently injectable so a spec can assert the lines. Nothing

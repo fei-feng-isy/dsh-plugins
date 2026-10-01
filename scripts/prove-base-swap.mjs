@@ -18,9 +18,9 @@
  *      base through `loadFramework()` — the plugin's real load path — and asserts:
  *        - the module it got back IS the shim (identity marker), i.e. resolution went through
  *          `node_modules`, not a baked path;
- *        - prompt-file read/write works through the base's `PromptFiles` and the shim recorded the
+ *        - prompt-file read/write missions through the base's `PromptFiles` and the shim recorded the
  *          call (so the capability came from the swapped base);
- *        - the data-root / family-root resolvers work and were recorded too.
+ *        - the data-root / family-root resolvers mission and were recorded too.
  *      The plugin artifact's sha256 is asserted unchanged across the run: nothing was rebuilt.
  *
  *   C. (**`--mount`**) the two plugins' own mount smokes run afterwards, i.e. the full Cordis mount
@@ -89,7 +89,7 @@ function sha256(file) {
  * The kit symbol names that would only be in a plugin bundle if the kit had been INLINED.
  *
  * Derived, not hardcoded: every declaration `base/plugin-base/src/kit/**` exports, MINUS every name
- * that the plugin's own tree already declares (an engine package's `expandHome`, the work plugin's
+ * that the plugin's own tree already declares (an engine package's `expandHome`, the mission plugin's
  * `resolveDataHome` fallback, …). Those are legitimate local code, not a base copy; everything left is
  * a name no plugin has any business defining itself.
  */

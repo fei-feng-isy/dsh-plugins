@@ -378,7 +378,7 @@ try {
   const forNothing = rendered()
   // A FACT-bearing string arriving as a plugin notice: the probe would fire on these words, so an
   // unchanged empty verdict is what proves the author filter.
-  say('张伟管理李娜', { kind: 'plugin:avantf-work' })
+  say('张伟管理李娜', { kind: 'plugin:avantf-mission' })
   const forNotice = rendered()
   say('统一网关 平台组')
   const forDoc = rendered()

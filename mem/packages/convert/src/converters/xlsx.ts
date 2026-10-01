@@ -70,15 +70,15 @@ export const xlsxConverter: MarkdownConverter = {
   },
 
   async convert(input: ConvertInput): Promise<ConvertedDocument> {
-    const label = input.path ?? 'xlsx 工作簿'
+    const label = input.path ?? 'xlsx 任务簿'
     // BEFORE the reader sees a byte of it: `load` inflates and materializes the entire workbook, so
     // the row/column caps below cannot protect the host from a large one.
     const declared = zipDeclaredCost(input.bytes)
     if (declared !== null && declared.uncompressed > MAX_DECLARED_BYTES) {
       throw new Error(
-        `${label}：工作簿声明解压后 ${Math.round(declared.uncompressed / 1024 / 1024)} MB`
+        `${label}：任务簿声明解压后 ${Math.round(declared.uncompressed / 1024 / 1024)} MB`
         + `（${String(declared.entries)} 个条目），超过 ${String(MAX_DECLARED_BYTES / 1024 / 1024)} MB 上限，已拒绝转换。`
-        + '请先在原文件里删掉不需要的工作表或行，或导出为 CSV 后入库。',
+        + '请先在原文件里删掉不需要的任务表或行，或导出为 CSV 后入库。',
       )
     }
     const { default: ExcelJS } = await import('exceljs')
@@ -94,7 +94,7 @@ export const xlsxConverter: MarkdownConverter = {
       const rowCount = worksheet.rowCount
       const columnCount = worksheet.columnCount
       if (rowCount === 0 || columnCount === 0) {
-        warnings.push(`工作表「${worksheet.name}」为空，未产出表格`)
+        warnings.push(`任务表「${worksheet.name}」为空，未产出表格`)
         continue
       }
       const rows: string[][] = []
@@ -107,20 +107,20 @@ export const xlsxConverter: MarkdownConverter = {
         rows.push(cells)
       }
       if (rowCount > MAX_ROWS) {
-        warnings.push(`工作表「${worksheet.name}」共 ${String(rowCount)} 行，只转换前 ${String(MAX_ROWS)} 行`)
+        warnings.push(`任务表「${worksheet.name}」共 ${String(rowCount)} 行，只转换前 ${String(MAX_ROWS)} 行`)
       }
       if (columnCount > MAX_COLS) {
-        warnings.push(`工作表「${worksheet.name}」共 ${String(columnCount)} 列，只转换前 ${String(MAX_COLS)} 列`)
+        warnings.push(`任务表「${worksheet.name}」共 ${String(columnCount)} 列，只转换前 ${String(MAX_COLS)} 列`)
       }
-      const table = renderTable(rows, `工作表「${worksheet.name}」`)
+      const table = renderTable(rows, `任务表「${worksheet.name}」`)
       if (table.synthesizedHeader) {
-        warnings.push(`工作表「${worksheet.name}」首行是数值，已按数据行处理并合成列名`)
+        warnings.push(`任务表「${worksheet.name}」首行是数值，已按数据行处理并合成列名`)
       }
       sections.push(`## ${worksheet.name}\n\n${table.markdown}`)
     }
 
     if (sections.length === 0) {
-      throw new Error(`${label}：转换后没有可入库的表格（工作簿里没有非空工作表）`)
+      throw new Error(`${label}：转换后没有可入库的表格（任务簿里没有非空任务表）`)
     }
     return { markdown: sections.join('\n\n'), converter: ID, warnings }
   },

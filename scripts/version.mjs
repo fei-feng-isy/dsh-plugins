@@ -3,7 +3,7 @@
  * The release version of each group: ONE file, and nothing to propagate.
  *
  * A group's version is recorded in exactly one place — the manifest of its publishable package
- * (`base/plugin-base`, `mem/packages/plugin`, `work/packages/plugin`) — and every other manifest of the
+ * (`base/plugin-base`, `mem/packages/plugin`, `mission/packages/plugin`) — and every other manifest of the
  * group carries no `version` at all. So:
  *
  *   pnpm version:set mem 0.1.2   # the bump: edits mem/packages/plugin/package.json, and that is all
@@ -91,7 +91,7 @@ if (command === 'prune' && argv.length === 1) {
 }
 
 if (command === 'set') {
-  // `set mem 0.1.2` and `set mem=0.1.2` both work: the second is what `pnpm version:set mem=0.1.2` passes.
+  // `set mem 0.1.2` and `set mem=0.1.2` both mission: the second is what `pnpm version:set mem=0.1.2` passes.
   const [pair, second] = [argv[1], argv[2]]
   const [group, version] = pair === undefined ? [] : (pair.includes('=') ? pair.split('=') : [pair, second])
   if (group === undefined || version === undefined) {

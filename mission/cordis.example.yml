@@ -1,0 +1,15 @@
+# Example profile patch layer for @avantf/dsh-mission.
+#
+# Paste the row into your profile's `cordis.patch.yml` (not this file):
+#   ~/.dsh/profiles/<profile>/cordis.patch.yml
+#
+# A host-plane row: the plugin publishes its own service, registers the model
+# tools, contributes one guidance context, and installs the `agent/pre-step` gate.
+# It needs no `isolate` realm because it never publishes into the root realm on
+# behalf of a preset.
+- insert:
+    - id: avantf-mission
+      name: '@avantf/dsh-mission'
+      config:
+        # Concurrent mission units. Omit to use (CPU cores - 1).
+        maxConcurrent: 6

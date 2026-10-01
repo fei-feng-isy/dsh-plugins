@@ -79,7 +79,7 @@ describe('multi-process presence clock (TRUST_MODEL.md §2.1)', () => {
   it('two OS processes racing on one DB keep the clock equal to the sum of counted days', async () => {
     const dbPath = join(dir, 'memory.db')
     // Shared rendezvous dir: the children wait for each other there, so the race is
-    // real work overlapping in time rather than two sequential child startups.
+    // real mission overlapping in time rather than two sequential child startups.
     const barrierDir = join(dir, 'barrier')
     mkdirSync(barrierDir)
     const rounds = 1500

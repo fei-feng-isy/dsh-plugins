@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** 声明 dsh peer 的两棵树；base 自己不声明（它由插件加载）。 */
-const MANIFESTS = ['mem/packages/plugin/package.json', 'work/packages/plugin/package.json']
+const MANIFESTS = ['mem/packages/plugin/package.json', 'mission/packages/plugin/package.json']
 const PACKAGE = '@deepseek-ai/dsh'
 
 const argv = process.argv.slice(2)
@@ -147,7 +147,7 @@ if (asJson) {
 const distinct = [...new Set([...declared.values()].flat())]
 console.log(`${PACKAGE} 声明：${distinct.join('  ||  ')}`)
 console.log(`  mem:  ${(declared.get('@avantf/dsh-mem') ?? []).join('  ||  ')}`)
-console.log(`  work: ${(declared.get('@avantf/dsh-work') ?? []).join('  ||  ')}`)
+console.log(`  mission: ${(declared.get('@avantf/dsh-mission') ?? []).join('  ||  ')}`)
 console.log('判定：satisfies(version, range, { includePrerelease: true }) —— 与 dsh 启动门同一份实现')
 console.log(`      （semver 取自 ${from}；版本列表取自 ${effectiveRegistry()}）`)
 console.log(`已发布 ${versions.length} 个版本，分 ${ordered.length} 条线：\n`)

@@ -3,12 +3,12 @@
  * The WORKSPACE-level release gate: what must be true of the merged repository before any of its
  * three packages is published.
  *
- * The per-package gates (`pnpm release:check:mem`, `pnpm release:check:work`, and the base's own
+ * The per-package gates (`pnpm release:check:mem`, `pnpm release:check:mission`, and the base's own
  * `release:check`) prove each tree builds, tests and packs. This script proves the three things that
- * only make sense once `base/`, `mem/` and `work/` are one workspace:
+ * only make sense once `base/`, `mem/` and `mission/` are one workspace:
  *
  *   1. **The publishable set is exactly three packages.** `@avantf/dsh-plugin-base`,
- *      `@avantf/dsh-mem`, `@avantf/dsh-work` — and every other workspace package is `private: true`.
+ *      `@avantf/dsh-mem`, `@avantf/dsh-mission` — and every other workspace package is `private: true`.
  *      The merged tree contains a dozen packages (engines, the kit, the CLI/MCP), and a missing
  *      `private` flag publishes an internal package by accident the first time someone runs a
  *      recursive publish.
@@ -64,16 +64,16 @@ const note = (message) => notes.push(message)
 const PUBLISHABLE = new Map([
   ['base/plugin-base', '@avantf/dsh-plugin-base'],
   ['mem/packages/plugin', '@avantf/dsh-mem'],
-  ['work/packages/plugin', '@avantf/dsh-work'],
+  ['mission/packages/plugin', '@avantf/dsh-mission'],
 ])
 /** The workspace globs the three live under; a package anywhere else is build output, never shipped. */
-const WORKSPACE_PATTERNS = ['base/*', 'mem/packages/*', 'work/packages/*']
+const WORKSPACE_PATTERNS = ['base/*', 'mem/packages/*', 'mission/packages/*']
 
 const BASE_DIR = 'base/plugin-base'
 const BASE = '@avantf/dsh-plugin-base'
 const PLUGINS = [
   { dir: 'mem/packages/plugin', name: '@avantf/dsh-mem' },
-  { dir: 'work/packages/plugin', name: '@avantf/dsh-work' },
+  { dir: 'mission/packages/plugin', name: '@avantf/dsh-mission' },
 ]
 
 function readJson(relative) {

@@ -3,11 +3,11 @@ import { dirname, join } from 'node:path'
 
 /**
  * User-editable prompt text: one `.md` per prompt section, in the family's shared prompt directory
- * (`<data home>/prompts`, where each plugin owns a prefix — `mem-*` in the memory plugin, `work-*`
- * in the work engine).
+ * (`<data home>/prompts`, where each plugin owns a prefix — `mem-*` in the memory plugin, `mission-*`
+ * in the mission engine).
  *
  * This lived, byte-for-byte identical except for its header comment, in BOTH plugins
- * (`@avantf/dsh-mem`'s and `@avantf/dsh-work`'s `packages/plugin/src/prompt_files.ts`) — the copy
+ * (`@avantf/dsh-mem`'s and `@avantf/dsh-mission`'s `packages/plugin/src/prompt_files.ts`) — the copy
  * was deliberate while the two were separate repositories with no shared family package, and the two
  * headers said "if a third consumer appears, hoist it into one shared package rather than copy it
  * again". The merge into one workspace is that moment: it now lives in the base

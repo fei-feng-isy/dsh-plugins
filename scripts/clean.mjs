@@ -2,7 +2,7 @@
 /**
  * Remove this workspace's build output and caches — and nothing else.
  *
- * The merged repository holds three package groups (`base/*`, `mem/packages/*`, `work/packages/*`),
+ * The merged repository holds three package groups (`base/*`, `mem/packages/*`, `mission/packages/*`),
  * each with its own `lib/` or `dist/`. A blanket recursive delete of every `lib` and `dist` directory
  * is how a clean script deletes a hand-written directory that happened to be named `dist`; this one
  * only touches those groups, only removes a `release/` directory's `*.tgz` (the `release/README.md`
@@ -11,7 +11,7 @@
  * Usage:
  *   node scripts/clean.mjs                 # remove build output + caches
  *   node scripts/clean.mjs --dry-run       # print, remove nothing
- *   node scripts/clean.mjs --group work    # only one package group (`base` | `mem` | `work`)
+ *   node scripts/clean.mjs --group mission    # only one package group (`base` | `mem` | `mission`)
  *
  * `--group` is what a subtree's own `pnpm clean` uses: a hand-written recursive delete in a manifest
  * is neither portable nor aware of the release-tarball rule below, and that subtree should not have to
@@ -30,7 +30,7 @@ const groupFilter = groupIndex === -1 ? undefined : process.argv[groupIndex + 1]
 const GROUPS = new Map([
   ['base', 'base'],
   ['mem', 'mem/packages'],
-  ['work', 'work/packages'],
+  ['mission', 'mission/packages'],
 ])
 if (groupFilter !== undefined && !GROUPS.has(groupFilter)) {
   console.error(`clean: unknown group '${String(groupFilter)}' (expected ${[...GROUPS.keys()].join(', ')})`)

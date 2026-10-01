@@ -4,7 +4,7 @@
  *
  *   pnpm build:dsh            # every plugin, in build order
  *   pnpm build:dsh mem        # the memory/knowledge plugin only
- *   pnpm build:dsh work       # the work-tree plugin only
+ *   pnpm build:dsh mission       # the mission-tree plugin only
  *   pnpm build:dsh base       # the base alone (tsc — no plugin bundle, no mount smoke)
  *
  * The plugin set is DISCOVERED (`scripts/lib/plugins.mjs`), not listed here: a plugin tree is a
@@ -13,13 +13,13 @@
  * no list to forget.
  *
  * This script only ROUTES. The actual build stays where it is — `mem/scripts/build-plugin.mjs`,
- * `work/scripts/build-plugin.mjs`, the base's `tsc` — because each plugin's pipeline is genuinely its
- * own (mem: tsc + the pinned tsdown client preset; work: tsc + esbuild + core-type relocation). What
+ * `mission/scripts/build-plugin.mjs`, the base's `tsc` — because each plugin's pipeline is genuinely its
+ * own (mem: tsc + the pinned tsdown client preset; mission: tsc + esbuild + core-type relocation). What
  * a developer should not have to remember is WHICH tree to enter, and that is all this adds: one entry
  * point over the per-plugin ones, which keep working unchanged.
  *
  * Arguments after the target are forwarded to that plugin's own `build:dsh`, so its flags keep their
- * meaning: `pnpm build:dsh mem --fresh`, `pnpm build:dsh work --skip-link`. With NO target they are
+ * meaning: `pnpm build:dsh mem --fresh`, `pnpm build:dsh mission --skip-link`. With NO target they are
  * refused up front, because flags are per-plugin: `--fresh` is mem-only, and forwarding it to a plugin
  * that rejects it would abort the run after another plugin had already been rebuilt. What each plugin
  * accepts is its own business — ask it: `pnpm build:dsh mem --help`.

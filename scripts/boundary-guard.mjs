@@ -189,7 +189,7 @@ function specifiersOf(file) {
   const found = []
   for (const pattern of [
     /(?:^|[;\n}])\s*import\s[^;'"]*?from\s*['"]([^'"]+)['"]/gmu,
-    // A SIDE-EFFECT import (`import '@avantf/dsh-work'`) has no `from`; miss it and the guard is green
+    // A SIDE-EFFECT import (`import '@avantf/dsh-mission'`) has no `from`; miss it and the guard is green
     // on exactly the import that pulls the other plugin in.
     /(?:^|[;\n}])\s*import\s*['"]([^'"]+)['"]/gmu,
     /(?:^|[^\w$])import\s*\(\s*['"]([^'"]+)['"]\s*\)/gu,

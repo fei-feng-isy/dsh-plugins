@@ -4,7 +4,7 @@
  * A DSH plugin's Remote face is hand-written here (the Typert generator runs only inside the harness
  * workspace), and both plugins independently arrived at the same conventions. The GENERATOR-level
  * parts live here once; the descriptor assembly stays per plugin because the two really differ (the
- * work engine adds `stream`/cancellation methods, the memory plugin has a `parameter()` helper with
+ * mission engine adds `stream`/cancellation methods, the memory plugin has a `parameter()` helper with
  * `acceptsUndefined`). Only the genuinely identical part is hoisted — a fake abstraction with a bag
  * of switches would be worse than the duplication it removes.
  *
@@ -21,7 +21,7 @@ import type { ZodType } from 'zod'
  * Carries BOTH members on purpose. The host's validator moved from `codec.schema.parse` (dsh 0.1.5)
  * to `codec.create()` (0.1.6), and each generation checks only its own — so a codec missing one of
  * them makes a healthy host read as an incompatible one, and the failure shows up as a REFUSED mount
- * rather than as a missing neighbour. Measured on the memory plugin first; the work copy had drifted
+ * rather than as a missing neighbour. Measured on the memory plugin first; the mission copy had drifted
  * to the one-member shape and was fixed to match. Do not "simplify" this back.
  */
 export interface StrictCodec {

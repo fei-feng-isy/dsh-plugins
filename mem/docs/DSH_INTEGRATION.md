@@ -193,7 +193,7 @@ per method, `@avantf/dsh-mem#avantfMem/<method>` ids):
 > live in each plugin — and **changing them needs a plugin release**. The other plugin-local pieces are
 > the plugin's own logger and its base-less fallbacks. What IS taken off the dynamically imported base
 > module: the compatibility gate's rules/probes/verification, the envinit provisioner, the prompt-file
-> layer, and (in the work plugin) `resolveDataHome`, so a fix there ships with ONE base release and no
+> layer, and (in the mission plugin) `resolveDataHome`, so a fix there ships with ONE base release and no
 > plugin rebuild.
 >
 > Optional fields are written `X.optional()`, never `z.union([z.undefined(), X])`: the two accept the

@@ -67,7 +67,7 @@ bootstrap（内联；解析底座 → 动态 import() → 校验 supportedRange�
    不校验 tarball；解析不到或版本不被接受就一条 `envinit: WARNING` + 降级挂载。
 2. **装载底座**：`@avantf/dsh-plugin-base` **只通过一个动态 `await import()` 出现**（bootstrap 返回的那份
    模块），绝无顶层 value import（有的话，坏树时 bootstrap 还没跑就抛 `ERR_MODULE_NOT_FOUND`）。共享能力
-   （门禁规则/探针/复查、envinit provisioner、prompt 文件层 `PromptFiles`；work 另取 `resolveDataHome`）
+   （门禁规则/探针/复查、envinit provisioner、prompt 文件层 `PromptFiles`；mission 另取 `resolveDataHome`）
    也从这份模块上取——所以这些共享逻辑只需一次底座发布即可修，不必重建插件产物。底座 kit 另外导出
    `createPluginLogger` 与 `familyHome` 等族根路径工具，插件可在运行时取用；`typert` `strict` codec 与符号
    字面量、各插件自己的 logger 与降级 fallback 则留在插件里，改它们需要发插件。
@@ -151,7 +151,7 @@ service / prompt / Remote 面都正常注册——"拿不到底座"不是"不兼
 
 ## 6. 迁移已有机器到新根
 
-**先确认新环境工作，再删旧目录。** 为避免重新下载，先**搬**再删：
+**先确认新环境任务，再删旧目录。** 为避免重新下载，先**搬**再删：
 
 ```bash
 mkdir -p ~/.avantf/env/tools ~/.avantf/env/models

@@ -62,6 +62,9 @@ pnpm approve-builds --all     # 勾选 nodejieba / hnswlib-node / onnxruntime，
 #   · 用 npm / yarn 装（它们不认识 dsh.profile.bundles）；
 #   · 手工编辑 profile 的包清单，而没有把本包选进 bundles。
 # 两条路都做也不会挂两次（loader 按条目 id 去重，实测只挂载一次），但配置里会多一行冗余——二选一。
+#   · 前提：自动选中只在 `dsh plugin add` **跑完**那一刻发生。若它中途被构建提示（pnpm 的
+#     approve-builds）拦下（ERR_PNPM_IGNORED_BUILDS、非零退出），依赖装上了但组合包**不会被选中**，
+#     事后再 add / install 也不会补选——先答完提示再装，或到 DSH Desktop 的「插件」页启用这个组合包。
 #
 # 手写的那一行，放在 ~/.dsh/profiles/<PROFILE>/cordis.patch.yml（不存在就新建）：
 - insert:

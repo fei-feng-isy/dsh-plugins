@@ -10,7 +10,7 @@ import { GitRepo } from '../src/git.js'
  * artifact worth sharing).
  *
  * The load-bearing property is NOT "it commits" but "it can never break a write path": the caller
- * gets here only after its real work is durable (the row is committed, the document is indexed),
+ * gets here only after its real mission is durable (the row is committed, the document is indexed),
  * so every failure mode — no `git`, no repo yet, a locked index, nothing to commit — has to end in
  * a warn at most. Those paths are tested directly, not assumed.
  *

@@ -132,7 +132,7 @@ describe('buildFtsQuery is bounded', () => {
   it('dedupes repeated trigrams and caps the phrase count', () => {
     // A long CJK run repeats its trigrams, and `"abc" OR "abc"` is exactly `"abc"`: the duplicates cost
     // `MATCH` time and buy nothing. The cap is the second line of defence behind the contract's
-    // `MAX_QUERY_CHARS` — it bounds the work at a number the tokenizer owns.
+    // `MAX_QUERY_CHARS` — it bounds the mission at a number the tokenizer owns.
     const long = '这是一段足够长的中文查询'.repeat(40)
     const built = buildFtsQuery(long, 'trigram')
     expect(built).not.toBeNull()

@@ -1,7 +1,7 @@
 /**
  * Classifying a pasted source, and browsing for one — both under the ingestion boundary.
  *
- * The classification is what makes the 知识 tab's single input work: the browser can recognize a
+ * The classification is what makes the 知识 tab's single input mission: the browser can recognize a
  * URL and nothing else, so "is this a file, a directory, a path that does not exist, or a
  * paragraph" is answered here, against the same boundary `kb_manage ingest` enforces.
  */

@@ -54,7 +54,7 @@ describe('the family path copies agree', () => {
 
   it('resolves the DATA root by the same rule: ⑤ explicit → ④ env → ② config → ~/.avantf', () => {
     // The configured value travels in the NAMED `configured` slot on the base side, exactly as layer
-    // ② travels in `common` on this side. Passing it as `explicit` instead — which the work plugin
+    // ② travels in `common` on this side. Passing it as `explicit` instead — which the mission plugin
     // used to do — promotes layer ② above layer ④, and the same config then resolves to two different
     // directories: `$AVANTF_HOME` silently stops mattering on one side of the family.
     const cases: { readonly configured: string; readonly env: string | undefined; readonly explicit?: string }[] = [

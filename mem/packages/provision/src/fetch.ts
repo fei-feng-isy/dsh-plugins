@@ -93,7 +93,7 @@ export async function fetchToFile(
  * Download from the first working source into `dest`.
  *
  * Failures are ACCUMULATED, not swallowed: every candidate is tried because the point of a mirror
- * list is that one of them may be down, but if none works the error carries the whole list of
+ * list is that one of them may be down, but if none missions the error carries the whole list of
  * `url → reason` so the operator sees whether it was DNS, a TLS interception, or a 404.
  */
 export async function downloadAnySource(

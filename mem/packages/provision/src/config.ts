@@ -21,7 +21,7 @@ import type { ProvisionConfig } from './types.js'
  * which is what a network-level interception of those domains looks like. They stay in the list
  * because a working proxy is the difference between a 35 MB download at GitHub speed and one that
  * times out; the official source is always the last candidate, and `ensure` reports EVERY source it
- * tried when none works, so a dead proxy can never be mistaken for a failed install. Set
+ * tried when none missions, so a dead proxy can never be mistaken for a failed install. Set
  * `tools.mirror: []` to skip them entirely.
  */
 export const DEFAULT_MIRRORS: readonly string[] = [

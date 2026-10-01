@@ -49,7 +49,7 @@ function fakeIo(initial: Record<string, string> = {}): Fake {
 }
 
 const DIR = '/data/prompts'
-const SPEC = { file: 'work-tree-guide.md', fallback: '默认正文' }
+const SPEC = { file: 'mission-tree-guide.md', fallback: '默认正文' }
 
 let warnings: string[]
 let infos: string[]

@@ -94,7 +94,7 @@ export interface PromptFileEntry {
  * directory (`<data_home>/prompts`, see {@link PromptFiles}).
  *
  * Every avantf plugin writes its prompts into that one directory and owns a prefix — `mem-*` here,
- * `work-*` in the work engine — so a deployment can find and diff all of its model-facing text in
+ * `mission-*` in the mission engine — so a deployment can find and diff all of its model-facing text in
  * one place without any plugin having to guess which files belong to it. This manifest is that
  * ownership: a `.md` it does not list is ignored (never read, never written, never deleted).
  *

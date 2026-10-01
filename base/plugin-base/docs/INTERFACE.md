@@ -44,11 +44,11 @@
 2. **形状面** —— 类型签名与参数形状。**已经**由编译保证，两半都成立：
    - **kit 半边**：插件把加载到的模块定型成接口类型 `BaseRuntimeV1`（`import type`，见
      `test/interface.spec.ts` 两条），`kit.resolveDataHome` / `kit.PromptFiles` 的签名一变就编译红
-     （`0.1.0 → 0.2.0` 那次 work 被迫改 `promptDir` 就是它在起作用）。
-   - **gate 半边曾经不成立**：work 把真实模块用 `framework as unknown as CompatModule` 塞进它手写的
+     （`0.1.0 → 0.2.0` 那次 mission 被迫改 `promptDir` 就是它在起作用）。
+   - **gate 半边曾经不成立**：mission 把真实模块用 `framework as unknown as CompatModule` 塞进它手写的
      `CompatModule`，编译器不做任何结构核对 —— 而 gate 正是语义最容易变的那半。已改成**只对测试缝做
      转换**：`const gate: CompatModule = options.compatModule ?? framework`（半成品的注入仍然转换，合理；
-     真实模块直接接受结构核对）。顺带得到一个免费的一致性检查：work 手写的 11 项与 base 实际导出的形状
+     真实模块直接接受结构核对）。顺带得到一个免费的一致性检查：mission 手写的 11 项与 base 实际导出的形状
      一旦对不上，立刻编译不过。
    base 现在**拥有**接口类型：`BaseRuntimeV1`（值面，真实模块可直接结构化赋值给它 —— 少一个成员就编译
    不过）与 `BaseTypeSurfaceV1`（类型面，`keyof` 就是类型名单）。插件不再各自手写一份子集、各自承担
@@ -56,7 +56,7 @@
 3. **语义面** —— 函数"做什么"的契约（数据根的层序、prompt 文件的 ensure/read/fallback、
    `compatReport` 的结构、provisioner 的终态与 `code`…）。这一层**机器抓不到**，所以只能靠 §4 的三条
    规则（其中第 3 条就是「给它一条跨树行为测试」）+ `DESIGN.md` §7 的协议面版本表来钉。每个带语义的成员
-   现在都有那条跨树测试（`mem/.../test/interface.spec.ts`、`work/.../test/interface.spec.ts`）。
+   现在都有那条跨树测试（`mem/.../test/interface.spec.ts`、`mission/.../test/interface.spec.ts`）。
 
 ## 3. 接口版本与运行期门禁（门禁在 base 里）
 
@@ -166,7 +166,7 @@
 要跟进时只需在方便的时候重建——而**重建之所以必要，只因为它要消费新世代的能力**，不是因为安装器会拒绝。
 
 代价要认：冻结点之后内部重构要绕开 `.` 面，接口换代要走弃用周期。**当时是最便宜的时机** —— 消费方只有
-本仓两个插件，且合并后的它们尚未发布（npm 上的 `@avantf/dsh-mem@0.1.1` / `@avantf/dsh-work@0.1.0`
+本仓两个插件，且合并后的它们尚未发布（npm 上的 `@avantf/dsh-mem@0.1.1` / `@avantf/dsh-mission@0.1.0`
 是合并前的旧产物，peer 还指向已死的 `@avantf/dsh-envinit`）；这也正是这次一次性把具名化、快照、接口类型
 与接口编号都做完的理由。
 
@@ -180,11 +180,11 @@
 | 块 | 状态 |
 | --- | --- |
 | `.` 名字面的 equality 门禁、`./internal` 隔离 | 已有 —— 门禁是 `test/public-surface.spec.ts`，**由 `api/interface-v1.json` 驱动**（清单只有一份：接口类型 `src/interface.ts` 的 `VALUE_NAMES_V1` / `TYPE_NAMES_V1` 是载体，快照是它的落盘） |
-| 插件对 base 的 `import type` 与模块定型（签名变化 ⇒ 插件 typecheck 红） | 已有 —— **两半都成立**：kit 一直是，gate 半边在 work 改成"只对测试缝做转换"之后才成立（§2 第 2 层） |
+| 插件对 base 的 `import type` 与模块定型（签名变化 ⇒ 插件 typecheck 红） | 已有 —— **两半都成立**：kit 一直是，gate 半边在 mission 改成"只对测试缝做转换"之后才成立（§2 第 2 层） |
 | `DESIGN.md` §7 的四张协议面版本表（item / layout / status / declared） | 已有 |
-| `resolveDataHome` 改具名对象（§4 第 1 条；同时是一次接口变更） | **已有** —— 三处都收成具名 slot，不再有位置参数：base kit 与 work `promptDir`/本地兜底是 `{ explicit?, env?, configured? }`，`@avantf/mem` 引擎是 `{ common, explicit }`（`common` 承载层 ② 的配置对象，因为它读的是 `Pick<Config,'dataHome'>`；名字不同，槽位语义相同，且都在编译期挡住"配置值放进 explicit slot"）。`family_pin.spec.ts`（跨树）、`family_paths.spec.ts`、`data_home.spec.ts`、`prompt_files.spec.ts` 同步 |
+| `resolveDataHome` 改具名对象（§4 第 1 条；同时是一次接口变更） | **已有** —— 三处都收成具名 slot，不再有位置参数：base kit 与 mission `promptDir`/本地兜底是 `{ explicit?, env?, configured? }`，`@avantf/mem` 引擎是 `{ common, explicit }`（`common` 承载层 ② 的配置对象，因为它读的是 `Pick<Config,'dataHome'>`；名字不同，槽位语义相同，且都在编译期挡住"配置值放进 explicit slot"）。`family_pin.spec.ts`（跨树）、`family_paths.spec.ts`、`data_home.spec.ts`、`prompt_files.spec.ts` 同步 |
 | `api/interface-v1.json` 快照（只记名字面）与"变了就必须升编号"的门禁 | **已有** —— 文件在 `base/plugin-base/api/interface-v1.json`，门禁断言快照 == 接口类型的两份名单 == 代码实际导出（两向相等）；不等时只能删导出，或新增 `interface-v2.json` 并升 `INTERFACE_VERSION` |
-| 接口类型 `BaseRuntimeV1`（插件改 `import type` 它）+ 每个带语义成员的跨树行为测试 | **已有** —— `src/interface.ts` 的 `BaseRuntimeV1`（值面，可结构化赋值）+ `BaseTypeSurfaceV1`（类型面，`keyof` 就是类型名单）；快照由它们派生。跨树行为测试在 `mem/packages/plugin/test/interface.spec.ts` 与 `work/packages/plugin/test/interface.spec.ts`，覆盖路径解析、`PromptFiles` 的 ensure/read/fallback、`compatReport` 的结构与文案归属、provisioner 的终态与 `code` 表，以及 bake 出的编号 == 加载到的 base 报出的编号（都是真实实现，不是 mock） |
+| 接口类型 `BaseRuntimeV1`（插件改 `import type` 它）+ 每个带语义成员的跨树行为测试 | **已有** —— `src/interface.ts` 的 `BaseRuntimeV1`（值面，可结构化赋值）+ `BaseTypeSurfaceV1`（类型面，`keyof` 就是类型名单）；快照由它们派生。跨树行为测试在 `mem/packages/plugin/test/interface.spec.ts` 与 `mission/packages/plugin/test/interface.spec.ts`，覆盖路径解析、`PromptFiles` 的 ensure/read/fallback、`compatReport` 的结构与文案归属、provisioner 的终态与 `code` 表，以及 bake 出的编号 == 加载到的 base 报出的编号（都是真实实现，不是 mock） |
 | `INTERFACE_VERSION` 与插件的构建期 bake + 运行期门禁（双向断言、由 link 步骤重烤） | **已有** —— base 导出整数 `INTERFACE_VERSION`；两个 `scripts/link-envinit.mjs` 在 vendor bootstrap 的同一步把 `{ baseVersion, interfaceVersion }` 写进 `lib/interface-version.json`（`files` 随包发布），`--check` 按字节比对；启动时插件用 base 的 `readInterfaceRequirement` 读自己的 bake、再调 base 的 `checkInterface`：`incompatible` ⇒ 一条 `WARNING` + 不用 base 的共享能力（自带 prompt 正文、门禁跳过、legacy provisioning）但**照常挂载**，`cannot-tell` ⇒ 一条 `WARNING` 并照常使用（§3）。**双向**断言：①bake 的编号 == base 当时的编号（两个 `link-envinit.mjs` 的 `--check`），②声明/bake 编号 == 加载到的 base 报出的编号（插件启动路径 + 两条跨树测试） |
 | 门禁搬进 base（§3 的核心） | **已有** —— `.` 导出 `checkInterface(required, module)` 与 `readInterfaceRequirement(url)`；两者都在 `BaseRuntimeV1` / `VALUE_NAMES_V1` 与快照里（v1 就地精修，不新建 v2、常量仍是 1）。插件只保留**消费**与"加载到的 base 没有这个函数 ⇒ `cannot-tell`"的兜底（老 base 必须还能被装上）。base 侧测试 `test/interface_gate.spec.ts` 覆盖三种 verdict、两个方向、缺常量/敌意 module、bake 记录缺失/畸形；两个插件的 `test/interface.spec.ts` 与 `test/envinit.spec.ts` 覆盖跨树消费与降级后果 |
 | 包版本退回普通 semver + 宽 peer（§1、§6） | **已有** —— `base/plugin-base/package.json` 是 **`0.3.0`**，两个插件的 peer 与 `devDependencies` 是 **`>=0.3.0 <1.0.0`**，`bootstrap.ts` 的 `VERSION` = `0.3.0`、`supportedRange` = `>=0.3.0 <1.0.0`，`pnpm version:check` 绿；接口变化不再要求插件同批改 peer，由运行期门禁按降级路径兜住 |
@@ -193,7 +193,7 @@
 第 2 步是后面几步的前提：形状不收成对象，"语义"就没有可检的落点；快照排在接口类型之前，是为了在起草
 `BaseRuntimeV1` 的过程中先把名字面锁住）：
 
-1. ✅ **work 的 gate 半边只对测试缝做转换**（§2 第 2 层）—— 一行，立刻把形状面变成两半都受编译保护，
+1. ✅ **mission 的 gate 半边只对测试缝做转换**（§2 第 2 层）—— 一行，立刻把形状面变成两半都受编译保护，
    且不必等 `BaseRuntimeV1`。
 2. ✅ `resolveDataHome` 改具名对象（§4 第 1 条）—— 整套方案里**唯一**破坏性改动，所以它同时**就是**一次
    接口变更。原计划是 base 从 0.2.0 走到 **0.3.0**；中途按 §7 第 5 步并进过 `1.0.0`，最终按 §1、§6 又

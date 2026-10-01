@@ -336,7 +336,6 @@ class NodeSqliteDb implements Db {
   }
 }
 
-/** Open (or create) a SQLite database behind the port. `':memory:'` is a valid path. */
 /**
  * Open (or create) a SQLite database behind the port. `':memory:'` is a valid path.
  *
@@ -347,7 +346,7 @@ class NodeSqliteDb implements Db {
  *
  * `verdict` is a TEST seam, and deliberately not a driver seam: there is one implementation and it
  * cannot be replaced at runtime. It exists so the refusal path can be asserted on a machine whose
- * builtin works — the path nobody sees until a user hits it.
+ * builtin missions — the path nobody sees until a user hits it.
  */
 export function openSqlite(path: string, verdict: () => string | undefined = serveReason): Db {
   const refused = verdict()

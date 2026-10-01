@@ -5,7 +5,7 @@
  * The projection is the WHOLE repository: every tracked file of `dsh-plugins`, in place, not one
  * plugin's subtree. That is what makes it both simple and verifiable — the release repo has the same
  * shape as the development repo (one root `pnpm-workspace.yaml` with the one catalog, `base/` + `mem/`
- * + `work/`, the same tests and the same gates), so nothing has to be rewritten for it to build. The
+ * + `mission/`, the same tests and the same gates), so nothing has to be rewritten for it to build. The
  * per-plugin projections this replaces had to strip the tests and re-derive each plugin's runtime
  * surface, because a single subtree does not contain the engine packages its bundle inlines.
  *
@@ -15,7 +15,7 @@
  *      projected, and the root manifest loses those two script entries: the release repo is generated,
  *      it never generates anything.
  *   2. `--version <group>=<v>` stamps the ONE manifest a group records its version in (`base` |
- *      `mem` | `work`): the group's publishable package. Its private siblings carry no `version` at
+ *      `mem` | `mission`): the group's publishable package. Its private siblings carry no `version` at
  *      all, so there is nothing to keep in lockstep and nothing that could be "not in lockstep" —
  *      grouping is by top-level tree only.
  *   3. `README.md` is generated (this repo has no root README to copy): the release repo's front page
@@ -31,7 +31,7 @@
  *   node scripts/make-release-tree.mjs --into <dir> --apply             # sync that checkout in place
  *   node scripts/make-release-tree.mjs --out <dir> [--force]            # materialize a fresh tree
  *   node scripts/make-release-tree.mjs --print-versions [--rc <dir>]    # TSV: group/dev/rc/effective/source
- *   … [--version base=0.1.4] [--version mem=0.1.2] [--version work=0.1.1]
+ *   … [--version base=0.1.4] [--version mem=0.1.2] [--version mission=0.1.1]
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -63,7 +63,7 @@ const ROOT_MANIFEST = 'package.json'
 /** Root-manifest scripts whose target files are excluded above; removed from the projection. */
 const RC_SCRIPTS = ['release:tree', 'sync:rc']
 /** The version groups, keyed by the top-level directory that owns the manifests. */
-const GROUPS = ['base', 'mem', 'work']
+const GROUPS = ['base', 'mem', 'mission']
 
 const README = `# avantf DSH plugins — release source
 
@@ -78,21 +78,21 @@ peer, so a plugin published before its base is un-installable):
 | --- | --- | --- |
 | \`@avantf/dsh-plugin-base\` | \`base/plugin-base\` | envinit + the host compatibility gate + the shared kit |
 | \`@avantf/dsh-mem\` | \`mem/packages/plugin\` | the memory/knowledge plugin |
-| \`@avantf/dsh-work\` | \`work/packages/plugin\` | the work-tree plugin |
+| \`@avantf/dsh-mission\` | \`mission/packages/plugin\` | the mission-tree plugin |
 
 Everything else in the tree is \`private: true\` and is inlined into the plugin that uses it.
 
 \`\`\`bash
 pnpm install --frozen-lockfile
-pnpm guard                     # mem/ and work/ reach only the base and their own trees
+pnpm guard                     # mem/ and mission/ reach only the base and their own trees
 pnpm release:check             # publish surface: exactly three packages, one zod, no link:/file:
 pnpm proof:base-swap           # the shared logic really comes off the base at runtime
 pnpm release:check:base        # per-package gates: typecheck → build → test → pack
-pnpm release:check:mem         #   (mem/work also run the real Cordis mount smoke)
-pnpm release:check:work
+pnpm release:check:mem         #   (mem/mission also run the real Cordis mount smoke)
+pnpm release:check:mission
 pnpm -C base/plugin-base publish --access public
 pnpm -C mem/packages/plugin publish --access public
-pnpm -C work/packages/plugin publish --access public
+pnpm -C mission/packages/plugin publish --access public
 \`\`\`
 `
 
@@ -273,7 +273,7 @@ const USAGE = `usage:
   node scripts/make-release-tree.mjs --print-versions [--rc <dir>] [--version <group>=<v>]…
 
 projects the WHOLE repository (every tracked file except the RC tooling itself) into the release
-checkout. --version stamps one version group: base | mem | work (bare <v> = all three).
+checkout. --version stamps one version group: base | mem | mission (bare <v> = all three).
 --print-versions writes one `|`-separated line per group: group, dev, rc, effective, source.`
 
 if (flag('--help') || flag('-h')) {

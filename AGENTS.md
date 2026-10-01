@@ -6,9 +6,9 @@
 | --- | --- | --- |
 | `base/plugin-base` | `@avantf/dsh-plugin-base` | DSH 插件的底座：启动期资源预装（声明式 provisioner）+ 宿主兼容门禁 + 共享 kit，运行期零依赖 |
 | `mem/packages/plugin` | `@avantf/dsh-mem` | DSH 的记忆/知识插件：可长期检索的记忆 + 文档知识库（8 个模型工具、两个设置页） |
-| `work/packages/plugin` | `@avantf/dsh-work` | DSH 的工作树插件：把一件能连验收标准一起交出去的事交给引擎，由它后台逐级派给一次性执行者 |
+| `mission/packages/plugin` | `@avantf/dsh-mission` | DSH 的任务树插件：把一件能连验收标准一起交出去的事交给引擎，由它后台逐级派给一次性执行者 |
 
-其余工作区包（`@avantf/mem-*`、`@avantf/work-core`、CLI/MCP）都是 `private: true`，会被内联进使用它的
+其余工作区包（`@avantf/mem-*`、`@avantf/mission-core`、CLI/MCP）都是 `private: true`，会被内联进使用它的
 那个插件。每个子树的领域设计仍写在自己的 `DESIGN.md` / `docs/` 里。
 
 ## 发布面
@@ -83,7 +83,7 @@
   `@avantf/mem-contract` 保留一份**无依赖**副本（CLI / MCP 没有 DSH 宿主、从不加载 base）。有跨树测试把
   两份钉在一起，改它等于一次 base 发版**加**一次 mem 引擎改动。
 - **两个插件绝不互相 import**（连相对路径也不行）；共享一律走 `base/`。
-- 刻意**不复用**之处：两个内核（`@avantf/mem` 与 `@avantf/work-core` 不共享领域模型）、两个 client 半边
+- 刻意**不复用**之处：两个内核（`@avantf/mem` 与 `@avantf/mission-core` 不共享领域模型）、两个 client 半边
   （不同 UI、不同 remote）、各插件的 item 清单与 SPEC。
 
 ## 抽取共用业务：先接口、后实现、向前兼容
@@ -108,7 +108,7 @@
 |---|---|---|
 | `base` | `base/plugin-base/package.json` | 无 |
 | `mem` | `mem/packages/plugin/package.json` | `mem/package.json` + `packages/{core,contract,convert,provision,retrieval-core,cli,mcp}` 都不带 `version` |
-| `work` | `work/packages/plugin/package.json` | `work/package.json` + `work/packages/core` 都不带 `version` |
+| `mission` | `mission/packages/plugin/package.json` | `mission/package.json` + `mission/packages/core` 都不带 `version` |
 
 ```bash
 pnpm version:set mem 0.1.2   # 只改该组那一个 manifest
@@ -124,7 +124,7 @@ pnpm version:prune           # 删掉私有 manifest 上多余的 version
 随包发布的 README 就是 npm 页面（`pack-plugin.mjs` 断言它随包、且首行是包名），只写**这个包本身**：
 
 - **base**：包是什么 → 主要功能 → 怎么用（可以有基础示例）→ 源码怎么编译。
-- **mem / work**：插件是什么 → 主要功能 → **怎么接入 dsh** → 怎么用。
+- **mem / mission**：插件是什么 → 主要功能 → **怎么接入 dsh** → 怎么用。
 - **不要写**：谁在用它、发布顺序、这个包由哪些包合并而来、catalog / rc / 发布门禁这类仓库内部内容；
   也不要指向**不随包发布**的仓库文档（`docs/DESIGN.md`、`docs/INTERFACE.md`、`INSTALL.md` 等）。
 - 计数按实测写（工具个数、提示词段数）；发布文档里出现过期数字属于缺陷。
@@ -133,7 +133,7 @@ pnpm version:prune           # 删掉私有 manifest 上多余的 version
 
 ```bash
 pnpm build:dsh            # 全部插件（按目录名字典序）；每个都会先构建 base
-pnpm build:dsh mem|work   # 只构建某个插件（含挂载冒烟）
+pnpm build:dsh mem|mission   # 只构建某个插件（含挂载冒烟）
 pnpm build:dsh base       # 只构建 base（tsc）
 ```
 
@@ -143,15 +143,15 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | `pnpm guard` | 每棵插件树只够得到 base 与自己的包（①不许 import 别棵树 ②相对路径不许出树 ③产物里不许按值 import base ④其余 `@avantf/*` 必须是本树自己的） |
 | `pnpm release:check` | 可发布集合恰好那三个、peer 是 required 且够宽、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base |
 | `pnpm proof:base-swap[:mount]` | 产物里没有静态 base import / 内联 kit；**被替换的** base 仍能提供提示词读写、根解析与接口门禁 |
-| `pnpm release:check:base\|:mem\|:work` | 各包自己的 typecheck → build → test → pack，**最后一步**是跨版本门 |
-| `pnpm check:old-dsh <base\|mem\|work>` | 在插件声明的 dsh peer 区间**下限**上重跑该包的 LOCAL 步骤（链接 → typecheck → build，含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
+| `pnpm release:check:base\|:mem\|:mission` | 各包自己的 typecheck → build → test → pack，**最后一步**是跨版本门 |
+| `pnpm check:old-dsh <base\|mem\|mission>` | 在插件声明的 dsh peer 区间**下限**上重跑该包的 LOCAL 步骤（链接 → typecheck → build，含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
 | `pnpm check:dsh-lines` | dsh **已发布**的版本里有没有我们的 peer 声明覆盖不到的（用 dsh 启动门同一份 semver + `includePrerelease: true` 判；有新 minor 线或 dist-tag 落到未覆盖线就退出 1，并给出该补的 `\|\|` 条款） |
 
 **改动 `base/**` 之后两个插件都要回归**（base 自己的测试不会走到挂载）：
 
 ```bash
 pnpm build:dsh mem && node mem/scripts/mount-smoke.mjs
-pnpm build:dsh work && node work/scripts/mount-smoke.mjs    # 或 pnpm -C work release:check
+pnpm build:dsh mission && node mission/scripts/mount-smoke.mjs    # 或 pnpm -C mission release:check
 ```
 
 **RC 投影只在发版时做**（`../dsh-plugins-rc`，整仓投影 + 产物级门禁）：日常开发不投影，不发版不投影。
@@ -178,5 +178,5 @@ pnpm build:dsh work && node work/scripts/mount-smoke.mjs    # 或 pnpm -C work r
   `lib/*.d.ts` 读依赖）；`pnpm typecheck:dsh` 覆盖插件的 src + specs，是本地门禁（CI 没有 harness）。
   读 zod 内部别猜：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })`，形状断言在
   `contract.spec.ts` / `tool_schema.spec.ts`。
-- **work**：工作树状态机在 `work/packages/core`（**刻意不带 Node 类型**），`work/packages/plugin` 是薄壳；
+- **mission**：任务树状态机在 `mission/packages/core`（**刻意不带 Node 类型**），`mission/packages/plugin` 是薄壳；
   它的领域模型与 mem 不共享任何东西。

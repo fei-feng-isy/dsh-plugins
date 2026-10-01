@@ -93,7 +93,7 @@ const NO_CHECK: { conflicts: DetectedContradiction[]; complete: boolean } = { co
 /**
  * Facts one derived-state sweep pass may rebuild (`reindexEntities`'s default budget).
  *
- * Bounds MEMORY, not only work: the pass selects `content` for every row it takes, so an
+ * Bounds MEMORY, not only mission: the pass selects `content` for every row it takes, so an
  * "unbounded" pass (the CLI used to ask for `Number.MAX_SAFE_INTEGER`) builds an array of every
  * stale fact's text before rebuilding the first one. Callers that want the corpus drained loop
  * until `deferred === 0` instead.
@@ -987,13 +987,13 @@ export class MemoryStore {
    *
    * Awaited by `maintenance` (one batch), so the caller knows the batch is done when it returns;
    * `deferred` is what the next pass still has to do. Callers that want the whole corpus drained
-   * loop until `deferred === 0` — `budget` bounds MEMORY as well as work, since the pass reads
+   * loop until `deferred === 0` — `budget` bounds MEMORY as well as mission, since the pass reads
    * every selected row's `content` before rebuilding the first one.
    *
    * The in-flight guard is here rather than at the callers because the callers CAN overlap: the
    * plugin's heartbeat and `maintenance` are both periodic, and `staleEntityRows` is ORDERED, so
    * two concurrent passes would select the same rows and re-tag them twice. Overlap is not
-   * corruption (each fact is stamped in its own transaction) — it is duplicated work in a
+   * corruption (each fact is stamped in its own transaction) — it is duplicated mission in a
    * single-threaded process. A pass that finds one running reports `skipped` and does nothing.
    *
    * `budget` is clamped at 0: SQLite reads a negative LIMIT as "no limit" (`LIMIT -1`), so a
@@ -1136,7 +1136,7 @@ export class MemoryStore {
    * rescale the survivors. That covers the Jaccard and FTS legs. It does NOT cover the HRR leg, whose
    * candidates arrive in the JACCARD leg's order (or by recency in its fallback), so its cap can
    * remove its own highest scorer and `v / max` really does move. Accepted — the cap bounds per-query
-   * work and the pool is reranked afterwards — but do not read these scores as comparable across
+   * mission and the pool is reranked afterwards — but do not read these scores as comparable across
    * different cap/over-fetch settings; see `docs/PROVENANCE_REVIEW.md` N5 for the missing differential.
    */
   private async searchLegs(

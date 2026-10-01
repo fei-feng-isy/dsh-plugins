@@ -68,7 +68,7 @@ const log = (o) => console.log(JSON.stringify(o))
 
 /**
  * Deterministic stub embedder: hashes the text into a unit vector. It is NOT a model — it only
- * has to be cheap, stable, and to produce dim-valid vectors so the vector store does real work.
+ * has to be cheap, stable, and to produce dim-valid vectors so the vector store does real mission.
  * Availability is what the two modes switch, so the SQL-only path can be measured in isolation.
  */
 function makeStub(available, dim) {

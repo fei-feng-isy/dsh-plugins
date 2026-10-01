@@ -445,6 +445,6 @@ export interface Provisioner {
   status(): readonly ProvisionStatus[]
   repair(itemId: string): Promise<ProvisionReport>
   experimental(): ProvisionerExperimental
-  /** Abort work still in flight and drop subscriptions; the instance is not reused. */
+  /** Abort mission still in flight and drop subscriptions; the instance is not reused. */
   dispose(): void
 }

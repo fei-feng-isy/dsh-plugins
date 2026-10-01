@@ -10,7 +10,7 @@
  * closure, redirects each package's `link-dsh` at it, runs the same LOCAL steps that package's
  * `release:check` runs, then puts the machine back.
  *
- * WHY THE REDIRECT LOOKS LIKE THIS. `link-dsh` resolves the install with `npm root -g` (work's also
+ * WHY THE REDIRECT LOOKS LIKE THIS. `link-dsh` resolves the install with `npm root -g` (mission's also
  * takes `--runtime`, but its build calls the bare form). So the closure is assembled as a fake global
  * root — `<cache>/root/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai` → `<cache>/set` —
  * and every step runs with `npm_config_prefix` pointed at it. The closure pins every
@@ -18,7 +18,7 @@
  * differs only in the dsh packages themselves.
  *
  * Usage:
- *   node scripts/check-old-dsh.mjs <base|mem|work> [--floor <version>] [--fresh] [--list]
+ *   node scripts/check-old-dsh.mjs <base|mem|mission> [--floor <version>] [--fresh] [--list]
  *
  * The floor defaults to the dsh peer ranges the PLUGINS declare (base declares no dsh peers of its
  * own — it is loaded by them — so it shares the family floor they name). The closure is cached under
@@ -40,7 +40,7 @@ const GROUPS = {
   base: {
     package: 'base/plugin-base',
     steps: [
-      // Explicit even though `typecheck`/`test` also link: work's `typecheck` does NOT, so the step
+      // Explicit even though `typecheck`/`test` also link: mission's `typecheck` does NOT, so the step
       // belongs to the gate rather than to each package's script shape.
       ['link the DSH peers at the floor', process.execPath, ['scripts/link-dsh.mjs'], 'base/plugin-base'],
       ['typecheck (src + tests) at the floor', pnpm, ['run', 'typecheck'], 'base/plugin-base'],
@@ -64,16 +64,16 @@ const GROUPS = {
       ['restore: rebuild the plugin (installed dsh)', pnpm, ['-C', 'packages/plugin', 'run', 'build'], 'mem'],
     ],
   },
-  work: {
-    package: 'work/packages/plugin',
+  mission: {
+    package: 'mission/packages/plugin',
     steps: [
-      ['link the DSH peers at the floor', process.execPath, ['scripts/link-dsh.mjs'], 'work'],
-      ['typecheck (src + tests) at the floor', pnpm, ['run', 'typecheck'], 'work'],
-      ['build + tests + mount smoke at the floor', pnpm, ['run', 'build:dsh'], 'work'],
+      ['link the DSH peers at the floor', process.execPath, ['scripts/link-dsh.mjs'], 'mission'],
+      ['typecheck (src + tests) at the floor', pnpm, ['run', 'typecheck'], 'mission'],
+      ['build + tests + mount smoke at the floor', pnpm, ['run', 'build:dsh'], 'mission'],
     ],
     restore: [
-      ['restore: link-dsh (installed dsh)', process.execPath, ['scripts/link-dsh.mjs', '--runtime'], 'work'],
-      ['restore: rebuild (installed dsh)', process.execPath, ['scripts/build-plugin.mjs'], 'work'],
+      ['restore: link-dsh (installed dsh)', process.execPath, ['scripts/link-dsh.mjs', '--runtime'], 'mission'],
+      ['restore: rebuild (installed dsh)', process.execPath, ['scripts/build-plugin.mjs'], 'mission'],
     ],
   },
 }
@@ -82,7 +82,7 @@ const argv = process.argv.slice(2)
 const known = ['--floor', '--fresh', '--list', '--help', '-h']
 const positional = argv.filter((arg, index) => !arg.startsWith('--') && argv[index - 1] !== '--floor')
 if (argv.includes('--help') || argv.includes('-h')) {
-  console.log('usage: node scripts/check-old-dsh.mjs <base|mem|work> [--floor <version>] [--fresh] [--list]')
+  console.log('usage: node scripts/check-old-dsh.mjs <base|mem|mission> [--floor <version>] [--fresh] [--list]')
   process.exit(0)
 }
 for (const arg of argv) {
@@ -117,7 +117,7 @@ function floorOf(range) {
 
 /** The family floor: every `@deepseek-ai/dsh*` peer range in the two plugins, which must agree. */
 const dshPeers = []
-for (const path of ['mem/packages/plugin', 'work/packages/plugin']) {
+for (const path of ['mem/packages/plugin', 'mission/packages/plugin']) {
   for (const [name, range] of Object.entries(readManifest(path).peerDependencies ?? {})) {
     if (name.startsWith('@deepseek-ai/dsh')) dshPeers.push([name, range])
   }

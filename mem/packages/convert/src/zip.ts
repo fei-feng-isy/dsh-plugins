@@ -59,7 +59,7 @@ export function zipEntryNames(bytes: Uint8Array): string[] | null {
  * is the ordinary bomb shape — a few megabytes on the wire declaring gigabytes of sheet XML — before
  * a reader library inflates any of it into the host's heap. Catching a lying archive would mean
  * inflating it ourselves under a running cap instead of handing it to the library, which is a
- * different (and much larger) piece of work; see the note at the xlsx call site.
+ * different (and much larger) piece of mission; see the note at the xlsx call site.
  */
 export function zipDeclaredCost(bytes: Uint8Array): { entries: number; uncompressed: number } | null {
   const directory = centralDirectory(bytes)

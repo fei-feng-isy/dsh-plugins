@@ -6,7 +6,7 @@
  * grows silently with every new export. This file is the other half: named types an author can hold in
  * their head, stating which members are the contract and what each one means. The compiler checks them
  * structurally against the real module in `test/public-surface.spec.ts`, and the cross-tree behaviour
- * tests in `mem/packages/plugin/test/interface.spec.ts` / `work/packages/plugin/test/interface.spec.ts`
+ * tests in `mem/packages/plugin/test/interface.spec.ts` / `mission/packages/plugin/test/interface.spec.ts`
  * drive the SAME members from a base that is actually linked — because the semantic half of the
  * contract (which directory a path resolves to, what `ensure` guarantees, what a refusal says) cannot
  * be caught by a type.

@@ -19,7 +19,7 @@ The pluggable design intentionally keeps the interface (`VectorStore`) and regis
 `qdrant` require their native or service dependencies, which are not installed by
 default (they are cloud/service or heavy native libs). Until a real adapter is registered for
 one of them, `config.vectorStore.backend` set to that name resolves to `local_numpy` (with an
-explicit warning) so the system always works.
+explicit warning) so the system always missions.
 
 ## Activating a backend
 

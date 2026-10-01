@@ -4,8 +4,8 @@ packages:
   - "base/*"
   # The memory engine workspace (kept in its original shape).
   - "mem/packages/*"
-  # The work-tree engine workspace (kept in its original shape).
-  - "work/packages/*"
+  # The mission-tree engine workspace (kept in its original shape).
+  - "mission/packages/*"
 autoInstallPeers: false
 
 # Link the workspace's own `@avantf/dsh-plugin-base` into the plugins, instead of trying to fetch
@@ -23,15 +23,15 @@ autoInstallPeers: false
 linkWorkspacePackages: true
 
 # ONE version per entry, for the WHOLE merged workspace. This is the merge of the two catalogs that
-# used to live in `mem/pnpm-workspace.yaml` and `work/pnpm-workspace.yaml`; a version can no longer
+# used to live in `mem/pnpm-workspace.yaml` and `mission/pnpm-workspace.yaml`; a version can no longer
 # differ between two packages that must agree.
 #
 # `zod` is pinned EXACTLY and tracks the version the INSTALLED dsh itself ships (4.6.5). It is the one
-# entry the merge had to reconcile: `mem` was on 4.4.3 and `work` on 4.6.5, and the host's
+# entry the merge had to reconcile: `mem` was on 4.4.3 and `mission` on 4.6.5, and the host's
 # `@deepseek-ai/dsh-storage-domain` types its record schemas with its own zod. Two copies — even of
 # the same major — have incompatible type identities, which is what forced the `TypertSchema['schema']`
 # cast (mem DESIGN §20.11). `pnpm why zod` must keep resolving ONE copy for `@avantf/mem-contract`,
-# `@avantf/dsh-mem` and `@avantf/dsh-work`. Bump this line, never a package.json.
+# `@avantf/dsh-mem` and `@avantf/dsh-mission`. Bump this line, never a package.json.
 # ONE version per entry, for the WHOLE merged workspace.
 #
 # Not in this catalog on purpose: `@avantf/dsh-plugin-base`. The plugins depend on it as a REQUIRED
@@ -56,7 +56,7 @@ catalog:
   # The browser half's windowing library: inlined into `lib/client.js`, so it is a devDependency of the
   # plugin and never part of the published surface.
   "@tanstack/react-virtual": ^3.14.13
-  # The browser-half bundler (work only — mem compiles through the pinned tsdown client preset).
+  # The browser-half bundler (mission only — mem compiles through the pinned tsdown client preset).
   esbuild: 0.25.0
   # Runtime of the VENDORED harness tsdown client preset
   # (mem/packages/plugin/vendor/dsh-client-preset): its CSS loaders call `transform()` from

@@ -495,7 +495,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     logger.warn('config mode=mcp is not served in-process — mounting the cordis toolset; run @avantf/mem-mcp standalone for MCP')
   }
   // Resolved through the CONFIG layer, not used as an explicit value: `$AVANTF_HOME` outranks the
-  // profile's `dataHome`, the same way it outranks the work plugin's (see `data_home.ts`).
+  // profile's `dataHome`, the same way it outranks the mission plugin's (see `data_home.ts`).
   const dataHome = configDataHome(config.dataHome)
   // Both halves are logged: what was configured, and where it actually landed — the runtime's own
   // init line repeats the latter, but a reader of this line should not have to join two log lines to
@@ -558,7 +558,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   //   - framework unavailable → the legacy `@avantf/mem-provision` sweep, over the pre-migration
   //     default directories, exactly as before.
   //
-  // nodejieba's dictionary parse is ~1.2 s of SYNCHRONOUS main-thread work, so it must not run
+  // nodejieba's dictionary parse is ~1.2 s of SYNCHRONOUS main-thread mission, so it must not run
   // while the host is still booting: measured, `dsh web` printed its URL line 0.09 s after our
   // "tokenizer ready" line, i.e. the parse was the last thing gating startup. The host's own
   // readiness signal is its loader tree settling (`loader.await()` — what the web app awaits before
@@ -629,7 +629,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // start, which keeps "what is in the prompt" the same for the whole life of the process.
   //
   // The directory is SHARED by the family's plugins and each plugin owns its prefix (`mem-*` here,
-  // `work-*` in the work engine): every avantf plugin's system prompt sits in one place, and no
+  // `mission-*` in the mission engine): every avantf plugin's system prompt sits in one place, and no
   // plugin has to guess which files are its own.
   const promptDir = join(rt.config.home, 'prompts')
   // The loader is the BASE's, taken at RUNTIME off the module the bootstrap already loaded: fixing
@@ -668,7 +668,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const agent = payload.agent
     if (agent === undefined) return
     // Only what the USER sent moves the verdict. The inbox also carries this plugin's own wake-ups
-    // and other plugins' notices; probing those would let a "工作 n1 已结束" wake rewrite a hint
+    // and other plugins' notices; probing those would let a "任务 n1 已结束" wake rewrite a hint
     // that claims to be about the user's last message.
     if ((payload.message as { source?: { kind?: string } } | null)?.source?.kind !== 'user') return
     const text = messageText(payload.message)

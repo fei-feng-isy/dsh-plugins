@@ -78,7 +78,7 @@ export interface EnsureOptions {
   offline?: boolean
   /**
    * A signal that the host has finished booting. Resolve before spending CPU or bandwidth: the
-   * embedding warm-up and the tokenizer parse are main-thread work, and the plugin mount is racing
+   * embedding warm-up and the tokenizer parse are main-thread mission, and the plugin mount is racing
    * the harness's own startup. A rejected/hung signal must not block forever.
    */
   waitFor?: Promise<unknown>

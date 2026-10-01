@@ -1,0 +1,92 @@
+/**
+ * The client half's own vocabulary, declared here rather than imported from
+ * `@avantf/mission-core`: the browser bundle must not pull the host engine in.
+ * @module @avantf/dsh-mission/client/contract
+ */
+
+export interface MissionNodeView {
+  readonly id: string
+  /** Where the node was born; `children` is the dependency edge it is rendered by. */
+  readonly parentId: string | null
+  /** The ids this node depends on (a reused prerequisite appears in several parents). */
+  readonly children: readonly string[]
+  readonly depth: number
+  readonly title: string
+  /** Why this mission exists (written by whoever decomposed its parent). */
+  readonly context: readonly string[]
+  /** The owner's corrections, newest last. A row renders the count as a "steered" marker: the title
+   *  above is the goal as created, so a corrected mission needs this to be readable at all. */
+  readonly corrections: readonly string[]
+  readonly status: string
+  readonly attempts: number
+  readonly createdAt: number
+  readonly hasResult: boolean
+  readonly resultRef: string | null
+}
+
+export interface MissionTreeViewData {
+  readonly rootId: string
+  readonly nodes: readonly MissionNodeView[]
+  /** Epoch millis when the owner archived the tree; `null` while it is live. */
+  readonly closedAt: number | null
+}
+
+export interface MissionSnapshot {
+  readonly trees: readonly MissionTreeViewData[]
+}
+
+export interface MissionSnapshotState {
+  readonly data: MissionSnapshot | undefined
+  readonly loading: boolean
+  readonly error: string | undefined
+  readonly refresh: () => Promise<void>
+}
+
+export interface MissionNodeDetailView {
+  readonly id: string
+  readonly rootId: string
+  readonly title: string
+  readonly description: string
+  /** Why this mission exists — the premise the decomposer attached (the owner's initial judgement,
+   *  for a root). NOT the same as `description`, which is what the mission must achieve. */
+  readonly context: readonly string[]
+  /** What this mission's executors recorded with `note_mission` before splitting it: the blocker, the
+   *  paths ruled out, what the prerequisites have to settle. Oldest first; appended, never replaced. */
+  readonly analysisNotes: readonly string[]
+  /** The `attempts` value of the dispatch that wrote the LAST analysis note; `0` when there is none. */
+  readonly analysisAttempt: number
+  /** The direction changes this mission was given, newest last — rendered between the goal and the
+   *  result so the two can be read together rather than as a mismatch. */
+  readonly corrections: readonly string[]
+  readonly status: string
+  readonly attempts: number
+  readonly depth: number
+  /** The mission's own submitted result, or null while it has not submitted one. */
+  readonly result: string | null
+  /** Where an oversized result was spilled, so the reader can still open it. */
+  readonly resultPointer: string | null
+}
+
+export interface MissionNodeDetailChild {
+  readonly id: string
+  readonly title: string
+  readonly status: string
+  readonly result: string | null
+  readonly resultPointer: string | null
+}
+
+/** What a clicked row expands into. Read on demand, never part of the snapshot. */
+export interface MissionNodeDetail {
+  readonly node: MissionNodeDetailView
+  readonly children: readonly MissionNodeDetailChild[]
+}
+
+export interface MissionViewProps {
+  /** Read the current snapshot and keep it updated. */
+  readonly useSnapshot: () => MissionSnapshotState
+  /** Delete one whole finished mission tree by root; rejects with the host's reason, which the view shows. */
+  readonly onDeleteTree: (rootId: string) => Promise<void>
+  readonly loadDetail: (nodeId: string) => Promise<MissionNodeDetail>
+  /** Read the FULL text behind a spilled result; rejects with the host's reason, which the pane shows. */
+  readonly loadResult: (nodeId: string) => Promise<string>
+}

@@ -14,14 +14,14 @@ import type { AvantfLogger } from '@avantf/mem-contract'
  * THREE PROPERTIES ARE LOAD-BEARING, and they are why this is not just `execFileSync` at each
  * call site:
  *
- *  - **It never throws.** Every caller writes here AFTER its real work is durable (the row is
+ *  - **It never throws.** Every caller writes here AFTER its real mission is durable (the row is
  *    committed, the document is indexed). A missing `git`, a locked index, or an unwritable repo
  *    must not turn a successful operation into a failed one — so failures are warned and swallowed,
  *    the same rule `IngestResult.file_error` follows for the managed file itself.
  *  - **It is always recognisable as automatic, and never invents an identity.** Every commit
  *    carries the `Automatic: avantf-mem` trailer. When the machine has an identity the commit is
  *    authored with it (the repo is the user's, and they may commit in it by hand — attributing
- *    their machine's work to a bot by default would be the wrong kind of surprise); when it has
+ *    their machine's mission to a bot by default would be the wrong kind of surprise); when it has
  *    NONE, the repo gets a LOCAL bot identity rather than failing or writing to the user's GLOBAL
  *    config, which is what lets the commit happen at all.
  *  - **It never commits an empty change.** `git status --porcelain` gates the commit, because

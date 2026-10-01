@@ -15,7 +15,7 @@
  * fixture, so both end up with the new object and the comparison is green. The "old" database has
  * to be built from a schema the current code does not produce anymore — that is
  * `fixtures/schema_baseline.ts`, which is deliberately frozen and never regenerated to make this
- * file pass. It is the base DDL with every later step's work removed, so each numbered step really
+ * file pass. It is the base DDL with every later step's mission removed, so each numbered step really
  * runs here (the memory fixture also carries the dead `idx_facts_idle` so step 4's DROP is
  * exercised).
  *

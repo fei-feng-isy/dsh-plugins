@@ -1,5 +1,5 @@
 /**
- * An idle-event-loop gate for startup work that would otherwise compete with the host's boot.
+ * An idle-event-loop gate for startup mission that would otherwise compete with the host's boot.
  *
  * Measured reason this exists: nodejieba parses its dictionary SYNCHRONOUSLY on the main thread
  * (~1.2 s), so firing that warm-up during the host's own startup makes the two fight for one thread.
@@ -21,7 +21,7 @@
  */
 export const IDLE_QUIET_MS = 300
 
-/** A timer this late means the loop was blocked by other work (host boot, a large import…). */
+/** A timer this late means the loop was blocked by other mission (host boot, a large import…). */
 export const IDLE_TOLERANCE_MS = 15
 
 /** Hard cap: warm anyway after this, so a permanently busy host still gets a tokenizer. */

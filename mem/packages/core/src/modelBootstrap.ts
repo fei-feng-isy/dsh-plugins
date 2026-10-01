@@ -47,7 +47,7 @@ export interface DshCompatVerdict {
 /** Hard cap on the host-readiness wait (see {@link WarmOptions.waitForCapMs}). */
 const WAIT_FOR_HOST_MS = 30_000
 
-/** A timer-based delay, the only await in this module that is not tied to real work. */
+/** A timer-based delay, the only await in this module that is not tied to real mission. */
 function delay(ms: number): Promise<void> {
   return new Promise<void>((resolve) => { setTimeout(resolve, ms) })
 }
@@ -245,7 +245,7 @@ export interface ProvisionSweepResult {
  * result lines in the host log come from the same mechanism that installs pandoc.
  *
  * The FIRST step is the dsh compatibility gate: an incompatible host means NOTHING is resolved,
- * installed or warmed — preparing an environment for an API we cannot drive is wasted work.
+ * installed or warmed — preparing an environment for an API we cannot drive is wasted mission.
  *
  * @param rt - the runtime, whose resolved `tools` config and logger the sweep uses.
  * @param options - the host's readiness signal and the dsh compatibility evidence.

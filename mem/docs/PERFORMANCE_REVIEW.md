@@ -382,7 +382,7 @@ SEARCH facts USING COVERING INDEX idx_facts_supersedes (supersedes_id=?)
 
   **两处均已独立确证【复核】**：`:442` 的 `if (!ids.length) return []` 确实在 `:468` 的 `recordRetrieval` 之前；`kind: 'cross'` 在 `packages/core/src/**` 里**零次出现**（虽然 `RetrievalEvent.kind` 的注释把它列为三个取值之一）。
 
-  **这条要排在性能工作之前做**（§9 第 2 步）：§10.2 第 9 项要把 `avg_*` 与 `zero_result_rate` 当回归门槛，而这两个失真正好改变这两类数字的定义（零结果漏计知识腿；分母从"用户查询"变成"腿"）。**先修计数、再量基准**，否则 before/after 是拿一把坏尺子量出来的——而且这两个计数器本身是新近引入的（`45901a9`），所以此刻还没有任何历史基线需要保留。
+  **这条要排在性能任务之前做**（§9 第 2 步）：§10.2 第 9 项要把 `avg_*` 与 `zero_result_rate` 当回归门槛，而这两个失真正好改变这两类数字的定义（零结果漏计知识腿；分母从"用户查询"变成"腿"）。**先修计数、再量基准**，否则 before/after 是拿一把坏尺子量出来的——而且这两个计数器本身是新近引入的（`45901a9`），所以此刻还没有任何历史基线需要保留。
 
 ---
 
@@ -474,7 +474,7 @@ SEARCH facts USING COVERING INDEX idx_facts_supersedes (supersedes_id=?)
 | **5** | tick 各段 sargable 谓词 + 预算化（idle 表达式索引 / trust_score / bonus） | 性能 P2 | tick 194ms@180k，单次归档 14400 行 | 多进程 `SQLITE_BUSY` 的根因 |
 | **6** | **先扩评测集**（2 字中文查询，见 §4.4/§10.3），**再**改检索腿 top-N + HRR 候选裁剪 + `triples.ts:95,110` 改 JOIN | 性能 P2 | search 315ms@33k；probe 1366ms@33k | 顺序不能反：现有 29 条查询里没有 2 字形状，拿它把关等于不设防 |
 | **7** | 知识库真 batch encode + `setVector` 单事务 + `reindex` 免 reload + 固定开销（语句缓存 / atom 缓存 / jieba 单次 / `maxTokens==0` 短路 / `SELECT` 显式列） | 性能 P3 | ingest 151s/1.16M 字符；零 stale reindex 1.76s | 分期做 |
-| **8** |（可选）§7 的相邻项：memory 侧 `facts_fts` 补 rebuild、`initClock` 接上或删除、两处过时注释 | 正确性/卫生 | 老库 FTS 永远为空 | 与性能工作解耦，可并行 |
+| **8** |（可选）§7 的相邻项：memory 侧 `facts_fts` 补 rebuild、`initClock` 接上或删除、两处过时注释 | 正确性/卫生 | 老库 FTS 永远为空 | 与性能任务解耦，可并行 |
 
 ---
 

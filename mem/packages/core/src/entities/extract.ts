@@ -119,7 +119,7 @@ export interface TriplePattern {
  *
  * Exists so one write can drive BOTH extractors from a single `jieba.tag()` call: `add`/`update`
  * used to tag the same content twice (once for entities, once for triples), which is pure repeated
- * work — measured ~1.1 ms per 1000 characters per pass.
+ * mission — measured ~1.1 ms per 1000 characters per pass.
  */
 export async function tagText(text: string): Promise<PosToken[] | null> {
   const jieba = await loadJieba()

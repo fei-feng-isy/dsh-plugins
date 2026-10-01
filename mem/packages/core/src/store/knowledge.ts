@@ -1194,7 +1194,7 @@ export class KnowledgeStore {
    * `domain` scopes the rebuild to one knowledge domain. One corpus SELECT feeds both legs, and
    * each row is skipped when its derivation is provably still valid (same text digest, same
    * vector space, same extractor version). Without that, the only way to know whether a chunk
-   * needed work was to redo the work: an ONNX forward pass plus a jieba pass per chunk over the
+   * needed mission was to redo the mission: an ONNX forward pass plus a jieba pass per chunk over the
    * whole corpus, every time.
    *
    * `dryRun` answers "how much would this cost?" without writing anything — including without
@@ -1228,7 +1228,7 @@ export class KnowledgeStore {
     }
     if (!semanticAvailable) {
       // Nothing can be re-encoded without the model, but ask for one so the next reindex (or
-      // query) can finish the work; `vectors_stale > vectors_encoded` is how a caller sees it.
+      // query) can finish the mission; `vectors_stale > vectors_encoded` is how a caller sees it.
       this.semantic.ensureWarm?.()
     } else if (staleVectors.length) {
       report.vectors_encoded = (await this.encodeAndStore(staleVectors, space)).encoded

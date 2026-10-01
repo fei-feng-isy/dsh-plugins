@@ -123,7 +123,7 @@ const CJK_RE = /[㐀-䶿一-鿿぀-ゟ゠-ヿ가-힯]/
  * The most OR phrases one query may expand to.
  *
  * 64 is far past any query a person types (a 64-character CJK run), and it is the ceiling that keeps a
- * pathological input from turning `MATCH` into minutes of synchronous work inside the host process.
+ * pathological input from turning `MATCH` into minutes of synchronous mission inside the host process.
  */
 export const MAX_FTS_PHRASES = 64
 
@@ -160,7 +160,7 @@ export function buildFtsQuery(query: string, tokenizer: FtsTokenizer = resolveFt
   // Dedupe first: a long CJK run repeats its trigrams, and `"abc" OR "abc"` is exactly `"abc"` — the
   // duplicates cost `MATCH` time and buy nothing. Then cap: the contract already refuses a query past
   // `MAX_QUERY_CHARS`, so this is the second line of defence for a direct caller of the engine, and it
-  // bounds the work at a number the tokenizer owns rather than at one the caller chose.
+  // bounds the mission at a number the tokenizer owns rather than at one the caller chose.
   const unique = [...new Set(parts)]
   return unique.slice(0, MAX_FTS_PHRASES).join(' OR ')
 }

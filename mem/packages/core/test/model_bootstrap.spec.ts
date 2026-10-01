@@ -112,7 +112,7 @@ describe('warmModels tokenizer gating', () => {
 /**
  * The dsh compatibility gate is the FIRST step of the startup sweep: when the host dsh API is proven
  * incompatible, NOTHING is resolved, installed or warmed — preparing an environment for an API we
- * cannot drive is wasted work. The counting artifact below is the falsifier: if the gate were
+ * cannot drive is wasted mission. The counting artifact below is the falsifier: if the gate were
  * missing (or after it), its `install` would record a call.
  *
  * The plugin computes the verdict (it owns the base dependency) and passes it as plain data; core

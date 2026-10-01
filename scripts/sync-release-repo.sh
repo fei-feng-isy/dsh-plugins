@@ -14,7 +14,7 @@
 #   --rc        $AVANTF_RC, else <repo>/../dsh-plugins-rc (created + `git init`ed if missing)
 #   --version   by default the DEV TREE decides: every group is stamped with the version its publishable
 #               manifest records (`pnpm version:set <group> <version>` is the one-file bump). Pass
-#               --version <group>=<v> (base | mem | work) to stamp something else into rc only, or
+#               --version <group>=<v> (base | mem | mission) to stamp something else into rc only, or
 #               --keep-rc-versions to keep whatever versions rc already carries (the old default: useful
 #               when rc is ahead of the development tree).
 #
@@ -39,7 +39,7 @@ usage() {
 usage: scripts/sync-release-repo.sh [options]
 
   --rc <dir>              release checkout to sync (default: $AVANTF_RC or ../dsh-plugins-rc)
-  --version <group>=<v>   stamp this version into one group: base | mem | work (repeatable)
+  --version <group>=<v>   stamp this version into one group: base | mem | mission (repeatable)
   --version <v>           stamp this version into all three groups
   --keep-rc-versions      keep rc's current versions instead of taking them from the development tree
   --dry-run               print the drift and exit (exit 1 when there is any), change nothing
@@ -175,7 +175,7 @@ if [[ "$DO_GATE" == 1 ]]; then
     pnpm release:check --offline
     pnpm release:check:base
     pnpm release:check:mem --allow-uncut
-    pnpm release:check:work
+    pnpm release:check:mission
     pnpm proof:base-swap
   )
 fi
@@ -198,9 +198,9 @@ done — release checkout: $RC_DIR
 next (if you did not pass --commit/--gate):
   git -C $RC_DIR add -A
   git -C $RC_DIR commit -m "release: sync from dsh-plugins@$DEV_SHA"
-  (cd $RC_DIR && pnpm install --frozen-lockfile && pnpm release:check:base && pnpm release:check:mem && pnpm release:check:work)
+  (cd $RC_DIR && pnpm install --frozen-lockfile && pnpm release:check:base && pnpm release:check:mem && pnpm release:check:mission)
 then tag and publish the three packages, base FIRST (each plugin's required peer):
   pnpm -C $RC_DIR/base/plugin-base publish --access public
   pnpm -C $RC_DIR/mem/packages/plugin publish --access public
-  pnpm -C $RC_DIR/work/packages/plugin publish --access public
+  pnpm -C $RC_DIR/mission/packages/plugin publish --access public
 EOF

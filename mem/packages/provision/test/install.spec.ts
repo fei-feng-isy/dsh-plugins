@@ -170,7 +170,7 @@ describe('sources: mirrors first, official last, every failure reported', () => 
     expect(server.requested).toContain('/reachable.tar.gz')
   })
 
-  it('names every source it tried when none works', async () => {
+  it('names every source it tried when none missions', async () => {
     const artifact = artifactById('faketool')
     const fixture = await buildTarGzFixture({ base: workspace, root: 'FIXTURE_ROOT', binary: 'faketool', version: '9.9' })
     pointAt(fixture, '/nowhere.tar.gz')

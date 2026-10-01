@@ -55,7 +55,7 @@ release-check `note:`，不是硬失败——checkout 领先于 pin 是重新对
 用 `npm_config_prefix` 让 `link-dsh` 指向它，然后跑该包的 LOCAL 步骤——`link-dsh` → `typecheck:dsh` →
 `build:dsh`（含 `test:dsh` 与 mount smoke）——最后**无论成败都恢复现场**（重新 link 已安装的 dsh 并重建产物，
 避免把产物留在"对下限编译"的状态）。闭包缓存在 `$TMPDIR/avantf-old-dsh-<floor>`，重复跑不重新下载。
-实现是**工作区共用**的（`scripts/check-old-dsh.mjs <base|mem|work>`），并且已经是 base / mem / work 三个
+实现是**工作区共用**的（`scripts/check-old-dsh.mjs <base|mem|mission>`），并且已经是 base / mem / mission 三个
 `release:check` 的**最后一步**——它要重新链接并重建，所以必须排在 `pack` 之后。
 
 ```bash
@@ -63,7 +63,7 @@ pnpm check:old-dsh                              # 等价于 node ../scripts/chec
 pnpm check:old-dsh --list                       # 只打印下限与各 peer 区间
 pnpm check:old-dsh --fresh                      # 重装缓存的闭包
 pnpm check:old-dsh --floor 0.1.5-rc.2           # 显式指定下限（也可用来看某个更高版本，如 0.1.7-rc.2）
-# 另外两组：node ../scripts/check-old-dsh.mjs base | work
+# 另外两组：node ../scripts/check-old-dsh.mjs base | mission
 ```
 
 改提示层、加工具、动门禁时值得顺手跑一次：**区间是声明，这条命令是证据**。另外 `test/provision.spec.ts` 的
@@ -104,8 +104,8 @@ git push origin master --follow-tags
 pnpm sync:rc --yes --commit
 # 发布树装出原生模块，再单独跑它自己的门禁（含三个包的门禁与 pack --mount）
 ( cd ../dsh-plugins-rc && (pnpm install --frozen-lockfile || pnpm rebuild) \
-    && pnpm release:check:base && pnpm release:check:mem && pnpm release:check:work )
-# 发布树的 tag 同样带组前缀（base-vX.Y.Z / mem-vX.Y.Z / work-vX.Y.Z）
+    && pnpm release:check:base && pnpm release:check:mem && pnpm release:check:mission )
+# 发布树的 tag 同样带组前缀（base-vX.Y.Z / mem-vX.Y.Z / mission-vX.Y.Z）
 git -C ../dsh-plugins-rc tag -a mem-vX.Y.Z -m "avantf-mem X.Y.Z"
 git -C ../dsh-plugins-rc push --follow-tags
 
@@ -147,12 +147,12 @@ available.`，而 `npm stage list` 会说没有 staged 版本。②只能等（2
   `pnpm -r publish` 碰不到它们；preflight 会断言"可发布的只有 plugin"，所以既不会误发引擎，
   也不会出现"插件悄悄变成 private 而没人发现"。DSH 用户装的是这一个插件包**加上**它的 peer 底座
   `@avantf/dsh-plugin-base`（npm 这类会自动装 peer；pnpm 关掉 `autoInstallPeers` 时要显式装），不需要装
-  引擎包 `@avantf/mem*`。家族里可发布的还有底座与工作插件两个包，它们各在自己的目录/仓库发布（见 §1.1 前置）。
+  引擎包 `@avantf/mem*`。家族里可发布的还有底座与任务插件两个包，它们各在自己的目录/仓库发布（见 §1.1 前置）。
 - semver：破坏性变更进 major，向后兼容的新增进 minor，修 bug 进 patch。候选版用 `X.Y.Z-rc.N`。
 - **CHANGELOG 就是 release notes**：`## [Unreleased]` 里积累，打 tag 时把它改名为 `## [X.Y.Z] - YYYY-MM-DD`
   并在顶部留一个空的 `[Unreleased]`。`release:check` 会检查"第一个版本节 == 包版本"且 `[Unreleased]` 已清空。
 - 打 tag：`git tag -a mem-vX.Y.Z -m "..." && git push origin master --follow-tags`（开发仓与发布仓都带
-  组前缀 `base-` / `mem-` / `work-`：三个包共用一个仓库，`vX.Y.Z` 会互相撞）。tag 之前必须先 `pnpm release:check`
+  组前缀 `base-` / `mem-` / `mission-`：三个包共用一个仓库，`vX.Y.Z` 会互相撞）。tag 之前必须先 `pnpm release:check`
   （见 §1 的原因）。
 - npm 发布是独立动作，且**只发一个包**，分两步：**先 `pnpm pack:plugin` 产出 tarball，再用 `npm publish`
   发它**：
@@ -222,7 +222,7 @@ cd ../dsh-plugins-rc
 pnpm install --frozen-lockfile     # 注意：不带 --ignore-scripts
 # node_modules 已存在时 install 会短路（"Lockfile is up to date"），此时用：
 pnpm rebuild
-pnpm release:check:base && pnpm release:check:mem && pnpm release:check:work
+pnpm release:check:base && pnpm release:check:mem && pnpm release:check:mission
 ```
 
 ## 3. 数据、升级与回滚

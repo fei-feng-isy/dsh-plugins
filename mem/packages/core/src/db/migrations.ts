@@ -119,7 +119,7 @@ export function migrate(db: Db, migrations: readonly Migration[], ctx: Migration
   const applied: number[] = []
   for (const migration of pending) {
     // Step + version bump + audit row in ONE transaction: `user_version` lives in the
-    // database header and is transactional, so a throw cannot leave a version claiming work
+    // database header and is transactional, so a throw cannot leave a version claiming mission
     // that was rolled back.
     db.transaction(() => {
       migration.up(db, ctx)

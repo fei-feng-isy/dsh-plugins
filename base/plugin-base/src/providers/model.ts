@@ -341,12 +341,12 @@ function decodeRecord(bytes: Uint8Array): FlatRecord | undefined {
   return { schemaVersion: RECORD_SCHEMA_VERSION, repo: record['repo'], revision: record['revision'], sha: record['sha'], files, digests }
 }
 
-/** Run `work` under the core's placement lock. */
-async function withLock<T>(ctx: ProviderContext, work: () => Promise<T>): Promise<T> {
+/** Run `mission` under the core's placement lock. */
+async function withLock<T>(ctx: ProviderContext, mission: () => Promise<T>): Promise<T> {
   const lock = ctx.lock ?? defaultLock()
   const handle = await lock.acquire(lockPath(ctx.home), { timeoutMs: LOCK_TIMEOUT_MS, staleMs: STALE_LOCK_MS })
   try {
-    return await work()
+    return await mission()
   } finally {
     handle.dispose()
   }

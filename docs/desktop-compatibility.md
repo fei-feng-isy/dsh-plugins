@@ -1,7 +1,19 @@
 # DSH Desktop 兼容性：方案与证据（2026-10-01）
 
-这一轮的目标：**让 `@avantf/dsh-mem` 与 `@avantf/dsh-work` 能在 DSH Desktop 上安装、挂载、真正可用，
-同时不改变 Linux/WSL 上的行为、依赖面与发布流程。** 工作树**未提交**，三处版本号**未动**。
+> ## ⚠ 先读这条：本文分两轮，第 1–5 节不是现状
+>
+> **第 1–5 节是第 1 轮的提案与记录**（当时的设计是"两个驱动 + 运行期回退"），**第 6 节起才是最终形态**：
+> 单实现 `node:sqlite`、`better-sqlite3` 已彻底移除、`AVANTF_MEM_SQLITE_DRIVER` 与 `db/binding.ts` 都不存在，
+> 且插件后来由 `work` 改名为 `mission`。照着第 1–5 节行动会去找已被删除的环境变量与 optional 依赖——
+> **以第 6 节为准。**
+>
+> **后续（2026-10-01）：插件已改名为 `@avantf/dsh-mission`（目录 `mission/`）。** 本文保留当时的名字
+> —— 文中的 `work/`、`@avantf/dsh-work`、`@avantf/work-core`、`create_work`、`avantf_work`、`work-` 前缀、
+> 「工作」标签，现在分别是 `mission/`、`@avantf/dsh-mission`、`@avantf/mission-core`、`create_mission`、
+> `avantf_mission`、`mission-`、「任务」。改名原因见下面的第 6 节末段。
+
+这一轮的目标：**让 `@avantf/dsh-mem` 与 `@avantf/dsh-mission` 能在 DSH Desktop 上安装、挂载、真正可用，
+同时不改变 Linux/WSL 上的行为、依赖面与发布流程。** 任务树**未提交**，三处版本号**未动**。
 
 本文是这次改动的唯一记录：第一节是实测出来的事实，第二节是逐文件方案，第三节解释为什么 Linux 不受影响，
 第四节是验证记录，第五节是没做的事。
@@ -28,11 +40,11 @@
 ### 1.1 三个被证实的失败点
 
 1. **不钉版本 → 解析到旧版 → 装不进去。** pnpm ≥ 10 的 `minimumReleaseAge` 避开刚发布的版本（本机实测
-   窗口大于 3 天，行为与 7 天一致）：`dsh plugin --profile probe add @avantf/dsh-work`（不钉版本）解析到
+   窗口大于 3 天，行为与 7 天一致）：`dsh plugin --profile probe add @avantf/dsh-mission`（不钉版本）解析到
    **0.2.0**，而 0.2.0 的 peer 是 `^0.1.5-rc.2`（不含 `0.2.0-rc.2`），于是宿主的安装门禁拒绝整单并回滚：
 
    ```
-   dsh: installation rejected: Plugin @avantf/dsh-work@0.2.0 is incompatible with dsh 0.2.0-rc.2:
+   dsh: installation rejected: Plugin @avantf/dsh-mission@0.2.0 is incompatible with dsh 0.2.0-rc.2:
         peerDependencies {"@deepseek-ai/dsh-agent":"^0.1.5-rc.2", …}
    dsh: restored package.json, pnpm-lock.yaml, and node_modules.
    ```
@@ -68,7 +80,7 @@
 
    手工把那个文件改名成 `pandoc.exe` 后 `pandoc 3.11` 正常输出（见 §4.4）——即"文件是对的，名字错了"。
 
-**work 0.2.2 的运行时本身在 Desktop 上没有问题**：实测挂载成功（compat ok、9 个工具、`/work` 命令、
+**mission 0.2.2 的运行时本身在 Desktop 上没有问题**：实测挂载成功（compat ok、9 个工具、`/mission` 命令、
 存储域、`engine ready`）。它的问题只在"装"这一层（第 1、2 条）。
 
 ---
@@ -109,10 +121,10 @@
 
 ### 2.2 组合包：让 Desktop 的界面能装
 
-- `mem/packages/plugin/package.json` / `work/packages/plugin/package.json`：新增
+- `mem/packages/plugin/package.json` / `mission/packages/plugin/package.json`：新增
   `dsh.bundle.patch: "./cordis.patch.yml"`，把该文件加进 `files`，并在 `exports` 里暴露它
   （与 `@deepseek-ai/dsh-base` 等官方组合包同一套写法）。
-- 新增 `mem/packages/plugin/cordis.patch.yml` 与 `work/packages/plugin/cordis.patch.yml`：一个
+- 新增 `mem/packages/plugin/cordis.patch.yml` 与 `mission/packages/plugin/cordis.patch.yml`：一个
   `- insert:` 层，把插件行插进 profile。
 - **装完不需要再手写那一行**（实测）：`dsh plugin add <本包>` 之后，profile 的
   `dsh.profile.bundles` 会自动多出本包，随包的 patch 把行插好；Desktop 的「插件」页是同一机制。
@@ -120,9 +132,9 @@
 - **两条都做也不会挂两次**（实测）：配置树里会出现两行同 id 的条目，但 loader 按条目 id 去重，
   插件只挂载一次（`plugin ready` 只出现一次）。仍是二选一更干净。
 
-### 2.3 work：`$DSH_HOME`
+### 2.3 mission：`$DSH_HOME`
 
-`work/packages/plugin/src/index.ts` 的 `sessionsRoot` 默认值从 `join(homedir(), '.dsh', 'sessions')`
+`mission/packages/plugin/src/index.ts` 的 `sessionsRoot` 默认值从 `join(homedir(), '.dsh', 'sessions')`
 改为 `join(dshHome(), 'sessions')`（`$DSH_HOME` 优先，未设置时仍是 `~/.dsh`）——与
 `scripts/link-profile.mjs`、`scripts/workspace-doctor.mjs` 同一条规则。Desktop 会显式设置 `DSH_HOME`，
 `/archive`、`/clean` 读的是同一份会话库，不该靠"默认值恰好相等"。
@@ -137,7 +149,7 @@ manifest `entry: bin/demo.exe`、`resolve()` ready。
 
 ### 2.5 文档
 
-- `mem/packages/plugin/README.md`、`work/packages/plugin/README.md`（随包发布的 npm 页）：安装步骤改为
+- `mem/packages/plugin/README.md`、`mission/packages/plugin/README.md`（随包发布的 npm 页）：安装步骤改为
   **钉版本**、挂载写成两条路、新增「DSH Desktop」小节、环境要求里写清存储层的回退顺序。
 - `mem/CHANGELOG.md`：`[Unreleased]` 记录这轮改动 + 一条装机维护提示（minimumReleaseAge）。
 - `mem/DESIGN.md` §19：新增「两个驱动，一个端口」段落（为什么、探测语义、契约一致性、发布面），并把
@@ -145,7 +157,7 @@ manifest `entry: bin/demo.exe`、`resolve()` ready。
 
 ---
 
-## 3. 为什么 Linux 不受影响
+## 3. 为什么 Linux 不受影响（**历史：第 1 轮"两个驱动"下的分析，已被 §6 取代**）
 
 | 改动 | Linux 上的实际行为 |
 | --- | --- |
@@ -163,7 +175,7 @@ manifest `entry: bin/demo.exe`、`resolve()` ready。
 
 ### 4.1 Linux（WSL Debian，node 22.23，全局 `@deepseek-ai/dsh@0.2.0-rc.2`）
 
-先把 `HEAD` 原样取出到 `/tmp/baseline`（`git archive`，只读、不碰工作树），在那里建立**基线**；再把
+先把 `HEAD` 原样取出到 `/tmp/baseline`（`git archive`，只读、不碰任务树），在那里建立**基线**；再把
 本次改动的文件覆盖到 `/tmp/current`（同一文件系统、同一套依赖）跑对比——这样"改动导致的差异"与
 "`/mnt/e` 这个 9p 文件系统导致的差异"能分开看：
 
@@ -172,18 +184,18 @@ manifest `entry: bin/demo.exe`、`resolve()` ready。
 | 基线 `/tmp/baseline`（`HEAD`，better-sqlite3） | **6 failed / 496 passed** | 6 条全是 `document_text`/`knowledge` 的 pandoc 转换用例（WSL 没装 pandoc，`AVANTF_MEM_AUTO_DOWNLOAD=0`） |
 | 改动后 `/tmp/current`（better-sqlite3） | **6 failed / 521 passed** | 与基线**同一批 6 条**，新增 25 条全绿 → 零回归 |
 | 改动后 `/tmp/current`（`AVANTF_MEM_SQLITE_DRIVER=node`） | **6 failed / 521 passed** | 与 better-sqlite3 **逐条相同**：整个引擎在回退驱动上等价 |
-| 直接在 `/mnt/e` 工作树跑 | 17 failed | 多出的 11 条是 9p 文件系统下的超时/时序用例；**同一份代码在 ext4 上只有那 6 条**——与本次改动无关 |
-| `pnpm guard` | ok | `mem, work reach only the base and their own trees` |
+| 直接在 `/mnt/e` 任务树跑 | 17 failed | 多出的 11 条是 9p 文件系统下的超时/时序用例；**同一份代码在 ext4 上只有那 6 条**——与本次改动无关 |
+| `pnpm guard` | ok | `mem, mission reach only the base and their own trees` |
 | `pnpm release:check` | ok | 三个可发布包、base 在插件之前、只有一份 zod、无 `link:`/`file:`（含新的 `files`/`exports`/bundle 字段与 optionalDependencies） |
 | `pnpm build:dsh mem` | ok | tsc + tsdown（`lib/index.js` 633 KB / `lib/client.js` 266 KB） |
-| `pnpm build:dsh work` | ok + **MOUNT SMOKE OK** | 挂载冒烟 |
+| `pnpm build:dsh mission` | ok + **MOUNT SMOKE OK** | 挂载冒烟 |
 | `pnpm pack:plugin:mem` | **PACK OK** | 自包含断言：引擎已内联、生产依赖都被真正 import、README 首行是包名、`lib/` 无游离文件（`cordis.patch.yml` 随包） |
-| `pnpm pack:plugin:work` | ok | 同上 |
+| `pnpm pack:plugin:mission` | ok | 同上 |
 | `pnpm -C base/plugin-base test`（含新增用例） | ok | `archive.spec.ts` 8/8 |
 
-**最后一次验收**（所有改动落地、base 修复重新打包之后）在同一个工作树里整轮重跑，结论不变：
-`pnpm guard` ok、`pnpm release:check` ok、`pnpm build:dsh mem` ok、`pnpm build:dsh work` ok +
-`MOUNT SMOKE OK`、`pnpm -C base/plugin-base test` **377/377**、`pnpm pack:plugin:mem` / `:work` ok。
+**最后一次验收**（所有改动落地、base 修复重新打包之后）在同一个任务树里整轮重跑，结论不变：
+`pnpm guard` ok、`pnpm release:check` ok、`pnpm build:dsh mem` ok、`pnpm build:dsh mission` ok +
+`MOUNT SMOKE OK`、`pnpm -C base/plugin-base test` **377/377**、`pnpm pack:plugin:mem` / `:mission` ok。
 
 ### 4.2 Desktop（Windows，Electron 44，profile `desktop` 的兄弟 profile `probe2`）
 
@@ -192,12 +204,12 @@ manifest `entry: bin/demo.exe`、`resolve()` ready。
 
 1. `allowBuilds: better-sqlite3: true`（**放行**构建，让它真的失败）→ 安装**仍然保留全部依赖**、
    pnpm 正常收尾（这是 optionalDependencies 的意义；作为普通依赖时同一场景会回滚）。
-2. `dsh.profile.bundles` 里加上 `@avantf/dsh-mem`、`@avantf/dsh-work`，`cordis.patch.yml` 保持**空**。
+2. `dsh.profile.bundles` 里加上 `@avantf/dsh-mem`、`@avantf/dsh-mission`，`cordis.patch.yml` 保持**空**。
 3. 启动（`AVANTF_HOME` 指向临时目录，不动用户数据）：两行都由**组合包**插入，两个插件都挂载：
 
    ```
-   [avantf-work] INFO registered 9 tools: create_work, …, cancel_work
-   [avantf-work] INFO engine ready: concurrency=11 depth=8 failure-budget=5 children<=6
+   [avantf-mission] INFO registered 9 tools: create_mission, …, cancel_mission
+   [avantf-mission] INFO engine ready: concurrency=11 depth=8 failure-budget=5 children<=6
    [avantf-mem]  INFO runtime init: … sqlite=node:sqlite (Could not locate the bindings file. Tried:
                  (no binding for node-v149 on Electron 44.0.0))
    [avantf-mem]  INFO memory: schema upgraded 0 → 9 (applied: 1 base-schema, … 9 contradiction-resolved-indexes)
@@ -229,21 +241,22 @@ install.json: "entry": "bin/pandoc.exe"
 
 ---
 
-## 5. 没做的事 / 遗留
+## 5. 没做的事 / 遗留（**历史：写于第 1 轮，其中"回退"相关条目已被 §6 取代**）
 
-- **未提交、未改版本号。** 按"纯修复 → patch"的约定，发版时建议 `mem 0.3.2`、`work 0.2.3`、
+- **未提交、未改版本号。** 按"纯修复 → patch"的约定，发版时建议 `mem 0.3.2`、`mission 0.2.3`、
   `base 0.3.2`（base 的改动只动 provider 实现、不加接口成员，**不需要** `INTERFACE_VERSION` +1）。
   发布顺序仍是 base → 插件。
-- **`node:sqlite` 是实验特性**：部分 Node 版本会在首次使用时打一行 `ExperimentalWarning`。Node < 22.5
-  没有这个内建模块（22.5–23.3 还需要 `--experimental-sqlite`），那种机器上仍需 `better-sqlite3`。
+- **`node:sqlite` 是实验特性**：部分 Node 版本会在首次使用时打一行 `ExperimentalWarning`。免 flag 的
+  下限是 Node 22.13 / 23.4，而适配器依赖的"忽略未用命名参数"要 22.15 / 23.11（见 §6）——低于该下限
+  **不再有 `better-sqlite3` 这条路**（它已被移除），宿主会降级挂载：工具回 `memory unavailable: <原因>`。
 - **CLI/MCP 的 pandoc 解析仍写死 `bin/pandoc`**（`@avantf/mem-provision` 的 `managedPandocPath`）。
   Desktop 走的是 base 的 provider，本轮已修好；没有 DSH 宿主的 CLI/MCP 在 Windows 上要装 pandoc 才能
   转换文档，这一条留待后续一并收口。
-- **工作树是 CRLF，`HEAD` 是 LF，且没有 `.gitattributes`**（Windows 检出造成，与本次改动无关）。后果：
-  `pnpm release:check` 这类按 `^…\n` 锚定解析 YAML 的门禁在 Windows 工作树里会误报"没有 `packages:`"。
+- **任务树是 CRLF，`HEAD` 是 LF，且没有 `.gitattributes`**（Windows 检出造成，与本次改动无关）。后果：
+  `pnpm release:check` 这类按 `^…\n` 锚定解析 YAML 的门禁在 Windows 任务树里会误报"没有 `packages:`"。
   本次把**改动过的文件**归一化成 LF（于是 `git diff` 只显示真正的改动），另加**一个**被门禁直接解析
   的文件 `pnpm-workspace.yaml`（内容零改动，只是把 CRLF 换成 `HEAD` 里的 LF）——归一化之后
-  `release:check` 在本工作树里直接通过。其余文件保持原样，没有做全仓换行符批量改写。
+  `release:check` 在本任务树里直接通过。其余文件保持原样，没有做全仓换行符批量改写。
 - **验证用的临时环境已清理**：profile `probe`/`probe2`/`probe3`、`%TEMP%\avantf-desktop-test*`、
   `%TEMP%\dsh-desktop-test` 与 `/tmp/baseline`、`/tmp/current` 都已删除；只留下一个副作用需要知会——
   第一次探测（还没把 `AVANTF_HOME` 隔离到临时目录时）在用户默认数据根 `~/.avantf` 下建了
@@ -283,10 +296,10 @@ Electron 44 = 3.53.1，两边 FTS5 + `trigram` 都在），没有 ABI 可对不�
 | --- | --- |
 | `pnpm -C mem/packages/core test` | **518 passed / 38 files**（含新的 `sqlite_adapter.spec.ts`） |
 | `pnpm build:dsh mem` | ok + **MOUNT SMOKE OK**（8 个工具；degraded 挂载用例仍给出原因） |
-| `pnpm build:dsh work` | ok + **MOUNT SMOKE OK** |
+| `pnpm build:dsh mission` | ok + **MOUNT SMOKE OK** |
 | `pnpm -C mem typecheck:dsh` | ok |
 | `pnpm -C base/plugin-base test` | **377 / 377** |
-| `pnpm guard` | ok（mem、work 只够得到 base 与自己的树） |
+| `pnpm guard` | ok（mem、mission 只够得到 base 与自己的树） |
 | `pnpm pack:plugin:mem` | **PACK OK**（tarball manifest：`engines` 在、无任何 SQLite 依赖） |
 | `pnpm release:check` | ok（三个可发布包、base 先于插件、只有一份 zod） |
 

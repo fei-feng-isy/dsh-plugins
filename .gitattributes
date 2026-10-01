@@ -1,0 +1,12 @@
+# This repository is developed on Linux and is also checked out on Windows (DSH Desktop). Keep the
+# WORKING TREE LF on every platform:
+#
+#  - gates parse files line-wise — `scripts/release-check.mjs` reads the `packages:` block out of
+#    `pnpm-workspace.yaml` with `/^packages:[ \t]*\n/u`, and `[ \t]*` does not swallow `\r`, so a CRLF
+#    checkout fails a gate whose `HEAD` is perfectly fine;
+#  - a CRLF checkout makes every text file show up as modified, burying real diffs in line-ending noise.
+#
+# `text=auto` lets git keep detecting binaries (they are left alone); `eol=lf` is what makes the
+# checkout LF. After adding this on a machine that already has a CRLF working tree, run
+# `git add --renormalize .` once.
+* text=auto eol=lf

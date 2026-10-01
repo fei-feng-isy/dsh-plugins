@@ -571,7 +571,7 @@ export class FactsDao {
   /**
    * The two "reinforcement quota" numbers of `trust_diagnose`, from ONE statement.
    *
-   * They share a predicate and used to run it twice — twice the work for two columns of the same
+   * They share a predicate and used to run it twice — twice the mission for two columns of the same
    * rows. It is now also sargable (`bonus_window_at > datetime('now', '-1 day')`, a plain string
    * comparison on the stored UTC-ISO format) and served by `idx_facts_bonus_window`, instead of
    * calling `julianday` on every row of `facts` (measured 13.4–16.2 ms at 20k, per query).

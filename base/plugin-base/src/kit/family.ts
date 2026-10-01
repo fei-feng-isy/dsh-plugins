@@ -1,7 +1,7 @@
 /**
  * The family's path conventions — ONE definition of two directories that four modules used to spell
  * out independently (`@avantf/mem-contract`, `@avantf/mem-provision`, `@avantf/mem`'s config paths
- * and the work plugin's prompt layer). They are part of the kit because a change to either convention
+ * and the mission plugin's prompt layer). They are part of the kit because a change to either convention
  * must be fixable with one base release.
  *
  * TWO ROOTS, and they are deliberately different. Confusing them is the bug this module documents:

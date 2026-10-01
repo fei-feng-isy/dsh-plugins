@@ -8,7 +8,7 @@
  *
  * `sniff` is synchronous and cheap: the ingestion pipeline asks every registered converter about
  * every document, so a converter that reads a whole workbook to answer "is this mine?" would tax
- * every unrelated ingest. `convert` is where the real work (and the heavy dependency) lives, which
+ * every unrelated ingest. `convert` is where the real mission (and the heavy dependency) lives, which
  * is also why each implementation imports its library lazily.
  */
 

@@ -80,15 +80,15 @@ All notable changes to `avantf-mem` are documented here.
 - **`AvantfRuntime.relevance(text)` 由四值 `RelevanceHit` 改为 `boolean`**：只回答"要不要提示"；两个库的
   探针仍各自跑（`||` 短路：记忆命中就不再探知识）。
 - **判定只认用户发的消息**：`agent/inbox/inserted` 也承载插件唤醒与子代理通知，非
-  `source.kind === 'user'` 的插入不再改写提示（此前一条"工作 n1 已结束"的唤醒会改写"与上条用户消息
+  `source.kind === 'user'` 的插入不再改写提示（此前一条"任务 n1 已结束"的唤醒会改写"与上条用户消息
   相关"的判定）。
 
 ### Added（跨版本门：对区间下限跑 LOCAL 步骤）
-- **`pnpm check:old-dsh`**（工作区根的 `scripts/check-old-dsh.mjs <base|mem|work>`；mem 侧入口
+- **`pnpm check:old-dsh`**（工作区根的 `scripts/check-old-dsh.mjs <base|mem|mission>`；mem 侧入口
   `pnpm -C mem check:old-dsh`）：从插件自己的 dsh peer 区间取**下限**、在临时目录装一份全部钉在该版本的
   dsh 闭包、用 `npm_config_prefix` 让 `link-dsh` 指向它，然后跑该包的 LOCAL 步骤
   （`link-dsh` → `typecheck:dsh` → `build:dsh`，含 `test:dsh` 与 mount smoke），**无论成败都恢复现场**。
-  已作为**最后一步挂进 base / mem / work 三个 `release:check`**（它要重新链接并重建产物，所以必须排在
+  已作为**最后一步挂进 base / mem / mission 三个 `release:check`**（它要重新链接并重建产物，所以必须排在
   `pack` 之后）。LOCAL 门禁原本只对着本机装的 dsh，"新改动是否偷偷要求了更新的宿主"要等运维装了旧版才
   暴露；这条命令把发现提前到本地（实测 `0.1.5-rc.2` 下限下三个包全绿）。缓存 `$TMPDIR/avantf-old-dsh-<floor>`，
   支持 `--list` / `--fresh` / `--floor`。
@@ -101,7 +101,7 @@ All notable changes to `avantf-mem` are documented here.
 - **wire face 不再 import registry 的 schema 类型**：0.1.7 把 `TypertSchema{name,schema}` 换成
   `TypertSchemaFactory{name,create}`、并从 `dsh-typert-registry/types` 移除了前者，同一代里 `TypertCodec`
   也去掉了 `.schema` 成员——`src/remote.ts` 因此在 0.1.7 上编译失败（`TS2305` + 两处 `TS2339`）。现在按
-  work 的既有做法**结构化声明** entry（两个成员都带：0.1.5 读 `schema`、0.1.6+ 调 `create()`），schema 值
+  mission 的既有做法**结构化声明** entry（两个成员都带：0.1.5 读 `schema`、0.1.6+ 调 `create()`），schema 值
   用本包自己的 `z.ZodType`，从 codec 上取 schema 也改为本地访问器；host 的 `TypertCodec` 类型里还有没有
   `schema` 这个名字，不再影响本包编译。
 - **dsh peer 区间放宽为 `^0.1.5-rc.2 || ^0.1.7-rc.2`**：按 semver 的预发布规则，`^0.1.5-rc.2` **不接受**
@@ -145,7 +145,7 @@ All notable changes to `avantf-mem` are documented here.
 
 ### Fixed（数据根：profile 的 `dataHome` 归配置层）
 - **插件 profile 里的 `config.dataHome` 是配置值（②），`$AVANTF_HOME`（④）压得过它**：它此前被直接塞进
-  引擎的显式槽（⑤），于是设了 profile `dataHome` 的用户在 mem 这半边环境变量静默失效，而 work 那半边
+  引擎的显式槽（⑤），于是设了 profile `dataHome` 的用户在 mem 这半边环境变量静默失效，而 mission 那半边
   同一条配置被环境变量压过 —— 同一个 profile 解析出两个目录，而 `<data home>/prompts` 是两边**共享**的
   （一边编辑的提示词另一边读不到）。现在两个半边同层；`mem/packages/plugin/test/data_home.spec.ts` 钉住
   这一层，`family_pin.spec.ts` 继续钉住两份解析器本身。
@@ -159,12 +159,12 @@ All notable changes to `avantf-mem` are documented here.
   断言防止它被写回模板。
 
 ### Added（系统提示词改为用户可编辑）
-- 三个 systemPrompt 段落的正文改为**磁盘上的文件**，放在**家族共享**的 `<data_home>/prompts/`：`mem-memory-usage.md` / `mem-knowledge-usage.md` / `mem-kb-edit.md`（同目录下工作引擎用 `work-` 前缀；各插件只动自己前缀的文件）。
+- 三个 systemPrompt 段落的正文改为**磁盘上的文件**，放在**家族共享**的 `<data_home>/prompts/`：`mem-memory-usage.md` / `mem-knowledge-usage.md` / `mem-kb-edit.md`（同目录下任务引擎用 `mission-` 前缀；各插件只动自己前缀的文件）。
   插件 `apply` 时缺失或空白则写入内置默认，有内容则逐字注入（去首尾空白、剥 BOM、CRLF→LF）；段落名与 order 仍由代码
   固定（`plugin/src/prompt.ts` 的 `PROMPT_FILES`），文件只提供正文；**只在初始化时读一次**（改完重启 dsh 生效）；
   读/写失败只告警并退回默认，绝不阻断挂载。用户文本不经硬守卫，只做一次软检查并各记一条警告（超 400 字 /
   命中 `RETENTION_VOCABULARY` / 命中"因为"这类因果措辞），**不截断、不拒绝**。ensure/read/fallback 按"每段只差
-  路径与默认正文"抽成通用件 `PromptFiles`（`packages/plugin/src/prompt_files.ts`：注入 io、永不抛错）。该件与工作引擎
+  路径与默认正文"抽成通用件 `PromptFiles`（`packages/plugin/src/prompt_files.ts`：注入 io、永不抛错）。该件与任务引擎
   的镜像件同路径、同形，便于 diff 与将来抽公共包。README 新增「自定义系统提示词」，DESIGN §3/§10 同步；`mount-smoke` 预置一份被编辑过的
   文件，断言它逐字进入 prompt、另两份按默认创建、且软检查的警告确实发出。
 
@@ -264,7 +264,7 @@ All notable changes to `avantf-mem` are documented here.
   `does not accept the framework 0.1.0 — bump the range with the framework`。
 
 ### Changed（插件改名：`@avantf/mem-dsh` → `@avantf/dsh-mem`）
-- 与家族其它包（`@avantf/dsh-work` / `@avantf/dsh-compat` / `@avantf/dsh-envinit`）命名对齐。
+- 与家族其它包（`@avantf/dsh-mission` / `@avantf/dsh-compat` / `@avantf/dsh-envinit`）命名对齐。
   改的是**包身份**：`packages/plugin` 的 `name`、tsdown 的 client bundle id、Typert 贡献里的 `package`、
   兼容门禁探测 key 的兜底、以及构建/打包/清理脚本（`link-dsh` 在 preset 根下发布的 stub 目录、
   `cleanup.sh`、tarball 名 `dist/avantf-dsh-mem-<ver>.tgz`）、`.gitignore`、CI 过滤、文档与命令示例。
@@ -416,7 +416,7 @@ All notable changes to `avantf-mem` are documented here.
   registry 取**（它是 checksum 的唯一来源），镜像只用于加速 integrity 已被钉住的 tarball；并新增
   `dist.tarball` 的 scheme 校验（拒绝 `file:`，拒绝 `http:` 降级，除非 registry 自身就是 http）。
   真实 npm 下载用例与"镜像只碰 tarball"用例都在 `provision/test/runtime_deps.spec.ts`。
-- **xlsx 解压炸弹前置界限**：`exceljs` 会先解压并物化整个工作簿，`MAX_ROWS/MAX_COLS` 只约束**输出**，
+- **xlsx 解压炸弹前置界限**：`exceljs` 会先解压并物化整个任务簿，`MAX_ROWS/MAX_COLS` 只约束**输出**，
   所以几 MB 的文件声明百万行即可在摄入时耗尽宿主内存。现在按中央目录声明的解压总量封顶（64 MiB，
   远超本转换器会保留的量），超限直接拒绝并给出可操作信息。`zip.ts` 新增 `zipDeclaredCost`，与
   `zipEntryNames` 共用同一份中央目录解析。**这是前置过滤而非保证**：尺寸是归档自己的声明，说谎的归档
@@ -1059,7 +1059,7 @@ All notable changes to `avantf-mem` are documented here.
   且定下一条规矩：**提示词只写动作与约束，理由一律留在 DESIGN 与 CHANGELOG**（写在提示词里每步都要花
   token，又不改变动作）。测试里加了一条守卫，禁止「因为 / 否则 / 原因是 / 之所以 / 身份载体 / 无主文件」
   这类解释性措辞回流。
-- **记忆段删掉 recall 引导**（原"回答涉及过去的工作、约定或用户偏好之前，先用 `mem_recall` 检索，不要凭
+- **记忆段删掉 recall 引导**（原"回答涉及过去的任务、约定或用户偏好之前，先用 `mem_recall` 检索，不要凭
   印象作答"）：每条用户消息现在都会带上匹配时的条件提示（`avantf:memory-hint`），常驻的"回答前先检索"
   只是每步白花 token。该段从此**只讲写侧**。
 - **知识库段给出明确的知识定义**（用户提供的成篇资料：文档、长说明、规范、综述；要按原文查阅的内容），

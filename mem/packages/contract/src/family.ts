@@ -10,7 +10,7 @@ import { join } from 'node:path'
  * (pandoc), `models` the downloaded embedding/rerank weights in the flat layout the transformers.js
  * cache reads. The engine's built-in defaults point HERE, not at the pre-framework
  * `~/.avantf/{tools,models}`: those legacy directories are no longer a fallback anywhere, so a
- * machine that never creates them loses nothing, and no process resolves a path that only works
+ * machine that never creates them loses nothing, and no process resolves a path that only missions
  * because somebody left a compatibility symlink behind.
  *
  * `provision` mirrors {@link familyHome} (it is deliberately dependency-free, so it cannot import

@@ -59,7 +59,7 @@ export interface VectorStore {
   /**
    * Optional: materialize any structure the backend built LAZILY. `topk` must always be correct
    * without it (it builds on demand); this exists so callers that need deterministic first-query
-   * latency — benchmarks, and tests that assert on build cost — can force the work.
+   * latency — benchmarks, and tests that assert on build cost — can force the mission.
    */
   prepare?(): void
   /**

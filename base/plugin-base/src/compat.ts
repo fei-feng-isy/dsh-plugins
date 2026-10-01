@@ -408,7 +408,7 @@ export function toolProbeDeclaration(defineTool: ToolDeclarationHelper): () => u
  *
  * What this proves that a method-presence check cannot: the registry ACCEPTED our
  * declaration shape and still lists it. It is the difference between "`register` is a
- * function" and "registering what we register works".
+ * function" and "registering what we register missions".
  * @param registry - `ctx.tools`.
  * @returns the outcome; never throws.
  */
@@ -582,7 +582,7 @@ export function readRuntimeVersions(
  * Read a live context into the plain evidence the rules consume.
  *
  * The probes are throwaway declarations shaped like the real ones: "`register` is a function" and
- * "registering what we register works" are different claims, and only the second one catches a
+ * "registering what we register missions" are different claims, and only the second one catches a
  * moved contract.
  * @param ctx - the live context (structural: only `get` is used).
  * @param spec - what the caller declared about itself.

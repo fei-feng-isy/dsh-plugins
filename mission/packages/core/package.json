@@ -1,0 +1,36 @@
+{
+  "name": "@avantf/mission-core",
+  "private": true,
+  "description": "Work-tree engine for @avantf/mission: node model, state machine, dispatch and recovery. Zero DSH imports.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@gitee.com:ffeng86/avantf-mission.git",
+    "directory": "packages/core"
+  },
+  "author": "qunqi.ff"
+}

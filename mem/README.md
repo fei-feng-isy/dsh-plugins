@@ -48,14 +48,14 @@
 > `bootstrap`（`packages/plugin/src/envinit-bootstrap.js`），它按
 > `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从插件自己的依赖树解析底座、
 > 动态 `import()` 并校验版本，拿不到就一条 `envinit: WARNING` 后**照常降级挂载**。插件在**运行时**从底座取用
-> 门禁规则/探针/复查、envinit provisioner 与 prompt 文件层 `PromptFiles`（work 还取底座的 `resolveDataHome`），
+> 门禁规则/探针/复查、envinit provisioner 与 prompt 文件层 `PromptFiles`（mission 还取底座的 `resolveDataHome`），
 > 所以修这些共享代码只需发一次底座。仍留在插件里、改它们需要发插件的是：`typert` `strict` wire codec 与端点/
 > 字段/结果符号字面量（照抄宿主约定的两三行，描述符在模块加载期就要组装），以及各插件自己的 logger 与
 > "底座缺席时"的降级 fallback；底座 kit 另外导出 `createPluginLogger`、`familyHome` 等，插件可在运行时取用。`scripts/link-envinit.mjs`（`pnpm build:dsh` 会自动跑）
 > 从**安装副本** vendor `bootstrap`；只有要就地联调底座时才用 `DSH_ENVINIT=<checkout>` 显式指定，不再隐式
 > 发现兄弟 checkout。**发布顺序是底座先于插件**；`zod` 由根 `pnpm-workspace.yaml` 的 catalog 统一成一份
 > （`zod: 4.6.5`，跟随已安装 dsh 的版本），底座的 `zod` peer 保持 `>=4.4.3 <5`。改 `base/**` 里的共享代码后，
-> **两个插件的完整门禁都要重跑**（mem：`pnpm build:dsh` + `node scripts/mount-smoke.mjs`；work：
+> **两个插件的完整门禁都要重跑**（mem：`pnpm build:dsh` + `node scripts/mount-smoke.mjs`；mission：
 > `pnpm release:check` + mount-smoke）；判据是"这条知识能不能靠**一次底座发布**修好"——能就在运行时从底座
 > 取用，不能（只是两三行照抄宿主约定的字面量）可以留在插件里，但要写明"改它需要发插件"。详见
 > [docs/RELEASING.md](docs/RELEASING.md)。
@@ -129,14 +129,14 @@ rerank:
 
 ## 自定义系统提示词
 
-注入给模型的三个 systemPrompt 段落的**正文**可以自己改，一段一个文件。这些文件与家族其它插件（如工作引擎 `@avantf/dsh-work`）的提示词**集中在一个目录**，用**文件名前缀**区分归属：
+注入给模型的三个 systemPrompt 段落的**正文**可以自己改，一段一个文件。这些文件与家族其它插件（如任务引擎 `@avantf/dsh-mission`）的提示词**集中在一个目录**，用**文件名前缀**区分归属：
 
 ```
 ~/.avantf/prompts/                  # 家族共享的提示词目录
 ├─ mem-memory-usage.md      # 记忆：何时该记、不要记什么（order 3000）
 ├─ mem-knowledge-usage.md   # 记忆：何时该查库、何时该入库（order 3010）
 ├─ mem-kb-edit.md           # 记忆：怎么改一篇既有文档（order 3020）
-└─ work-tree-guide.md       # 工作引擎的（`work-` 前缀；由 @avantf/dsh-work 维护）
+└─ mission-tree-guide.md       # 任务引擎的（`mission-` 前缀；由 @avantf/dsh-mission 维护）
 ```
 
 每个插件**只读写自己前缀的文件**：别人的文件、以及任何不在清单里的 `.md`，既不会被读、也不会被写或删。

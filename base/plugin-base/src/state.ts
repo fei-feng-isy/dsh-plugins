@@ -180,13 +180,13 @@ export function mergeRows(current: readonly StatusRow[], incoming: readonly Stat
   return [...merged.values()]
 }
 
-async function withStatusLock<T>(lock: ProvisionLock, home: string, work: () => Promise<T>): Promise<T> {
+async function withStatusLock<T>(lock: ProvisionLock, home: string, mission: () => Promise<T>): Promise<T> {
   const handle: Disposable = await lock.acquire(statusLockPath(home), {
     timeoutMs: STATUS_LOCK_TIMEOUT_MS,
     staleMs: STATUS_LOCK_STALE_MS,
   })
   try {
-    return await work()
+    return await mission()
   } finally {
     handle.dispose()
   }

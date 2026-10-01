@@ -141,7 +141,7 @@ export class ContradictionsDao {
    * {@link resolveForFact} for a BATCH of ids leaving the corpus — the lifecycle tick path.
    *
    * The per-id loop cost O(archived × log) plus one statement compile per id: measured 6.3 s for
-   * 999 ids at 99k open pairs. Two statements PER BATCH (one per side) do the same work: each is
+   * 999 ids at 99k open pairs. Two statements PER BATCH (one per side) do the same mission: each is
    * an index seek on the plain `fact_a`/`fact_b` index, and the side that matched supplies the
    * loser (the fact that actually left the corpus), so the recorded verdict is unchanged.
    */
