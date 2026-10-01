@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AvantfMissionHost } from '../src/host.js'
 import { createTreeStore, type TreesTable } from '../src/store.js'
+import type { TreeDocument } from '../src/domain.js'
 import { apply as applyPlugin, inject, name } from '../src/index.js'
 
 // The plugin's environment initialisation loads the family base `@avantf/dsh-plugin-base` through the
@@ -200,6 +201,9 @@ export interface Mounted {
   parkedWorkerOf: (nodeId: string) => string | null | undefined
   /** One node's durable record, as stored. */
   nodeFor: (nodeId: string) => import('@avantf/mission-core').NodeRecord | undefined
+  /** One stored tree document exactly as the store holds it: how a test asserts what was PERSISTED
+   *  (a durable mark) rather than what is merely in memory. */
+  stored: (rootId: string) => TreeDocument | undefined
   /** Materialize the owner away, as a restart or an idle host would. */
   dropOwner: () => void
   /**
@@ -303,6 +307,13 @@ export async function mount(
      * restart. The generated root ids come back as `mounted.seededRoots`.
      */
     seedTrees?: readonly string[]
+    /**
+     * Raw durable documents written into the store BEFORE the plugin opens it — how a test models a
+     * RESTART: a document produced by an earlier generation, possibly missing fields added since.
+     * Unlike `seedTrees` this bypasses `createRoot`, which is the point: only then can a fixture be
+     * a record the CURRENT code would never write.
+     */
+    seedDocuments?: readonly TreeDocument[]
     /** Mount a workspace registry whose archive set is `mounted.archivedSessions`. */
     workspaceRegistry?: boolean
     /** Plugin config, so a test can point `sessionsRoot` at a throwaway directory. */
@@ -443,6 +454,12 @@ export async function mount(
       if (!created.ok) throw new Error(`seeding a tree for ${ownerSessionId} failed`)
       seededRoots.push(created.value.id)
     }
+  }
+
+  // Documents written by an earlier generation, dropped in verbatim: the plugin's open() is what
+  // reconciles them, exactly as it would after a restart.
+  for (const document of options.seedDocuments ?? []) {
+    records.set(document.tree.rootId, document)
   }
 
   const ctx = new Context()
@@ -674,6 +691,7 @@ export async function mount(
     executorOf,
     parkedWorkerOf: (nodeId: string) => host.parkedWorkerOf(nodeId),
     nodeFor: (nodeId: string) => host.nodeFor(nodeId),
+    stored: (rootId: string) => records.get(rootId) as TreeDocument | undefined,
     makeOwner: (sessionId: string) => {
       // A SECOND top-level session: the harness's `makeLive` stamps the 'owner' descriptor on
       // whatever it is given, which models a worker, not another owner. Cross-owner surfaces

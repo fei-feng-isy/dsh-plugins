@@ -17,38 +17,8 @@
  * reached through the real event chain.
  */
 import { describe, expect, it } from 'vitest'
-import { agent, callTool, executorFor, mount, noteAndSplit, promptFor } from './mount.js'
-
-/** A tree with one node that decomposed and whose children are all terminal. */
-async function parkedRoot(
-  mounted: Awaited<ReturnType<typeof mount>>,
-  owner: ReturnType<typeof agent> = mounted.owner,
-): Promise<{
-  root: string
-  rootWorker: ReturnType<typeof agent>
-  child: string
-}> {
-  const created = await callTool(
-    mounted,
-    'create_mission',
-    { title: 'T', description: 'd', analysis: ['because'] },
-    owner,
-  )
-  const root = String(created.data?.root_id ?? '')
-  await mounted.flush()
-  const rootWorker = agent(String(mounted.dispatched.at(-1)?.childId ?? ''))
-  const split = await noteAndSplit(
-    mounted,
-    root,
-    [{ title: 'sub', description: 'd', context: ['why'] }],
-    rootWorker,
-  )
-  const child = String((split.data?.['created'] as string[] | undefined)?.[0] ?? '')
-  await mounted.flush()
-  await callTool(mounted, 'submit_mission', { node_id: child, result: 'child conclusion' }, executorFor(mounted, child))
-  await mounted.flush()
-  return { root, rootWorker, child }
-}
+import { executorFor, mount, promptFor } from './mount.js'
+import { parkedRoot } from './fixtures.js'
 
 describe('the parked session is woken, not replaced', () => {
   it('reports the parked batch to the owner as a signal, not an instruction', async () => {

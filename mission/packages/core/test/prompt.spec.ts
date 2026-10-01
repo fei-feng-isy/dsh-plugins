@@ -7,7 +7,7 @@
  * invites a worker to wait instead of finishing.
  */
 import { describe, expect, it } from 'vitest'
-import { buildProgressLine, buildWorkerPrompt, CAPACITY, isTroubled, isTroubledNode, type DispatchView, type NodeRecord } from '../src/index.js'
+import { buildProgressLine, buildWorkerPrompt, CAPACITY, isTroubled, isTroubledNode, type ContinuationDelta, type DispatchView, type NodeRecord } from '../src/index.js'
 
 function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
   return {
@@ -18,6 +18,7 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     description: 'Do the whole thing',
     context: [],
     corrections: [],
+    correctionsDeliveredUpTo: 0,
     analysisNotes: [],
     analysisAttempt: 0,
     status: 'ready',
@@ -29,6 +30,8 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     failures: 0,
     spawnFailures: 0,
     parkedWorker: null,
+    lastWorkerId: null,
+    dispatchBaseline: null,
     progressAt: 0,
     stalls: 0,
     stalledNotifiedAt: null,
@@ -155,6 +158,153 @@ describe('execution prompt', () => {
     expect(prompt).toContain('拿到后再判断改动范围')
     // Inside 「本任务」: after the node's own block, before any aggregate section.
     expect(prompt.indexOf('本任务：')).toBeLessThan(prompt.indexOf('执行本任务时写下的分析'))
+  })
+})
+
+describe('the hand-off notice for a later execution', () => {
+  // The complaint this answers: after a restart the mission looked like it was starting over — a
+  // brand-new executor re-derived the plan and re-ran work the previous attempt may already have
+  // left on disk. The notice is the one place that fact can be stated, and it has to differ between
+  // "a fresh executor" and "the very session that was interrupted", because only the latter still
+  // holds its own history.
+  it('says nothing on a FIRST execution', () => {
+    const prompt = buildWorkerPrompt(view({ node: node({ attempts: 1 }) }))
+    expect(prompt).not.toContain('这是本任务第')
+    expect(prompt).not.toContain('工作区')
+  })
+
+  it('tells a fresh executor which execution this is, and that the worktree may be dirty', () => {
+    const prompt = buildWorkerPrompt(view({ node: node({ attempts: 2 }) }))
+    expect(prompt).toContain('这是本任务第 2 次执行')
+    expect(prompt).toContain('工作区里可能留着上一次执行的改动')
+    expect(prompt).toContain('`git status`')
+    // A fresh executor was not interrupted; only a resume may say so.
+    expect(prompt).not.toContain('上一次执行被中断')
+  })
+
+  it('tells a RESUMED executor that it is continuing the interrupted session', () => {
+    const prompt = buildWorkerPrompt(view({ node: node({ attempts: 2 }) }), { resumed: true })
+    expect(prompt).toContain('这是本任务第 2 次执行')
+    expect(prompt).toContain('上一次执行被中断')
+    expect(prompt).toContain('接着那个会话继续')
+  })
+})
+
+describe('the drift a cold wake reports', () => {
+  // The resumed session is the one participant whose picture of the mission can be stale without it
+  // being able to notice. The section sits between the hand-off notice and the mission block,
+  // because that is the order it has to be read in: "you are continuing" → "here is what moved" →
+  // "here is the mission".
+  function drift(overrides: Partial<ContinuationDelta> = {}): ContinuationDelta {
+    return {
+      baselineKnown: true,
+      corrections: [],
+      notes: [],
+      terminalChildren: 0,
+      titleOrContentChanged: false,
+      analysisFromAnotherDispatch: false,
+      ...overrides,
+    }
+  }
+
+  it('lists every channel that moved, between the notice and the mission block', () => {
+    const delta = drift({
+      corrections: ['换成先做 C'],
+      notes: ['缺一个前置事实：先拿到调用点清单'],
+      terminalChildren: 2,
+      titleOrContentChanged: true,
+    })
+    const prompt = buildWorkerPrompt(view({ node: node({ attempts: 2 }) }), {
+      resumed: true,
+      corrections: delta.corrections,
+      delta,
+    })
+    expect(prompt).toContain('自你上次执行后：')
+    expect(prompt).toContain('新增纠偏 1 条')
+    expect(prompt).toContain('新增执行笔记 1 条：缺一个前置事实：先拿到调用点清单')
+    expect(prompt).toContain('2 个子任务达到终态')
+    expect(prompt).toContain('本任务的标题或内容被改过')
+
+    const noticeAt = prompt.indexOf('这是本任务第 2 次执行')
+    const driftAt = prompt.indexOf('自你上次执行后：')
+    const missionAt = prompt.indexOf('本任务：')
+    expect(noticeAt).toBeGreaterThanOrEqual(0)
+    expect(noticeAt).toBeLessThan(driftAt)
+    expect(driftAt).toBeLessThan(missionAt)
+  })
+
+  it('says nothing when a known baseline shows no drift', () => {
+    // The hand-off notice already says "you are continuing"; a block saying "nothing changed" on
+    // every quiet wake would be pure noise.
+    const prompt = buildWorkerPrompt(view({ node: node({ attempts: 2 }) }), {
+      resumed: true,
+      corrections: [],
+      delta: drift(),
+    })
+    expect(prompt).not.toContain('自你上次执行后')
+    expect(prompt).toContain('上一次执行被中断')
+  })
+
+  it('answers an UNKNOWN baseline with an honest caveat, never with silence', () => {
+    // A record written before baselines existed cannot say what changed; "we cannot tell" must not be
+    // dressed as "nothing changed", and the correction it carries must still reach the session.
+    const delta = drift({ baselineKnown: false, corrections: ['没人读过这条'] })
+    const prompt = buildWorkerPrompt(view({ node: node({ attempts: 2, corrections: ['没人读过这条'] }) }), {
+      resumed: true,
+      corrections: delta.corrections,
+      delta,
+    })
+    expect(prompt).toContain('自你上次执行后的变化无法确定')
+    expect(prompt).toContain('以当前视图为准')
+    expect(prompt).toContain('没人读过这条')
+    // It must not invent counts it does not have.
+    expect(prompt).not.toContain('新增执行笔记')
+    expect(prompt).not.toContain('达到终态')
+  })
+
+  it('is absent from a fresh spawn, which never executed this mission', () => {
+    // The fresh path passes no delta at all — and must not grow one by accident, because "since you
+    // last executed" is a lie for a session that has never executed anything.
+    const prompt = buildWorkerPrompt(view({ node: node({ attempts: 3 }) }))
+    expect(prompt).not.toContain('自你上次执行后')
+    expect(prompt).not.toContain('无法确定')
+    // The corrections it needs are all there regardless of the watermark.
+    expect(prompt).toContain('这是本任务第 3 次执行')
+  })
+})
+
+describe('which corrections one dispatch renders', () => {
+  const corrected = () => node({
+    attempts: 2,
+    corrections: ['最早那条（已送达）', '后来那条（未送达）'],
+    correctionsDeliveredUpTo: 1,
+  })
+
+  it('gives a fresh executor EVERY correction, watermark or not', () => {
+    // A new session has read none of them; suppressing a delivered one here would hide a direction
+    // the owner gave from the only executor that could act on it.
+    const prompt = buildWorkerPrompt(view({ node: corrected() }))
+    expect(prompt).toContain('最早那条（已送达）')
+    expect(prompt).toContain('后来那条（未送达）')
+  })
+
+  it('gives a resumed session only what it has NOT read', () => {
+    // `correctionsDeliveredUpTo` is the watermark; a wake renders the tail. The delivered one must
+    // not be argued a second time to the session that already acted on it.
+    const prompt = buildWorkerPrompt(view({ node: corrected() }), {
+      resumed: true,
+      corrections: corrected().corrections.slice(corrected().correctionsDeliveredUpTo),
+    })
+    expect(prompt).toContain('后来那条（未送达）')
+    expect(prompt).not.toContain('最早那条（已送达）')
+    expect(prompt).toContain('纠偏')
+  })
+
+  it('omits the correction block entirely when nothing is pending', () => {
+    const prompt = buildWorkerPrompt(view({ node: corrected() }), { resumed: true, corrections: [] })
+    // The tail mentions 纠偏消息 in general; what must be gone is the node's own block.
+    expect(prompt).not.toContain('纠偏:')
+    expect(prompt).not.toContain('后来那条（未送达）')
   })
 })
 
@@ -366,6 +516,41 @@ describe('the vocabulary the model reads', () => {
   it('calls the ancestor path a chain of missions', () => {
     const prompt = buildWorkerPrompt(view({ node: node({ id: 'n0009', depth: 2 }), chain: [ancestor()] }))
     expect(prompt).toContain('任务链（根任务 → 本任务）')
+  })
+
+  it('keeps the hand-off notice out of the tree vocabulary too', () => {
+    // The notice is NEW model-facing text, so it owes the same discipline as the rest: it may say
+    // 工作区 (the checkout), never 树 (the engine's shape).
+    expectNoTreeWording(
+      buildWorkerPrompt(
+        view({ node: node({ id: 'n0009', depth: 2, attempts: 3, corrections: ['换口径'] }) }),
+        { resumed: true, corrections: ['换口径'] },
+      ),
+      'resumed prompt',
+    )
+  })
+
+  it('keeps the drift section out of the tree vocabulary too', () => {
+    // The drift is the other NEW model-facing text, and it is the one most tempted to describe the
+    // engine's shape: it is literally about "things happening elsewhere". It says 子任务, never 树.
+    expectNoTreeWording(
+      buildWorkerPrompt(
+        view({ node: node({ id: 'n0009', depth: 2, attempts: 3, corrections: ['换口径'] }) }),
+        {
+          resumed: true,
+          corrections: ['换口径'],
+          delta: {
+            baselineKnown: true,
+            corrections: ['换口径'],
+            notes: ['缺前置事实'],
+            terminalChildren: 2,
+            titleOrContentChanged: true,
+            analysisFromAnotherDispatch: false,
+          },
+        },
+      ),
+      'resumed prompt with drift',
+    )
   })
 
   it('builds the progress line without naming the shape', () => {

@@ -15,5 +15,15 @@ export type {
   OrphanedTree,
 } from './tree.js'
 export { MissionEngine, DEFAULT_ENGINE_OPTIONS, detectConcurrency } from './engine.js'
-export type { EngineHooks, EngineOptions, StartWorkerInput, StallReport } from './engine.js'
+export type {
+  EngineHooks,
+  EngineOptions,
+  ResumeOutcome,
+  ResumeWorkerInput,
+  StartWorkerInput,
+  StallReport,
+} from './engine.js'
+export { computeContinuationDelta, isMaterialChange, nodeFingerprint } from './continuation.js'
+export type { ContinuationDelta } from './continuation.js'
 export { buildWorkerPrompt, buildProgressLine, isTroubled, isTroubledNode, spillPointer, statusLabel } from './prompt.js'
+export type { WorkerPromptOptions } from './prompt.js'

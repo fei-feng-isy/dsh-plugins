@@ -20,6 +20,20 @@ export const DOMAIN_VERSION = 1
 
 export const TREES_TABLE = 'trees'
 
+/**
+ * The dispatch baseline: what a prompt showed its session, so a later cold wake can subtract it.
+ * Every member is required — a partially-written baseline is not a weaker snapshot, it is a wrong
+ * one, and the consumer (`continuation.ts`) reads a malformed object as "no baseline" rather than
+ * trusting invented numbers.
+ */
+const baselineSchema = z.object({
+  corrections: z.number(),
+  notes: z.number(),
+  terminalChildren: z.number(),
+  fingerprint: z.string(),
+  attempts: z.number(),
+})
+
 const nodeSchema = z.object({
   id: z.string(),
   rootId: z.string(),
@@ -29,6 +43,10 @@ const nodeSchema = z.object({
   context: z.array(z.string()),
   // Optional-with-default: a document written before the field existed must keep loading.
   corrections: z.array(z.string()).default([]),
+  // Optional-with-default, and the default is the CONSERVATIVE one: a missing watermark reads as
+  // "nothing has been delivered", so a wake still carries every correction rather than silently
+  // skipping a direction the owner gave.
+  correctionsDeliveredUpTo: z.number().default(0),
   analysisNotes: z.array(z.string()).default([]),
   analysisAttempt: z.number().default(0),
   status: z.enum(['blocked', 'ready', 'running', 'interrupted', 'done', 'failed']),
@@ -40,6 +58,14 @@ const nodeSchema = z.object({
   failures: z.number().default(0),
   spawnFailures: z.number().default(0),
   parkedWorker: z.string().nullable().default(null),
+  // Optional-with-default: a document written before the field existed reads as "no continuation
+  // handle", which is the only safe default — an invented session id would be woken.
+  lastWorkerId: z.string().nullable().default(null),
+  // Optional-with-default, and the default is UNKNOWN rather than "nothing changed": a wake that
+  // cannot subtract a baseline renders an honest caveat instead of pretending the mission is
+  // unchanged. `.catch(null)` covers the other direction — a baseline object that fails to parse
+  // must degrade to "unknown" too, never to a half-read snapshot the delta would believe.
+  dispatchBaseline: baselineSchema.nullable().default(null).catch(null),
   // Optional-with-default: reads as "no activity observed, never stalled, never reported".
   progressAt: z.number().default(0),
   stalls: z.number().default(0),

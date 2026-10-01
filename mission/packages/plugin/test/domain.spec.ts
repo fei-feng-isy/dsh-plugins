@@ -67,6 +67,11 @@ describe('a document written before the analysis fields existed', () => {
     // remaining budget rather than being judged a failure on load).
     expect(node?.failures).toBe(0)
     expect(node?.spawnFailures).toBe(0)
+    // The continuation handle and the correction watermark arrived the same way. A missing handle
+    // must NOT read as "there is a session to wake" (an invented id would be woken), and a missing
+    // watermark must read as "nothing delivered yet" so a wake still carries every correction.
+    expect(node?.lastWorkerId).toBeNull()
+    expect(node?.correctionsDeliveredUpTo).toBe(0)
   })
 
   it('also accepts a record that already carries them', () => {
@@ -76,6 +81,15 @@ describe('a document written before the analysis fields existed', () => {
     })))
     expect(parsed.nodes['n0001']?.analysisNotes).toEqual(['缺前置事实：先拿到调用点清单'])
     expect(parsed.nodes['n0001']?.analysisAttempt).toBe(2)
+  })
+
+  it('carries a continuation handle and a delivery watermark when the record has them', () => {
+    const parsed = treeDocumentSchema.parse(legacyDocument(legacyNode({
+      lastWorkerId: 'mission-aaaa1111',
+      correctionsDeliveredUpTo: 2,
+    })))
+    expect(parsed.nodes['n0001']?.lastWorkerId).toBe('mission-aaaa1111')
+    expect(parsed.nodes['n0001']?.correctionsDeliveredUpTo).toBe(2)
   })
 
   it('rejects a record whose analysis fields have the wrong shape', () => {

@@ -53,8 +53,12 @@ node {
   description   : string            // 任务内容
   context       : string[]          // 任务背景：拆解原因等，由拆解者写入
   corrections   : string[]          // master 的纠偏，最新在后（§6.6）
+  corrections_delivered_up_to : number  // 纠偏投递水位：前 N 条已确认送达持有者那个会话（§9.2.1）
   analysis_notes: string[]          // 执行者用 note_mission 写下的判断，最老在前（§5.3.2）
   analysis_attempt: number          // 写下最后一条时的 attempts；0 表示没人写过
+  parked_worker : string | null      // 拆解后停手的会话 id —— 等待被唤醒的地址（§3.2.2）
+  last_worker_id: string | null      // 被中断的会话 id —— 冷唤醒的句柄（§3.2.2）
+  dispatch_baseline: Baseline | null // 这次 prompt 给会话看过什么；冷唤醒用它算差量（§3.2.2 / §9.2.1）
   status        : NodeStatus
   created_at    : number            // 跨树公平排序用（最老优先）
   depth         : number            // 根为 1
@@ -197,6 +201,62 @@ dispatch(node):
 > **已确认的优化**：continuable 子 agent 的 child id **可由调用方预留** —— `ContinuableStartSpec.childId` 的契约写明 "supplying one lets a durable parent **record provisioning before child materialization** without a second identity handshake"。
 > 因此引擎可以先写 `claimed_by` 再物化子 agent，**窗口彻底关闭**。上面那条"同一轮次内不让出"的不变量仍应保留（防重复派活），但不再是承受窗口的唯一依靠。
 
+#### 3.2.2 打开时的三类处置，以及"冷唤醒"句柄
+
+`reconcileOnOpen` 对每个 `running` 节点按**本进程**的 agent 注册表判活，于是打开时恰好有三种处置：
+
+| 情形 | 判据 | 处置 |
+|---|---|---|
+| **幸存者** | `isAgentLive(claimedBy)` 为真（热重载，agent 还在） | 绑定不动，只把 `progressAt` 刷成当下（否则一段长跑从打开那一刻起就显得沉默） |
+| **可接续** | 判活为假，但记录里有一个 `claimedBy` | **先把 `claimedBy` 存进 `lastWorkerId`**，再置 `interrupted`、清 `claimedBy` |
+| **无句柄** | 本来就不是 `running`，或 `claimedBy` 就是 `null` | 不动（`lastWorkerId` 若有也早已花掉） |
+
+第二行是新增的**持久化字段** `NodeRecord.lastWorkerId`（旧记录缺该字段时按 `null` 加载）：
+
+```ts
+/** 最近一次绑在这个节点上的执行者会话 id，在"中断"而不是"干净交接"时保留下来。
+ *  与 parkedWorker 是两回事，谁也不许覆盖谁：parked 是"活着、正在等唤醒"的续命地址
+ *  （它拆解完就停手，期望同一轮里被叫醒）；lastWorkerId 是"可能已经不存在"的会话句柄，
+ *  冷恢复允许失败。只有 reconcileOnOpen 写它，只有 adoptContinuation 消费它 ——
+ *  同进程内的回收不写，所以普通重派行为一点没变。 */
+```
+
+- **为什么非存不可**：`claimedBy` 是那个 session id 唯一的落点，一置 `null` 旧会话就再也找不回来，
+  下一次派发只能起全新执行者 —— 这正是"重启后像是重新执行一遍"的成因。
+- **状态词表不变**：`lastWorkerId` 是附加事实，不是执行状态；节点照样回到 `interrupted`（可派活）。
+- **缺省语义取保守**：旧记录没有该字段 → `null`（没有句柄，不去唤醒任何会话）。读取时在
+  `MissionTree.open()` 这个**唯一入口**把缺字段规范化成默认值，`domain.ts` 的 schema 同时给出
+  `nullable().default(null)`；两处都写是因为测试可以用不经 schema 的 store，而"缺字段读成 undefined"
+  会让 `!== null` 判成"有句柄"。
+
+#### 3.2.3 变化差量基线：`dispatchBaseline`
+
+冷唤醒要把一个会话从"它记忆里的节点"接到"节点现在的样子"，所以它不仅需要地址（`lastWorkerId`），还需要
+**那个会话上一次看到的是什么**。`NodeRecord.dispatchBaseline` 就是这份快照：
+
+```ts
+interface DispatchBaseline {
+  corrections: number        // 纠偏条数——与投递水位一起定义"这个会话没读过的纠偏"
+  notes: number              // analysisNotes 条数——之后追加的就是差量里的"新增笔记"
+  terminalChildren: number   // 当时已终态的子任务数——只用于差量措辞，不参与 material 判据
+  fingerprint: string        // title + description 的指纹——任务被改写过的判据
+  attempts: number           // 当时是第几次派发——判断最后一条笔记是不是本会话那次派发写的
+}
+```
+
+- **取点 = 宿主把 prompt 交给会话、投递被接受的那一刻**（`startWorker` / `wakeParkedWorker` /
+  `deliverContinuation` 三处统一走 `recordBaseline`）。不放 core 的 `dispatch()`：一次 `dispatch()` 可能根本没有
+  prompt（owner 不在、view 消失、启动被拒），在那种记录上盖"它看过这里"就是让下一次唤醒少报差量；而且
+  "已绑定、子 agent 尚未物化"那段窗口（§3.4 的 `startingClaims`）不该再长出一笔等待中的持久写。
+- **只在当前绑定者还是该会话、节点仍是 `running` 时盖戳**：与扫描回收/重派赛跑输掉的那次静默拒绝，比一个
+  被相信的错误快照好。
+- **缺省语义是"未知"，不是"没有变化"**：旧记录、非本代宿主构造过 prompt 的记录、以及形状残缺的 baseline 都读成
+  `null`（`normalizeLoaded()` + schema 的 `nullable().default(null).catch(null)`，见 §3.2.2 的同一处口径）。
+  唤醒遇到它时**照样续命**，但渲染一句诚实的说明（§5.1），不渲染任何编造的"新增 N 条"。
+- **差量与阈值**（哪些变化算"大到不该续"）见 §9.2.1。
+
+---
+
 ### 3.3 身份即凭证
 
 `submit_mission` / `decompose_mission` 只接受**调用方 session id == 节点当前 `claimed_by`** 的写入。僵死 worker 迟到写结果时，它的 session id 已不等于节点当前的绑定者，写入被拒。
@@ -325,11 +385,17 @@ loop:
 每个任务单元是一次全新的子 agent 生成。prompt 由**一个按节点状态分叉的构造器**产出（同一段模板，尾段随状态变化）：
 
 ```
+[续任说明]    第 N 次执行 / 上一次被中断 / 工作区可能留着改动（§9.2.1）
+[变化差量]    仅冷唤醒：自你上次执行后发生了什么（无变化则整段不出现；基线未知则只有那句说明）
 [任务链]      沿 parent 链 root → 当前节点，每层只给 **title + 少量基本信息**
 [当前节点]    本节点的完整内容：id / title / description / context + attempts
               +「执行本任务时写下的分析」一节（有记录时才出现，见 §5.3.2）
 [状态尾段]    按 node.status 分叉，见 §5.1.1
 ```
+
+**「变化差量」只属于唤醒路径。** 它由 `WorkerPromptOptions.delta` 传入，只有冷唤醒（`deliverContinuation`）会传：
+全新 spawn 从未执行过这个任务，"自你上次执行后"是假话，而且它本来就会读到全部纠偏、全部笔记与全部子结果 ——
+两条路径在这里**刻意不合并**。差量逐分量怎么算、什么时候算"大到不该续"，见 §9.2.1。
 
 两条设计约束：
 
@@ -963,7 +1029,7 @@ Cordis 的 `ctx.effect()` 就是 install/uninstall 接线：**disposer 在 fiber
 | 失败预算 `failures` | **5** | 每次 worker 被回收（消失 / 卡死）+1；达阈值 → 节点标 `failed` + 唤醒 master 上报。**成功的提交与拆解（含汇总轮）不消耗** |
 | 启动失败预算 `spawnFailures` | **5** | 每次「派发即失败」（runtime 拒绝 / toolFilter 无法施加）+1，并按指数退避冷却后再派；成功启动即清零；达阈值 → `failed`。**不计入 `failures`** |
 | 单树节点上限 | **200** | `decompose` 提交前校验，超限 `node-limit` 拒绝该次拆解（一次性，零副作用）。只数**本次新增**的节点：复用已有前置任务的子任务不计数 |
-| 会话续命 | **同一父子边**（`parkedWorker`）| 拆解后停手的执行者被记在该节点上；子任务全终态后由 owner 那一轮唤醒它继续判断。不占并发配额（停手时 `claimedBy=null`）、不触发 stale 判定、失败不消耗任何预算（`wake-failed`）。见 §9.3 与设计提案 |
+| 会话续命 | **同一父子边**（`parkedWorker`）+ **重启后冷唤醒**（`lastWorkerId`）| 拆解后停手的执行者被记在该节点上；子任务全终态后由 owner 那一轮唤醒它继续判断。中断留下的句柄在打开时存进 `lastWorkerId`，下次派发**先冷唤醒、失败再新起**（失败不消耗任何预算：`wake-failed`）。冷唤醒另带**变化差量**：派发时把"这个 prompt 给会话看了什么"存成 `dispatchBaseline`，唤醒时用当前值减它，差量渲染进唤醒消息；**差量大到 material 就不续命、直接新起**（不扣预算、不触发冷却）。停手期间节点不是 `running`，不占并发配额、不触发 stale 判定；认领后如常走 stale 兜底。优先级 parked > 冷唤醒 > 新起，互不覆盖。见 §3.2.2 / §3.2.3 / §5.1 / §9.2.1 与设计提案 |
 | 任务链 token 预算 | **暂不需要**（见 §9.2.1）| —— |
 
 **深度的计数口径**：根节点为第 1 层，深度 8 即允许最多 7 次连续下钻。实施时以根为准统一定义。
@@ -1016,6 +1082,75 @@ Cordis 的 `ctx.effect()` 就是 install/uninstall 接线：**disposer 在 fiber
   owner 的 inbox 堆一条唤醒。
 
 冷启（`sendMessage` 对非驻留子会话走 `coldResume`）已在真实协议上验证：`pnpm spike:cold-resume`。
+
+**冷唤醒（2026-09-25 实施）：重启后不把执行者当新的**。上面的续命只在"同一进程内停手等唤醒"这条边上成立；
+进程重启/worker 灭失留下的 `interrupted` 节点，过去只能起全新执行者。现在 `reconcileOnOpen` 会把旧会话 id
+存成 `lastWorkerId`（§3.2.2），下一次派发**先试冷唤醒，失败再新起**：
+
+| 项 | 约定 |
+|---|---|
+| **优先级** | parked 会话 > `lastWorkerId` 冷唤醒 > 全新 spawn。parked 是活着、正在等唤醒的续命；`lastWorkerId` 是可能已不存在的句柄；`nextDispatchable` 照旧排除 parked 节点 |
+| **要不要续** | 认领前先算**变化差量**（`dispatchBaseline`，§3.2.3）并过 `isMaterialChange`：未读纠偏 / 笔记来自另一次派发 / 标题内容被改过 → **不续命**，消费句柄后走全新 spawn。**"子任务达到终态"被刻意排除在判据之外**：那是 parked 唤醒的触发条件本身 |
+| **投递 seam** | 复用既有 `ctx.subagents.sendMessage(owner, SessionId(lastWorkerId), …)` —— dsh-subagent 的 `materialize` 就是 "Create **or resume** one child Agent"（内部 `agents.resume({ resumeSessionId })`）。不新增任何会话 API |
+| **认领顺序** | 守卫 → 认领（`adoptContinuation`：`claimedBy = lastWorkerId`、`attempts+1`、**消费**句柄）→ 投递。认领必须在前，因为被唤醒的会话立刻可以 `submit_mission` / `decompose_mission`，两者都校验 `claimedBy === caller` |
+| **守卫** | 复用 `wakingClaims`：冷恢复的目标同样按定义是 idle（没物化），只靠 `agents.get` 会把刚认领的绑定读成"已消失"，被扫描回收 → 冷恢复落地 + 新起执行者**双跑**。守卫在**认领之前**置位，直到 `workerLive` 真的观测到 resumed agent |
+| **投递被拒** | `reclaim(..., 'wake-failed')` 退回 `ready` + 立即预留新 claim 走今天的 `dispatch`/`startWorker`。**不扣任何预算**、不触发 30s 冷却；`attempts` 不回滚（它是派发代号） |
+| **不双跑的另一半** | `ResumeOutcome` 是三种答案而不是布尔：`resumed`（引擎计一次派发，**不 spawn**）/ `failed`（这次续命不会发生 —— 投递被拒时宿主已自行回收，差量 material 时宿主**根本没有认领**；两种都走普通新起）/ `skip`（另有投递在途或状态已变 —— **绝不许** spawn）。没有 `skip`，守卫窗口里就会多起一个执行者 |
+
+**纠偏投递标记（`correctionsDeliveredUpTo`）**：`adjust_mission` 的实时投递成功后才把水位推进到
+`corrections.length`；失败/无 holder 不推进。语义是"前 N 条已确认送达**那个会话**"，因此：
+
+- **冷唤醒消息**只渲染 `corrections.slice(correctionsDeliveredUpTo)` —— 已经实时送到这个会话手里的纠偏，
+  不再对它重复一遍（它已经照做或已经判过）。唤新成功后水位也随之前进，下一次再唤醒不重复。
+- **全新 spawn 的消息照旧渲染全部纠偏** —— 新执行者一条都没见过，抑制任何一条都是把 owner 给的方向
+  从唯一能执行它的会话眼前藏起来。两条路径在这里**刻意不合并**。
+- 旧记录缺该字段按 `0` 加载（= 全部待投），保守且安全；`corrections` 仍是 append-only 的文本数组，
+  标记是旁边的一个数字 —— 把数组改成对象会让历史纠偏整批读成不存在。
+
+> **REV-4 补的那一半（2026-09-25）**：只看水位会把"全新 spawn 渲染过、但没推进水位"的纠偏永远算成未读。
+> 所以"这个会话没读过的纠偏"取**两个标记的较后者**：水位（确实投递过的证据）与 `dispatchBaseline.corrections`
+> （那次 prompt 里就有的证据）。未读纠偏 > 0 现在是 **material**（见下），也就是说已知基线下它**不再进入唤醒
+> 消息**——它改变的是路由：改新起。上面那条"冷唤醒只渲染未送达的纠偏"因此在**未知基线**这条路径上成立
+> （旧记录/夹具），渲染逻辑保留。
+
+**变化差量与 material 判据（2026-09-25 实施）**：派发时把"这个 prompt 给会话看了什么"存成
+`dispatchBaseline`（§3.2.3），冷唤醒时相减得到差量，渲染在续任说明之后、任务链之前。差量大到一定程度
+（`isMaterialChange`）时**放弃续命**：
+
+| 信号 | 为什么算 material |
+|---|---|
+| **未读纠偏 > 0**（水位与 baseline 取较后者） | owner 改了方向。这个会话的计划建立在旧方向上；全新执行者先读纠偏、再读别的，是这条消息更好的读者 |
+| **最后一条笔记不是本会话那次派发写的**（`analysisNotes.length > 0 && analysisAttempt !== baseline.attempts`） | 节点的判断通道被另一次派发推进过。保守是刻意的：误报只多起一个新执行者（永远正确），漏报是在自己没写过的判断上继续推理。`length > 0` 是必需的：没有笔记时 `analysisAttempt` 为 `0`，与任何 `attempts` 都不等 |
+| **标题或内容被改过**（指纹不同） | 会话会被唤醒到一个它从未接到过的任务上 |
+
+**必须排除"子任务达到终态"，这是硬要求。** parked 会话被唤醒**就是因为**子任务全部终态 —— 那是引擎自己的触发条件
+（`decompose_mission` 之后同步 `pump()`，父节点在子任务建出来的一刻停手）。把它算作"变了"，parked 唤醒就会永远
+不续命，REV-2 那套功能当场作废。两处保证：判据里根本没有这一项，而且判据**只在冷唤醒路径**求值（`host.resumeWorker`，
+parked 唤醒不看它）；回归由两侧钉住 —— core 断言"差量里 `terminalChildren === 1` 而 `isMaterialChange` 为假"，
+plugin 的 `a parked wake is not drift` 在同一用例里断言这两件事**并且**真的完成一次唤醒。
+
+**基线未知（旧记录、或本代宿主没构造过 prompt）→ 判据答"不 material"，照样续命，但附一句诚实的说明**：
+
+```
+自你上次执行后的变化无法确定（这条记录里没有当时的快照）：下面是本任务的当前视图；若与你记忆里的不一致，以当前视图为准。
+```
+
+理由：prompt 里的当前视图本身是完整的（标题/内容/背景/纠偏/全部笔记/子结果都在），差量是额外的一段而不是真相来源，
+所以"无法确定变化"一句话就能诚实交代；反过来选"未知即新起"，等于在特性上线那一刻把所有在飞的任务都换成全新执行者，
+是落在最该被这套功能服务的记录上的永久损失。已知基线且**没有**变化时，整段差量不出现（续任说明已经说了"你在继续"，
+每次安静的唤醒都写"没有变化"只是噪声）。
+
+**放弃续命的计数语义**：判据在**认领之前**求值（守卫 → owner 存活 → 判据 → 认领 → 投递；放在 owner 检查之后是必须的，
+否则 owner 不在时返回 `failed` 会让引擎落进一次发不出去的 spawn）。判为 material 时用 `abandonContinuation` **消费句柄**并
+返回 `failed`，引擎在同一次 pass 里走**既有**的新起路径；**不扣 `failures` / `spawnFailures`、不触发 30s 冷却**（与
+`wake-failed` 同一条契约），`attempts` 由新的那次派发 `+1`。没有认领，所以 `wakingClaims` 与它无关；新起走既有的
+`startingClaims` 路径，"不双跑"的既有三条回归未改、全部通过。
+
+**续任说明**：两条路径都会在 prompt 顶部带一段"这是本任务第 N 次执行"：
+冷唤醒说"上一次执行被中断、你接着那个会话"；全新 spawn 说"之前已经有执行者动过手"。
+两者都补一句"工作区里可能留着上一次执行的改动：先核对（`git status` / 文件时间 / 测试）再决定补做还是重做"，
+直接修掉"重启后像是重新执行一遍"的另一半。注意措辞用**工作区**而不是工作树：prompt 层从不向模型描述任务树的形状
+（见 `prompt.spec.ts` 的 `the vocabulary the model reads`）。
 
 **为什么任务链 token 预算暂不需要**：任务链的组装**只含各节点的 title 与少量基本信息**，不含 description / context（那些属于当前节点自己的内容）。所以任务链长度是"深度 × 一行的开销"：
 

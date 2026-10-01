@@ -1,6 +1,6 @@
 {
   "name": "@avantf/dsh-mission",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "DSH native Cordis plugin: a mission-tree engine (nodes attempted, decomposed by the blocked executor, converged by the engine)",
   "type": "module",
   "main": "lib/index.js",

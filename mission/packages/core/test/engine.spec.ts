@@ -6,7 +6,7 @@
  * whom it wakes — with no harness and no model.
  */
 import { describe, expect, it } from 'vitest'
-import { MissionEngine, MissionTree, type StallReport, type TreeState, type TreeStore } from '../src/index.js'
+import { MissionEngine, MissionTree, type ResumeOutcome, type StallReport, type TreeState, type TreeStore } from '../src/index.js'
 
 function memoryStore(): TreeStore & { documents: Map<string, TreeState> } {
   const documents = new Map<string, TreeState>()
@@ -495,5 +495,119 @@ describe('stalls', () => {
     expect(world.stalled[0]?.stalls).toBe(1)
     expect(world.stalled[0]?.attempts).toBe(4)
     expect(world.stalled[0]?.title).toBe('root 0')
+  })
+})
+
+/**
+ * The dispatch pass must prefer CONTINUING a demoted worker session over starting a fresh one, and
+ * the three host answers must lead to three different actions. The host itself (adoption, guard,
+ * delivery) is exercised in the plugin's `cold-resume` cases; what is pinned HERE is the engine's
+ * side of the contract.
+ */
+describe('cold continuation', () => {
+  /** Persist a `running` binding and reopen the store, as a process restart does: `open()` demotes
+   *  the node and parks the worker id in `lastWorkerId`. */
+  async function demoted(workerId: string): Promise<{ tree: MissionTree; rootId: string }> {
+    const store = memoryStore()
+    const deps = {
+      isAgentLive: (sessionId: string) => sessionId === 'owner',
+      probeOwner: () => Promise.resolve({ kind: 'exists' as const }),
+      spill: () => Promise.resolve(null),
+      now: () => 1,
+      newId: () => 'root0001',
+    }
+    const first = new MissionTree(store, deps)
+    const created = await first.createRoot({
+      ownerSessionId: 'owner',
+      title: 'continued',
+      description: 'd',
+      analysis: [],
+    })
+    if (!created.ok) throw new Error('root failed')
+    await first.dispatch(created.value.id, workerId)
+    const reopened = new MissionTree(store, deps)
+    await reopened.open()
+    if (reopened.node(created.value.id)?.lastWorkerId !== workerId) {
+      throw new Error('the continuation handle was not recorded on open')
+    }
+    return { tree: reopened, rootId: created.value.id }
+  }
+
+  /** An engine over a demoted tree, with a host that answers continuation attempts `answer`. */
+  function engineWith(
+    tree: MissionTree,
+    answer: (input: { nodeId: string; workerId: string }) => Promise<ResumeOutcome>,
+  ): { engine: MissionEngine; started: string[]; attempted: { nodeId: string; workerId: string }[] } {
+    const started: string[] = []
+    const attempted: { nodeId: string; workerId: string }[] = []
+    let sequence = 0
+    const engine = new MissionEngine(
+      tree,
+      {
+        reserveClaimId: () => `mission-fresh-${String(++sequence)}`,
+        releaseClaimId: () => undefined,
+        startWorker: ({ claimId }) => {
+          started.push(claimId)
+          return Promise.resolve()
+        },
+        resumeWorker: async (input) => {
+          attempted.push({ nodeId: input.node.id, workerId: input.workerId })
+          return answer({ nodeId: input.node.id, workerId: input.workerId })
+        },
+        interruptWorker: () => Promise.resolve(),
+        notifyOwner: () => undefined,
+      },
+      { maxConcurrent: 4, staleMs: 60_000, now: () => 1 },
+    )
+    return { engine, started, attempted }
+  }
+
+  it('continues the recorded session instead of starting a fresh worker', async () => {
+    const { tree, rootId } = await demoted('mission-old')
+    const { engine, started, attempted } = engineWith(tree, async ({ nodeId, workerId }) => {
+      const adopted = await tree.adoptContinuation(nodeId, workerId)
+      return adopted.ok ? 'resumed' : 'skip'
+    })
+
+    expect(await engine.pump()).toBe(1)
+    expect(attempted).toEqual([{ nodeId: rootId, workerId: 'mission-old' }])
+    // Bound to the OLD session at the next attempt, and nobody was spawned.
+    expect(started).toEqual([])
+    expect(tree.node(rootId)?.claimedBy).toBe('mission-old')
+    expect(tree.node(rootId)?.attempts).toBe(2)
+    expect(tree.node(rootId)?.lastWorkerId).toBeNull()
+  })
+
+  it('starts nobody when the continuation reports skip', async () => {
+    const { tree, rootId } = await demoted('mission-old')
+    const { engine, started, attempted } = engineWith(tree, async () => 'skip')
+
+    expect(await engine.pump()).toBe(0)
+    expect(attempted).toHaveLength(1)
+    // "skip" is not "failed": a fresh executor on top of a session another delivery owns is the
+    // double run the answer exists to prevent. The node is left for the next pass.
+    expect(started).toEqual([])
+    expect(tree.node(rootId)?.status).toBe('interrupted')
+    expect(tree.node(rootId)?.lastWorkerId).toBe('mission-old')
+    expect(tree.node(rootId)?.attempts).toBe(1)
+  })
+
+  it('takes the ordinary fresh path, in the same pass, when the continuation fails', async () => {
+    const { tree, rootId } = await demoted('mission-old')
+    const { engine, started } = engineWith(tree, async ({ nodeId, workerId }) => {
+      const adopted = await tree.adoptContinuation(nodeId, workerId)
+      if (!adopted.ok) return 'skip'
+      await tree.reclaim(nodeId, 'wake-failed')
+      return 'failed'
+    })
+
+    expect(await engine.pump()).toBe(1)
+    expect(started).toEqual(['mission-fresh-1'])
+    expect(tree.node(rootId)?.status).toBe('running')
+    expect(tree.node(rootId)?.claimedBy).toBe('mission-fresh-1')
+    // The refused delivery charged neither budget, and the handle is spent.
+    expect(tree.node(rootId)?.failures).toBe(0)
+    expect(tree.node(rootId)?.spawnFailures).toBe(0)
+    expect(tree.node(rootId)?.lastWorkerId).toBeNull()
   })
 })

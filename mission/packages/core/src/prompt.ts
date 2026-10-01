@@ -3,6 +3,7 @@
  * @module @avantf/mission-core/prompt
  */
 import { CAPACITY, TERMINAL, type DispatchView, type NodeRecord } from './types.js'
+import type { ContinuationDelta } from './continuation.js'
 
 /** Node statuses in the language the model reads. */
 const STATUS_ZH: Record<string, string> = {
@@ -55,8 +56,10 @@ function chainLine(node: NodeRecord): string {
   return `- [${node.id}] ${node.title}${reason}${corrections}`
 }
 
-/** The full block for the node being executed right now. */
-function currentNodeBlock(node: NodeRecord): string {
+/** The full block for the node being executed right now. `corrections` is what this dispatch may
+ * render: every recorded one for a fresh executor, only the still-undelivered slice for a session
+ * that is being CONTINUED (see {@link WorkerPromptOptions}). */
+function currentNodeBlock(node: NodeRecord, corrections: readonly string[]): string {
   const lines: string[] = [
     `id: ${node.id}`,
     `标题: ${node.title}`,
@@ -66,9 +69,9 @@ function currentNodeBlock(node: NodeRecord): string {
     lines.push('背景:')
     for (const fact of node.context) lines.push(`  - ${fact}`)
   }
-  if (node.corrections.length > 0) {
+  if (corrections.length > 0) {
     lines.push('纠偏:')
-    for (const correction of node.corrections) lines.push(`  - ${correction}`)
+    for (const correction of corrections) lines.push(`  - ${correction}`)
   }
   analysisSection(node, lines)
   // Say how many FAILED EXECUTIONS remain, not how many times this node was dispatched: `attempts` counts every dispatch, including successful aggregate/convergence rounds. Silence when nothing has failed, so a first dispatch is not invited to pace itself against a clock it cannot see.
@@ -149,18 +152,120 @@ function depthCeilingLine(): string {
 }
 
 /**
+ * What a LATER execution of the same mission must be told before it starts reading anything else.
+ *
+ * The complaint this answers is "a restart looks like starting over": an executor that has no idea
+ * a previous run existed re-derives the whole plan and re-runs work that may already be on disk.
+ * Two variants, and the difference matters:
+ *
+ * - `resumed` — this dispatch CONTINUES the very session that was interrupted. It still holds its
+ *   own history, so the notice points at that history instead of re-arguing the mission.
+ * - fresh — a brand-new executor. It has read nothing, which is exactly why it also gets every
+ *   correction (see {@link WorkerPromptOptions.corrections}); the notice only tells it that the
+ *   worktree may already carry an earlier attempt.
+ *
+ * Absent on a first execution (`attempts <= 1`), where there is no earlier attempt to warn about.
+ * Wording note: it says 工作区, not 工作树 — the prompt layer deliberately never names the tree
+ * shape to a model (see the `the vocabulary the model reads` cases).
+ */
+function handoffNotice(node: NodeRecord, resumed: boolean): string | undefined {
+  if (!resumed && node.attempts <= 1) return undefined
+  const lines: string[] = []
+  if (resumed) {
+    lines.push(
+      `这是本任务第 ${String(node.attempts)} 次执行：上一次执行被中断了，你现在接着那个会话继续`
+      + '（它做过的判断、试过的路都还在你的上下文里，不必从头重推）。',
+    )
+  } else {
+    lines.push(`这是本任务第 ${String(node.attempts)} 次执行，之前已经有执行者动过手。`)
+  }
+  lines.push('工作区里可能留着上一次执行的改动：先核对（`git status` / 文件时间 / 测试）再决定补做还是重做，不要从零重来。')
+  return lines.join('\n')
+}
+
+/**
+ * "What happened since you last executed this" — the section a COLD WAKE owes the session it is
+ * resuming, rendered between the hand-off notice and the mission chain. Its whole reason to exist is
+ * that the resumed session is the one participant whose picture of the node can be stale without it
+ * being able to notice.
+ *
+ * Three shapes, and the difference is deliberate:
+ *
+ * - a KNOWN baseline with drift renders the clauses below;
+ * - a KNOWN baseline with no drift renders NOTHING — the hand-off notice already says "you are
+ *   continuing", and a block that says "nothing changed" would be noise on every quiet wake;
+ * - an UNKNOWN baseline renders an honest caveat. "We cannot tell what changed" must never be
+ *   dressed as "nothing changed", and it must never be a reason to withhold the view that follows
+ *   anyway: the full current mission block, the analysis and the children's conclusions are right
+ *   below, so the caveat only has to say which of the two pictures wins.
+ *
+ * The corrections clause is normally absent on a wake that happens at all: an unread correction is
+ * a MATERIAL change (`isMaterialChange`), and a material change routes to a fresh executor instead.
+ * It is kept because the rule and the rendering are two different decisions, and a report that
+ * silently dropped a channel would be worse than a clause that rarely fires.
+ */
+function deltaSection(delta: ContinuationDelta): string | undefined {
+  if (!delta.baselineKnown) {
+    return '自你上次执行后的变化无法确定（这条记录里没有当时的快照）：下面是本任务的当前视图；若与你记忆里的不一致，以当前视图为准。'
+  }
+  const clauses: string[] = []
+  if (delta.corrections.length > 0) {
+    clauses.push(`新增纠偏 ${String(delta.corrections.length)} 条（已列在本任务的「纠偏」里）`)
+  }
+  if (delta.notes.length > 0) {
+    clauses.push(`新增执行笔记 ${String(delta.notes.length)} 条：${delta.notes.join('；')}`)
+  }
+  if (delta.terminalChildren > 0) {
+    clauses.push(`${String(delta.terminalChildren)} 个子任务达到终态（结论在下面）`)
+  }
+  if (delta.titleOrContentChanged) {
+    clauses.push('本任务的标题或内容被改过，下面是当前版本')
+  }
+  if (clauses.length === 0) return undefined
+  return ['自你上次执行后：', ...clauses.map((clause) => `- ${clause}`)].join('\n')
+}
+
+/** How one dispatch renders the node it is about; the default is the fresh-executor reading. */
+export interface WorkerPromptOptions {
+  /** This dispatch CONTINUES the session that was interrupted: the hand-off notice says which
+   * execution this is and points at the resumed session's own history. */
+  readonly resumed?: boolean
+  /** Corrections to render on the CURRENT node. Defaults to every recorded correction, because a
+   * fresh executor has read none. A continuation wake passes
+   * `node.corrections.slice(node.correctionsDeliveredUpTo)`: a correction already delivered to that
+   * same session must not be argued to it twice. The chain's ancestor lines keep their own text —
+   * they are a different node's corrections, and none of them is repeated by this override. */
+  readonly corrections?: readonly string[]
+  /** What changed on this node since the session's own last prompt, for the delta section. Passed
+   * by a CONTINUATION only: a fresh executor has never executed this mission, so "since you last
+   * executed" would be a lie, and it reads every correction, note and child conclusion anyway. */
+  readonly delta?: ContinuationDelta
+}
+
+/**
  * Build the complete prompt for one dispatch; the mission chain carries only titles and one-line context, so its size is bounded by the depth limit, and the full `description`/`context` is included for the current node only.
  * The tail branches on the CHILDREN in the view, not on the node's status: the prompt is built after `dispatch()` has already marked the node `running`, so a status test can never see the aggregate case, and a `failed` node is never dispatched at all.
  */
-export function buildWorkerPrompt(view: DispatchView): string {
+export function buildWorkerPrompt(view: DispatchView, options: WorkerPromptOptions = {}): string {
   const { node, chain, children } = view
   const sections: string[] = []
+
+  const notice = handoffNotice(node, options.resumed === true)
+  if (notice !== undefined) sections.push(notice)
+
+  // Immediately after the notice and before the mission chain: both the notice and the delta are
+  // "read this before you read the mission" text, and the chain below is the stable context the two
+  // of them are adjusting. Nothing renders here on a fresh spawn — it never gets a `delta`.
+  if (options.delta !== undefined) {
+    const drift = deltaSection(options.delta)
+    if (drift !== undefined) sections.push(drift)
+  }
 
   if (chain.length > 0) {
     sections.push(['任务链（根任务 → 本任务）：', ...chain.map(chainLine)].join('\n'))
   }
 
-  sections.push(['本任务：', currentNodeBlock(node)].join('\n'))
+  sections.push(['本任务：', currentNodeBlock(node, options.corrections ?? node.corrections)].join('\n'))
 
   // `children` holds exactly the node's terminal children, so a non-empty view means the aggregate pass.
   if (children.length > 0) {

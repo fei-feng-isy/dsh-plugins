@@ -13,6 +13,32 @@ export interface StartWorkerInput {
   readonly claimId: string
 }
 
+/** One node the host should try to CONTINUE in the session it was interrupted in (a cold wake). */
+export interface ResumeWorkerInput {
+  readonly node: NodeRecord
+  /** The session id recorded in `lastWorkerId`: the address to deliver to, and the identity the
+   *  adoption binds if the delivery is accepted. */
+  readonly workerId: string
+}
+
+/**
+ * What a continuation attempt resolved to. Three answers, not a boolean, because "nothing to do" is
+ * not "it failed": when another delivery already owns the session, starting a fresh executor on top
+ * of it is precisely the double run this guard exists to prevent.
+ *
+ * - `resumed` — the node is bound to `workerId` and the prompt was accepted; the caller counts one
+ *   dispatch and starts nobody.
+ * - `failed` — the continuation is not going to happen: either the delivery was refused and the
+ *   host has already undone its own adoption (`reclaim(..., 'wake-failed')`, which charges no
+ *   budget), or the host declined it BEFORE adopting because the node drifted too far from what that
+ *   session last read (a material change; see `continuation`). Either way the caller takes the
+ *   ordinary fresh path with a newly reserved claim, which is the complete answer: a new executor
+ *   reads every correction and every note.
+ * - `skip` — the node must be left exactly as it is: a wake for that session is in flight, the owner
+ *   is not materialized, or the node's state moved under us. Never a reason to spawn.
+ */
+export type ResumeOutcome = 'resumed' | 'failed' | 'skip'
+
 export interface EngineHooks {
   /** Reserve a child session id without creating it, which closes the spawn/bind window: the node is bound before anything is materialized. Pair with {@link releaseClaimId}: a claim reserved for a dispatch that is then refused was never bound and must be handed back, or it stays "live" as a ghost forever. */
   reserveClaimId(): string
@@ -20,6 +46,20 @@ export interface EngineHooks {
   releaseClaimId(claimId: string): void
   /** Materialize the worker for a dispatched node and deliver its prompt; the prompt is built HERE from `tree.view(node.id)`, because a sibling result may have landed since the dispatch decision. */
   startWorker(input: StartWorkerInput): Promise<void>
+  /**
+   * Try to CONTINUE a node in the session it was interrupted in, instead of starting a fresh one
+   * (a cold wake). The host owns this because only it can reach `ctx.subagents`, and the delivery
+   * must be sent by the child's live direct parent (`authorizeLineage`).
+   *
+   * Called BEFORE a claim is reserved, so a continuation that lands consumes no claim id and a
+   * fallback reserves one exactly as any other dispatch does. See {@link ResumeOutcome} for the
+   * contract, including the rule that `skip` must never be answered with a spawn.
+   *
+   * Priority when several addresses apply — documented because it is a decision, not an accident:
+   * a parked session wins (it is an ALIVE continuation waiting to be woken), then this cold
+   * continuation, then a fresh spawn (`nextDispatchable` already excludes parked nodes).
+   */
+  resumeWorker?(input: ResumeWorkerInput): Promise<ResumeOutcome>
   /** Stop a worker believed to be stuck. */
   interruptWorker(sessionId: string): Promise<void>
   /** Deliver a one-line signal to the tree owner; it carries no content — the guidance layer does. */
@@ -196,9 +236,33 @@ export class MissionEngine {
     while (this.hasCapacity()) {
       const candidate = this.tree.nextDispatchable(reserved)
       if (candidate === undefined) break
+      // Reserved before anything can start for it: a `skip`ped continuation must not be re-selected
+      // in this same pass either, or the pass would spin on the same node.
+      reserved.add(candidate.id)
+
+      // CONTINUATION FIRST (a cold wake). A node reclaimed by an ordinary sweep has no handle, so
+      // this branch is reached only for a binding an interruption demoted (`reconcileOnOpen`), which
+      // is the case the previous generation could only answer with a fresh session.
+      if (candidate.lastWorkerId !== null && this.hooks.resumeWorker !== undefined) {
+        const outcome = await this.hooks.resumeWorker({ node: candidate, workerId: candidate.lastWorkerId })
+        if (outcome === 'resumed') {
+          // Bound and delivered: one dispatch, and deliberately no `startWorker`.
+          dispatched += 1
+          continue
+        }
+        if (outcome === 'skip') {
+          // Nothing was bound and nothing must be spawned: another delivery owns the session, or the
+          // state moved. Leave it for the next pass.
+          this.hooks.trace?.(`continuation of ${candidate.id} deferred`)
+          continue
+        }
+        // 'failed': the host has already undone the adoption, so the ordinary fresh path below is
+        // the complete answer — with no budget charged and no cooldown, because "the session is gone
+        // or refuses to resume" is neither a mission failure nor an infrastructure outage.
+      }
+
       const claimId = this.hooks.reserveClaimId()
       const decision = await this.tree.dispatch(candidate.id, claimId)
-      reserved.add(candidate.id)
       if (!decision.ok) {
         // Another pass won the race, or the node hit its attempt ceiling. The reservation never
         // reached a node, so it must go back: nothing will ever start (or settle) under that id.

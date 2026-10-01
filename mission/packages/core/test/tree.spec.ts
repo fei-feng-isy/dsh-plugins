@@ -6,7 +6,7 @@
  * themselves — no harness, no engine, no model.
  */
 import { describe, expect, it } from 'vitest'
-import { CAPACITY, MissionTree, type TreeState, type TreeStore } from '../src/index.js'
+import { CAPACITY, MissionTree, isMaterialChange, nodeFingerprint, type NodeRecord, type TreeState, type TreeStore } from '../src/index.js'
 
 /** An in-memory store that records exactly what was persisted. */
 function memoryStore(): TreeStore & { documents: Map<string, TreeState> } {
@@ -1475,5 +1475,348 @@ describe('analysis and the decompose gate', () => {
     expect(again.ok).toBe(true)
     expect(tree.node(id)?.analysisNotes).toEqual(['第一次为什么拆', '这次为什么还缺'])
     expect(tree.node(id)?.analysisAttempt).toBe(2)
+  })
+})
+
+/**
+ * The cold wake: an interruption that only a restart can cause must not throw the worker session
+ * away. `reconcileOnOpen` demotes the `running` node, but parks its session id in `lastWorkerId`
+ * first; the next dispatch tries to continue that session and falls back to a fresh one on refusal,
+ * charging nothing for the attempt.
+ */
+function reopen(
+  store: TreeStore,
+  options: { live?: readonly string[] } = {},
+): MissionTree {
+  const live = new Set(options.live ?? ['owner'])
+  return new MissionTree(store, {
+    isAgentLive: (sessionId) => live.has(sessionId),
+    probeOwner: () => Promise.resolve({ kind: 'exists' }),
+    spill: () => Promise.resolve(null),
+    now: () => 1,
+    newId: () => 'fresh',
+  })
+}
+
+/** The persisted document with a field ABSENT, as an earlier release wrote it. */
+function withoutField(state: TreeState, nodeId: string, field: string): TreeState {
+  const nodes = new Map(state.nodes)
+  const stripped: Record<string, unknown> = { ...nodes.get(nodeId) }
+  delete stripped[field]
+  nodes.set(nodeId, stripped as unknown as NodeRecord)
+  return { tree: state.tree, nodes }
+}
+
+/** The persisted document with one field REPLACED, however malformed a fixture needs it. */
+function withField(state: TreeState, nodeId: string, field: string, value: unknown): TreeState {
+  const nodes = new Map(state.nodes)
+  nodes.set(nodeId, { ...nodes.get(nodeId), [field]: value } as unknown as NodeRecord)
+  return { tree: state.tree, nodes }
+}
+
+describe('the dispatch baseline', () => {
+  it('stamps the live dispatch at the prompt, and refuses anybody else', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    // A node nothing has been dispatched for has nothing to subtract later.
+    expect(tree.node(id)?.dispatchBaseline).toBeNull()
+    await tree.dispatch(id, 'mission-1')
+
+    // The baseline belongs to the dispatch that is BOUND: a stamp from anyone else (a re-dispatched
+    // node still carrying an old holder, a lost race with a sweep) must not land.
+    expect(await tree.recordDispatchBaseline(id, 'mission-other')).toBe(false)
+    expect(tree.node(id)?.dispatchBaseline).toBeNull()
+
+    expect(await tree.recordDispatchBaseline(id, 'mission-1')).toBe(true)
+    const baseline = tree.node(id)?.dispatchBaseline
+    expect(baseline?.attempts).toBe(1)
+    expect(baseline?.corrections).toBe(0)
+    expect(baseline?.notes).toBe(0)
+    expect(baseline?.terminalChildren).toBe(0)
+    expect(baseline?.fingerprint).toBe(nodeFingerprint('Root mission', 'Do the whole thing'))
+
+    // Once the node is no longer running under that holder, the prompt is history: no more stamps.
+    await tree.reclaim(id, 'vanished')
+    expect(await tree.recordDispatchBaseline(id, 'mission-1')).toBe(false)
+  })
+
+  it('reads a missing or truncated baseline as UNKNOWN, never as "nothing changed"', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-legacy')
+    await tree.recordDispatchBaseline(id, 'mission-legacy')
+    const state = store.documents.get(id)
+    if (state === undefined) throw new Error('nothing was persisted')
+
+    // Absent: the field did not exist yet.
+    store.documents.set(id, withoutField(state, id, 'dispatchBaseline'))
+    let reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.dispatchBaseline).toBeNull()
+    expect(reopened.continuationDelta(id)?.baselineKnown).toBe(false)
+
+    // Present but truncated: a half-read snapshot is worse than none, so it is discarded too.
+    store.documents.set(id, withField(state, id, 'dispatchBaseline', { corrections: 1 }))
+    reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.dispatchBaseline).toBeNull()
+    expect(reopened.continuationDelta(id)?.baselineKnown).toBe(false)
+  })
+
+  it('spends a handle without dispatching, charging nothing', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-gone')
+    const reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.lastWorkerId).toBe('mission-gone')
+
+    // A handle that is not the one on the node is not this caller's to spend.
+    expect((await reopened.abandonContinuation(id, 'mission-other')).ok).toBe(false)
+    expect(reopened.node(id)?.lastWorkerId).toBe('mission-gone')
+
+    const spent = await reopened.abandonContinuation(id, 'mission-gone')
+    expect(spent.ok).toBe(true)
+    const node = reopened.node(id)
+    expect(node?.lastWorkerId).toBeNull()
+    // Exactly where it was: the handle is spent, no dispatch happened, no budget moved. The fresh
+    // path picks the node up from here.
+    expect(node?.status).toBe('interrupted')
+    expect(node?.attempts).toBe(1)
+    expect(node?.failures).toBe(0)
+    expect(node?.spawnFailures).toBe(0)
+    expect((await reopened.adoptContinuation(id, 'mission-gone')).ok).toBe(false)
+  })
+
+  it('counts terminal children as drift but never as a reason to refuse a parked wake', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-parked')
+    await tree.recordDispatchBaseline(id, 'mission-parked')
+    const split = await noteAndSplit(tree, id, 'mission-parked', [
+      { title: 'child', description: 'd', context: [] },
+    ])
+    const child = split.ok ? split.value.created[0] ?? '' : ''
+    await tree.dispatch(child, 'mission-child')
+    await tree.submitResult(child, 'mission-child', 'child conclusion')
+
+    // The parent is parked-ready: every child terminal, and the session that decomposed it waiting.
+    expect(tree.parkedReadyNodes().map((node) => node.id)).toEqual([id])
+    const parked = tree.continuationDelta(id)
+    expect(parked?.baselineKnown).toBe(true)
+    expect(parked?.terminalChildren).toBe(1)
+    expect(parked?.notes).toEqual(['这次为什么拆：缺一个前置事实'])
+    // The engine's own trigger for the wake must not read as drift — otherwise no parked session
+    // would ever be woken, and `session-continuation.spec.ts` would be testing a dead path.
+    expect(parked).toBeDefined()
+    expect(isMaterialChange(parked!)).toBe(false)
+  })
+
+  it('treats an unread correction as drift, and one the prompt already carried as nothing', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-1')
+    await tree.recordDispatchBaseline(id, 'mission-1')
+    await tree.correct(id, 'owner', '改成先做 C')
+
+    const arrived = tree.continuationDelta(id)
+    expect(arrived?.corrections).toEqual(['改成先做 C'])
+    expect(isMaterialChange(arrived!)).toBe(true)
+
+    // Delivered live to the holder: that session has read it, so continuing it is honest again. This
+    // is the second half of the correction arithmetic — the watermark.
+    await tree.markCorrectionsDelivered(id, 1)
+    const read = tree.continuationDelta(id)
+    expect(read?.corrections).toEqual([])
+    expect(isMaterialChange(read!)).toBe(false)
+
+    // And a correction that existed BEFORE the prompt is not drift, even though a fresh spawn never
+    // advances the watermark: the prompt rendered it, which is what the baseline's count records.
+    const second = makeTree()
+    const other = await rootOf(second.tree)
+    await second.tree.correct(other, 'owner', '先做 A')
+    await second.tree.dispatch(other, 'mission-2')
+    await second.tree.recordDispatchBaseline(other, 'mission-2')
+    const carried = second.tree.continuationDelta(other)
+    expect(second.tree.node(other)?.correctionsDeliveredUpTo).toBe(0)
+    expect(carried?.corrections).toEqual([])
+    expect(isMaterialChange(carried!)).toBe(false)
+  })
+
+  it('reports a node whose latest note belongs to an earlier dispatch', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-1')
+    await tree.recordDispatchBaseline(id, 'mission-1')
+    const split = await noteAndSplit(tree, id, 'mission-1', [
+      { title: 'child', description: 'd', context: [] },
+    ])
+    const child = split.ok ? split.value.created[0] ?? '' : ''
+    await tree.dispatch(child, 'mission-child')
+    await tree.submitResult(child, 'mission-child', 'child conclusion')
+
+    // Same dispatch wrote the note: the node's judgement is this session's own.
+    const own = tree.continuationDelta(id)
+    expect(own?.analysisFromAnotherDispatch).toBe(false)
+
+    // The parked session is adopted for its convergence round (attempts 2) and its new prompt is
+    // stamped. The note on the node still belongs to dispatch 1, so the node's judgement channel has
+    // moved without the session that is now bound — the conservative "somebody else is writing here"
+    // reading, which is exactly what `analysisAttempt` exists to answer.
+    await tree.adoptParked(id, 'mission-1')
+    await tree.recordDispatchBaseline(id, 'mission-1')
+    const foreign = tree.continuationDelta(id)
+    expect(foreign?.analysisFromAnotherDispatch).toBe(true)
+    expect(isMaterialChange(foreign!)).toBe(true)
+  })
+})
+
+describe('the cold-wake handle', () => {
+  it('parks the lost session on open, so the next dispatch can try to continue it', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-gone')
+    // The handle is NOT written by an ordinary dispatch: a same-process reclaim must keep its
+    // today's behaviour of simply re-dispatching.
+    expect(tree.node(id)?.lastWorkerId).toBeNull()
+
+    const reopened = reopen(store)
+    await reopened.open()
+    const node = reopened.node(id)
+    expect(node?.status).toBe('interrupted')
+    expect(node?.claimedBy).toBeNull()
+    // The binding was the only place that session id existed, and it is now recoverable.
+    expect(node?.lastWorkerId).toBe('mission-gone')
+    // Still an ordinary dispatchable node: the continuation decision belongs to the engine.
+    expect(reopened.nextDispatchable()?.id).toBe(id)
+  })
+
+  it('adopts the recorded session, counts one attempt and spends the handle', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-gone')
+    const reopened = reopen(store)
+    await reopened.open()
+
+    const adopted = await reopened.adoptContinuation(id, 'mission-gone')
+    expect(adopted.ok).toBe(true)
+    const node = reopened.node(id)
+    expect(node?.status).toBe('running')
+    expect(node?.claimedBy).toBe('mission-gone')
+    expect(node?.attempts).toBe(2)
+    // Spent: a resume the runtime refused once must not be retried on every later dispatch.
+    expect(node?.lastWorkerId).toBeNull()
+    // And the same handle cannot be adopted twice.
+    expect((await reopened.adoptContinuation(id, 'mission-gone')).ok).toBe(false)
+  })
+
+  it('refuses a handle that moved, with no effect at all', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-gone')
+    const reopened = reopen(store)
+    await reopened.open()
+
+    const refused = await reopened.adoptContinuation(id, 'mission-other')
+    expect(refused.ok).toBe(false)
+    expect(refused.ok === false && refused.code).toBe('not-dispatchable')
+    expect(reopened.node(id)?.status).toBe('interrupted')
+    expect(reopened.node(id)?.lastWorkerId).toBe('mission-gone')
+    expect(reopened.node(id)?.attempts).toBe(1)
+  })
+
+  it('refuses to continue a node a parked session is supposed to wake', async () => {
+    // The two address kinds must not overwrite each other: a parked session is an ALIVE
+    // continuation and owns the node's next dispatch.
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-1')
+    await noteAndSplit(tree, id, 'mission-1', [{ title: 'child', description: 'd', context: [] }])
+    expect(tree.node(id)?.parkedWorker).toBe('mission-1')
+
+    const refused = await tree.adoptContinuation(id, 'mission-1')
+    expect(refused.ok).toBe(false)
+    expect(tree.node(id)?.parkedWorker).toBe('mission-1')
+  })
+
+  it('charges no budget when the continuation delivery is refused', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-gone')
+    const reopened = reopen(store)
+    await reopened.open()
+    await reopened.adoptContinuation(id, 'mission-gone')
+
+    const reverted = await reopened.reclaim(id, 'wake-failed')
+    expect(reverted.ok).toBe(true)
+    const node = reopened.node(id)
+    expect(node?.status).toBe('ready')
+    expect(node?.claimedBy).toBeNull()
+    // `wake-failed` is neither a mission failure nor an infrastructure one; `attempts` is a
+    // generation marker and never rolls back.
+    expect(node?.failures).toBe(0)
+    expect(node?.spawnFailures).toBe(0)
+    expect(node?.attempts).toBe(2)
+  })
+
+  it('loads a record written before the continuation fields existed', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-legacy')
+    const state = store.documents.get(id)
+    if (state === undefined) throw new Error('nothing was persisted')
+    store.documents.set(id, withoutField(withoutField(state, id, 'lastWorkerId'), id, 'correctionsDeliveredUpTo'))
+
+    const reopened = reopen(store)
+    await reopened.open()
+    const node = reopened.node(id)
+    // The handle is recovered from the binding the old record DOES have...
+    expect(node?.lastWorkerId).toBe('mission-legacy')
+    // ...and a missing watermark reads as "nothing delivered", so a wake still carries everything.
+    expect(node?.correctionsDeliveredUpTo).toBe(0)
+  })
+
+  it('reads a never-dispatched legacy record as "no handle, nothing delivered"', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    const state = store.documents.get(id)
+    if (state === undefined) throw new Error('nothing was persisted')
+    store.documents.set(id, withoutField(withoutField(state, id, 'lastWorkerId'), id, 'correctionsDeliveredUpTo'))
+
+    const reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.lastWorkerId).toBeNull()
+    expect(reopened.node(id)?.correctionsDeliveredUpTo).toBe(0)
+  })
+})
+
+describe('the correction delivery watermark', () => {
+  it('is monotone and clamped to the corrections actually recorded', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.correct(id, 'owner', 'A')
+    await tree.correct(id, 'owner', 'B')
+    expect(tree.node(id)?.correctionsDeliveredUpTo).toBe(0)
+
+    await tree.markCorrectionsDelivered(id, 1)
+    expect(tree.node(id)?.correctionsDeliveredUpTo).toBe(1)
+    // A raced, older report cannot pull the mark back...
+    await tree.markCorrectionsDelivered(id, 0)
+    expect(tree.node(id)?.correctionsDeliveredUpTo).toBe(1)
+    // ...and a report that outran a concurrent append cannot skip a correction nobody read.
+    await tree.markCorrectionsDelivered(id, 99)
+    expect(tree.node(id)?.correctionsDeliveredUpTo).toBe(2)
+  })
+
+  it('survives a restart, which is the whole reason it is durable', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.correct(id, 'owner', 'A')
+    await tree.correct(id, 'owner', 'B')
+    await tree.markCorrectionsDelivered(id, 1)
+
+    const reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.correctionsDeliveredUpTo).toBe(1)
   })
 })

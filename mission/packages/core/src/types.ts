@@ -60,6 +60,38 @@ export interface TreeRecord {
   readonly reportedAt: number | null
 }
 
+/**
+ * What one dispatch's prompt showed its session, frozen so a LATER wake can subtract it: "what has
+ * changed since this session last read this mission?" It is a snapshot of the node's ACCUMULATING
+ * channels, not of its execution state — the execution state is the binding's business.
+ *
+ * Every component exists for one consumer; none is decoration:
+ *
+ * - `corrections` — the second half of "corrections this session has NOT seen" (the delivery
+ *   watermark is the first). Both are needed: a FRESH spawn renders every correction but does not
+ *   advance the watermark, so a watermark-only reading would call those corrections unseen forever
+ *   and route every corrected mission to a fresh executor instead of continuing it.
+ * - `notes` — how many analysis entries existed when the prompt was built; entries beyond it are the
+ *   ones appended while this session held the node, which is what the delta reports.
+ * - `terminalChildren` — for the delta's wording only ("N 子任务达到终态"). Deliberately NOT part of
+ *   the material-change judgement, because for a PARKED session "all children terminal" is the
+ *   trigger of the wake itself (see `isMaterialChange`).
+ * - `fingerprint` — title+description at dispatch. A changed headline means this session would be
+ *   resuming a mission it was never handed.
+ * - `attempts` — the dispatch generation this prompt was built under, compared against
+ *   `analysisAttempt` to tell whether the node's latest note belongs to THIS dispatch.
+ *
+ * Missing on a record written before the field existed: that reads as "no baseline", which a wake
+ * must treat as UNKNOWN rather than as "nothing changed" (see `computeContinuationDelta`).
+ */
+export interface DispatchBaseline {
+  readonly corrections: number
+  readonly notes: number
+  readonly terminalChildren: number
+  readonly fingerprint: string
+  readonly attempts: number
+}
+
 export interface NodeRecord {
   readonly id: string
   readonly rootId: string
@@ -75,6 +107,18 @@ export interface NodeRecord {
    * field is persisted: renaming it would make every earlier correction load as absent. Separate
    * from `context` on purpose — different author and lifetime. */
   readonly corrections: readonly string[]
+  /** Delivery watermark for {@link corrections}: how many LEADING entries are confirmed delivered
+   * to the executor that was holding this node. What it decides is the WAKE message — a cold resume
+   * renders only `corrections.slice(correctionsDeliveredUpTo)`, because the corrections already
+   * handed to that very session must not be argued to it a second time. A FRESH executor ignores
+   * the watermark entirely and sees every correction: it has read none of them.
+   *
+   * `0` means "nothing is confirmed delivered", which is also what a record written before this
+   * field existed loads as — the conservative reading, since a silently skipped correction is a
+   * direction the owner gave that nobody ever reads. Monotone: a raced, older report can never pull
+   * it back. Kept as a NUMBER beside the text array rather than turning `corrections` into objects,
+   * because changing that array's shape would make every historical correction load as absent. */
+  readonly correctionsDeliveredUpTo: number
   /** What this mission's executors recorded with `note_mission`, oldest first. The durable channel
    * across sessions: the round that judges the mission is a fresh session reading only this node's
    * prompt, and notes are appended, never replaced. */
@@ -104,6 +148,34 @@ export interface NodeRecord {
    * (adopted, or replaced by a fresh session). `nextDispatchable` excludes a parked node, because
    * `decompose_mission` is followed by a synchronous `pump()` that would otherwise pre-empt the wake. */
   readonly parkedWorker: string | null
+  /** The session id of the worker most recently bound to this node, kept when the binding is
+   * dropped by an INTERRUPTION rather than by a clean hand-off — i.e. `reconcileOnOpen` demoting a
+   * `running` node whose worker is not materialized in this process (a restart or a crash), which
+   * is exactly when `claimedBy` alone loses the address for good. The next dispatch of this node
+   * first tries to CONTINUE that session (cold wake) instead of starting a fresh executor; a
+   * delivery the runtime refuses falls back to a brand-new session with no budget charged.
+   *
+   * Deliberately NOT the same thing as `parkedWorker`, and neither may overwrite the other:
+   * a parked worker is an ALIVE, actively waiting continuation (it decomposed and expects to be
+   * woken in the same run); `lastWorkerId` is a handle to a session that may no longer exist, and
+   * the cold resume that reaches it is allowed to fail. Only `reconcileOnOpen` writes it, and only
+   * `adoptContinuation` consumes it — a same-process reclaim does not, so ordinary re-dispatch
+   * behaviour is untouched. `null` for a node that was never dispatched or whose handle was spent,
+   * which is also the value a record written before this field existed loads as. */
+  readonly lastWorkerId: string | null
+  /** What the prompt of the LAST dispatch showed its session, stamped by the host the moment that
+   * prompt was ACCEPTED (not when the node was bound: a dispatch whose prompt was never built or
+   * never delivered must not leave a baseline claiming the session read something). The cold wake
+   * subtracts it to get the delta it renders, and the same delta decides whether continuing is honest
+   * at all; a FRESH spawn ignores it entirely, because a new executor has read nothing.
+   *
+   * Deliberately NOT the same thing as `analysisAttempt` (that is `note_mission`'s generation gate)
+   * and NOT derived from `correctionsDeliveredUpTo` (that is one half of the correction story, and
+   * the weaker half — see {@link DispatchBaseline}). `null` for a node never dispatched by a host
+   * that stamps baselines, which is also the value a record written before this field existed loads
+   * as; that direction is the safe one, because "unknown" renders an honest caveat and never a
+   * fabricated "nothing changed". */
+  readonly dispatchBaseline: DispatchBaseline | null
   /** When this node's worker was last seen doing something. Bumped by durable activity in the
    * worker's own session, which keeps a long but ACTIVE run safe from the stale check (it compares
    * its window against this, not `claimedAt`); `0` means never observed and falls back to `claimedAt`. */

@@ -7,6 +7,11 @@
  */
 import { statusLabel } from './prompt.js'
 import {
+  computeContinuationDelta,
+  nodeFingerprint,
+  type ContinuationDelta,
+} from './continuation.js'
+import {
   CAPACITY,
   DISPATCHABLE,
   TERMINAL,
@@ -14,6 +19,7 @@ import {
   refuse,
   type ChildSpec,
   type DecomposeOutcome,
+  type DispatchBaseline,
   type DispatchView,
   type MutationResult,
   type NodeRecord,
@@ -163,6 +169,66 @@ function appendNotes(notes: readonly string[], added: readonly string[]): readon
   return [...notes, ...added.filter((note) => !notes.includes(note))]
 }
 
+/** A count this code could have written: a non-negative integer. Anything else is not believed. */
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
+/**
+ * A persisted baseline, validated back into shape. A record written before the field existed has
+ * `undefined` there; a hand-edited or partially-written one could have an object missing a
+ * component. Both read as `null` (= "no baseline", i.e. UNKNOWN) rather than as a snapshot with
+ * invented numbers: a fabricated baseline is worse than no baseline, because the delta would then
+ * claim to know what the session saw when nobody does.
+ */
+function asBaseline(value: unknown): DispatchBaseline | null {
+  if (value === null || typeof value !== 'object') return null
+  const candidate = value as Partial<DispatchBaseline>
+  if (
+    !isCount(candidate.corrections)
+    || !isCount(candidate.notes)
+    || !isCount(candidate.terminalChildren)
+    || typeof candidate.fingerprint !== 'string'
+    || !isCount(candidate.attempts)
+  ) {
+    return null
+  }
+  // The SAME object when it is already in shape, so `normalizeLoaded`'s identity check still holds
+  // for a current document (opening one must not allocate a copy of every node).
+  return candidate as DispatchBaseline
+}
+
+/**
+ * Bring a record written before a field existed up to the current shape at the ONE boundary where
+ * durable records enter memory. `corrections`'s comment is the reason fields are ADDED rather than
+ * renamed; this is the other half of that contract — a missing field must read as its documented
+ * default, never as `undefined`. A node whose `lastWorkerId` is `undefined` would satisfy
+ * `!== null` and be treated as "there is a resumable handle"; a missing watermark must read as `0`
+ * (= nothing delivered yet), the conservative direction, because a correction silently skipped is a
+ * direction the owner gave that nobody ever reads; a missing `dispatchBaseline` must read as `null`
+ * (= UNKNOWN drift), never as "nothing changed".
+ *
+ * Returns the SAME object when nothing changed, so opening a current document does not churn it.
+ */
+function normalizeLoaded(node: NodeRecord): NodeRecord {
+  const legacy = node as NodeRecord & {
+    lastWorkerId?: string | null
+    correctionsDeliveredUpTo?: number
+    dispatchBaseline?: unknown
+  }
+  const lastWorkerId = legacy.lastWorkerId ?? null
+  const correctionsDeliveredUpTo = legacy.correctionsDeliveredUpTo ?? 0
+  const dispatchBaseline = asBaseline(legacy.dispatchBaseline)
+  if (
+    lastWorkerId === node.lastWorkerId
+    && correctionsDeliveredUpTo === node.correctionsDeliveredUpTo
+    && dispatchBaseline === node.dispatchBaseline
+  ) {
+    return node
+  }
+  return { ...node, lastWorkerId, correctionsDeliveredUpTo, dispatchBaseline }
+}
+
 export class MissionTree {
   private readonly states = new Map<string, TreeState>()
   private chain: Promise<unknown> = Promise.resolve()
@@ -200,7 +266,7 @@ export class MissionTree {
     for (const state of loaded) {
       const reconciled = new Map<string, NodeRecord>()
       for (const [id, node] of state.nodes) {
-        reconciled.set(id, this.reconcileOnOpen(node))
+        reconciled.set(id, this.reconcileOnOpen(normalizeLoaded(node)))
       }
       this.states.set(state.tree.rootId, { tree: state.tree, nodes: reconciled })
     }
@@ -212,13 +278,36 @@ export class MissionTree {
     }
   }
 
+  /**
+   * Three outcomes on open, decided by what the durable record says and what this process can see:
+   *
+   * 1. SURVIVOR — `running` and the worker IS materialized (hot reload): keep the binding, only
+   *    reset `progressAt`, or a long run looks silent from the moment we open.
+   * 2. CONTINUABLE — `running` but the worker is not materialized in THIS process (a restart or a
+   *    crash): demote to `interrupted`, but FIRST park `claimedBy` in `lastWorkerId`. The binding is
+   *    the only place that session id was recorded, so dropping it here is what made every restart
+   *    unable to do anything but start over.
+   * 3. NO HANDLE — not `running`: nothing to do, and `lastWorkerId` (if any) is already spent.
+   *
+   * The survivor branch is deliberately unchanged: a live binding is authoritative, and a stale
+   * handle left beside it is only ever consulted by `adoptContinuation`, which requires the node to
+   * be dispatchable — a `running` node never is.
+   */
   private reconcileOnOpen(node: NodeRecord): NodeRecord {
     if (node.status !== 'running') return node
     if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
       // Hot-reload survivor: reset progressAt, or a long run looks silent from the moment we open.
       return { ...node, progressAt: this.deps.now() }
     }
-    return { ...node, status: 'interrupted', claimedBy: null, updatedAt: this.deps.now() }
+    return {
+      ...node,
+      // Only when there is something to remember: a `running` record with no holder keeps any
+      // earlier handle rather than erasing it.
+      lastWorkerId: node.claimedBy ?? node.lastWorkerId,
+      status: 'interrupted',
+      claimedBy: null,
+      updatedAt: this.deps.now(),
+    }
   }
 
   /** Trees whose owner session did not resolve to `exists`, each with the probe that says why.
@@ -329,6 +418,20 @@ export class MissionTree {
       .filter((child): child is NodeRecord => child !== undefined && TERMINAL.has(child.status))
   }
 
+  /** What changed on this node since the prompt its bound session was handed (see
+   * `@avantf/mission-core/continuation`). Read-only and synchronous, because the wake path consults
+   * it before it adopts anything: a refusal that has already consumed an address is a refusal that
+   * cannot be undone.
+   *
+   * `undefined` when the node does not exist; a node that merely has no baseline still answers, with
+   * `baselineKnown: false` — "unknown" is a fact the caller renders, not an error. */
+  continuationDelta(nodeId: string): ContinuationDelta | undefined {
+    const found = this.locate(nodeId)
+    if (found === undefined) return undefined
+    const { node } = found
+    return computeContinuationDelta(node, this.terminalChildren(node).length)
+  }
+
   /** The next node to dispatch: `ready`/`interrupted`, oldest first across trees, excluding ones
    * whose binding still resolves to a live agent. A vanished worker's node is reclaimed by the
    * engine's sweep before it becomes a candidate again. */
@@ -414,6 +517,139 @@ export class MissionTree {
         chain: this.chainOf(updated),
         children: updated.children.length > 0 ? this.terminalChildren(updated) : [],
       })
+    })
+  }
+
+  /**
+   * Claim a node FOR the lost session recorded in `lastWorkerId`, so its next execution CONTINUES
+   * that session (a cold wake) rather than starting a fresh executor. The continuation counterpart
+   * of {@link adoptParked}, and the same shape: no new claim id is reserved — the identity IS the
+   * recorded session — and the handle is consumed in the same locked step.
+   *
+   * Why the ceilings ARE consulted here, unlike for a parked adoption: a continuation IS a
+   * dispatch. It hands work to a model and advances `attempts`, so a node whose failure budget is
+   * spent must fail here exactly as `dispatch` would fail it, instead of being resurrected.
+   *
+   * The handle is CONSUMED (`lastWorkerId = null`) rather than kept: this dispatch either continues
+   * that session or — through `reclaim(..., 'wake-failed')` — falls back to a fresh one, and neither
+   * outcome may try the same address again. A runtime that refused the resume once will refuse it
+   * again; the fallback is the complete answer (`note_mission` is the cross-session hand-off).
+   */
+  async adoptContinuation(nodeId: string, workerId: string): Promise<MutationResult<DispatchView>> {
+    return this.withLock(async () => {
+      const found = this.locate(nodeId)
+      if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
+      const { state, node } = found
+      if (node.parkedWorker !== null) {
+        // A parked session is an ALIVE continuation; it owns this node's next dispatch (and
+        // `nextDispatchable` excludes the node for exactly that reason). Refusing keeps the two
+        // address kinds from overwriting each other.
+        return refuse('not-dispatchable', `任务 ${nodeId} 停在 ${node.parkedWorker}，走唤醒路径`)
+      }
+      if (node.lastWorkerId !== workerId) {
+        return refuse(
+          'not-dispatchable',
+          `任务 ${nodeId} 的可接续会话已从 ${workerId} 变为 ${String(node.lastWorkerId)}`,
+        )
+      }
+      if (TERMINAL.has(node.status)) {
+        return refuse('terminal', `任务 ${nodeId} 处于 ${statusLabel(node.status)}，不能被接续`)
+      }
+      if (!DISPATCHABLE.has(node.status)) {
+        return refuse('not-dispatchable', `任务 ${nodeId} 处于 ${statusLabel(node.status)}，不可接续`)
+      }
+      if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
+        return refuse('not-dispatchable', `任务 ${nodeId} 仍被一个在运行的执行者持有`)
+      }
+      // Same budgets as `dispatch`, and the same refusal shape: a continuation that cannot be
+      // attempted must not silently skip the ceiling.
+      if (node.failures >= CAPACITY.maxAttempts) {
+        return this.failExhausted(state, node, `已用完 ${CAPACITY.maxAttempts} 次执行（反复失败）`)
+      }
+      if (node.spawnFailures >= CAPACITY.maxAttempts) {
+        return this.failExhausted(state, node, `连续 ${CAPACITY.maxAttempts} 次无法启动执行者`)
+      }
+      const updated = this.replace(state, node, {
+        status: 'running',
+        claimedBy: workerId,
+        claimedAt: this.deps.now(),
+        attempts: node.attempts + 1,
+        // Fresh silence window: the previous attempt's activity says nothing about this one.
+        progressAt: this.deps.now(),
+        lastWorkerId: null,
+      })
+      await this.flush(state.tree.rootId)
+      return accept({
+        node: updated,
+        chain: this.chainOf(updated),
+        children: updated.children.length > 0 ? this.terminalChildren(updated) : [],
+      })
+    })
+  }
+
+  /**
+   * Stamp the node with what the prompt just handed to the session showed it: the snapshot a later
+   * cold wake subtracts. The HOST owns the moment (it calls this once the delivery resolved, at each
+   * of its three prompt sites), because only the host knows a prompt was actually read — a dispatch
+   * that never produced, or never delivered, a prompt must leave no baseline claiming otherwise.
+   *
+   * GUARDED on the live binding: between the delivery and this call, a sweep can reclaim the node
+   * (or another pass can re-dispatch it), and a baseline that says "this session saw this" must
+   * belong to the dispatch that is actually bound. A stamp that loses that race is refused
+   * silently: the wake that later reads a stale-or-missing baseline takes the conservative path,
+   * while a wrongly stamped one would under-report the drift to a live session.
+   *
+   * Tolerant rather than a mutation result, like {@link markCorrectionsDelivered}: it is bookkeeping
+   * about a prompt that already exists, and the caller can do nothing useful with a refusal. The
+   * return value exists so the caller (and tests) can tell a stamp from a lost race.
+   */
+  async recordDispatchBaseline(nodeId: string, holder: string): Promise<boolean> {
+    return this.withLock(async () => {
+      const found = this.locate(nodeId)
+      if (found === undefined) return false
+      const { state, node } = found
+      if (node.status !== 'running' || node.claimedBy !== holder) return false
+      this.replace(state, node, {
+        dispatchBaseline: {
+          corrections: node.corrections.length,
+          notes: node.analysisNotes.length,
+          terminalChildren: this.terminalChildren(node).length,
+          fingerprint: nodeFingerprint(node.title, node.description),
+          // The generation this prompt is being built under, i.e. the value `recordAnalysis` stamps
+          // onto a note written by this very dispatch.
+          attempts: node.attempts,
+        },
+      })
+      await this.flush(state.tree.rootId)
+      return true
+    })
+  }
+
+  /**
+   * Spend a continuation handle WITHOUT using it, so the node's next dispatch starts fresh. Used
+   * when the drift since that session's prompt is material (`isMaterialChange`): the address is not
+   * worth spending, and leaving it would make every later pass re-decide the same thing.
+   *
+   * No status change, no budget, no cooldown — the caller's ordinary `dispatch` follows in the same
+   * engine pass. The baseline is left alone: the fresh dispatch stamps its own, which is the whole
+   * point of replacing the session.
+   */
+  async abandonContinuation(nodeId: string, workerId: string): Promise<MutationResult<NodeRecord>> {
+    return this.withLock(async () => {
+      const found = this.locate(nodeId)
+      if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
+      const { state, node } = found
+      if (node.lastWorkerId !== workerId) {
+        // The handle moved, or somebody else already spent it: nothing here is ours to clear, and
+        // the caller's fallback is still correct because the node is a candidate either way.
+        return refuse(
+          'not-dispatchable',
+          `任务 ${nodeId} 的可接续会话已从 ${workerId} 变为 ${String(node.lastWorkerId)}`,
+        )
+      }
+      const updated = this.replace(state, node, { lastWorkerId: null })
+      await this.flush(state.tree.rootId)
+      return accept(updated)
     })
   }
 
@@ -533,6 +769,7 @@ export class MissionTree {
       description: input.description,
       context: [...input.context],
       corrections: [],
+      correctionsDeliveredUpTo: 0,
       analysisNotes: [],
       analysisAttempt: 0,
       status: 'ready',
@@ -544,6 +781,9 @@ export class MissionTree {
       failures: 0,
       spawnFailures: 0,
       parkedWorker: null,
+      lastWorkerId: null,
+      // No prompt has been built for this node yet, so there is nothing to subtract later.
+      dispatchBaseline: null,
       progressAt: 0,
       stalls: 0,
       stalledNotifiedAt: null,
@@ -970,6 +1210,29 @@ export class MissionTree {
       const updated = this.replace(state, node, { corrections: [...node.corrections, text] })
       await this.flush(node.rootId)
       return accept(updated)
+    })
+  }
+
+  /**
+   * Advance the durable delivery watermark of {@link NodeRecord.correctionsDeliveredUpTo}: the
+   * first `upTo` corrections have been confirmed READ by the session that holds this node (either
+   * a live steer, or a cold-wake prompt that carried them). What it buys is the restart case — a
+   * mark kept only in memory is empty exactly when the wake that needs it happens.
+   *
+   * Deliberately tolerant rather than a mutation result: this is bookkeeping ABOUT a delivery that
+   * already happened, so it is monotone (a raced, older report can never pull the mark back) and
+   * clamped to the array's own length (a report that outran a concurrent append cannot make a later
+   * wake skip a correction nobody read). A no-op returns without writing.
+   */
+  async markCorrectionsDelivered(nodeId: string, upTo: number): Promise<void> {
+    await this.withLock(async () => {
+      const found = this.locate(nodeId)
+      if (found === undefined) return
+      const { state, node } = found
+      const next = Math.min(Math.max(node.correctionsDeliveredUpTo, upTo), node.corrections.length)
+      if (next === node.correctionsDeliveredUpTo) return
+      this.replace(state, node, { correctionsDeliveredUpTo: next })
+      await this.flush(state.tree.rootId)
     })
   }
 
