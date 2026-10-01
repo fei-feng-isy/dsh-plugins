@@ -15,22 +15,30 @@
  *
  * The plugin set is DISCOVERED (`scripts/lib/plugins.mjs`), like the build dispatcher: a plugin tree is
  * a top-level directory whose `package.json` defines a `build:dsh` script. So adding `notes/` puts it
- * under this guard with no change here, and the rules below then apply to it automatically.
+ * under this guard with no change here, and the rules below then apply to it automatically. The base
+ * is scanned too, through `discoverGuardTrees()`: it is not a plugin (no manifest at `base/`), which
+ * is exactly why the forbidden `base` → plugin direction had been invisible to every gate.
  *
- * Rules, per discovered tree T (source files, build output and vendored trees excluded):
+ * Rules, per tree T (source files, build output and vendored trees excluded):
  *
  *   1. no specifier may name a package owned by ANOTHER tree;
  *   2. no RELATIVE specifier may resolve outside T — the only exception is the workspace-level shared
  *      helper directory `scripts/lib/` (the two helpers hoisted out of both trees);
- *   3. no file that gets BUNDLED may import the base by VALUE: `import type` — and `typeof
+ *   3. no PLUGIN file that gets BUNDLED may import the base by VALUE: `import type` — and `typeof
  *      import(…)` in a type position — are the only static references a plugin may have, everything
  *      else must come off the base module the inlined bootstrap loaded at runtime. A static value
  *      import leaves `import '@avantf/dsh-plugin-base'` in the artifact and makes the whole plugin
  *      module fail to load wherever the base is absent, which is the failure the family forbids.
- *      Tests are exempt: they are never bundled and may use the base's real values.
+ *      Tests are exempt: they are never bundled and may use the base's real values. This rule is
+ *      about PLUGINS taking the base by value; it does NOT apply to the base's own files (`isBase`),
+ *      which ARE the base — rules 1 and 2 are what the base is scanned for.
  *   4. any other `@avantf/*` specifier must be a package of T itself. A new name is the moment a
  *      plugin gains a dependency outside its own tree — a deliberate act, not something discovery
  *      should absorb silently.
+ *
+ * Rule 1 lets every tree import the base in whatever form it likes, because the base is the ONE
+ * shared package; the base's own packages are therefore never "foreign" (a plugin importing the base
+ * is the whole point). Only a tree importing ANOTHER tree is a violation, in either direction.
  *
  * `base/plugin-base/test/boundary.spec.ts` — the vitest mirror — RUNS this script instead of copying
  * its rules, so the two can no longer drift apart.
@@ -41,27 +49,18 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
-import { BASE_PACKAGE, discoverPlugins, repoRoot as repo } from './lib/plugins.mjs'
+import { pathToFileURL } from 'node:url'
+import { BASE_PACKAGE, discoverGuardTrees, repoRoot as repo } from './lib/plugins.mjs'
 
 const USAGE = `usage: node scripts/boundary-guard.mjs [--verbose]
 
-Scans every discovered plugin tree (top-level directory with a \`build:dsh\` script) and fails when a
-source file reaches another tree's package, escapes its own tree by a relative path (except
-scripts/lib/), imports the base by value where it gets bundled, or names an unknown @avantf package.`
+Scans every discovered plugin tree (top-level directory with a \`build:dsh\` script) AND the family
+base, and fails when a source file reaches another tree's package, escapes its own tree by a relative
+path (except scripts/lib/), imports the base by value where a plugin bundles it, or names an unknown
+@avantf package. The base is scanned for the first two rules only: it is not a plugin, so the
+"bundle must not take the base by value" rule does not apply to the base's own files.`
 
-const argv = process.argv.slice(2)
 const KNOWN = new Set(['--verbose', '--help', '-h'])
-const unknown = argv.filter((flag) => !KNOWN.has(flag))
-if (unknown.length > 0) {
-  console.error(`boundary-guard: unknown option ${unknown.join(', ')}`)
-  console.error(USAGE)
-  process.exit(2)
-}
-if (argv.some((flag) => flag === '--help' || flag === '-h')) {
-  console.log(USAGE)
-  process.exit(0)
-}
-const verbose = argv.includes('--verbose')
 
 const SKIP_DIRS = new Set(['node_modules', 'lib', 'dist', 'release', '.git', 'vendor', '.vitest'])
 const SOURCE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u
@@ -211,9 +210,12 @@ function packageName(specifier) {
  * True when the file is compiled into a SHIPPED bundle — the only place a static value import of the
  * base is dangerous. Tests, tooling (`scripts/`) and config files are not bundled and may use the
  * base's real values.
+ *
+ * `root` is the repository root the path is judged against — a parameter so the rule can be replayed
+ * on a constructed tree (it defaults to the real repository).
  */
-function isBundled(file) {
-  const path = relative(repo, file)
+function isBundled(file, root = repo) {
+  const path = relative(root, file)
   if (/(?:^|\/)(?:tests?|__tests__|scripts)\//u.test(path)) return false
   if (/(?:^|\/)[^/]*\.config\.[cm]?[jt]s$/u.test(path)) return false
   return !/\.(?:spec|test)\.[cm]?[jt]sx?$/u.test(path)
@@ -254,70 +256,120 @@ function baseValueImports(file) {
   return found
 }
 
-// ── scan ─────────────────────────────────────────────────────────────────────────────────────────
-const trees = discoverPlugins().map((plugin) => ({
-  ...plugin,
-  packages: ownedPackages(plugin.tree),
-  files: sourceFiles(plugin.tree),
-}))
+// ── rules ────────────────────────────────────────────────────────────────────────────────────────
 
-const problems = []
+/**
+ * Judge every boundary rule for a set of scan trees and return the violations.
+ *
+ * `trees` entries are `{ id, tree, packageDir?, packages: Set<string>, files: string[], isBase? }`
+ * (`discoverGuardTrees()` + `ownedPackages`/`sourceFiles` build them). Pure apart from reading the
+ * files it is given, and `root` is the repository the paths are judged against — so the whole rule
+ * set can be replayed on a constructed tree without a workspace, which is how "a reverse import from
+ * the base is a violation" is proven (the base's sources must stay clean either way).
+ *
+ * @param {Array<object>} trees
+ * @param {string} [root] repository root the paths are relative to.
+ * @returns {string[]} one line per violation.
+ */
+export function judgeTrees(trees, root = repo) {
+  const problems = []
 
-if (trees.length === 0) {
-  problems.push('no plugin tree discovered — a plugin tree is a top-level directory with a `build:dsh` script, so this scan would be vacuous')
-}
-
-for (const tree of trees) {
-  // A tree that carries the family layout must yield real sources: otherwise a moved or gutted tree
-  // would pass by scanning nothing.
-  if (tree.packageDir !== undefined && tree.files.length <= 10) {
-    problems.push(`${tree.id}/ has only ${tree.files.length} source file(s) but carries a packages/plugin layout — the scan is vacuous or the tree moved`)
-  }
-  if (verbose) {
-    console.log(`  scan  ${tree.id}: ${tree.files.length} source file(s), ${tree.packages.size} package name(s)`)
-  }
-}
-
-for (const tree of trees) {
-  const foreign = new Map()
-  for (const other of trees) {
-    if (other === tree) continue
-    for (const name of other.packages) foreign.set(name, other.id)
+  if (trees.length === 0) {
+    problems.push('no plugin tree discovered — a plugin tree is a top-level directory with a `build:dsh` script, so this scan would be vacuous')
   }
 
-  for (const file of tree.files) {
-    const where = relative(repo, file)
-    for (const specifier of specifiersOf(file)) {
-      const name = packageName(specifier)
-      const owner = foreign.get(name)
-      if (owner !== undefined) {
-        problems.push(`${where} → ${specifier} (a package of ${owner}/ — plugin trees never import each other)`)
-        continue
-      }
-      if (specifier.startsWith('.')) {
-        const target = resolve(dirname(file), specifier)
-        const inside = target === tree.tree || target.startsWith(tree.tree + sep)
-        const shared = target === SHARED_LIB || target.startsWith(SHARED_LIB + sep)
-        if (!inside && !shared) {
-          problems.push(`${where} → ${specifier} (resolves to ${relative(repo, target)}, outside ${tree.id}/ — the only shared code reachable by path is scripts/lib/)`)
+  for (const tree of trees) {
+    // A tree that carries the family layout must yield real sources: otherwise a moved or gutted tree
+    // would pass by scanning nothing.
+    if (tree.packageDir !== undefined && tree.files.length <= 10) {
+      problems.push(`${tree.id}/ has only ${tree.files.length} source file(s) but carries a known package layout — the scan is vacuous or the tree moved`)
+    }
+  }
+
+  for (const tree of trees) {
+    const foreign = new Map()
+    for (const other of trees) {
+      // The base is importable from EVERY tree — it is the one shared package, in both directions
+      // spelled out above. Only the base's own scan must not treat a plugin tree as reachable.
+      if (other === tree || other.isBase === true) continue
+      for (const name of other.packages) foreign.set(name, other.id)
+    }
+
+    for (const file of tree.files) {
+      const where = relative(root, file)
+      for (const specifier of specifiersOf(file)) {
+        const name = packageName(specifier)
+        const owner = foreign.get(name)
+        if (owner !== undefined) {
+          problems.push(`${where} → ${specifier} (a package of ${owner}/ — no tree imports another tree; the base is the only shared package)`)
+          continue
         }
-        continue
+        if (specifier.startsWith('.')) {
+          const target = resolve(dirname(file), specifier)
+          const inside = target === tree.tree || target.startsWith(tree.tree + sep)
+          const shared = target === SHARED_LIB || target.startsWith(SHARED_LIB + sep)
+          if (!inside && !shared) {
+            problems.push(`${where} → ${specifier} (resolves to ${relative(root, target)}, outside ${tree.id}/ — the only shared code reachable by path is scripts/lib/)`)
+          }
+          continue
+        }
+        if (name.startsWith('@avantf/') && name !== BASE_PACKAGE && !tree.packages.has(name)) {
+          problems.push(`${where} → ${specifier} (names no package of ${tree.id}/ or the family base — a new @avantf dependency is a deliberate act, not something discovery absorbs silently)`)
+        }
       }
-      if (name.startsWith('@avantf/') && name !== BASE_PACKAGE && !tree.packages.has(name)) {
-        problems.push(`${where} → ${specifier} (names no package of ${tree.id}/ or the family base — a new @avantf dependency is a deliberate act, not something discovery absorbs silently)`)
-      }
-    }
-    if (isBundled(file)) {
-      for (const how of baseValueImports(file)) {
-        problems.push(`${where} → ${BASE_PACKAGE} (${how}: only \`import type\` may be static — values come off the base module the inlined bootstrap loaded at runtime)`)
+      // Rule 3 is about a PLUGIN taking the base by value into a shipped bundle. The base IS the base,
+      // so a static reference to itself is not the failure this rule exists for (rules 1/2 are what
+      // the base is scanned for). `isBase` makes that scope explicit rather than incidental.
+      if (tree.isBase !== true && isBundled(file, root)) {
+        for (const how of baseValueImports(file)) {
+          problems.push(`${where} → ${BASE_PACKAGE} (${how}: only \`import type\` may be static — values come off the base module the inlined bootstrap loaded at runtime)`)
+        }
       }
     }
   }
+
+  return problems
 }
 
-for (const problem of problems) console.error(`  FAIL  ${problem}`)
-if (problems.length > 0) {
-  console.error(`\nboundary-guard: FAILED (${problems.length} violation${problems.length === 1 ? '' : 's'})`)
-  process.exit(1)
+// ── executable ───────────────────────────────────────────────────────────────────────────────────
+
+function main(argv = process.argv.slice(2)) {
+  const unknown = argv.filter((flag) => !KNOWN.has(flag))
+  if (unknown.length > 0) {
+    console.error(`boundary-guard: unknown option ${unknown.join(', ')}`)
+    console.error(USAGE)
+    return 2
+  }
+  if (argv.some((flag) => flag === '--help' || flag === '-h')) {
+    console.log(USAGE)
+    return 0
+  }
+  const verbose = argv.includes('--verbose')
+
+  const trees = discoverGuardTrees().map((tree) => ({
+    ...tree,
+    packages: ownedPackages(tree.tree),
+    files: sourceFiles(tree.tree),
+  }))
+
+  if (verbose) {
+    for (const tree of trees) {
+      console.log(`  scan  ${tree.id}: ${tree.files.length} source file(s), ${tree.packages.size} package name(s)`)
+    }
+  }
+
+  const problems = judgeTrees(trees)
+  for (const problem of problems) console.error(`  FAIL  ${problem}`)
+  if (problems.length > 0) {
+    console.error(`\nboundary-guard: FAILED (${problems.length} violation${problems.length === 1 ? '' : 's'})`)
+    return 1
+  }
+
+  const pluginIds = trees.filter((tree) => tree.isBase !== true).map((tree) => tree.id)
+  console.log(`boundary-guard ok — ${pluginIds.join(', ')} reach only the base and their own trees; base/ reaches into no plugin tree`)
+  return 0
 }
-console.log(`boundary-guard ok — ${trees.map((tree) => tree.id).join(', ')} reach only the base and their own trees`)
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exitCode = main()
+}

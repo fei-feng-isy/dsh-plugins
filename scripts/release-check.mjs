@@ -35,6 +35,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VERSION_GROUPS, versionState } from './lib/versions.mjs'
+import { baseDependencyProblems } from './lib/gates.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -219,33 +220,27 @@ if (problems.length === 0) {
 const baseManifest = seen.get(BASE_DIR)
 const baseVersion = baseManifest?.version
 
-/** `link:`/`file:`/`workspace:`/`catalog:` are local specifiers: fine in-source, never in a tarball. */
-function isLocalSpecifier(range) {
-  return /^(?:link|file|workspace|catalog):/u.test(range) || range === '*'
-}
-
 const pluginRanges = []
 for (const plugin of PLUGINS) {
   const manifest = seen.get(plugin.dir)
   if (manifest === undefined) continue
-  const peer = manifest.peerDependencies?.[BASE]
-  if (typeof peer !== 'string' || peer.trim() === '') {
-    fail(`${plugin.name} does not declare ${BASE} in peerDependencies — the host could not supply the base`)
-  } else if (isLocalSpecifier(peer)) {
-    fail(`${plugin.name}'s peer range for ${BASE} is ${peer} — it must be a publishable registry range`)
-  } else {
-    pluginRanges.push({ plugin: plugin.name, dir: plugin.dir, range: peer })
-    if (baseVersion !== undefined && !satisfies(peer, baseVersion)) {
+  // BOTH sides of the base wiring: a required peer with a registry range, and the SAME range in
+  // devDependencies (pnpm-workspace.yaml's "asserts both sides" — the dev half had no assertion).
+  const wiring = baseDependencyProblems(plugin.name, manifest, BASE)
+  for (const problem of wiring.problems) fail(problem)
+  if (wiring.peer !== undefined) {
+    pluginRanges.push({ plugin: plugin.name, dir: plugin.dir, range: wiring.peer, dev: manifest.devDependencies?.[BASE] })
+    if (baseVersion !== undefined && !satisfies(wiring.peer, baseVersion)) {
       fail(
-        `${plugin.name}'s peer range ${peer} does not accept the workspace base ${baseVersion} — `
+        `${plugin.name}'s peer range ${wiring.peer} does not accept the workspace base ${baseVersion} — `
         + 'a local mount would refuse the base that is right there',
       )
     }
     // Wide enough for a base-only fix: a caret range on 0.x accepts patch releases, which is what
     // "fix shared code with one base release" needs. An exact pin or a `~` range would block it.
-    if (/^[~=]|^\d+\.\d+\.\d+$/u.test(peer.trim())) {
+    if (/^[~=]|^\d+\.\d+\.\d+$/u.test(wiring.peer)) {
       fail(
-        `${plugin.name}'s peer range for ${BASE} is ${peer} — too narrow: a patch/minor base release `
+        `${plugin.name}'s peer range for ${BASE} is ${wiring.peer} — too narrow: a patch/minor base release `
         + '(one base release must be enough to fix shared code) would fall outside it',
       )
     }
@@ -263,7 +258,9 @@ for (const plugin of PLUGINS) {
   }
 }
 if (pluginRanges.length > 0) {
-  note(`plugin peer range for ${BASE}: ${pluginRanges.map((p) => `${p.plugin} ${p.range}`).join(', ')}`)
+  note(
+    `plugin base wiring: ${pluginRanges.map((p) => `${p.plugin} peer ${p.range} = dev ${String(p.dev)}`).join(', ')}`,
+  )
 }
 const distinctRanges = new Set(pluginRanges.map((p) => p.range))
 if (distinctRanges.size > 1) {

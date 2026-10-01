@@ -12,17 +12,30 @@
  * 只有**跨 minor 线**才会漏。别用本仓 base 的 `satisfiesRange` 来对这件事下结论：它走默认规则（不带
  * includePrerelease），比 dsh 的门禁更严，会给出"漏了"的假警报（那个规则是给安装期 peer 检查用的）。
  *
+ * 判定**按树分别做**（M8）：dsh 启动门按行禁用，只被 mem 覆盖、mission 缺声明的线，对 mission 已经坏了。
+ * 旧的"任一树覆盖即算覆盖"（并集）让这种单树漏永远打印 ok。现在 exit 1 有两种形状（见 gates.mjs 的
+ * `judgeDshLines`）：① `missingLines`——**有树覆盖、另一棵树漏**的线（并集掩盖的正是它，且不分高低）；
+ * ② `higherUncovered`——**比"每棵树都覆盖"的最高线更高、没有任何树覆盖**的线；另外任一 dist-tag 只要有
+ * 一棵树覆盖不到也 exit 1。没有任何树覆盖、且低于最高全覆线的历史线（例如 0.0.x）仍只是备注。
+ * 纯判定在 `scripts/lib/gates.mjs` 的 `judgeDshLines` 里，可用构造输入复跑。
+ *
  * Usage:
  *   node scripts/check-dsh-lines.mjs [--registry <url>] [--json]
+ *   node scripts/check-dsh-lines.mjs --fixture <file> --json   # judge a JSON fixture, no network
+ *       fixture: { declared?: { <tree>: [ranges] }, versions: [...], tags: { <tag>: <version> } }
+ *       (`declared` overrides the manifests — how scripts/gates.test.mjs replays the per-tree rule)
  *
- * 退出码 1 表示：某个 dist-tag（latest / next …）指向的版本覆盖不到，或存在**比已覆盖的最高线更高**的未覆盖
- * 线——两者都意味着"dsh 一升级，插件行就会被禁用"。低于已覆盖线的历史未覆盖线（例如 0.0.x）只是备注。
+ * 退出码 1 表示：某个 dist-tag（latest / next …）指向的版本有**任一**声明树覆盖不到，或存在上述两种线
+ * 之一——都意味着"dsh 一升级，那棵树的插件行就会被启动门禁用"。低于已覆盖线的历史未覆盖线（例如
+ * 0.0.x）只是备注。
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { judgeDshLines } from './lib/gates.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** 声明 dsh peer 的两棵树；base 自己不声明（它由插件加载）。 */
@@ -31,16 +44,21 @@ const PACKAGE = '@deepseek-ai/dsh'
 
 const argv = process.argv.slice(2)
 if (argv.includes('--help') || argv.includes('-h')) {
-  console.log('usage: node scripts/check-dsh-lines.mjs [--registry <url>] [--json]')
+  console.log('usage: node scripts/check-dsh-lines.mjs [--registry <url>] [--json] [--fixture <file>]')
+  console.log('  --fixture <file>  judge a JSON fixture instead of the registry: { declared?, versions, tags }')
+  console.log('                    (declared overrides the manifests; used by scripts/gates.test.mjs)')
   process.exit(0)
 }
 const asJson = argv.includes('--json')
 const registryIndex = argv.indexOf('--registry')
 const registry = registryIndex >= 0 ? argv[registryIndex + 1] : undefined
 if (registryIndex >= 0 && (registry === undefined || registry.startsWith('--'))) fail('--registry needs a URL')
+const fixtureIndex = argv.indexOf('--fixture')
+const fixturePath = fixtureIndex >= 0 ? argv[fixtureIndex + 1] : undefined
+if (fixtureIndex >= 0 && (fixturePath === undefined || fixturePath.startsWith('--'))) fail('--fixture needs a file')
 for (const [index, arg] of argv.entries()) {
-  if (arg.startsWith('--') && !['--registry', '--json', '--help', '-h'].includes(arg)) fail(`unknown option ${arg}`)
-  if (!arg.startsWith('--') && argv[index - 1] !== '--registry') fail(`unexpected argument ${arg}`)
+  if (arg.startsWith('--') && !['--registry', '--json', '--fixture', '--help', '-h'].includes(arg)) fail(`unknown option ${arg}`)
+  if (!arg.startsWith('--') && !['--registry', '--fixture'].includes(argv[index - 1])) fail(`unexpected argument ${arg}`)
 }
 
 function fail(message) {
@@ -106,78 +124,88 @@ function effectiveRegistry() {
   }
 }
 
-const declared = declaredRanges()
+const fixture = fixturePath === undefined ? undefined : JSON.parse(readFileSync(resolve(fixturePath), 'utf8'))
+const declared = fixture?.declared === undefined ? declaredRanges() : new Map(Object.entries(fixture.declared))
 const { semver, from } = loadGateSemver()
 // `npm view --json` 对单值/多值的形状不稳定：versions 可能是字符串，dist-tags 可能是 `[{latest: …}]`。
-const versions = [npmView('versions')].flat().filter((entry) => typeof entry === 'string')
-const rawTags = npmView('dist-tags')
-const tags = (Array.isArray(rawTags) ? rawTags : [rawTags]).reduce((all, entry) => Object.assign(all, entry), {})
-if (versions.length === 0) fail('the registry returned no versions')
-
-/** 一个版本是否被**任一**棵树的声明覆盖（两棵树不一致时也仍然只报"谁漏了"）。 */
-const coveredBy = (version) => [...declared.entries()]
-  .filter(([, ranges]) => ranges.some((range) => semver.satisfies(version, range, { includePrerelease: true })))
-  .map(([name]) => name)
-
-/** 按 major.minor 分线，线内取最高版本做代表。 */
-const lines = new Map()
-for (const version of versions) {
-  const parsed = semver.parse(version)
-  if (parsed === null) continue
-  const line = `${parsed.major}.${parsed.minor}`
-  const current = lines.get(line)
-  if (current === undefined || semver.gt(version, current.newest)) lines.set(line, { line, newest: version, count: (current?.count ?? 0) + 1 })
-  else lines.set(line, { ...current, count: current.count + 1 })
+let versions
+let tags
+if (fixture === undefined) {
+  versions = [npmView('versions')].flat().filter((entry) => typeof entry === 'string')
+  const rawTags = npmView('dist-tags')
+  tags = (Array.isArray(rawTags) ? rawTags : [rawTags]).reduce((all, entry) => Object.assign(all, entry), {})
+} else {
+  versions = [fixture.versions ?? []].flat().filter((entry) => typeof entry === 'string')
+  tags = fixture.tags ?? {}
 }
-const ordered = [...lines.values()]
-  .map((entry) => ({ ...entry, covered: coveredBy(entry.newest) }))
-  .sort((a, b) => semver.compare(`${a.line}.0`, `${b.line}.0`))
+if (versions.length === 0) fail('the selected source returned no versions')
+const versionSource = fixture === undefined ? effectiveRegistry() : `fixture ${fixturePath}`
 
-const highestCovered = [...ordered].reverse().find((entry) => entry.covered.length > 0)
-const tagRows = Object.entries(tags).map(([tag, version]) => ({ tag, version, covered: coveredBy(version) }))
-const uncoveredTags = tagRows.filter((row) => row.covered.length === 0)
-const higherUncovered = ordered.filter((entry) => entry.covered.length === 0
-  && (highestCovered === undefined || semver.gt(entry.newest, highestCovered.newest)))
+// 判定在 scripts/lib/gates.mjs 里（纯函数，可用构造输入复跑）：按树分别判，任一树漏即算漏。
+const { trees, treeRanges, distinct, declaredDivergence, lines, tagRows, uncoveredTags, missingLines, higherUncovered } =
+  judgeDshLines({ declared, versions, tags, semver })
 
 if (asJson) {
-  console.log(JSON.stringify({ declared: Object.fromEntries(declared), semverFrom: from, tags: tagRows, lines: ordered, uncoveredTags, higherUncovered }, null, 2))
-  process.exit(uncoveredTags.length > 0 || higherUncovered.length > 0 ? 1 : 0)
+  console.log(JSON.stringify({
+    declared: Object.fromEntries(declared), semverFrom: from, trees, declaredDivergence,
+    tags: tagRows, lines, uncoveredTags, missingLines, higherUncovered,
+  }, null, 2))
+  process.exit(uncoveredTags.length > 0 || missingLines.length > 0 || higherUncovered.length > 0 ? 1 : 0)
 }
 
-const distinct = [...new Set([...declared.values()].flat())]
 console.log(`${PACKAGE} 声明：${distinct.join('  ||  ')}`)
-console.log(`  mem:  ${(declared.get('@avantf/dsh-mem') ?? []).join('  ||  ')}`)
-console.log(`  mission: ${(declared.get('@avantf/dsh-mission') ?? []).join('  ||  ')}`)
-console.log('判定：satisfies(version, range, { includePrerelease: true }) —— 与 dsh 启动门同一份实现')
-console.log(`      （semver 取自 ${from}；版本列表取自 ${effectiveRegistry()}）`)
-console.log(`已发布 ${versions.length} 个版本，分 ${ordered.length} 条线：\n`)
-console.log('  线      代表版本          覆盖        备注')
-for (const entry of ordered) {
+for (const tree of trees) console.log(`  ${tree}: ${(treeRanges[tree] ?? []).join('  ||  ')}`)
+console.log('判定：satisfies(version, range, { includePrerelease: true }) —— 与 dsh 启动门同一份实现，且**按树分别判**')
+console.log(`      （semver 取自 ${from}；版本列表取自 ${versionSource}）`)
+console.log(`已发布 ${versions.length} 个版本，分 ${lines.length} 条线：\n`)
+console.log('  线      代表版本          覆盖                备注')
+for (const entry of lines) {
   const tagNames = tagRows.filter((row) => semver.eq(row.version, entry.newest)).map((row) => row.tag)
   const notes = []
   if (tagNames.length > 0) notes.push(`dist-tag: ${tagNames.join(', ')}`)
-  if (entry.covered.length === 0) notes.push('未覆盖')
-  console.log(`  ${entry.line.padEnd(7)}${entry.newest.padEnd(18)}${(entry.covered.length > 0 ? '✓' : '✗').padEnd(11)}${notes.join('; ')}`)
+  if (entry.missing.length > 0) notes.push(`缺: ${entry.missing.join(', ')}`)
+  const covered = entry.covered.length === trees.length
+    ? `✓ 全部(${trees.length})`
+    : (entry.covered.length > 0 ? `部分: ${entry.covered.join(',')}` : '✗')
+  console.log(`  ${entry.line.padEnd(7)}${entry.newest.padEnd(18)}${covered.padEnd(20)}${notes.join('; ')}`)
 }
 
 let bad = false
+if (declaredDivergence) {
+  console.log('\n⚠ 两棵树声明的 dsh 区间不一致（并集掩盖单树漏的成因，保持同步）：')
+  for (const tree of trees) console.log(`    ${tree}: ${(treeRanges[tree] ?? []).join('  ||  ')}`)
+}
 if (uncoveredTags.length > 0) {
   bad = true
-  console.log('\n⚠ dist-tag 指向的版本覆盖不到：')
-  for (const row of uncoveredTags) console.log(`    ${row.tag} → ${row.version}`)
+  console.log('\n⚠ dist-tag 指向的版本有树覆盖不到（dsh 一升上去，那棵树整行就被启动门禁用）：')
+  for (const row of uncoveredTags) console.log(`    ${row.tag} → ${row.version}（缺：${row.missing.join(', ')}）`)
+}
+if (missingLines.length > 0) {
+  bad = true
+  console.log('\n⚠ 有树覆盖、另一棵树漏的线（并集掩盖的正是这种单树漏；漏的那棵树在这条线上整行会被禁用）：')
+  for (const entry of missingLines) {
+    console.log(`    ${entry.line} 线（代表 ${entry.newest}，共 ${entry.count} 个版本；缺：${entry.missing.join(', ')}；已有：${entry.covered.join(', ')}）`)
+  }
 }
 if (higherUncovered.length > 0) {
   bad = true
-  console.log('\n⚠ 出现了比已覆盖最高线更高的未覆盖线（dsh 一升上去，插件行就会被启动门禁用）：')
-  for (const entry of higherUncovered) console.log(`    ${entry.line} 线（代表 ${entry.newest}，共 ${entry.count} 个版本）`)
-  const newest = higherUncovered[higherUncovered.length - 1]
-  const suggested = `${distinct.join(' || ')} || ^${newest.newest}`
-  console.log(`\n  建议：把 dsh peer 区间补成 '${suggested}'`)
-  console.log(`  补之前先实测那条线能跑：node scripts/check-old-dsh.mjs mem --floor ${newest.newest}`)
+  console.log('\n⚠ 出现了比"每棵树都覆盖"的最高线更高的、没有任何树覆盖的线（dsh 一升上去，所有插件行都会被启动门禁用）：')
+  for (const entry of higherUncovered) {
+    console.log(`    ${entry.line} 线（代表 ${entry.newest}，共 ${entry.count} 个版本）`)
+  }
+}
+const toFix = [...new Set([...missingLines, ...higherUncovered]
+  .flatMap((entry) => entry.missing.map((tree) => `${tree}@${entry.newest}`)))]
+  .map((key) => { const at = key.lastIndexOf('@'); return { tree: key.slice(0, at), newest: key.slice(at + 1) } })
+for (const { tree, newest } of toFix) {
+  const suggested = [...(treeRanges[tree] ?? []), `^${newest}`].join(' || ')
+  const group = tree.replace('@avantf/dsh-', '')
+  console.log(`\n  建议：把 ${tree} 的 dsh peer 区间补成 '${suggested}'`)
+  console.log(`  补之前先实测那条线能跑：node scripts/check-old-dsh.mjs ${group} --floor ${newest}`)
 }
 
 if (bad) {
   console.log('\ncheck-dsh-lines: 需要处理（见上）')
   process.exit(1)
 }
-console.log(`\ncheck-dsh-lines: ok —— 所有 dist-tag（${tagRows.map((row) => `${row.tag}=${row.version}`).join(', ')}）都被声明覆盖，也没有更高的未覆盖线。`)
+console.log(`\ncheck-dsh-lines: ok —— 所有 dist-tag（${tagRows.map((row) => `${row.tag}=${row.version}`).join(', ')}）都被**每一棵**声明树覆盖，也没有更高的、有树覆盖不到的线。`)

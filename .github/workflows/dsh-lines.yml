@@ -1,0 +1,31 @@
+name: dsh lines
+
+# The dsh boot gate disables a plugin row whose OWN `peerDependencies` do not cover the running dsh.
+# A new dsh release can therefore make a plugin disappear from users' GUIs with no push of ours. This
+# scheduled run moves that discovery from "a user restarts the GUI" to "the day dsh published": it
+# judges every published `@deepseek-ai/dsh` version against EACH declaring tree (mem and mission
+# separately — a line one tree misses is a failure, see scripts/check-dsh-lines.mjs) and exits 1 with
+# the `||` clause to add.
+#
+# Network is the point: this asks the registry. `pnpm check:dsh-lines` locally is the same judgement
+# against the same script.
+on:
+  schedule:
+    # Daily. dsh releases are not on a clock; a day of latency is the tradeoff for not polling.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The script judges with the installed dsh's OWN semver (the same implementation its boot gate
+      # uses), so the harness has to be there even though this job builds nothing.
+      - name: Install the DSH harness (judge with the boot gate's own semver)
+        run: npm i -g @deepseek-ai/dsh
+      - name: dsh peer coverage, per tree
+        run: node scripts/check-dsh-lines.mjs

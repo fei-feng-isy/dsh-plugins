@@ -12,6 +12,10 @@
  * family-layout facts that gate needs (`<tree>/packages/plugin`, `<tree>/scripts/mount-smoke.mjs`)
  * are derived here too, and REPORTED by that gate when a tree does not follow the layout yet — a
  * missing layout must never make `pnpm build:dsh` itself fail for that tree.
+ *
+ * One gate needs MORE than the plugin set: the boundary guard must also scan the base, which is not
+ * a plugin (see `discoverGuardTrees()`). `discoverPlugins()` stays plugin-only so the build
+ * dispatcher and the release gates are never handed the base as a plugin.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -80,4 +84,36 @@ export function discoverBase() {
     if (manifest?.name === BASE_PACKAGE) return { dir, name: manifest.name, version: manifest.version }
   }
   return undefined
+}
+
+/**
+ * The family base as a SCAN tree, or `undefined` when there is no base.
+ *
+ * The base is deliberately NOT part of `discoverPlugins()`: `base/` carries no manifest of its own
+ * (the package is `base/plugin-base/`), so the plugin rule (`<dir>/package.json` defines `build:dsh`)
+ * cannot see it — and that is correct for the build dispatcher, `release-check` and the generators,
+ * which must never mistake the base for a plugin. It was also why the base had NO gate at all: the
+ * boundary rules were derived from `discoverPlugins()`, so "a plugin tree must never be imported
+ * from the base" (AGENTS.md) was invisible (review §3 工具链). The guard scans the base through this
+ * entry and recognises it by `isBase`.
+ *
+ * `packageDir` is the directory that carries the base manifest (`base/plugin-base`), so the guard's
+ * "a tree that follows the family layout must yield real sources" check applies to the base too.
+ */
+export function discoverBaseTree() {
+  const base = discoverBase()
+  if (base === undefined) return undefined
+  return { id: 'base', tree: join(repoRoot, 'base'), packageDir: base.dir, name: base.name, isBase: true }
+}
+
+/**
+ * The trees the BOUNDARY guard scans: the base plus every discovered plugin tree.
+ *
+ * Kept separate from `discoverPlugins()` on purpose — see `discoverBaseTree()`. Only the guard needs
+ * the `base` ← plugin direction checked in both directions; giving the base to the build dispatcher
+ * would make it build the base as if it were a plugin.
+ */
+export function discoverGuardTrees() {
+  const base = discoverBaseTree()
+  return base === undefined ? discoverPlugins() : [base, ...discoverPlugins()]
 }

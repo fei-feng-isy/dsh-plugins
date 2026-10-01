@@ -47,6 +47,12 @@ jobs:
         run: pnpm -r typecheck
       - name: Test (all packages)
         run: pnpm -r test
+      # The root gates' own logic, replayed on constructed input: group-scoped version
+      # materialization (M7), the base peer↔devDependencies pair, per-tree dsh-line coverage (M8)
+      # and the plugin prepublishOnly wiring (M10). No build, no registry — the dsh-line half uses
+      # the workspace's resolved semver (installed above with the frozen lockfile).
+      - name: Gate logic self-tests
+        run: node scripts/gates.test.mjs
       - name: Boundary guard (mem/ and mission/ never import each other)
         run: pnpm guard
       # Each group records its version in exactly ONE carrier manifest; this catches a second copy

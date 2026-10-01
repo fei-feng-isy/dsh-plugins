@@ -17,6 +17,10 @@
  *                                    where only the installed dsh exists — the guard never invents
  *                                    a failure)
  *
+ * A file missing on EITHER side (a pruned checkout, or a deleted vendored file) is also "nothing to
+ * compare": it is named in the warning, never thrown — the vendored side used to be read without an
+ * existence check, so one removed file crashed `link-dsh` and `mem release:check` on the stack.
+ *
  * It is an OPTIONAL cross-check, never a build input: nothing here is needed to compile.
  * `node scripts/check-preset-drift.mjs` runs it standalone. `link-dsh.mjs` and `release-check.mjs`
  * also call `presetDriftWarning()` and print its one-line warning through their existing
@@ -47,9 +51,9 @@ export const PRESET_FILES = [
 ]
 
 /** Revision this copy was taken from, read from ORIGIN.md so the two cannot disagree. */
-function pinnedRevision() {
+function pinnedRevision(vendorRoot = VENDOR_ROOT) {
   try {
-    return /\|\s*revision\s*\|\s*`([0-9a-f]{7,40})`/.exec(readFileSync(join(VENDOR_ROOT, 'ORIGIN.md'), 'utf8'))?.[1]
+    return /\|\s*revision\s*\|\s*`([0-9a-f]{7,40})`/.exec(readFileSync(join(vendorRoot, 'ORIGIN.md'), 'utf8'))?.[1]
   } catch {
     return undefined
   }
@@ -67,22 +71,37 @@ function checkoutRevision(harnessDir) {
 /**
  * One-line drift warning, or `undefined` when every vendored file matches the checkout (or the
  * comparison cannot run because a file/checkout is missing).
+ *
+ * BOTH sides are existence-checked BEFORE either is read. A missing file on the vendored side used
+ * to fall straight into `readFileSync` and throw ENOENT through every caller (`link-dsh.mjs` and
+ * `mem release:check`) — the opposite of what this function's contract, and its header, promise: a
+ * file that is missing on either side means "there is nothing to compare", which is reported as
+ * `missing` in the returned warning, never as a stack trace (review §3 工具链).
+ *
  * @param harnessDir - harness checkout root to compare against.
+ * @param vendorRoot - vendored preset root; a seam so the missing-file branch can be exercised on a
+ *   constructed tree (the default is the one real pin).
  */
-export function presetDriftWarning(harnessDir) {
+export function presetDriftWarning(harnessDir, vendorRoot = VENDOR_ROOT) {
   const drifted = []
   const missing = []
   for (const { vendored, harness } of PRESET_FILES) {
+    const local = join(vendorRoot, vendored)
     const origin = join(harnessDir, harness)
-    if (!existsSync(origin)) { missing.push(harness); continue }
-    if (!readFileSync(join(VENDOR_ROOT, vendored)).equals(readFileSync(origin))) drifted.push(vendored)
+    if (!existsSync(local)) { missing.push({ side: 'vendored', path: vendored }); continue }
+    if (!existsSync(origin)) { missing.push({ side: 'checkout', path: harness }); continue }
+    if (!readFileSync(local).equals(readFileSync(origin))) drifted.push(vendored)
   }
   if (drifted.length === 0 && missing.length === 0) return undefined
-  const pinned = pinnedRevision() ?? '(unknown)'
+  const pinned = pinnedRevision(vendorRoot) ?? '(unknown)'
   const current = checkoutRevision(harnessDir) ?? '(not a git checkout)'
+  const absentFrom = (side) => missing.filter((entry) => entry.side === side).map((entry) => entry.path)
+  const absentFromCheckout = absentFrom('checkout')
+  const absentFromVendored = absentFrom('vendored')
   const detail = [
     drifted.length > 0 ? `${String(drifted.length)} of ${String(PRESET_FILES.length)} file(s) differ: ${drifted.join(', ')}` : undefined,
-    missing.length > 0 ? `${String(missing.length)} file(s) missing from the checkout: ${missing.join(', ')}` : undefined,
+    absentFromCheckout.length > 0 ? `${String(absentFromCheckout.length)} file(s) missing from the checkout: ${absentFromCheckout.join(', ')}` : undefined,
+    absentFromVendored.length > 0 ? `${String(absentFromVendored.length)} vendored file(s) missing from packages/plugin/vendor/dsh-client-preset: ${absentFromVendored.join(', ')}` : undefined,
   ].filter(Boolean).join('; ')
   return `the vendored client preset has drifted from the harness checkout — ${detail}.`
     + ` Vendored pins ${pinned}; checkout is ${current}.`
