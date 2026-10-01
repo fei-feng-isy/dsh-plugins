@@ -853,15 +853,39 @@ function groupKey(hit: RecallHit): string {
   return domain || source || '文档切片'
 }
 
+/**
+ * How many candidates one reply's relevance floors removed, across every leg.
+ *
+ * This is the difference between the two readings of an empty result ("the floors removed N" vs
+ * "there was nothing to remove"), and it is what makes the panel's 宽松 hint actionable rather than
+ * a suggestion to retry blindly.
+ */
+function droppedByFloor(value: RecallResult): number {
+  const drops = value.dropped_by_floor
+  if (drops === undefined) return 0
+  return drops.semantic + drops.fts + drops.jaccard + drops.hrr
+}
+
 function KnowledgePanel(props: { remote?: AvantfRemote }) {
   // The document list is the page body; 查询 is a panel opened on demand, so nothing
   // here queries the store until the user asks for it.
   const [showQuery, setShowQuery] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const [kind, setKind] = React.useState('all')
+  /**
+   * The relevance-floor profile (contract `FLOOR_PROFILES`): 严格 = the configured floors with NO
+   * automatic fallback, 宽松 = the relaxed floors. Default 严格 — the panel must not silently trade
+   * precision for recall, and sending `strict` explicitly is what makes the empty-result hint
+   * actionable ("N were dropped, switch to 宽松") instead of the retry having already happened.
+   * The value is always sent; an omitted profile is the engine's default policy (auto-relax once),
+   * which the 严格/宽松 labels would misdescribe.
+   */
+  const [floors, setFloors] = React.useState('strict')
   const [domain, setDomain] = React.useState('')
   const [source, setSource] = React.useState('')
   const [hits, setHits] = React.useState<RecallHit[]>([])
+  /** Candidates the last reply's floors removed; drives the 宽松 hint on an empty result. */
+  const [floorDropped, setFloorDropped] = React.useState(0)
   const [queryStatus, setQueryStatus] = React.useState('输入关键词后按回车检索')
   const [error, setError] = React.useState<string | undefined>()
   const [notice, setNotice] = React.useState<string | undefined>()
@@ -923,6 +947,7 @@ function KnowledgePanel(props: { remote?: AvantfRemote }) {
     if (text.length === 0) {
       setQueryStatus('请输入查询关键词')
       setHits([])
+      setFloorDropped(0)
       setError(undefined)
       return
     }
@@ -934,17 +959,24 @@ function KnowledgePanel(props: { remote?: AvantfRemote }) {
       domain: domain.trim() || undefined,
       source: source.trim() || undefined,
       limit: 10,
+      floors,
     }))
       .then((outcome) => {
         if (!queryGuard.isCurrent(seq)) return // a newer Enter already owns the panel
         if (outcome.ok) {
-          const found = outcome.value?.hits ?? []
+          const value = outcome.value
+          const found = value?.hits ?? []
           setHits(found)
-          const degraded = outcome.value?.degraded === true ? '（语义降级，仅 FTS+实体）' : ''
-          setQueryStatus(`命中 ${String(found.length)} 条${degraded}`)
+          setFloorDropped(value === undefined ? 0 : droppedByFloor(value))
+          const degraded = value?.degraded === true ? '（语义降级，仅 FTS+实体）' : ''
+          // The profile and the engine's automatic fallback are both stated: a relaxed answer sits
+          // below the configured relevance bar and must not read like a strict one.
+          const profile = value?.relaxed === true ? '（已自动放宽门槛）' : floors === 'loose' ? '（宽松门槛）' : ''
+          setQueryStatus(`命中 ${String(found.length)} 条${profile}${degraded}`)
           setError(undefined)
         } else {
           setHits([])
+          setFloorDropped(0)
           setQueryStatus('查询失败')
           setError(outcome.error)
         }
@@ -1368,6 +1400,15 @@ function KnowledgePanel(props: { remote?: AvantfRemote }) {
             h('option', { value: 'fact' }, '仅记忆'),
             h('option', { value: 'doc_chunk' }, '仅文档'),
             )),
+          h('label', { className: css.field }, '门槛',
+            h('select', {
+              className: css.input,
+              value: floors,
+              onChange: (e: React.ChangeEvent<HTMLSelectElement>) => { setFloors(e.target.value) },
+            },
+            h('option', { value: 'strict' }, '严格'),
+            h('option', { value: 'loose' }, '宽松'),
+            )),
           h(DomainField, {
             label: '知识域（domain）',
             value: domain,
@@ -1380,7 +1421,17 @@ function KnowledgePanel(props: { remote?: AvantfRemote }) {
           h(Btn, { label: '检索', disabled: queryLoading, onClick: run }),
         ),
         props.remote === undefined ? null : h('div', { className: css.status }, queryLoading ? '查询中…' : queryStatus),
-        props.remote !== undefined && !queryLoading && error === undefined && hits.length === 0 && queryStatus.startsWith('命中')
+        // An empty result had no explanation at all, which is half of the 「我是谁」 complaint: the
+        // answer WAS the top-ranked candidate and a relevance floor removed it. The two readings of
+        // an empty answer are told apart here — "the floors removed N, 宽松 is one switch away" vs
+        // "nothing relevant at all (the relaxed profile is already in force)".
+        props.remote !== undefined && !queryLoading && error === undefined && hits.length === 0 && queryStatus.startsWith('命中') && floors === 'strict' && floorDropped > 0
+          ? h('div', { className: css.status }, `没有达到相关性门槛的结果（严格门槛丢弃了 ${String(floorDropped)} 条）——可切「宽松」重试。`)
+          : null,
+        props.remote !== undefined && !queryLoading && error === undefined && hits.length === 0 && queryStatus.startsWith('命中') && floors === 'loose' && floorDropped > 0
+          ? h('div', { className: css.status }, `确实没有相关结果（宽松门槛下仍丢弃了 ${String(floorDropped)} 条）。`)
+          : null,
+        props.remote !== undefined && !queryLoading && error === undefined && hits.length === 0 && queryStatus.startsWith('命中') && floorDropped === 0
           ? h('div', { className: css.status }, '没有匹配项。知识库为空时先用「入库/导入」添加文档；记忆里也只包含已写入的事实。')
           : null,
         groups.map(([groupName, groupHits]) => h(

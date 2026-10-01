@@ -28,6 +28,7 @@ import {
   envAutoDownload,
   MAX_QUERY_CHARS,
   QueryUnion,
+  FLOOR_PROFILES,
 } from '../src/index.js'
 
 /**
@@ -133,9 +134,19 @@ describe('contract', () => {
     expect(ConfigSchema.safeParse({ retriever: { min_jaccard: -0.1 } }).success).toBe(false)
     expect(ConfigSchema.safeParse({ retriever: { min_fts_terms: -1 } }).success).toBe(false)
     expect(ConfigSchema.safeParse({ retriever: { min_fts_terms: 1.5 } }).success).toBe(false)
-    // DESIGN §20.19 / the tool contract: the floors must not leak into a model-visible schema.
+    // DESIGN §20.19 / the tool contract: the CONFIG knob names must not leak into a model-visible
+    // schema. The per-call profile is a different thing and IS model-facing — an enum, not the
+    // numbers — because the model needs the documented escape hatch when the floors empty its query.
     const toolSchemas = JSON.stringify([REMEMBER_TOOL, RECALL_TOOL, ADMIN_TOOL, KB_TOOL, KB_ADD_TOOL, QUERY_TOOL])
     expect(toolSchemas).not.toMatch(/min_semantic_similarity|min_fts_terms|min_jaccard/)
+    for (const spec of [RECALL_TOOL, QUERY_TOOL]) {
+      const schema = toolInputJsonSchema(spec) as { properties: Record<string, { enum?: string[] }> }
+      expect(schema.properties.floors?.enum).toEqual([...FLOOR_PROFILES])
+    }
+    expect(RECALL_TOOL.input.safeParse({ action: 'search', query: '我是谁', floors: 'loose' }).success).toBe(true)
+    expect(RECALL_TOOL.input.safeParse({ action: 'search', query: '我是谁', floors: 'wide' }).success).toBe(false)
+    expect(QUERY_TOOL.input.safeParse({ query: '我是谁', floors: 'strict' }).success).toBe(true)
+    expect(QUERY_TOOL.input.safeParse({ query: '我是谁', floors: 'wide' }).success).toBe(false)
   })
 
   it('bounds retrieval OUTPUT by default, and lets one call override the bound', () => {

@@ -25,7 +25,7 @@
  *
  * @module store/hybrid
  */
-import { DEGRADED_WEIGHTS, type Config, type RecallResult, type RetrievalFloorDrops, type RetrievalFloors } from '@avantf/mem-contract'
+import { DEGRADED_WEIGHTS, type Config, type FloorProfile, type RecallResult, type RetrievalFloorDrops, type RetrievalFloors } from '@avantf/mem-contract'
 import {
   fitToTokenBudget,
   fuse,
@@ -39,7 +39,8 @@ import {
   type Reranker,
   type SemanticBackend,
 } from '@avantf/mem-core'
-import { emptyFloorDrops, resolveFloors } from './floors.js'
+import { emptyFloorDrops, resolveFloors, totalFloorDrops } from './floors.js'
+import { relevanceTerms } from './lexical.js'
 
 /** The `limit` a caller gets when it passes nothing usable. */
 export const DEFAULT_SEARCH_LIMIT = 10
@@ -155,6 +156,16 @@ export interface HybridPlan {
   maxTokens?: number
   queryVector?: Float32Array
   /**
+   * Which relevance-floor policy governs this query (see the contract's `FLOOR_PROFILES`):
+   * omitted = the configured floors plus ONE relaxed pass when they empty the result, `'strict'` =
+   * no fallback, `'loose'` = the relaxed floors outright.
+   *
+   * The cross-store router pins a profile on every store call (`'strict'` for its first pass,
+   * `'loose'` for its second): only the MERGED result may decide whether relaxing is warranted, or a
+   * store that happens to be empty would inject its relaxed tail into another store's strict answer.
+   */
+  floors?: FloorProfile
+  /**
    * Emit a health event for this search (default true). The cross-store router sets it false: it
    * fuses both stores into ONE user-facing query and records a single `kind: 'cross'` event, so
    * `queries` counts questions instead of legs (DESIGN §20.5).
@@ -172,10 +183,16 @@ export interface HybridResult<H> {
   weights: RetrievalWeights
   /** Tokens the returned hits carry; `0` means "not computed" (an unlimited budget skips the pass). */
   used_tokens: number
-  /** The floors actually applied (post degraded-relaxation), for the caller's result envelope. */
+  /** The floors actually applied (post degraded-relaxation AND profile), for the result envelope. */
   floors: RetrievalFloors
   /** How many candidates each leg dropped below its floor. */
   dropped_by_floor: RetrievalFloorDrops
+  /**
+   * The strict pass returned nothing while having dropped candidates, and ONE relaxed pass supplied
+   * these hits — `floors` are that pass's values. An explicit `floors: 'loose'` request does NOT set
+   * this: the caller asked for the relaxed profile, so nothing was "relaxed behind its back".
+   */
+  relaxed?: boolean
 }
 
 /**
@@ -250,50 +267,91 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
     : DEGRADED_WEIGHTS
   const overFetch = Math.max(limit, plan.overFetch ?? limit * (retriever.over_fetch_factor || DEFAULT_OVER_FETCH_FACTOR))
   const legCap = legCapFor(deps.config, overFetch)
-  // Resolved ONCE and handed to the legs: the degraded relaxation of `min_fts_terms` must be the
-  // same value the result reports, or a caller cannot tell which rule produced an empty answer.
-  const floors = resolveFloors(retriever, semAvail)
+  // Computed once for both passes: the FTS bar is clamped to the terms this QUERY can produce (a
+  // 3-char CJK query has one trigram, so a configured 2 is unreachable for it).
+  const termCount = relevanceTerms(query).length
 
-  const legs = await runLegs(deps, {
-    query,
-    limit,
-    overFetch,
-    legCap,
-    semAvail,
-    weights,
-    floors,
-    ...(plan.queryVector === undefined ? {} : { queryVector: plan.queryVector }),
-  })
-  for (const leg of legs) if (leg.capped === true) recordLegCapped()
-  const droppedByFloor = emptyFloorDrops()
-  for (const leg of legs) {
-    if (leg.leg !== undefined && leg.droppedByFloor !== undefined) droppedByFloor[leg.leg] += leg.droppedByFloor
+  /**
+   * One full pass under ONE floor profile: legs → fuse → live filter → rerank → slice → budget.
+   *
+   * `onReturn` (the store's reinforcement) is deliberately NOT called here: the strict pass is a
+   * probe whenever a relaxed pass may follow, and reinforcing text the caller never receives is
+   * exactly the defect `onReturn`'s doc calls out. The chosen pass is delivered by the caller below.
+   */
+  const runPass = async (profile: FloorProfile): Promise<{ hits: Budgeted<H>[]; used_tokens: number; floors: RetrievalFloors; dropped_by_floor: RetrievalFloorDrops; capped: number }> => {
+    // Resolved per pass and handed to the legs: the degraded relaxation of `min_fts_terms` must be
+    // the same value the result reports, or a caller cannot tell which rule produced an empty answer.
+    const floors = resolveFloors(retriever, semAvail, { profile, termCount })
+    const legs = await runLegs(deps, {
+      query,
+      limit,
+      overFetch,
+      legCap,
+      semAvail,
+      weights,
+      floors,
+      ...(plan.queryVector === undefined ? {} : { queryVector: plan.queryVector }),
+    })
+    let capped = 0
+    for (const leg of legs) if (leg.capped === true) capped += 1
+    const droppedByFloor = emptyFloorDrops()
+    for (const leg of legs) {
+      if (leg.leg !== undefined && leg.droppedByFloor !== undefined) droppedByFloor[leg.leg] += leg.droppedByFloor
+    }
+    const fused = fuse(legs.map((leg) => ({ weight: leg.weight, scores: leg.scores })), overFetch)
+    const texts = deps.texts(fused.map((h) => h.id))
+    // Drop stale candidates (purged rows, vectors lingering in the index).
+    const live = fused.filter((h) => texts.has(h.id))
+    const ranked = (await rerankHits(deps.reranker, query, live, (id) => texts.get(id) ?? '')).slice(0, limit)
+    const hits = deps.hits(ranked, texts)
+    // The output budget is applied LAST: it must bound what the caller receives, and it is the only
+    // place that knows how much text the whole result carries (DESIGN §20).
+    const budgeted = applyOutputBudget(deps.config, hits, plan.maxTokens)
+    return { hits: budgeted.kept, used_tokens: budgeted.used_tokens, floors, dropped_by_floor: droppedByFloor, capped }
   }
 
-  const fused = fuse(legs.map((leg) => ({ weight: leg.weight, scores: leg.scores })), overFetch)
-  const texts = deps.texts(fused.map((h) => h.id))
-  // Drop stale candidates (purged rows, vectors lingering in the index).
-  const live = fused.filter((h) => texts.has(h.id))
-  const ranked = (await rerankHits(deps.reranker, query, live, (id) => texts.get(id) ?? '')).slice(0, limit)
-  const hits = deps.hits(ranked, texts)
-  // The output budget is applied LAST: it must bound what the caller receives, and it is the only
-  // place that knows how much text the whole result carries (DESIGN §20).
-  const budgeted = applyOutputBudget(deps.config, hits, plan.maxTokens)
-  deps.onReturn?.(budgeted.kept)
+  // THE RETRY RULE (DESIGN §20.19). The strict pass answers unless it returned NOTHING while having
+  // dropped candidates — the one shape in which a lower floor can help (a leg with no candidates at
+  // all cannot gain any from relaxing). The relaxed pass keeps an absolute bottom line, so an
+  // unrelated question still comes back empty instead of surfacing the archive. An explicit profile
+  // (`'strict'` / `'loose'`) suppresses the retry: the caller stated which pass it wants.
+  let chosen = await runPass(plan.floors === 'loose' ? 'loose' : 'strict')
+  let relaxed = false
+  if (plan.floors === undefined && chosen.hits.length === 0 && totalFloorDrops(chosen.dropped_by_floor) > 0) {
+    const loosened = await runPass('loose')
+    // Only a pass that actually produced something replaces the strict answer. If relaxing changes
+    // nothing, the caller gets the STRICT result — its `dropped_by_floor` is the honest "the floors
+    // removed N" report, and an empty query stays bit-identical to what it was before this rule.
+    if (loosened.hits.length > 0) {
+      chosen = loosened
+      relaxed = true
+    }
+  }
+  for (let i = 0; i < chosen.capped; i += 1) recordLegCapped()
+  deps.onReturn?.(chosen.hits)
 
   if (plan.recordStats !== false) {
     const rerank = rerankState(deps.reranker)
     recordRetrieval({
       kind: deps.kind,
-      results: budgeted.kept.length,
+      results: chosen.hits.length,
+      // Covers BOTH passes: the caller waited for the whole thing.
       latencyMs: Date.now() - startedAt,
       semanticLive: semAvail,
       rerankUsed: rerank.used,
       rerankFallback: rerank.fallback,
-      droppedByFloor,
+      droppedByFloor: chosen.dropped_by_floor,
     })
   }
-  return { hits: budgeted.kept, degraded: !semAvail, weights, used_tokens: budgeted.used_tokens, floors, dropped_by_floor: droppedByFloor }
+  return {
+    hits: chosen.hits,
+    degraded: !semAvail,
+    weights,
+    used_tokens: chosen.used_tokens,
+    floors: chosen.floors,
+    dropped_by_floor: chosen.dropped_by_floor,
+    ...(relaxed ? { relaxed: true } : {}),
+  }
 }
 
 /**

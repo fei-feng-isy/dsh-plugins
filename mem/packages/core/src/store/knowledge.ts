@@ -10,6 +10,7 @@ import {
   type Config,
   type DocumentDetail,
   type DocumentSummary,
+  type FloorProfile,
   type ImportResult,
   type IngestResult,
   type KbConflictReport,
@@ -61,6 +62,13 @@ export interface KnowledgeSearchOptions {
   queryVector?: Float32Array
   /** Per-call output token budget; `0` = unlimited, omitted = `retriever.max_output_tokens`. */
   maxTokens?: number
+  /**
+   * Relevance-floor profile: omitted = the default policy (configured floors, plus one relaxed pass
+   * if they empty the result — see `MemoryStore`'s `SearchInput.floors`), `'strict'` = no fallback,
+   * `'loose'` = the relaxed floors outright. The cross-store router passes a profile explicitly for
+   * each pass, because only the MERGED result can decide whether relaxing is warranted.
+   */
+  floors?: FloorProfile
   /** See `SearchInput.recordStats`: the cross-store router records the merged query once. */
   recordStats?: boolean
   /**
@@ -1273,6 +1281,7 @@ export class KnowledgeStore {
       maxTokens: opts?.maxTokens,
       queryVector: opts?.queryVector,
       recordStats: opts?.recordStats,
+      floors: opts?.floors,
     })
     opts?.onResult?.(result)
     return result.hits

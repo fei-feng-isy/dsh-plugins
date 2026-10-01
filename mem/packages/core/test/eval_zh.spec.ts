@@ -81,6 +81,17 @@ describe('zh relations eval (degraded FTS+entity path)', () => {
     // calibration is the semantic-LIVE scan in the CHANGELOG (0.40/0.45/0.50 tie; 0.55+ starts
     // blocking must-include answers), and `test/floors.spec.ts` pins the boundary behaviour on both
     // stores — NOT this degraded set.
+    //
+    // RE-VERIFIED AGAIN, still unchanged, for the §20.20 rules (auto-relax on an empty strict pass,
+    // and the FTS reachability clamp `min(configured, termCount)`). Both are no-ops HERE:
+    //   - the reachability clamp only bites when the semantic LEG IS UP and `min_fts_terms` > 1; this
+    //     spec runs degraded, where the configured FTS bar is already relaxed to 1, so the reported
+    //     `floors.fts` stays 1 and no row's verdict moves;
+    //   - these calls omit `floors`, i.e. they get the default policy, whose retry fires only when the
+    //     strict pass returned NOTHING while having dropped something — and the measured drop totals
+    //     above are all zero, so no query here ever takes the second pass.
+    // The rules themselves are pinned by `test/floors.spec.ts` (both stores) and by the semantic-LIVE
+    // measurements recorded in DESIGN §20.20.
     expect(report.summary).toEqual({
       n_queries: 35,
       mean_precision_at_k: 0.5666666666666667,

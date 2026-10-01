@@ -6,6 +6,12 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [0.4.0] - 2026-10-01
 
+### Fixed（「我是谁」搜不到自己的名字：门槛把答案切掉）
+- **严格档为空时自动放宽一次**（默认策略）：不传 `floors` 时先按配置的严格门槛跑，**当且仅当**一条都没命中、且 `dropped_by_floor` 总数 > 0（是门槛挡掉了候选，而不是本来就没有候选）时，用宽松档再跑一遍。宽松档仍有**绝对底线** `LOOSE_FLOORS = {semantic:0.40, fts:1, jaccard:0}`——0.40 卡在实测的无关查询余弦上界 0.384 与代词式提问「我是谁」的 0.444 之间，所以无关问题在两档下都为空。只有宽松档真的产出结果才替换答案，并置 `RecallResult.relaxed: true`、`floors` 回显**宽松档生效值**；放宽也救不回时返回严格档原结果（空查询与改动前逐位一致）。跨库 `kb_query` 的放宽决定**只做在合并结果上**（两 store 各自 pin 档位跑，否则空 store 会把放宽尾部注入另一 store 的严格命中）。动机与标定见 DESIGN §20.20。
+- **每查询的 `floors: 'strict' | 'loose'` 覆盖**（增量，不传=上面的默认策略）：`mem_recall.search` 与跨库 `kb_query` 都接受；`strict` = 配置门槛、不自动放宽，`loose` = 直接宽松档、不置 `relaxed`。UI 的查询面板加「严格 / 宽松」选择（默认严格），空结果时区分两种读数并给出行内提示：「严格门槛丢弃了 N 条，可切「宽松」重试」vs「（宽松档下）确实没有相关结果」。
+- **FTS 门槛可达性（结构性 bug）**：`min_fts_terms` 数的是"该行命中的不同查询词元数"，而 3 字 CJK 查询只产生 **1 个 trigram**，配置 2 结构性不可达、该腿对这类查询恒为空。生效门槛改为 `min(configured, relevanceTerms(query).length)`（词元数 0 时不判定；配置 0 仍是关闭）；判据集中在 `effectiveTermFloor` 一处，`resolveFloors`（回报）与 `applyTermFloor`（判定）共用。可观察变化：单词元查询的 `floors.fts` 从配置值变为 1。
+- `pinned` 事实**不做**门槛豁免：豁免只让事实进融合池、不加分，弱匹配/本该为空的查询里会填满尾部（等于"搜什么都能看到那几条档案"），噪音随 pinned 数量增长；已否决理由写在 DESIGN §20.20 与 `store/floors.ts` 注释里。
+
 ### Fixed（发布面：pack 步骤缺失，坏包发到了 npm）
 - `scripts/release-check.mjs` 的 STEPS 补上 **pack 步骤**（置于 old-dsh 之前）：此前 tarball 级断言（自包含、README/LICENSE、`workspace:` 残留、lib 杂物）在发布流程中**从不执行**——0.3.1 就是这样带着类型面破损发出去的。已核实 RC 侧跑的是同一脚本，无双重 pack。
 - 发布物类型面不再引用未发布私有包：新增 `scripts/carry-engine-types.mjs`，把声明闭包搬进 `lib/engine/` 并重指相对路径（链进 build）；`pack-plugin` 以**解析出的真实 specifier** 扫描 shipped `lib/types|engine`，`@avantf/*` 白名单只留已发布的底座 peer。实测：声明里对私有包的引用从 4+8+2+1 个文件降到 0（只剩底座）；`lib/types/**/*.js` 17 → 0。

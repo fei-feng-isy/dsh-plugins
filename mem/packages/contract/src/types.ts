@@ -169,6 +169,29 @@ export interface RetrievalFloorDrops {
   hrr: number
 }
 
+/**
+ * The floor profiles a retrieval CALL may ask for. There is deliberately no numeric per-call
+ * override: the two profiles are named policies, and their values live in ONE place
+ * (`@avantf/mem-core`'s `store/floors.ts`), so a caller cannot invent a third calibration.
+ *
+ *  - **omitted** — the default policy: the configured (strict) floors, and if they empty the result
+ *    while having dropped candidates, ONE relaxed pass over the absolute bottom line before
+ *    answering. `RecallResult.relaxed` marks that second pass.
+ *  - **`strict`** — the configured floors with NO fallback. This is what the UI's 严格 mode sends, so
+ *    the panel can show the honest strict outcome plus how many candidates the floors removed.
+ *  - **`loose`** — the relaxed floors outright (never "no floors": it still answers "nothing
+ *    relevant" for an unrelated question).
+ *
+ * Why a second pass exists at all. The floors are calibrated for paraphrase-style relevance, and
+ * there is a band where no threshold separates "answers the question" from "unrelated": measured on
+ * the live store, the fact answering 「我是谁」 scored cosine 0.444 while four unrelated queries
+ * topped out at 0.384 — a 0.06 margin, and the answering fact was the query's own top-1. A relaxed
+ * PASS is bounded (it runs only on an empty strict result and keeps its own floor); a lower default,
+ * or exempting the user's `pinned` archive from the floors, trades precision on every query.
+ */
+export const FLOOR_PROFILES = ['strict', 'loose'] as const
+export type FloorProfile = (typeof FLOOR_PROFILES)[number]
+
 export interface RecallResult {
   hits: RecallHit[]
   degraded: boolean
@@ -176,10 +199,18 @@ export interface RecallResult {
   /**
    * The effective relevance floors for this query, when it ran through the hybrid orchestration.
    * Absent on graph-only answers (`probe`/`chain`/`reason`/`related`), which never scored a leg.
+   * When {@link RecallResult.relaxed} is true these are the RELAXED values that produced the hits.
    */
   floors?: RetrievalFloors
   /** Per-leg candidates removed by those floors (see {@link RetrievalFloorDrops}). */
   dropped_by_floor?: RetrievalFloorDrops
+  /**
+   * The strict floors emptied this query's result and ONE relaxed pass supplied these hits (`floors`
+   * are that pass's values). Absent on an ordinary answer, on an explicit `floors: 'loose'` request
+   * (the caller asked for it) and on a graph-only answer. Its purpose is honesty at the UI: relaxed
+   * hits sit below the configured relevance bar and must not look as trustworthy as strict ones.
+   */
+  relaxed?: boolean
 }
 
 /**

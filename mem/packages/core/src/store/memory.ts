@@ -6,6 +6,7 @@ import {
   type FactDetail,
   type FactPage,
   type FactSummary,
+  type FloorProfile,
   type RecallHit,
   type RecallResult,
   type RememberResult,
@@ -190,6 +191,14 @@ export interface SearchInput {
   queryVector?: Float32Array
   /** Per-call output token budget; `0` = unlimited, omitted = `retriever.max_output_tokens`. */
   maxTokens?: number
+  /**
+   * Relevance-floor profile for this query. Omitted = the default policy: the configured (strict)
+   * floors, and if they empty the result while having dropped candidates, ONE relaxed pass
+   * (`store/floors.ts`'s `LOOSE_FLOORS`) before answering. `'strict'` asserts the configured floors
+   * with no fallback — what the UI's 严格 mode asks for, so the panel can show the honest strict
+   * outcome and the drop count. `'loose'` applies the relaxed floors outright.
+   */
+  floors?: FloorProfile
   /**
    * Emit a `kind: 'memory'` health event for this search (default true). The cross-store router
    * sets it false: it fuses this leg with the knowledge leg and records ONE `kind: 'cross'`
@@ -1094,6 +1103,7 @@ export class MemoryStore {
       maxTokens: input.maxTokens,
       queryVector: input.queryVector,
       recordStats: input.recordStats,
+      floors: input.floors,
     })
     return {
       hits: result.hits,
@@ -1101,6 +1111,7 @@ export class MemoryStore {
       weights: result.weights,
       floors: result.floors,
       dropped_by_floor: result.dropped_by_floor,
+      ...(result.relaxed === true ? { relaxed: true } : {}),
     }
   }
 

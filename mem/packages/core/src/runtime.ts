@@ -1,5 +1,6 @@
 import type {
   AdminRequest,
+  FloorProfile,
   KbAddRequest,
   KbConflictReport,
   KbRequest,
@@ -30,6 +31,7 @@ import { MEMORY_SCHEMA, openMemoryStore, type Db } from './db/conn.js'
 import { describeSqlite } from './db/sqlite.js'
 import { describeMigrationOutcome, wasUpgraded } from './db/store.js'
 import { looksRelevant, type RelevanceHit } from './store/lexical.js'
+import { emptyFloorDrops, totalFloorDrops } from './store/floors.js'
 import { MemoryStore } from './store/memory.js'
 import { KnowledgeStore } from './store/knowledge.js'
 import { crossQuery } from './router.js'
@@ -299,7 +301,7 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
     async recall(req: RecallRequest) {
       switch (req.action) {
         case 'search':
-          return this.memory.search({ query: req.query, category: req.category, limit: req.limit, maxTokens: req.max_tokens })
+          return this.memory.search({ query: req.query, category: req.category, limit: req.limit, maxTokens: req.max_tokens, floors: req.floors })
         case 'ask': {
           if (req.query) return this.memory.ask(req.query, req.limit ?? 10)
           if (!req.subj && !req.pred && !req.obj) {
@@ -431,34 +433,58 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
       // Defaulting here keeps the runtime honest on its own.
       const limit = req.limit ?? 10
       const queryVector = semantic.isAvailable() ? await semantic.encode(req.query) : undefined
-      // The knowledge store answers with hits only; capture its floor report so the ONE merged
-      // result can carry both stores' drops (the memory side brings its own on the result object).
-      let kbDroppedByFloor: RecallResult['dropped_by_floor']
-      const [memory, kb] = await Promise.all([
-        // The per-store budgets are lifted for the fusion pool: the router ranks the merged
-        // pool and applies the caller's budget to what it finally returns. `recordStats: false`
-        // for both legs: ONE user query must produce ONE health event (`kind: 'cross'`, below),
-        // or `queries`/`zero_result_rate`/`avg_latency` count legs — two per `kb_query` — and the
-        // knowledge leg's zero-result case was not counted at all.
-        this.memory.search({ query: req.query, limit: limit * 3, track: false, recordStats: false, queryVector, maxTokens: 0 }),
-        this.knowledge.search(req.query, {
+      /**
+       * ONE cross-store pass under ONE floor policy.
+       *
+       * The profile is pinned on both store calls (`'strict'` / `'loose'`) so neither store runs its
+       * own relaxed fallback: only the MERGED result may decide whether relaxing is warranted,
+       * otherwise a store that happens to be empty would inject its relaxed tail into an answer the
+       * other store filled strictly.
+       */
+      const crossPass = async (profile: FloorProfile): Promise<RecallResult> => {
+        // The knowledge store answers with hits only; capture its floor report so the ONE merged
+        // result can carry both stores' drops (the memory side brings its own on the result object).
+        let kbDroppedByFloor: RecallResult['dropped_by_floor']
+        const [memory, kb] = await Promise.all([
+          // The per-store budgets are lifted for the fusion pool: the router ranks the merged
+          // pool and applies the caller's budget to what it finally returns. `recordStats: false`
+          // for both legs: ONE user query must produce ONE health event (`kind: 'cross'`, below),
+          // or `queries`/`zero_result_rate`/`avg_latency` count legs — two per `kb_query` — and the
+          // knowledge leg's zero-result case was not counted at all.
+          this.memory.search({ query: req.query, limit: limit * 3, track: false, recordStats: false, queryVector, maxTokens: 0, floors: profile }),
+          this.knowledge.search(req.query, {
+            domain: req.domain,
+            source: req.source,
+            limit: limit * 3,
+            recordStats: false,
+            queryVector,
+            maxTokens: 0,
+            floors: profile,
+            onResult: (r) => { kbDroppedByFloor = r.dropped_by_floor },
+          }),
+        ])
+        return crossQuery(memory, kb, {
+          limit,
+          kind: req.kind ?? 'all',
           domain: req.domain,
           source: req.source,
-          limit: limit * 3,
-          recordStats: false,
-          queryVector,
-          maxTokens: 0,
-          onResult: (r) => { kbDroppedByFloor = r.dropped_by_floor },
-        }),
-      ])
-      const result = crossQuery(memory, kb, {
-        limit,
-        kind: req.kind ?? 'all',
-        domain: req.domain,
-        source: req.source,
-        maxTokens: req.max_tokens ?? config.common.retriever.max_output_tokens,
-        ...(kbDroppedByFloor === undefined ? {} : { kbDroppedByFloor }),
-      })
+          maxTokens: req.max_tokens ?? config.common.retriever.max_output_tokens,
+          ...(kbDroppedByFloor === undefined ? {} : { kbDroppedByFloor }),
+        })
+      }
+      // The retry rule lives HERE, not in the stores (see `crossPass`). An explicit profile
+      // suppresses it; an omitted one gets the strict pass, then ONE relaxed pass if the merged
+      // result was empty BECAUSE the floors dropped candidates.
+      let result = await crossPass(req.floors === 'loose' ? 'loose' : 'strict')
+      if (req.floors === undefined && result.hits.length === 0) {
+        const dropped = totalFloorDrops(result.dropped_by_floor ?? emptyFloorDrops())
+        if (dropped > 0) {
+          const loosened = await crossPass('loose')
+          // Only a pass that produced something replaces the strict answer: if relaxing changes
+          // nothing, the caller keeps the strict result and its honest "the floors removed N" report.
+          if (loosened.hits.length > 0) result = { ...loosened, relaxed: true }
+        }
+      }
       // The merged outcome is what the caller saw, so it is what the health counters describe:
       // `results` is the post-filter/post-budget count, and latency is the whole cross query
       // (both legs + encode + fusion), not one leg's share of it.

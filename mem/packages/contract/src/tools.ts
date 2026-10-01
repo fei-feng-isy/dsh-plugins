@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CATEGORY_VALUES, FACT_STATUSES, withoutRetentionDiagnostics } from './types.js'
+import { CATEGORY_VALUES, FACT_STATUSES, FLOOR_PROFILES, withoutRetentionDiagnostics } from './types.js'
 
 /**
  * The closed value sets these tools accept, exported so no other surface has to retype them.
@@ -21,6 +21,17 @@ const CATEGORY_HINT = `内置分类：${CATEGORY_VALUES.join(' / ')}；也可自
 
 export const CONTRADICTION_RESOLUTIONS = ['true_positive', 'false_positive'] as const
 export const QUERY_KINDS = ['all', 'fact', 'doc_chunk'] as const
+
+/**
+ * The one description both retrieval entry points use for `floors`.
+ *
+ * Written once because `mem_recall.search` and `kb_query` accept the same override, and a second
+ * copy is how the two surfaces drift (the model then reads two different meanings for one field).
+ */
+const FLOORS_FIELD_DESCRIPTION =
+  '相关性门槛档位（可选）。不传=默认策略：严格门槛，严格门槛一条都没命中而确有条目被门槛丢弃时自动再跑一次宽松门槛；'
+  + 'strict=只用严格门槛，无自动放宽；'
+  + 'loose=直接用宽松门槛（仍有绝对底线，代词式提问如「我是谁」「我司」属于这一类）。'
 
 /**
  * The longest retrieval query the contract accepts, in characters.
@@ -129,6 +140,7 @@ export const RecallUnion = z.discriminatedUnion('action', [
     category: z.string().optional().describe('限定分类；可选。'),
     limit: z.number().int().positive().max(50).optional().describe('返回条数上限（1-50）；可选。'),
     max_tokens: z.number().int().nonnegative().optional().describe('本次结果的总 token 上限；0=不限制。缺省用配置 retrieval.max_output_tokens。'),
+    floors: z.enum(FLOOR_PROFILES).optional().describe(FLOORS_FIELD_DESCRIPTION),
   }),
   z.object({
     action: z.literal('ask'),
@@ -283,6 +295,7 @@ export const QueryUnion = z.object({
   domain: z.string().optional().describe('限定知识域；可选。'),
   source: z.string().optional().describe('限定来源；可选。'),
   limit: z.number().int().positive().max(50).default(10).describe('返回条数上限（1-50）；可选，默认 10。'),
+  floors: z.enum(FLOOR_PROFILES).optional().describe(FLOORS_FIELD_DESCRIPTION),
 })
 export type QueryRequest = z.infer<typeof QueryUnion>
 

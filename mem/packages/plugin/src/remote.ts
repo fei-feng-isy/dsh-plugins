@@ -128,6 +128,10 @@ export const descriptors: readonly InvocationDescriptor[] = [
     category: optionalText.optional(),
     limit: count.optional(),
     max_tokens: count.optional(),
+    // `strict` / `loose` (see `FLOOR_PROFILES`): the client's 查询 panel sends this when the user
+    // switches to 宽松, and the contract validates the value host-side. Declared here because a
+    // strict codec PARSES these args and a zod object drops an undeclared key silently.
+    floors: optionalText.optional(),
   })),
   // admin: stats/list/detail/archive/restore/vectors_*/contradict_*/maintenance (defaults to 'list')
   //
@@ -185,6 +189,8 @@ export const descriptors: readonly InvocationDescriptor[] = [
     source: optionalText.optional(),
     limit: count.optional(),
     max_tokens: count.optional(),
+    // Same field as `recall`'s: the 查询 panel's 严格/宽松 control. See `FLOOR_PROFILES`.
+    floors: optionalText.optional(),
   })),
   // classifySource / browseDir: UI-only. The 知识 tab has ONE source input, so the host has to say
   // what a string IS (URL / file / directory / missing / pasted text) and let the user browse for a
