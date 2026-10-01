@@ -89,6 +89,10 @@ git add -A && git commit
 
 # 2) 版本 + CHANGELOG：版本只改一处 —— 本包自己的 package.json（组内其余 manifest 不带版本号）：
 pnpm version:set mem X.Y.Z
+#    base 组另有一份 **baked 常量**：`base/plugin-base/src/bootstrap.ts` 的 `export const VERSION`（零依赖
+#    bootstrap 不能在运行期读 package.json）。`pnpm version:set base X.Y.Z` 会一并改它，`pnpm version:check`
+#    会断言二者一致 —— 只改一边的话，base 自己的两条断言会失败、两棵树的 vendoring 会以
+#    "the base was built from a mismatched source tree" 停下（信息误导，实际是常量没跟）。
 #    CHANGELOG.md 把 [Unreleased] 的条目移进新节 `## [X.Y.Z] - YYYY-MM-DD`，顶部留一个空的 [Unreleased]
 #    （preflight 检查：版本只记在 packages/plugin 的 manifest 里、私有包不带版本 + 第一个版本节 == 包版本
 #      + [Unreleased] 无 `### ` 条目）

@@ -19,6 +19,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { repoRoot as root } from './lib/plugins.mjs'
+import { bakedVersionProblems, writeBakedVersion } from './lib/bootstrap-version.mjs'
 import { VERSION_GROUPS, groupManifests, publishableManifest, versionState } from './lib/versions.mjs'
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
@@ -41,9 +42,13 @@ function check() {
   for (const group of VERSION_GROUPS) {
     console.log(`  ${group.padEnd(5)} ${String(state.versions[group] ?? '?').padEnd(8)} ${state.carriers[group] ?? '(no carrier)'}`)
   }
-  for (const problem of state.problems) console.error(`  FAIL  ${problem}`)
-  if (state.problems.length > 0) {
-    console.error(`\nversion:check FAILED (${String(state.problems.length)})`)
+  // The base's version also exists as a constant baked into `src/bootstrap.ts`; `version:set` moves
+  // both, and this is the assertion that keeps a hand-edit from splitting them (see the module header
+  // of `lib/bootstrap-version.mjs` for what the split costs).
+  const problems = [...state.problems, ...bakedVersionProblems(root, state.versions)]
+  for (const problem of problems) console.error(`  FAIL  ${problem}`)
+  if (problems.length > 0) {
+    console.error(`\nversion:check FAILED (${String(problems.length)})`)
     process.exit(1)
   }
   console.log(`version:check ok — one file per group records it:\n  ${table(state)}`)
@@ -117,6 +122,8 @@ if (command === 'set') {
   manifest.version = version
   writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`)
   console.log(`  ${file}: ${String(was)} → ${version}`)
+  const baked = writeBakedVersion(root, group, version)
+  if (baked !== undefined) console.log(`  ${baked.file}: ${String(baked.was)} → ${version} (baked constant)`)
   console.log('next: cut mem/CHANGELOG.md if this is a mem release, then `pnpm sync:rc`')
   process.exit(0)
 }

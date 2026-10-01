@@ -4,6 +4,21 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-01
+
+### Fixed（发布面：pack 步骤缺失，坏包发到了 npm）
+- `scripts/release-check.mjs` 的 STEPS 补上 **pack 步骤**（置于 old-dsh 之前）：此前 tarball 级断言（自包含、README/LICENSE、`workspace:` 残留、lib 杂物）在发布流程中**从不执行**——0.3.1 就是这样带着类型面破损发出去的。已核实 RC 侧跑的是同一脚本，无双重 pack。
+- 发布物类型面不再引用未发布私有包：新增 `scripts/carry-engine-types.mjs`，把声明闭包搬进 `lib/engine/` 并重指相对路径（链进 build）；`pack-plugin` 以**解析出的真实 specifier** 扫描 shipped `lib/types|engine`，`@avantf/*` 白名单只留已发布的底座 peer。实测：声明里对私有包的引用从 4+8+2+1 个文件降到 0（只剩底座）；`lib/types/**/*.js` 17 → 0。
+- `lib/client.js.map`（650,321 B，内嵌 zod 内部与 client 源码）不再随包发布（从 `LIB_OK` 移除 + `files` 加否定）；sourcemap 仍构建，悬空 `sourceMappingURL` 在注释里写明是有意的。
+
+### Fixed（`$AVANTF_HOME`、坏配置与静默失败）
+- `$AVANTF_HOME` 现在 **trim + 展开 `~`**（`plugin/src/envinit.ts`）：此前原样返回，底座把 pandoc/模型装进相对的 `<cwd>/~/x/…`，而引擎侧展开同一字符串去读 `/home/<user>/x/…` —— 两条路各写一半（模型二次下载、pandoc 找不到）。
+- 配置文件 YAML 解析失败**不再静默**：`readYamlOrNull(path, logger)` 会 warn（路径 + 原因 + "整份文件被忽略"），值仍回落默认。安全旋钮（`local_roots` / `allow_outside_workspace` / `allow_private_network` / `trust.*`）此前可以被一次缩进手误悄悄改掉而毫无痕迹。
+- 知识库摄入替换事务改 `tx.immediate()`（与 memory 侧同形状的读-改-写一致）；`purgeArchived` 的两个互斥分支**共享一份预算**（此前各拼一份 LIMIT，单趟最多删 2× `tick_max_facts`，且 deferral 判据永假、backlog 漏报）；语料漂移定时器登记进 `ctx.effect` 清理并 unref；`provision/zip.ts` 的 DEFLATE 分支补运行时上限与声明大小比对。
+
+### Changed（zod 改为宿主提供的 required peer）
+- `zod` 从 `dependencies` 改为 **`peerDependencies`（required，`>=4.4.3 <5`）** + `devDependencies: catalog:`。宿主（dsh）自带一份 zod，用它的那份可以避免第二份副本带来的 schema 类型身份分叉。**下限已实测**：把根 catalog 临时降到 `4.4.3` → `pnpm install` → mem build/typecheck → contract/core/plugin 测试全部通过（随后恢复 `4.6.5`）。发布 README 相应增补"不要在 profile 里另装一份 zod"。
+
 ### Changed（检索相关性门槛：绝对分门槛打在融合之前，`0` = 关）
 - 三条检索腿各加一个**绝对门槛**，打在**每条腿的原始分**上、`fuse()` **之前**（`core/src/store/floors.ts`，
   经 `HybridContext.floors` 下发，两条 store 的腿各自应用）：语义腿余弦 `min_semantic_similarity`

@@ -35,6 +35,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VERSION_GROUPS, versionState } from './lib/versions.mjs'
+import { bakedVersionProblems } from './lib/bootstrap-version.mjs'
 import { baseDependencyProblems } from './lib/gates.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -211,6 +212,11 @@ if (problems.length === 0) {
 {
   const { versions, carriers, problems } = versionState(repo)
   for (const problem of problems) fail(problem)
+  // The base's version is ALSO baked into `src/bootstrap.ts` (the zero-dependency bootstrap cannot read
+  // package.json at runtime). `version:set base` moves both; this is the release-time assertion that
+  // they agree — a split makes base's own tests and every plugin's vendoring stop with the misleading
+  // "the base was built from a mismatched source tree".
+  for (const problem of bakedVersionProblems(repo, versions)) fail(problem)
   if (problems.length === 0) {
     note(`versions: ${VERSION_GROUPS.map((group) => `${group} ${String(versions[group])} (${String(carriers[group])})`).join(', ')}`)
   }
