@@ -20,6 +20,12 @@
   tarball 里绝不出现 `link:`/`file:`；`publishConfig.access` 是 `public`。
 - **只有一份 `zod`**：从根 `pnpm-workspace.yaml` 的 `catalog:` 解析（改 catalog，不改 `package.json`）；
   base 的 zod peer 保持 `>=4.4.3 <5`，同一份 base 既服务本仓、也服务宿主自带的那份。
+- **dsh 的启动门按 `peerDependencies` 判插件兼容，不兼容就禁用那一行**（dsh ≥ 0.2.0-rc.2；是禁用而非告警）。
+  判定实为 `semver.satisfies(runtime, range, { includePrerelease: true })`（`dsh-app-boot`），该选项把 caret 上界
+  写成 `-0`，所以 `^0.2.0-rc.2` = `>=0.2.0-rc.2 <0.3.0-0` **覆盖整条 0.2.x 线**（`0.2.1-rc.1`、0.2.x 正式版都放行）
+  ——**只有跨 minor 线（`0.3.0-rc.x`）才需要补一条** `|| ^0.3.0-rc.x`。另一侧安装期（pnpm/npm 默认不带
+  `includePrerelease`）更严：同线内的新 rc **tuple** 会给 unmet peer 告警，但那只是告警。补声明前先对那条线跑
+  `pnpm check:old-dsh <group> --floor <新线>` 与本机门禁实测能跑，再发 patch。
 
 ## 家族的三条硬约束
 

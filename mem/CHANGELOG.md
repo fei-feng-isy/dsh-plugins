@@ -4,6 +4,23 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-28
+
+### Fixed（dsh 0.2.0-rc 线：声明区间漏了新 rc 线）
+- **dsh peer 区间补上 `^0.2.0-rc.2`**（现为 `^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2`）：dsh 从 0.2.0-rc.2 起，
+  宿主的插件管理器在 boot 时读插件的 `peerDependencies` 判兼容，判不兼容就**直接禁用该插件行**
+  （`dsh: disabling profile plugin row "avantf-mem" … incompatible with dsh 0.2.0-rc.2`）。而按 semver 的预发布
+  规则，`^0.1.x` 的上界 `<0.2.0` 不接受 `0.2.0-rc.2`，于是插件**能跑却因声明被整行禁用**。已在本机对
+  0.2.0-rc.2 实测：`typecheck:dsh`、`test:dsh`、mount smoke 全绿，代码零改动——只有声明变，故为 patch。
+- 维护提示（**实测出来的，别凭直觉**）：dsh 的启动门用
+  `semver.satisfies(runtime, range, { includePrerelease: true })` 判定（`dsh-app-boot` 的 peer 检查）。该选项会把
+  caret 的上界写成 `-0` 形式，于是 `^0.2.0-rc.2` 实际是 `>=0.2.0-rc.2 <0.3.0-0`，**覆盖整条 0.2.x 线**：
+  `0.2.0-rc.5`、`0.2.1-rc.1`、`0.2.9-rc.3`、0.2.x 的正式版全部放行（逐条实测过）。**所以只有跨 minor 线**
+  （`0.3.0-rc.1` 出现时）**才需要补一条** `|| ^0.3.0-rc.x`，同线内的任何 dsh 更新都不必再发版。
+  另一侧比它更严的是**安装期**：pnpm/npm 默认**不带** includePrerelease（预发布必须同 tuple），所以同线内的新
+  rc tuple（`0.2.1-rc.1`）会给出 unmet peer 告警——那只是告警，不影响加载。补声明前先对那条线跑
+  `node ../scripts/check-old-dsh.mjs mem --floor <新线>` 与本机门禁，确认能跑再写。
+
 ## [0.3.0] - 2026-09-28
 
 ### Changed（条件提示合并为一条，判定塌成布尔）
