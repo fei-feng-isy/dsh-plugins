@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { ProvisionError } from '../errors.js'
 import { exists, linkOrCopy } from '../fs.js'
 import { verifyIntegrity } from '../integrity.js'
-import { isInside } from '../layout.js'
+import { isInside, assertSafeRelativePath } from '../layout.js'
 import { decodeJson, readInstallManifest } from '../manifest.js'
 import { DEFAULT_MAX_BYTES, candidateUrls, fetchImplOf, readCapped, signalFor } from '../net.js'
 import { assertPackageName } from '../package-name.js'
@@ -66,7 +66,9 @@ async function fetchPackument(ctx: ProviderContext, spec: NpmPackageSpec): Promi
     throw new ProvisionError('fetch/failed', `无法获取 packument：${url}（${error instanceof Error ? error.message : String(error)}）`)
   }
   if (!response.ok) throw new ProvisionError('fetch/failed', `packument ${url} 返回 HTTP ${String(response.status)}`)
-  const body: unknown = await response.json()
+  // Metadata read through the same hard byte cap as a tarball: a hostile or broken mirror must not be
+  // able to OOM the host with an unbounded `response.json()`.
+  const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response, DEFAULT_MAX_BYTES))) as unknown
   const versions = typeof body === 'object' && body !== null ? (body as { versions?: unknown }).versions : undefined
   if (typeof versions !== 'object' || versions === null) {
     throw new ProvisionError('fetch/failed', `packument ${url} 没有 versions`)
@@ -187,35 +189,64 @@ async function packageVersionOf(ctx: ProviderContext, dir: string): Promise<stri
   }
 }
 
-/** Walk up from a resolved entry to the owning package directory. */
-function packageDirOf(entry: string, name: string): string | undefined {
-  let dir = dirname(entry)
+/** Does `dir` end with the package's path segments? Compares segments, not a raw string suffix.
+ *
+ *  `dir.endsWith(name)` never matched a scoped peer on Windows (`…\node_modules\@scope\pkg` does not
+ *  end with `@scope/pkg`), so peer resolution silently fell through. Comparing the trailing segments
+ *  on forward slashes works with either separator; no match stays a `peer/unsatisfied` (fail-closed). */
+function dirIsPackage(dir: string, name: string): boolean {
+  const wanted = name.split('/')
+  const got = dir.replaceAll('\\', '/').replace(/\/+$/, '').split('/')
+  if (got.length < wanted.length) return false
+  const tail = got.slice(got.length - wanted.length)
+  return tail.every((segment, index) => segment === wanted[index])
+}
+
+/** Walk up from a resolved entry to the owning package directory.
+ *
+ *  The candidate is checked BEFORE stepping up (the entry usually sits directly in the package), and
+ *  `dirnameImpl` is the platform `dirname` so the win32 separator path is covered from Linux. */
+export function packageDirOf(entry: string, name: string, dirnameImpl: (path: string) => string = dirname): string | undefined {
+  let dir = dirnameImpl(entry)
   for (let depth = 0; depth < 6; depth += 1) {
-    if (dir === dirname(dir)) return undefined
-    dir = dirname(dir)
-    if (dir.endsWith(name)) return dir
+    if (dirIsPackage(dir, name)) return dir
+    const parent = dirnameImpl(dir)
+    if (parent === dir) return undefined
+    dir = parent
   }
   return undefined
 }
 
-/** Resolve a peer directory from the caller's tree, falling back to an entry walk-up. */
-function resolvePeerDir(peer: string): string | undefined {
-  const roots = [join(process.cwd(), 'noop.js'), import.meta.url]
-  for (const root of roots) {
+/** Resolve a peer directory from this module's tree, falling back to the host CWD with a warning.
+ *
+ *  The order matters: `import.meta.url` is the tree that actually loaded this provider, while the CWD
+ *  is wherever the host happened to start. A peer resolved from the CWD becomes an ABSOLUTE symlink
+ *  inside the published version directory (see {@link linkPeers}); it dangles the moment the host
+ *  starts elsewhere or that tree is removed, and it made "one zod" depend on the launch directory.
+ *  The CWD stays as a last resort, but never silently. */
+function resolvePeerDir(peer: string, ctx: ProviderContext): string | undefined {
+  const from = (root: string): string | undefined => {
     try {
       return dirname(createRequire(root).resolve(`${peer}/package.json`))
     } catch {
       // fall through to the entry walk-up
     }
-  }
-  for (const root of roots) {
     try {
       const entry = createRequire(root).resolve(peer)
-      const dir = packageDirOf(entry, peer)
-      if (dir !== undefined) return dir
+      return packageDirOf(entry, peer)
     } catch {
-      // not resolvable from this root
+      return undefined
     }
+  }
+  const own = from(import.meta.url)
+  if (own !== undefined) return own
+  const cwd = join(process.cwd(), 'noop.js')
+  const fromCwd = from(cwd)
+  if (fromCwd !== undefined) {
+    ctx.logger.warn(
+      `peer ${peer} 只能从宿主启动目录解析到（${process.cwd()} → ${fromCwd}）；发布物里嵌的是该位置的绝对链接，换目录/卸载后会悬空`,
+    )
+    return fromCwd
   }
   return undefined
 }
@@ -235,7 +266,7 @@ async function linkPeers(
     assertPackageName(peer, 'peer 名')
     const declared = spec.peers?.find(candidate => candidate.name === peer)
     const optional = meta[peer]?.optional === true || declared?.optional === true
-    const dir = declared?.dir ?? resolvePeerDir(peer)
+    const dir = declared?.dir ?? resolvePeerDir(peer, ctx)
     if (dir === undefined) {
       if (optional) continue
       throw new ProvisionError('peer/unsatisfied', `peer ${peer}@${range} 不可满足（调用方未解析该 peer，也没有提供目录）`)
@@ -354,7 +385,16 @@ export function npmPackageProvider(options: { readonly id?: string } = {}): Prov
           ctx.logger.warn(`unverifiable: ${versionDir} 的 install.json 没有 integrity；按可用处理`)
         }
         const relativeEntry = manifest.entryDir ?? `node_modules/${spec.name}`
+        // The read-back side of the same check `publish()` runs on write: an `install.json` whose
+        // entryDir is absolute or `..`-escaping must not be joined into a path at all.
+        try {
+          assertSafeRelativePath(relativeEntry)
+        } catch {
+          ctx.logger.warn(`install.json 的 entryDir 不安全，已跳过：${relativeEntry}（${versionDir}）`)
+          continue
+        }
         const entryDir = join(versionDir, ...relativeEntry.split('/'))
+        if (!isInside(versionDir, entryDir)) continue
         // A copy whose entry directory is missing is not usable.
         if (!(await exists(ctx.fs, entryDir))) continue
         candidates.push({

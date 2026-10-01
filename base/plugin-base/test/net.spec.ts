@@ -6,11 +6,66 @@
  *
  * @module test/net
  */
-import { describe, expect, it } from 'vitest'
-import { DEFAULT_MAX_BYTES, downloadBytes, readCapped } from '../src/net.js'
+import { describe, expect, it, vi } from 'vitest'
+import { DEFAULT_MAX_BYTES, DEFAULT_REQUEST_TIMEOUT_MS, downloadBytes, readCapped, signalFor } from '../src/net.js'
 import type { ProviderContext } from '../src/types.js'
 
 const bytesOf = (text: string): Uint8Array => new TextEncoder().encode(text)
+
+/** A context whose only meaningful field is the item policy. */
+function policyCtx(policy: ProviderContext['policy'], signal?: AbortSignal): ProviderContext {
+  return {
+    home: '/tmp/unused',
+    logger: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined },
+    policy,
+    fs: undefined as never,
+    ...(signal === undefined ? {} : { signal }),
+  } as unknown as ProviderContext
+}
+
+describe('signalFor：ItemPolicy.timeoutMs 的三种语义', () => {
+  it('未声明 ⇒ 现状 300s（DEFAULT_REQUEST_TIMEOUT_MS）', () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      signalFor(policyCtx({}))
+      expect(spy).toHaveBeenCalledWith(DEFAULT_REQUEST_TIMEOUT_MS)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('声明正数 ⇒ 覆盖请求超时', () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      signalFor(policyCtx({ timeoutMs: 5_000 }))
+      expect(spy).toHaveBeenCalledWith(5_000)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('0 ⇒ 不限：不排超时定时器，且调用方 signal 原样透传', () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      const own = new AbortController()
+      expect(signalFor(policyCtx({ timeoutMs: 0 }))).toBeInstanceOf(AbortSignal)
+      expect(signalFor(policyCtx({ timeoutMs: 0 }, own.signal))).toBe(own.signal)
+      expect(spy).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('非法值（负数）按未声明处理，回落到 300s', () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      signalFor(policyCtx({ timeoutMs: -1 }))
+      expect(spy).toHaveBeenCalledWith(DEFAULT_REQUEST_TIMEOUT_MS)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
 
 describe('readCapped：声明长度与实际上限', () => {
   it('声明长度与实读一致 ⇒ 通过', async () => {
@@ -62,7 +117,7 @@ describe('downloadBytes：下载期的进度可见（DSH Desktop 上曾空转 8 
       },
       policy: {},
       fs: undefined as never,
-      fetch: async (input: RequestInfo | URL) => {
+      fetch: async (input: Parameters<typeof fetch>[0]) => {
         const url = String(input)
         if (failing.includes(url)) return new Response('', { status: 503 })
         return new Response('ok', { status: 200, headers: { 'content-length': '2' } })

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ProvisionError } from '../src/errors.js'
 import { defaultFs } from '../src/fs.js'
-import { extractTarGz } from '../src/tar.js'
+import { assertLinkStaysInside, extractTarGz } from '../src/tar.js'
 import { tarGz } from './helpers/tar.js'
 
 describe('tar 解包', () => {
@@ -46,6 +46,31 @@ describe('tar 解包', () => {
     const archive = tarGz([{ name: 'package/link', type: '2', link: '../../outside' }])
     await expect(extractTarGz(archive, join(root, 'out'), defaultFs(), { strip: 1 })).rejects.toMatchObject({
       code: 'archive/path-traversal',
+    })
+  })
+
+  describe('符号链接判定的 win32 形态（显式断言；仍需 Windows 实机复核）', () => {
+    it('win32 反斜杠路径的子目录链接不再被误判越界', () => {
+      // Old code: posix.relative('C:\\dest','C:\\dest\\sub') === '../C:\\dest\\sub' → every
+      // sub-directory symlink was rejected on Windows.
+      expect(() => {
+        assertLinkStaysInside('C:\\dest', 'C:\\dest\\sub', 'target')
+      }).not.toThrow()
+      expect(() => {
+        assertLinkStaysInside('C:\\dest', 'C:\\dest', 'a/b/target')
+      }).not.toThrow()
+    })
+
+    it('win32 反斜杠的 `..` 目标仍被拒绝（fail-closed）', () => {
+      expect(() => {
+        assertLinkStaysInside('C:\\dest', 'C:\\dest\\sub', '..\\..\\evil')
+      }).toThrow(ProvisionError)
+    })
+
+    it('UNC 目标按绝对路径拒绝（旧代码不识别前导 `\\\\`）', () => {
+      expect(() => {
+        assertLinkStaysInside('C:\\dest', 'C:\\dest', '\\\\srv\\share\\payload')
+      }).toThrow(ProvisionError)
     })
   })
 })

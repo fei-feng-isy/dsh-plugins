@@ -8,7 +8,7 @@
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { readBootstrapVersion } from '../../scripts/lib/bootstrap-version.mjs'
 
@@ -17,11 +17,11 @@ const check = process.argv.includes('--typecheck')
 const packages = ['core', 'plugin']
 
 function compile(dir, project, noEmit) {
-  const tsc = join(dir, 'node_modules', '.bin', 'tsc')
   const args = ['-p', join(dir, project), ...(noEmit ? ['--noEmit'] : [])]
-  const result = spawnSync(tsc, args, { cwd: dir, stdio: 'inherit', env: process.env })
+  const launch = binLaunch(dir, 'tsc', args)
+  const result = spawnSync(launch.command, launch.args, { ...launch.options, cwd: dir, stdio: 'inherit', env: process.env })
   if (result.error) {
-    console.error(`  cannot run ${tsc}: ${result.error.message}`)
+    console.error(`  cannot run ${launch.command}: ${result.error.message}`)
     process.exit(1)
   }
   if (result.status !== 0) process.exit(result.status ?? 1)
@@ -40,27 +40,54 @@ function cleanGenerated() {
   }
 }
 
-if (!check) cleanGenerated()
+/**
+ * Launch one `node_modules/.bin` tool on `platform`.
+ *
+ * POSIX installs a `.bin/tsc` you can exec directly (a sh shim that `exec`s the real JS entry). On
+ * Windows the same path is that sh script — the runnable launchers are `tsc.cmd` / `tsc.ps1` — and
+ * since CVE-2024-27980 Node REFUSES to spawn a `.cmd`/`.bat` without a shell (EINVAL), so a failed
+ * build there read as a terminal "cannot run …\\.bin\\tsc". Naming `<name>.cmd` AND asking for the
+ * shell is the fix; both halves are a function of an INJECTED platform, so the win32 shape is
+ * asserted from Linux (`[win]` — a real Windows box still has to confirm it launches).
+ *
+ * `shell: true` hands the whole line to `cmd.exe`, which does not quote arguments for us: a
+ * workspace under `C:\\Users\\Foo Bar\\…` would otherwise split at the space, so win32 args go
+ * through {@link quoteForCmd}.
+ */
+export function binLaunch(dir, name, args, platform = process.platform) {
+  const shim = join(dir, 'node_modules', '.bin', name)
+  if (platform !== 'win32') return { command: shim, args, options: {} }
+  return { command: quoteForCmd(`${shim}.cmd`), args: args.map(quoteForCmd), options: { shell: true } }
+}
 
-for (const name of packages) {
-  const dir = join(repo, 'packages', name)
-  console.log(`\n▶ ${check ? 'typecheck' : 'build'} @avantf/mission-${name}`)
-  // Core emits even under --typecheck: the plugin resolves `@avantf/mission-core` to core's emitted declarations, so `--noEmit` here would check it against a stale core.
-  compile(dir, 'tsconfig.json', check && name !== 'core')
-  if (check) {
-    // Tests are transpiled without type-checking by vitest, so this is the only place their types are verified.
-    console.log(`\n▶ typecheck @avantf/mission-${name} (tests)`)
-    compile(dir, 'tsconfig.test.json', true)
+/** Best-effort `cmd.exe` quoting for one argument of a `shell: true` line. */
+export function quoteForCmd(arg) {
+  return /[\s"&|<>^()]/u.test(arg) ? `"${arg.replace(/"/gu, '""')}"` : arg
+}
+
+function main() {
+  if (!check) cleanGenerated()
+
+  for (const name of packages) {
+    const dir = join(repo, 'packages', name)
+    console.log(`\n▶ ${check ? 'typecheck' : 'build'} @avantf/mission-${name}`)
+    // Core emits even under --typecheck: the plugin resolves `@avantf/mission-core` to core's emitted declarations, so `--noEmit` here would check it against a stale core.
+    compile(dir, 'tsconfig.json', check && name !== 'core')
+    if (check) {
+      // Tests are transpiled without type-checking by vitest, so this is the only place their types are verified.
+      console.log(`\n▶ typecheck @avantf/mission-${name} (tests)`)
+      compile(dir, 'tsconfig.test.json', true)
+    }
   }
-}
 
-if (!check) {
-  copyVendoredBootstrap()
-  bundleHost()
-  inlineCoreTypes()
-}
+  if (!check) {
+    copyVendoredBootstrap()
+    bundleHost()
+    inlineCoreTypes()
+  }
 
-console.log(`\n${check ? 'typecheck' : 'build'}: ok`)
+  console.log(`\n${check ? 'typecheck' : 'build'}: ok`)
+}
 
 /**
  * The plugin is `tsc`-only, so the framework's `bootstrap.js` is a copied file imported by relative
@@ -105,27 +132,25 @@ function bundleHost() {
   const pluginDir = join(repo, 'packages', 'plugin')
   const entry = join(pluginDir, 'lib', 'index.js')
   const bundle = join(pluginDir, 'lib', 'index.bundle.js')
-  const esbuild = join(pluginDir, 'node_modules', '.bin', 'esbuild')
   const externals = ['@deepseek-ai/*', 'zod', '@avantf/dsh-plugin-base', './envinit-bootstrap.js']
   console.log('\n▶ inline @avantf/mission-core into the host entry')
-  const result = spawnSync(
-    esbuild,
-    [
-      entry,
-      '--bundle',
-      '--format=esm',
-      '--platform=node',
-      '--target=es2022',
-      // esbuild's default `charset=ascii` escapes the Chinese prompt text to `\uXXXX`: runtime-identical, but the artifact turns unreadable and `grep` can no longer find the prompt it carries.
-      '--charset=utf8',
-      `--outfile=${bundle}`,
-      '--log-level=warning',
-      ...externals.map((name) => `--external:${name}`),
-    ],
-    { cwd: pluginDir, stdio: 'inherit', env: process.env },
-  )
+  const launch = binLaunch(pluginDir, 'esbuild', [
+    entry,
+    '--bundle',
+    '--format=esm',
+    '--platform=node',
+    '--target=es2022',
+    // esbuild's default `charset=ascii` escapes the Chinese prompt text to `\uXXXX`: runtime-identical, but the artifact turns unreadable and `grep` can no longer find the prompt it carries.
+    '--charset=utf8',
+    `--outfile=${bundle}`,
+    '--log-level=warning',
+    ...externals.map((name) => `--external:${name}`),
+  ])
+  const result = spawnSync(launch.command, launch.args, {
+    ...launch.options, cwd: pluginDir, stdio: 'inherit', env: process.env,
+  })
   if (result.error) {
-    console.error(`  cannot run ${esbuild}: ${result.error.message}`)
+    console.error(`  cannot run ${launch.command}: ${result.error.message}`)
     process.exit(1)
   }
   if (result.status !== 0) process.exit(result.status ?? 1)
@@ -192,4 +217,9 @@ function inlineCoreTypes() {
     `  ${String(copied)} declaration file(s) → lib/mission-core, `
     + `${String(rewritten)} declaration file(s) repointed`,
   )
+}
+
+// Only run when executed as a script: importing this file (the launch tests do) must not build.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
 }

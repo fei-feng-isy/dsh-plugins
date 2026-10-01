@@ -77,6 +77,12 @@ describe('provision lint（静态规则）', () => {
     expect(rulesOf(manifest([{ ...npmItem, policy: { 'plugin:acme': 1 } }]))).not.toContain('lint/policy-key')
   })
 
+  it('policy.timeoutMs 已实现（不再报 unimplemented），concurrency/platforms 仍然未实现', () => {
+    expect(rulesOf(manifest([{ ...npmItem, policy: { timeoutMs: 0 } }]))).not.toContain('lint/policy-unimplemented')
+    expect(rulesOf(manifest([{ ...npmItem, policy: { concurrency: 2 } }]))).toContain('lint/policy-unimplemented')
+    expect(rulesOf(manifest([{ ...npmItem, policy: { platforms: ['linux-x64'] } }]))).toContain('lint/policy-unimplemented')
+  })
+
   it('spec 形状错误与非法 JSON', () => {
     expect(rulesOf(manifest([{ ...npmItem, spec: { name: 'x' } }]))).toContain('lint/spec-shape')
     expect(rulesOf(manifest([{ ...npmItem, kind: 'binary-archive', spec: { id: 'x' } }]))).toContain('lint/spec-shape')

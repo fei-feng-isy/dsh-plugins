@@ -6,8 +6,9 @@
  * @module test/layout
  */
 import { createHash } from 'node:crypto'
+import { win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { assertSafeRelativePath, assertSafeRelativeRoot, versionSegment } from '../src/layout.js'
+import { assertSafeRelativePath, assertSafeRelativeRoot, isInside, versionSegment } from '../src/layout.js'
 
 const digestOf = (name: string, version: string): string => createHash('sha256').update(`${name}@${version}`).digest('hex')
 
@@ -87,6 +88,31 @@ describe('磁盘布局原语', () => {
       for (const path of ['', '/abs', 'D:\\abs', '../escape', 'demo/../../escape']) {
         expect(codeOf(() => assertSafeRelativePath(path)), path).toBe('invalid-option')
       }
+    })
+  })
+
+  describe('isInside（win32 用 path.win32 显式注入；仍需 Windows 实机复核）', () => {
+    it('POSIX：普通子路径在内、父路径相等在内、跳出在外', () => {
+      expect(isInside('/home/u/.avantf/env', '/home/u/.avantf/env/tools/demo')).toBe(true)
+      expect(isInside('/home/u/.avantf/env', '/home/u/.avantf/env')).toBe(true)
+      expect(isInside('/home/u/.avantf/env', '/home/u/.avantf/evil')).toBe(false)
+      expect(isInside('/home/u/.avantf/env', '/home/u/.avantf')).toBe(false)
+    })
+
+    it('win32：跨盘恒不在内——旧代码的 `relative` 返回 `D:\\evil\\x`，不以 `..` 开头即被当作在内', () => {
+      // Measured: win32.relative('C:\\avantf\\env','D:\\evil\\x') === 'D:\\evil\\x'.
+      expect(isInside('C:\\avantf\\env', 'D:\\evil\\x', win32)).toBe(false)
+      expect(isInside('C:\\avantf\\env', 'D:\\evil\\x\\tools', win32)).toBe(false)
+    })
+
+    it('win32：同盘正常判定，且 UNC 共享不同即在外', () => {
+      expect(isInside('C:\\avantf\\env', 'C:\\avantf\\env\\tools\\demo', win32)).toBe(true)
+      expect(isInside('C:\\avantf\\env', 'C:\\avantf\\env', win32)).toBe(true)
+      expect(isInside('C:\\avantf\\env', 'C:\\avantf\\evil', win32)).toBe(false)
+      // Drive letters and UNC names are case-insensitive.
+      expect(isInside('C:\\Avantf\\Env', 'c:\\avantf\\env\\tools', win32)).toBe(true)
+      expect(isInside('\\\\srv\\share\\env', '\\\\srv\\share\\env\\tools', win32)).toBe(true)
+      expect(isInside('\\\\srv\\share\\env', '\\\\other\\share\\x', win32)).toBe(false)
     })
   })
 })

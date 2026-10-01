@@ -82,7 +82,20 @@ function readEntry(bytes: Uint8Array, entry: CentralEntry): Uint8Array {
   const start = local + 30 + nameLength + extraLength
   const end = start + entry.compressedSize
   const raw = bytes.subarray(start, end)
-  if (entry.method === 0) return raw
+  if (entry.method === 0) {
+    // A STORE entry's data IS the declared payload, so a truncated archive yields fewer bytes than
+    // the header promises — the same check the DEFLATE branch makes, and the same hard cap.
+    if (raw.byteLength !== entry.uncompressedSize) {
+      throw new ProvisionError(
+        'extract/failed',
+        `zip 条目 ${entry.name} 的实际大小 ${String(raw.byteLength)} 与头部声明 ${String(entry.uncompressedSize)} 不符`,
+      )
+    }
+    if (raw.byteLength > MAX_UNPACKED_BYTES) {
+      throw new ProvisionError('extract/failed', `zip 条目 ${entry.name} 超过上限 ${String(MAX_UNPACKED_BYTES)} 字节`)
+    }
+    return raw
+  }
   if (entry.method === 8) {
     try {
       const inflated = new Uint8Array(inflateRawSync(raw, { maxOutputLength: MAX_UNPACKED_BYTES }))

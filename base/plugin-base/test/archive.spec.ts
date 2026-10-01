@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -177,5 +177,85 @@ describe('binary-archive provider', () => {
     expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'verify/failed' })
     expect(await exists(fs, join(home, 'tools', 'demo', '1.0.0'))).toBe(false)
     expect(await fs.readdir(join(home, '.envinit', '.quarantine'))).toHaveLength(1)
+  })
+
+  // ── M2：探针必须解析 stdout，而不是把退出码当成"就是钉住的那个版本" ──────────────────────
+  it('PATH 上的同名二进制报告别的版本 ⇒ 不算命中（旧代码只看退出码即当作 1.0.0）', async () => {
+    const dir = join(home, 'fake-bin')
+    await mkdir(dir, { recursive: true })
+    const fake = join(dir, 'demo')
+    await writeFile(fake, '#!/bin/sh\necho demo 9.9.9\n')
+    await chmod(fake, 0o755)
+    const original = process.env['PATH']
+    process.env['PATH'] = dir
+    try {
+      const created = provisioner(archiveFetcher(new Uint8Array()))
+      created.declare({ plugin: 'mem', items: [item({ spec: { id: 'demo', version: '1.0.0', packs: {} } })] } as Manifest)
+      const report = await created.ensure({ offline: true })
+      expect(report.entries[0]).toMatchObject({ action: 'skipped', code: 'policy/offline' })
+      expect(created.resolve('mem:demo').state).toBe('skipped')
+    } finally {
+      if (original === undefined) delete process.env['PATH']
+      else process.env['PATH'] = original
+    }
+  })
+
+  it('输出合法版本号 ⇒ 命中', async () => {
+    const explicit = join(home, 'external', 'demo')
+    await mkdir(join(home, 'external'), { recursive: true })
+    await writeFile(explicit, '#!/bin/sh\necho demo 1.0.0\n')
+    await chmod(explicit, 0o755)
+    const created = provisioner(archiveFetcher(new Uint8Array()))
+    created.declare({ plugin: 'mem', items: [item({ spec: { id: 'demo', version: '1.0.0', entry: explicit, packs: {} } })] } as Manifest)
+    const report = await created.ensure({ offline: true })
+    expect(report.entries[0]).toMatchObject({ action: 'present', source: 'explicit', version: '1.0.0' })
+  })
+
+  it('versionArgs 为空 ⇒ 存在但版本未知（旧代码照抄 spec.version）', async () => {
+    const explicit = join(home, 'external', 'demo')
+    await mkdir(join(home, 'external'), { recursive: true })
+    await writeFile(explicit, '#!/bin/sh\necho demo 1.0.0\n')
+    await chmod(explicit, 0o755)
+    const created = provisioner(archiveFetcher(new Uint8Array()))
+    created.declare({ plugin: 'mem', items: [item({ spec: { id: 'demo', version: '1.0.0', entry: explicit, versionArgs: [], packs: {} } })] } as Manifest)
+    const report = await created.ensure({ offline: true })
+    expect(report.entries[0]).toMatchObject({ action: 'present', source: 'explicit' })
+    expect(report.entries[0]?.version).toBeUndefined()
+    const state = created.resolve('mem:demo')
+    expect(state.state).toBe('ready')
+    if (state.state === 'ready') expect(state.handle.version).toBeUndefined()
+  })
+
+  it('install.json 的 entry 跳出版本目录 ⇒ 不采信（旧代码会 join 到 home 之外）', async () => {
+    const versionDir = join(home, 'tools', 'demo', '1.0.0')
+    await mkdir(versionDir, { recursive: true })
+    await writeFile(
+      join(versionDir, 'install.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        name: 'demo',
+        version: '1.0.0',
+        dir: '1.0.0',
+        entry: '../../../outside/demo',
+        installed_at: new Date(0).toISOString(),
+        source: 'installed',
+        layout: 'v1',
+      }),
+    )
+    await mkdir(join(home, 'outside'), { recursive: true })
+    await writeFile(join(home, 'outside', 'demo'), '#!/bin/sh\necho demo 1.0.0\n')
+    await chmod(join(home, 'outside', 'demo'), 0o755)
+    const original = process.env['PATH']
+    process.env['PATH'] = ''
+    try {
+      const created = provisioner(archiveFetcher(new Uint8Array()))
+      created.declare({ plugin: 'mem', items: [item({ spec: { id: 'demo', version: '1.0.0', packs: {} } })] } as Manifest)
+      const report = await created.ensure({ offline: true })
+      expect(report.entries[0]).toMatchObject({ action: 'skipped', code: 'policy/offline' })
+      expect(created.resolve('mem:demo').state).toBe('skipped')
+    } finally {
+      if (original === undefined) delete process.env['PATH']
+      else process.env['PATH'] = original
+    }
   })
 })

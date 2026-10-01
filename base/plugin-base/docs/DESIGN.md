@@ -263,9 +263,15 @@ interface ProvisionerOptions {
 ```
 
 `ProvisionPolicy` 当前实际读取 `autoDownload`（整体或按 kind）、`mirrors`（`archive` / `npm` /
-`model` 三个网络）、`deadlineMs`；
+`model` 三个网络）、`deadlineMs` 与 `timeoutMs`（由核心从 `item.policy.timeoutMs` 填入）；
 `quotaBytes` / `trashGraceMs` / `gc` / `preloaded` / `packumentMirrors` 与 `ItemPolicy` 的
-`concurrency` / `timeoutMs` / `platforms` 尚未生效，设置它们会收到 `ignored-field` 告警。
+`concurrency` / `platforms` 尚未生效，设置它们会收到 `ignored-field` 告警。
+
+`ItemPolicy.timeoutMs` 是**每项的请求超时**（毫秒），作用于该项的每一次 HTTP 请求（packument /
+revision / siblings / tarball / 模型文件与归档）；缺省是 300 000ms，`0` 表示**不设超时**。
+它存在的理由：4 GiB 的模型上限在 300s 内需要持续 >14 MB/s，慢链路下永远装不上——声明
+`timeoutMs: 0` 是唯一能把"上限"与"超时"解耦的出口。`ctx.signal`（关闭 / 调用方中止）在任何取值下
+依然生效。
 `experimental().prune()` 是显式告警的 no-op：受管模型数据只增不减，`blobs` / `snapshots` 不回收，
 换一个 revision 就会再存一份。
 

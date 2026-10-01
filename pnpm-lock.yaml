@@ -456,10 +456,6 @@ importers:
         version: 2.1.1
 
   mission/packages/core:
-    dependencies:
-      zod:
-        specifier: 'catalog:'
-        version: 4.6.5
     devDependencies:
       typescript:
         specifier: 'catalog:'

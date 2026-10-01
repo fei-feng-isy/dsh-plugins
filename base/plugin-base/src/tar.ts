@@ -177,13 +177,20 @@ function stripSegments(relative: string, strip: number): string | undefined {
   return parts.slice(strip).join('/')
 }
 
-/** A symlink may point anywhere inside the destination, never outside it. */
-function assertLinkStaysInside(destination: string, fromDir: string, link: string): void {
-  if (link.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(link)) {
+/** A symlink may point anywhere inside the destination, never outside it.
+ *
+ *  Every path here is normalised to forward slashes before the POSIX computation, because on Windows
+ *  the destination/dir come from `path.join` (backslashes) and feeding those to `posix.relative`
+ *  yielded `../C:\…` — i.e. every sub-directory symlink was rejected. Normalising the link too keeps
+ *  a `..\..\evil` Windows-shaped target from being treated as one opaque segment (fail-closed). */
+export function assertLinkStaysInside(destination: string, fromDir: string, link: string): void {
+  const slash = (path: string): string => path.replaceAll('\\', '/')
+  const linkPath = slash(link)
+  if (linkPath.startsWith('/') || /^[a-zA-Z]:\//.test(linkPath)) {
     throw new ProvisionError('archive/path-traversal', `归档符号链接指向绝对路径：${link}`)
   }
-  const base = posix.relative(destination, fromDir)
-  const resolved = posix.normalize(posix.join(base === '' ? '.' : base, link))
+  const base = posix.relative(slash(destination), slash(fromDir))
+  const resolved = posix.normalize(posix.join(base === '' ? '.' : base, linkPath))
   if (resolved === '..' || resolved.startsWith('../')) {
     throw new ProvisionError('archive/path-traversal', `归档符号链接跳出目标目录：${link}`)
   }

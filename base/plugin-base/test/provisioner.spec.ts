@@ -1,11 +1,11 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultFs, exists } from '../src/fs.js'
 import { createProvisioner } from '../src/provisioner.js'
 import { npmPackageProvider } from '../src/providers/npm.js'
-import type { Manifest, Provider, ProvisionItem, ProvisionLogger, ProvisionPolicy } from '../src/types.js'
+import type { Manifest, ProbeResult, Provider, ProvisionItem, ProvisionLogger, ProvisionPolicy } from '../src/types.js'
 import { integrityOf, noNetwork, packageTarball, registryFor } from './helpers/registry.js'
 import { removeHome } from './helpers/tmp.js'
 
@@ -241,10 +241,92 @@ describe('createProvisioner × npm provider', () => {
     expect(code).toBeDefined()
 
     const status = JSON.parse(await readFile(join(home, '.envinit', 'status.json'), 'utf8')) as {
-      rows: Array<{ key: string; version: string; last_error?: { code: string } }>
+      rows: Array<{ key: string; version: string; items: string[]; last_error?: { code: string } }>
     }
     const row = status.rows.find((entry) => entry.items.includes('mem:demo'))
     expect(row?.version).toBe('')
     expect(row?.last_error?.code).toBe(code)
+  })
+
+  it('复用已存在版本目录时比对 integrity：不符即隔离并落盘本次校验过的 staging', async () => {
+    // 盘上那份的 install.json 说 1.0.0，但 integrity 不是本次下载并校验的值，且入口目录缺失
+    // （probe 因此不认它）。旧代码只比 version 就复用，接着 verify 失败、白下载一次；新代码隔离重取。
+    const versionDir = join(home, 'runtime', 'demo-pkg', '1.0.0')
+    await mkdir(versionDir, { recursive: true })
+    await writeFile(
+      join(versionDir, 'install.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        name: 'demo-pkg',
+        version: '1.0.0',
+        dir: '1.0.0',
+        integrity: 'sha512-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOL==',
+        entryDir: 'node_modules/demo-pkg',
+        installed_at: new Date(0).toISOString(),
+        source: 'installed',
+        layout: 'v1',
+      }),
+    )
+
+    const tarball = packageTarball()
+    const integrity = integrityOf(tarball)
+    const created = provisioner(registryFor('demo-pkg', '1.0.0', tarball, integrity))
+    created.declare(manifestOf([item()]))
+
+    const report = await created.ensure()
+    expect(report.entries[0]).toMatchObject({ action: 'installed' })
+    const install = JSON.parse(await readFile(join(versionDir, 'install.json'), 'utf8')) as { integrity?: string }
+    expect(install.integrity).toBe(integrity)
+    expect(await exists(fs, join(versionDir, 'node_modules', 'demo-pkg', 'index.js'))).toBe(true)
+    // The old directory was renamed aside, never deleted.
+    expect(await fs.readdir(join(home, '.envinit', '.quarantine'))).toHaveLength(1)
+  })
+
+  it('background 项的 rejection 在真正 handler 挂上之前就已被认领（不产生 unhandledRejection）', async () => {
+    // `ensure()` 要到隔着一次 persistStatus I/O 之后才挂真正的 .catch；窗口内 reject 曾是
+    // unhandledRejection（严格宿主上是 FATAL）。一个会抛的 getter 让 ensureOne 在 try/catch 之外
+    // reject，正好落在那个窗口里。
+    const seen: unknown[] = []
+    const listener = (reason: unknown): void => {
+      seen.push(reason)
+    }
+    process.on('unhandledRejection', listener)
+    try {
+      const boom: Provider = {
+        id: '@avantf/boom',
+        kinds: ['plugin:boom'],
+        identify: () => ({ name: 'boom' }),
+        targetDir: () => 'boom',
+        plan: () => ({ action: 'install' }),
+        probe: async (probedItem): Promise<ProbeResult> => {
+          if (probedItem.id === 'mem:ok') return { found: false }
+          return Object.defineProperty({}, 'found', {
+            get() {
+              throw new Error('boom')
+            },
+          }) as unknown as ProbeResult
+        },
+        install: async () => {
+          throw new Error('unused')
+        },
+        verify: async () => undefined,
+      }
+      const created = createProvisioner({ home, logger: silent, fs })
+      created.register(boom)
+      created.declare(
+        manifestOf([
+          { id: 'mem:ok', kind: 'plugin:boom', spec: {}, target: { root: 'runtime' }, schemaVersion: 1 },
+          { id: 'mem:bg', kind: 'plugin:boom', spec: {}, target: { root: 'runtime' }, schemaVersion: 1, startup: 'background' },
+        ]),
+      )
+
+      // The blocking item settles first, so the background rejection lands inside the persistStatus I/O.
+      const report = await created.ensure({ offline: true })
+      expect(report.entries[0]).toMatchObject({ action: 'skipped', code: 'policy/offline' })
+      await new Promise(resolve => setTimeout(resolve, 30))
+      expect(seen).toEqual([])
+    } finally {
+      process.off('unhandledRejection', listener)
+    }
   })
 })

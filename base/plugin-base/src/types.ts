@@ -47,6 +47,10 @@ export interface MirrorPolicy {
 export interface ItemPolicy {
   readonly mirrors?: MirrorPolicy
   readonly concurrency?: number
+  /** Per-request timeout in ms for this item's downloads; `0` = wait indefinitely, undeclared = 300 000.
+   *
+   *  It is the escape hatch a multi-gigabyte model needs on a link slower than 14 MB/s; the core
+   *  copies it into the provider's `policy.timeoutMs`, where `signalFor` reads it. */
   readonly timeoutMs?: number
   readonly platforms?: readonly string[]
   readonly [providerScopedKey: string]: unknown
@@ -209,6 +213,12 @@ export interface ProvisionPolicy {
   readonly kindProviders?: Readonly<Record<string, string>>
   readonly mirrors?: MirrorPolicy
   readonly packumentMirrors?: readonly string[]
+  /** Per-request timeout in ms for this item's downloads; `0` = wait indefinitely.
+   *
+   *  The core fills it from `item.policy.timeoutMs`; an item that does not declare one keeps the
+   *  300 000 ms default. It exists so a multi-gigabyte model on a slow link is not cut off by a
+   *  timeout sized for metadata. */
+  readonly timeoutMs?: number
   /** Startup critical-path budget in ms. Default 15 000. */
   readonly deadlineMs?: number
   readonly quotaBytes?: number

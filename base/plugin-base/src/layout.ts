@@ -3,7 +3,7 @@
  * @module layout
  */
 import { createHash } from 'node:crypto'
-import { join, relative, sep } from 'node:path'
+import { join, parse, relative, sep } from 'node:path'
 import { ProvisionError } from './errors.js'
 
 /** The control-plane directory name under `home`. */
@@ -51,10 +51,26 @@ export function quarantineDir(home: string, sequence: number): string {
   return join(quarantineRoot(home), `${String(Date.now())}-${String(process.pid)}-${String(sequence)}`)
 }
 
-/** Is `child` inside `parent` (or equal to it)? Both are absolute and already normalised. */
-export function isInside(parent: string, child: string): boolean {
-  const rel = relative(parent, child)
-  return rel === '' || (!rel.startsWith('..') && !rel.startsWith(`..${sep}`))
+/** The platform slice {@link isInside} needs; injected so win32 semantics are testable on Linux. */
+export interface PathSemantics {
+  parse(path: string): { readonly root: string }
+  relative(from: string, to: string): string
+  readonly sep: string
+}
+
+/**
+ * Is `child` inside `parent` (or equal to it)? Both are absolute and already normalised.
+ *
+ * The root comparison comes FIRST and is what makes this fail-closed on Windows: `win32.relative`
+ * answers a cross-drive/UNC pair with the other drive's absolute path (`D:\evil\x`), which does not
+ * start with `..`, so a bare relative check called every cross-root path "inside". `pathImpl` is a
+ * parameter only so the win32 branch is exercised from Linux; callers pass nothing.
+ */
+export function isInside(parent: string, child: string, pathImpl: PathSemantics = { parse, relative, sep }): boolean {
+  // Windows drive letters and UNC shares are case-insensitive; lowercasing a POSIX root is a no-op.
+  if (pathImpl.parse(parent).root.toLowerCase() !== pathImpl.parse(child).root.toLowerCase()) return false
+  const rel = pathImpl.relative(parent, child)
+  return rel === '' || (!rel.startsWith('..') && !rel.startsWith(`..${pathImpl.sep}`))
 }
 
 /** Reject a `target.root` that is absolute or escapes `home` (`invalid-option`). */

@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process'
 import { ProvisionError } from '../errors.js'
 import { exists } from '../fs.js'
 import { sriOfSha256 } from '../integrity.js'
+import { assertSafeRelativePath } from '../layout.js'
 import { decodeJson, readInstallManifest } from '../manifest.js'
 import { candidateUrls, downloadBytes, platformKey, verifySha256 } from '../net.js'
 import { extractTarGz } from '../tar.js'
@@ -111,12 +112,18 @@ function pathEnvOf(dir: string): Readonly<Record<string, string>> {
   return { PATH: `${dir}${delimiter}${process.env['PATH'] ?? ''}` }
 }
 
+/** One `--version` probe: its exit shape plus whatever the binary printed. */
+interface VersionProbeOutcome {
+  readonly outcome: 'ok' | 'failed' | 'timeout'
+  readonly stdout: string
+}
+
 /** Run the `--version` probe; `'timeout'` means the version is unknown. */
 function runVersionProbe(
   path: string,
   args: readonly string[],
   options: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
-): Promise<'ok' | 'failed' | 'timeout'> {
+): Promise<VersionProbeOutcome> {
   return new Promise(resolve => {
     execFile(
       path,
@@ -125,16 +132,42 @@ function runVersionProbe(
         timeout: options.timeoutMs ?? VERIFY_TIMEOUT_MS,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       },
-      error => {
+      (error, stdout) => {
+        const text = typeof stdout === 'string' ? stdout : ''
         if (error === null) {
-          resolve('ok')
+          resolve({ outcome: 'ok', stdout: text })
           return
         }
         const killed = (error as { killed?: boolean }).killed === true || (error as { code?: string }).code === 'ETIMEDOUT'
-        resolve(killed ? 'timeout' : 'failed')
+        resolve({ outcome: killed ? 'timeout' : 'failed', stdout: text })
       },
     )
   })
+}
+
+/**
+ * Version-shaped tokens in a probe's output (a leading `v` is part of the decoration, not the number).
+ *
+ * A version is confirmed by an EQUAL token, never by the exit code: any same-named binary on PATH
+ * answers `--version` with 0. An exact-token rule can only produce a false NEGATIVE (a tool that
+ * prints more precision than the spec pins, e.g. `1.0.0.1` for `1.0.0`), which degrades to "present,
+ * version unknown" — the same safe shape as a timeout.
+ */
+const VERSION_TOKEN = /(?:^|[^0-9A-Za-z])v?(\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)/g
+
+/** Does the probe output report exactly `expected`? */
+function reportsVersion(stdout: string, expected: string): boolean {
+  const wanted = expected.replace(/^v/, '')
+  for (const match of stdout.matchAll(VERSION_TOKEN)) {
+    if (match[1] === wanted) return true
+  }
+  return false
+}
+
+/** One line of probe output, for a warning that stays readable. */
+function firstLine(stdout: string): string {
+  const line = stdout.split('\n').find(candidate => candidate.trim() !== '')
+  return (line ?? '').trim().slice(0, 120)
 }
 
 /** Build the built-in binary-archive provider. */
@@ -166,12 +199,23 @@ export function binaryArchiveProvider(options: { readonly id?: string } = {}): P
       const binary = binaryOf(spec)
       const args = spec.versionArgs ?? ['--version']
 
-      // A PATH/explicit hit is confirmed with the same `--version` probe as verify.
+      // A PATH/explicit hit is confirmed by the `--version` probe's OUTPUT, not its exit code: any
+      // same-named binary exits 0, and trusting that made an arbitrary `pandoc` on PATH masquerade as
+      // the pinned version (its directory then went into PATH and status.json). A mismatch is a miss.
       const check = async (path: string): Promise<{ version?: string } | undefined> => {
-        if (args.length === 0) return { version: spec.version }
-        const outcome = await runVersionProbe(path, args, { timeoutMs: PROBE_TIMEOUT_MS, ...(ctx.signal === undefined ? {} : { signal: ctx.signal }) })
-        if (outcome === 'ok') return { version: spec.version }
-        if (outcome === 'timeout') {
+        // No probe command ⇒ the binary may exist, but there is no way to know its version. Say so
+        // (the same shape as a timeout) instead of copying the assertion in the spec.
+        if (args.length === 0) {
+          ctx.logger.warn(`${path} 未配置版本探针（versionArgs 为空）；按"存在但版本未知"处理`)
+          return {}
+        }
+        const probed = await runVersionProbe(path, args, { timeoutMs: PROBE_TIMEOUT_MS, ...(ctx.signal === undefined ? {} : { signal: ctx.signal }) })
+        if (probed.outcome === 'ok') {
+          if (reportsVersion(probed.stdout, spec.version)) return { version: spec.version }
+          ctx.logger.warn(`${path} 的 ${args.join(' ')} 未报告 ${spec.version}（输出：${firstLine(probed.stdout)}）；按未命中处理`)
+          return undefined
+        }
+        if (probed.outcome === 'timeout') {
           ctx.logger.warn(`${path} 的 ${args.join(' ')} 探针超时；按"存在但版本未知"处理`)
           return {}
         }
@@ -194,12 +238,20 @@ export function binaryArchiveProvider(options: { readonly id?: string } = {}): P
           if ((await ctx.fs.stat(manifestPath)) === undefined) continue
           const manifest = readInstallManifest(decodeJson(await ctx.fs.readFile(manifestPath)), BINARY_ARCHIVE_KIND)
           if (manifest === undefined || manifest.version !== spec.version) continue
-          // The manifest's entry is authoritative.
+          // The manifest's entry is authoritative — and the read-back side still validates it, so a
+          // hand-edited/corrupt install.json cannot point the join outside the version directory.
           const relative = manifest.entry ?? `bin/${binaryOf(spec, spec.packs[platformKey()])}`
-          const executable = join(root, entry, ...relative.split('/'))
+          let executable: string
+          try {
+            assertSafeRelativePath(relative)
+            executable = join(root, entry, ...relative.split('/'))
+          } catch {
+            ctx.logger.warn(`install.json 的 entry 不安全，已跳过：${relative}（${join(root, entry)}）`)
+            continue
+          }
           if (await exists(ctx.fs, executable)) {
             const dir = dirname(executable)
-            return { found: true, version: spec.version, dir, source: 'managed', env: pathEnvOf(dir) }
+            return { found: true, version: manifest.version, dir, source: 'managed', env: pathEnvOf(dir) }
           }
         }
       } catch {
@@ -276,20 +328,30 @@ export function binaryArchiveProvider(options: { readonly id?: string } = {}): P
       // The published entry is the manifest's.
       const manifest = readInstallManifest(decodeJson(await ctx.fs.readFile(join(resolved.dir, 'install.json'))), BINARY_ARCHIVE_KIND)
       const entry = manifest?.entry
-      const path = entry === undefined ? join(resolved.entryDir, binaryOf(spec)) : join(resolved.dir, ...entry.split('/'))
+      let path: string
+      if (entry === undefined) {
+        path = join(resolved.entryDir, binaryOf(spec))
+      } else {
+        try {
+          assertSafeRelativePath(entry)
+          path = join(resolved.dir, ...entry.split('/'))
+        } catch {
+          throw new ProvisionError('verify/failed', `install.json 的 entry 不安全：${entry}`)
+        }
+      }
       if (!(await exists(ctx.fs, path))) {
         throw new ProvisionError('verify/failed', `归档可执行物不存在：${path}`)
       }
       await ctx.fs.chmod(path, 0o755)
       const args = spec.versionArgs ?? ['--version']
       if (args.length === 0) return
-      const outcome = await runVersionProbe(path, args, { ...(ctx.signal === undefined ? {} : { signal: ctx.signal }) })
-      if (outcome === 'timeout') {
+      const probed = await runVersionProbe(path, args, { ...(ctx.signal === undefined ? {} : { signal: ctx.signal }) })
+      if (probed.outcome === 'timeout') {
         // A timeout leaves the binary usable; only a failed probe fails verification.
         ctx.logger.warn(`${path} 的 ${args.join(' ')} 探针超时；按可用处理`)
         return
       }
-      if (outcome === 'failed') {
+      if (probed.outcome === 'failed') {
         throw new ProvisionError('verify/failed', `${path} 的 ${args.join(' ')} 探针失败`)
       }
     },

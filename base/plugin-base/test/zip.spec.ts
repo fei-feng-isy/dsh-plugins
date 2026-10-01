@@ -45,4 +45,22 @@ describe('zip 解包', () => {
     const archive = new TextEncoder().encode('not a zip at all')
     await expect(extractZip(archive, join(root, 'out'), defaultFs())).rejects.toMatchObject({ code: 'extract/failed' })
   })
+
+  it('STORE 条目的实读大小与声明不符 ⇒ extract/failed（旧代码直接 `return raw`，静默写短文件）', async () => {
+    const archive = buildZip([{ name: 'pkg/plain.txt', data: 'stored' }])
+    // The central directory's uncompressedSize says the payload is longer than it is — a truncated
+    // archive. The DEFLATE branch always checked this; STORE did not.
+    const overstated = archive.slice()
+    let patched = false
+    for (let index = 0; index + 46 <= overstated.length; index += 1) {
+      if (overstated[index] === 0x50 && overstated[index + 1] === 0x4b && overstated[index + 2] === 0x01 && overstated[index + 3] === 0x02) {
+        const declared = overstated[index + 24] ?? 0
+        overstated[index + 24] = declared + 4
+        patched = true
+        break
+      }
+    }
+    expect(patched).toBe(true)
+    await expect(extractZip(overstated, join(root, 'out'), defaultFs(), { strip: 1 })).rejects.toMatchObject({ code: 'extract/failed' })
+  })
 })

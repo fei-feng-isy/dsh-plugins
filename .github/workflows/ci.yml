@@ -53,6 +53,14 @@ jobs:
       # the workspace's resolved semver (installed above with the frozen lockfile).
       - name: Gate logic self-tests
         run: node scripts/gates.test.mjs
+      # The three other self-test files the earlier waves added; without a step here a fixed gate
+      # exists only on the machine that ran it by hand.
+      - name: Toolchain self-tests (check-old-dsh cache key, preset drift, boundary guard)
+        run: node scripts/toolchain.test.mjs
+      - name: dsh-line coverage self-tests
+        run: node scripts/check-dsh-lines.test.mjs
+      - name: Mission build self-tests (win32 launcher shape)
+        run: node mission/scripts/build.test.mjs
       - name: Boundary guard (mem/ and mission/ never import each other)
         run: pnpm guard
       # Each group records its version in exactly ONE carrier manifest; this catches a second copy

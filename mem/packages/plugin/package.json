@@ -105,7 +105,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "prepublishOnly": "pnpm build",
   "repository": {
     "type": "git",
     "url": "git@gitee.com:ffeng86/dsh-plugins.git",

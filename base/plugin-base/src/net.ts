@@ -19,9 +19,21 @@ export const DEFAULT_MAX_BYTES = 256 * 1024 * 1024
 /** Default per-request timeout in milliseconds. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 300_000
 
-/** Combine the caller's `AbortSignal` with a timeout signal. */
-export function signalFor(ctx: ProviderContext, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): AbortSignal {
-  const timeout = AbortSignal.timeout(timeoutMs)
+/**
+ * Combine the caller's `AbortSignal` with a timeout signal.
+ *
+ * `timeoutMs` (or, when omitted, the item's `policy.timeoutMs`) is the item's per-request budget;
+ * an undeclared value keeps the 300 s default. `0` means NO timeout — the escape hatch a 4 GiB model
+ * needs on a link slower than 14 MB/s, which the fixed default could never finish. `ctx.signal`
+ * (shutdown/caller abort) still applies in every case.
+ */
+export function signalFor(ctx: ProviderContext, timeoutMs?: number): AbortSignal {
+  const configured = timeoutMs ?? ctx.policy.timeoutMs
+  if (configured === 0) {
+    return ctx.signal ?? new AbortController().signal
+  }
+  const effective = configured === undefined || !Number.isFinite(configured) || configured < 0 ? DEFAULT_REQUEST_TIMEOUT_MS : configured
+  const timeout = AbortSignal.timeout(effective)
   return ctx.signal === undefined ? timeout : AbortSignal.any([ctx.signal, timeout])
 }
 

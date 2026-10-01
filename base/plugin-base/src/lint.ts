@@ -11,10 +11,10 @@ import type { BuiltinKind } from './types.js'
 export const BUILTIN_KINDS: readonly string[] = ['npm-package', 'binary-archive', 'model-cache'] satisfies readonly BuiltinKind[]
 
 /** Item policy keys the core reads. */
-export const IMPLEMENTED_POLICY_KEYS: readonly string[] = ['mirrors']
+export const IMPLEMENTED_POLICY_KEYS: readonly string[] = ['mirrors', 'timeoutMs']
 
 /** Item policy keys the surface declares but this build does not read. */
-export const UNIMPLEMENTED_POLICY_KEYS: readonly string[] = ['concurrency', 'timeoutMs', 'platforms']
+export const UNIMPLEMENTED_POLICY_KEYS: readonly string[] = ['concurrency', 'platforms']
 
 /** Provision-policy keys the surface declares but this build does not read. */
 export const UNIMPLEMENTED_PROVISION_POLICY_KEYS: readonly string[] = [

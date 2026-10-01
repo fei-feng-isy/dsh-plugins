@@ -12,17 +12,17 @@
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, join, win32 } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { CAPABILITIES, createProvisioner, normalizeOnMissing } from '../src/provisioner.js'
 import { assertRange, satisfiesRange } from '../src/semver.js'
 import { defaultFs, exists } from '../src/fs.js'
 import { lintManifest } from '../src/lint.js'
 import { aliasLegacyManifest, readInstallManifest } from '../src/manifest.js'
-import { platformKey } from '../src/net.js'
+import { DEFAULT_MAX_BYTES, platformKey } from '../src/net.js'
 import { binaryArchiveProvider } from '../src/providers/archive.js'
 import { modelCacheProvider } from '../src/providers/model.js'
-import { npmPackageProvider } from '../src/providers/npm.js'
+import { npmPackageProvider, packageDirOf } from '../src/providers/npm.js'
 import type { InstallContext, Manifest, ProgressEvent, Provider, ProvisionItem, ProvisionLogger } from '../src/types.js'
 import { integrityOf, packageTarball, registryFor } from './helpers/registry.js'
 import { tarGz } from './helpers/tar.js'
@@ -1192,5 +1192,105 @@ describe('修复回归：provider 扫描与告警的进程外状态（P3）', ()
     expect(first.lines.filter(line => line.includes('unverifiable'))).toHaveLength(1)
     // The dedup state lives on the provider instance, so a fresh instance warns again (not once per process).
     expect(second.lines.filter(line => line.includes('unverifiable'))).toHaveLength(1)
+  })
+})
+
+describe('修复回归：2026-10-01 审核的静默与不设防（D 车道）', () => {
+  let home: string
+  const fs = defaultFs()
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'envinit-fix-'))
+  })
+  afterEach(async () => {
+    await removeHome(home)
+  })
+
+  it('packument 走硬字节上限 ⇒ fetch/too-large（旧代码无上限地 response.json()）', async () => {
+    const fetcher = (async () =>
+      new Response('{"versions":{}}', { status: 200, headers: { 'content-length': String(DEFAULT_MAX_BYTES + 1) } })) as unknown as typeof fetch
+    const created = createProvisioner({ home, logger: logger().log, fs, fetch: fetcher })
+    created.register(npmPackageProvider())
+    created.declare(manifestOf([npmItem()]))
+
+    const report = await created.ensure()
+    expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/too-large' })
+  })
+
+  it('model 的 revision/siblings 元数据同样有硬上限 ⇒ fetch/too-large（终局，不换源）', async () => {
+    const fetcher = (async () =>
+      new Response('{"sha":"x"}', { status: 200, headers: { 'content-length': String(DEFAULT_MAX_BYTES + 1) } })) as unknown as typeof fetch
+    const created = createProvisioner({ home, logger: logger().log, fs, fetch: fetcher })
+    created.register(modelCacheProvider())
+    created.declare(
+      manifestOf([{ id: 'mem:model', kind: 'model-cache', spec: { repo: 'org/model' }, target: { root: 'models' }, schemaVersion: 1 }]),
+    )
+
+    const report = await created.ensure()
+    expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/too-large' })
+  })
+
+  it('peer 只能从宿主启动目录解析到 ⇒ 告警一次（旧代码静默用 CWD）', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'envinit-cwd-'))
+    const peerDir = join(cwd, 'node_modules', 'phantom-peer')
+    await mkdir(peerDir, { recursive: true })
+    await writeFile(join(peerDir, 'package.json'), JSON.stringify({ name: 'phantom-peer', version: '1.0.0' }))
+    const tarball = packageTarball({ packageJson: { peerDependencies: { 'phantom-peer': '^1.0.0' } } })
+    const original = process.cwd()
+    process.chdir(cwd)
+    try {
+      const captured = logger()
+      const created = createProvisioner({
+        home,
+        logger: captured.log,
+        fs,
+        fetch: registryFor('demo-pkg', '1.0.0', tarball, integrityOf(tarball)),
+      })
+      created.register(npmPackageProvider())
+      created.declare(manifestOf([npmItem()]))
+
+      const report = await created.ensure()
+      expect(report.entries[0]).toMatchObject({ action: 'installed' })
+      expect(captured.lines.some(line => line.includes('宿主启动目录'))).toBe(true)
+    } finally {
+      process.chdir(original)
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('packageDirOf：win32 反斜杠下 scoped peer 也能匹配（旧代码 endsWith 永不匹配）', () => {
+    expect(packageDirOf('C:\\host\\node_modules\\@scope\\pkg\\dist\\index.js', '@scope/pkg', win32.dirname)).toBe(
+      'C:\\host\\node_modules\\@scope\\pkg',
+    )
+    // 同一个 off-by-one 修好后，入口就在包根时也能命中（旧循环先上跳一步再看）。
+    expect(packageDirOf('/host/node_modules/zod/index.js', 'zod')).toBe('/host/node_modules/zod')
+    expect(packageDirOf('/host/other/thing.js', 'zod')).toBeUndefined()
+  })
+
+  it('install.json 的 entryDir 逃出包目录 ⇒ 不采信（旧代码会 join 到 home 内别处）', async () => {
+    const versionDir = join(home, 'runtime', 'demo-pkg', '1.0.0')
+    await mkdir(versionDir, { recursive: true })
+    await writeFile(
+      join(versionDir, 'install.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        name: 'demo-pkg',
+        version: '1.0.0',
+        dir: '1.0.0',
+        entryDir: '../../outside',
+        installed_at: new Date(0).toISOString(),
+        source: 'installed',
+        layout: 'v1',
+      }),
+    )
+    await mkdir(join(home, 'runtime', 'outside'), { recursive: true })
+    await writeFile(join(home, 'runtime', 'outside', 'package.json'), JSON.stringify({ name: 'demo-pkg', version: '1.0.0' }))
+
+    const created = createProvisioner({ home, logger: logger().log, fs })
+    created.register(npmPackageProvider())
+    created.declare(manifestOf([npmItem()]))
+
+    const report = await created.ensure({ offline: true })
+    expect(report.entries[0]).toMatchObject({ action: 'skipped', code: 'policy/offline' })
   })
 })

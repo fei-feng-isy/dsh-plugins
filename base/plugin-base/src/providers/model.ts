@@ -218,7 +218,9 @@ async function resolveRevision(ctx: ProviderContext, spec: ModelCacheSpec): Prom
         problems.push(`${url} → HTTP ${String(response.status)}`)
         continue
       }
-      const body: unknown = await response.json()
+      // Metadata goes through the same hard byte cap as model data: an unbounded `response.json()`
+      // lets a broken or hostile mirror OOM the host before any integrity check can run.
+      const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response))) as unknown
       const sha = typeof body === 'object' && body !== null ? (body as { sha?: unknown }).sha : undefined
       if (!isSha(sha)) {
         problems.push(`${url} → 响应 sha 不是 40/64 位小写十六进制`)
@@ -226,6 +228,8 @@ async function resolveRevision(ctx: ProviderContext, spec: ModelCacheSpec): Prom
       }
       return sha
     } catch (error) {
+      // Crossing the byte cap is terminal: every endpoint serves the same oversized object.
+      if (error instanceof ProvisionError && error.code === 'fetch/too-large') throw error
       problems.push(`${url} → ${error instanceof Error ? error.message : String(error)}`)
     }
   }
@@ -251,7 +255,7 @@ async function listFiles(ctx: ProviderContext, spec: ModelCacheSpec): Promise<re
         problems.push(`${url} → HTTP ${String(response.status)}`)
         continue
       }
-      const body: unknown = await response.json()
+      const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response))) as unknown
       const siblings = typeof body === 'object' && body !== null ? (body as { siblings?: unknown }).siblings : undefined
       const names = Array.isArray(siblings)
         ? siblings.map(row => (typeof row === 'object' && row !== null ? (row as { rfilename?: unknown }).rfilename : undefined))
@@ -263,6 +267,8 @@ async function listFiles(ctx: ProviderContext, spec: ModelCacheSpec): Promise<re
       }
       return files
     } catch (error) {
+      // Crossing the byte cap is terminal: every endpoint serves the same oversized object.
+      if (error instanceof ProvisionError && error.code === 'fetch/too-large') throw error
       problems.push(`${url} → ${error instanceof Error ? error.message : String(error)}`)
     }
   }

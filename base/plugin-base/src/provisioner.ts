@@ -485,15 +485,21 @@ export function createProvisioner(options: ProvisionerOptions): Provisioner {
   /** The provisioner's own controller: `dispose()` aborts everything still in flight. */
   const shutdown = new AbortController()
 
-  /** The policy a provider sees for one item; item-level mirrors win per field. */
+  /** The policy a provider sees for one item; item-level fields win per field.
+   *
+   *  `timeoutMs` rides along so `signalFor(ctx)` can honour it without providers reaching into
+   *  `ProvisionItem`; `0` (= no timeout) and any illegal value are passed through as declared and
+   *  normalised once, in `signalFor`. */
   const policyFor = (item: ProvisionItem): ProvisionPolicy => {
+    const timeoutMs = item.policy?.timeoutMs
+    const withTimeout: ProvisionPolicy = timeoutMs === undefined ? policy : { ...policy, timeoutMs }
     const scoped = item.policy?.mirrors as Partial<MirrorPolicy> | undefined
-    if (scoped === undefined) return policy
+    if (scoped === undefined) return withTimeout
     const archive = scoped.archive ?? policy.mirrors?.archive ?? []
     const npm = scoped.npm ?? policy.mirrors?.npm
     const model = scoped.model ?? policy.mirrors?.model
     return {
-      ...policy,
+      ...withTimeout,
       mirrors: {
         archive,
         ...(npm === undefined ? {} : { npm }),
@@ -585,18 +591,30 @@ export function createProvisioner(options: ProvisionerOptions): Provisioner {
         const existing = await readManifestAt(target, item.kind)
         // Reuse only a manifest that describes *this* version; anything else is renamed aside.
         if (existing !== undefined && existing.version === meta.version) {
-          if (existing.integrity === undefined) {
-            logger.warn(`unverifiable: ${target} 的 install.json 没有 integrity（旧形状或未校验来源）；按可用处理，不隔离`)
+          // The staging tree this call just downloaded and verified is deleted in the `finally`, so
+          // "same version" is not enough: the bytes ON DISK were never checked. When both sides carry
+          // an integrity, a mismatch means the resident copy is not what this call verified — isolate
+          // it and publish the verified staging instead of trusting the version string.
+          if (meta.integrity !== undefined && existing.integrity !== undefined && existing.integrity !== meta.integrity) {
+            logger.warn(
+              `target 已存在但 install.json 的 integrity（${existing.integrity}）与本次校验值（${meta.integrity}）不符：隔离后重取（${target}）`,
+            )
+            await quarantine(target)
+          } else {
+            if (existing.integrity === undefined) {
+              logger.warn(`unverifiable: ${target} 的 install.json 没有 integrity（旧形状或未校验来源）；按可用处理，不隔离`)
+            }
+            return resolvedOf(declared, target, existing)
           }
-          return resolvedOf(declared, target, existing)
+        } else {
+          // Both branches are logged rather than renamed silently.
+          logger.warn(
+            existing === undefined
+              ? `target 已存在但没有可用的 install.json：隔离后重取（${target}）`
+              : `target 已存在但描述的是 ${existing.version}，期望 ${meta.version}：隔离后重取（${target}）`,
+          )
+          await quarantine(target)
         }
-        // Both branches are logged rather than renamed silently.
-        logger.warn(
-          existing === undefined
-            ? `target 已存在但没有可用的 install.json：隔离后重取（${target}）`
-            : `target 已存在但描述的是 ${existing.version}，期望 ${meta.version}：隔离后重取（${target}）`,
-        )
-        await quarantine(target)
       }
       await fs.mkdir(dirname(target))
       try {
@@ -867,6 +885,10 @@ export function createProvisioner(options: ProvisionerOptions): Provisioner {
         // Dispatched, not awaited: mark it `pending` and spend no budget on it.
         putPending(declared)
         background.push(promise)
+        // The real handler is installed in `ensure()` only after `await persistStatus()`; a rejection
+        // inside that window would be an unhandledRejection (FATAL on a strict host). This no-op
+        // catch claims the rejection now — `ensure()`'s `.catch` still does the real work.
+        void promise.catch(() => undefined)
         continue
       }
       let done = false
