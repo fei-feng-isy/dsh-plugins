@@ -41,7 +41,7 @@ export interface WorkerSessionDeps {
   /** Durable archive of one session. Absent in a deployment without a registry. */
   archive?(id: string): Promise<void>
   isLive(id: string): boolean
-  /** Root of the session store (`~/.dsh/sessions` by default). */
+  /** Root of the session store (`$DSH_HOME/sessions`, `~/.dsh/sessions` by default). */
   sessionsRoot: string
 }
 

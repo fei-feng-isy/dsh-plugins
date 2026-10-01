@@ -2,8 +2,9 @@
  * The relational access port — the ONE place the engine is allowed to say "a database".
  *
  * Stores, lifecycle code and DAOs depend on this interface, never on a driver class, so the
- * binding is an adapter (see `sqlite.ts`) rather than something smeared through 50 call
- * sites. This is deliberately NOT a query builder or an ORM: the SQL stays SQL (FTS5,
+ * database is ONE adapter (`sqlite.ts`, over the runtime's own `node:sqlite`) rather than a
+ * driver smeared through 50 call sites — and the contract that adapter owes is written down in that
+ * file. This is deliberately NOT a query builder or an ORM: the SQL stays SQL (FTS5,
  * `INDEXED BY`, partial indexes and `julianday` are load-bearing — see DESIGN §19), and the
  * port only fixes the *shape* of the conversation.
  *

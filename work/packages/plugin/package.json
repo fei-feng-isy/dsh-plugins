@@ -14,7 +14,8 @@
     "./client": {
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
-    }
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "files": [
     "lib/index.js",
@@ -24,7 +25,8 @@
     "lib/types",
     "lib/work-core",
     "README.md",
-    "lib/interface-version.json"
+    "lib/interface-version.json",
+    "cordis.patch.yml"
   ],
   "scripts": {
     "build": "node ../../scripts/build.mjs",
@@ -130,6 +132,9 @@
   },
   "author": "qunqi.ff",
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-ui-conversation",

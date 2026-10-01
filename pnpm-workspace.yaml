@@ -71,7 +71,10 @@ catalog:
   # declare gets bundled instead of imported, and a bundled native module does not load). The
   # duplication is the point — it keeps "what does this run on" to a single answer, and keeps the
   # native ones next to the `allowBuilds` entries they must stay in step with.
-  better-sqlite3: ^11.3.0
+  #
+  # NOT here, and not anywhere: a SQLite binding. The engine uses the runtime's own `node:sqlite`
+  # (see `mem/packages/core/src/db/sqlite.ts`), so the plugin has no NAN addon whose
+  # `NODE_MODULE_VERSION` could disagree with an Electron host.
   yaml: ^2.5.0
   # PDF text extraction (`kb_manage ingest/import` on a `.pdf`). One self-contained package with a
   # bundled pdfjs build — 2.1 MB unpacked, no external CMaps/font assets — that reads CJK CID fonts
@@ -86,7 +89,6 @@ catalog:
   "@modelcontextprotocol/sdk": ^1.11.0
 
 allowBuilds:
-  better-sqlite3: true
   esbuild: true
   hnswlib-node: true
   nodejieba: true

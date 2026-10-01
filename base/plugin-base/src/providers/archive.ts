@@ -2,7 +2,7 @@
  * The built-in `binary-archive` provider.
  * @module providers/archive
  */
-import { delimiter, dirname, join } from 'node:path'
+import { basename, delimiter, dirname, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { ProvisionError } from '../errors.js'
 import { exists } from '../fs.js'
@@ -247,7 +247,14 @@ export function binaryArchiveProvider(options: { readonly id?: string } = {}): P
       }
       const binDir = join(staging, 'bin')
       await ctx.fs.mkdir(binDir)
-      const target = join(binDir, binary)
+      // The name the archive ACTUALLY carries, not the declared one. A pack names its executable
+      // (`pandoc`) while a Windows archive ships `pandoc.exe`, and Windows cannot execute a PE image
+      // under a name without the extension: installing it as `bin/pandoc` made the mandatory
+      // `--version` probe fail and quarantined a freshly downloaded 223 MB tool (measured on DSH
+      // Desktop). The manifest records the real name, and `probe`/`verify` read the entry from there,
+      // so resolution follows it without a second rule.
+      const installed = basename(found)
+      const target = join(binDir, installed)
       await ctx.fs.copyFile(found, target)
       await ctx.fs.chmod(target, 0o755)
       await ctx.fs.rm(unpack, { recursive: true })
@@ -258,7 +265,7 @@ export function binaryArchiveProvider(options: { readonly id?: string } = {}): P
         integrity: sriOfSha256(pack.sha256),
         tarball: pack.url,
         source: 'installed',
-        entry: `bin/${binary}`,
+        entry: `bin/${installed}`,
         entryDir: 'bin',
       }
       return ctx.publish(staging, meta)

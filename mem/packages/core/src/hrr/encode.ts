@@ -29,7 +29,7 @@ export function hrrToBytes(vec: Float64Array): Buffer {
  *
  * Reads through a `DataView` instead of `new Float64Array(buf.buffer, buf.byteOffset, …)`:
  * that constructor requires an 8-byte-ALIGNED `byteOffset`, and nothing about a SQLite
- * BLOB promises one (better-sqlite3 happens to hand back offset-0 buffers today, but the
+ * BLOB promises one (the adapter hands back offset-0 views today, but the
  * callers here also pass plain `Uint8Array`s — a subarray or a pooled `Buffer` slice
  * would throw a RangeError from deep inside retrieval). A trailing partial element is
  * ignored, as before.

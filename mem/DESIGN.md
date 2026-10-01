@@ -324,7 +324,7 @@ avantf-mem/
 |---|---|
 | ONNX vs torch 嵌入非逐位等价 | 独立重算 + `reindex`；评估集验收 |
 | nodejieba POS 一致 | 实测 + 29 查询回归 |
-| `node:sqlite` 不保证 FTS5/trigram | 用 `better-sqlite3`；**建表前**做内存库 tokenizer 自检，`trigram` 不可用时降级 `unicode61` 并告警（不污染真实库、也不因 DDL 抛错而打不开库） |
+| `node:sqlite` 缺 FTS5 / 缺 `setAllowUnknownNamedParameters` | 启动探测 `sqliteProbe()` 先开一个内存库、建一张 fts5 表、再试绑一次多余命名参数，任一不满足即降级挂载并报出原因；`trigram` 另做**建表前**自检，不可用时降级 `unicode61` 并告警（不污染真实库、也不因 DDL 抛错而打不开库） |
 | 两库分离的跨库可比性 | 联合 min-max 归一化；插拔验证用例 |
 | client 页打包（外部包） | client 页为第一方 harness 模块 / workspace link |
 | 原生 ANN 绑定编译 | 提供 `local_numpy` 降级 + 构建前置文档 |
@@ -355,7 +355,13 @@ avantf-mem/
 
 ## 19. 数据库访问与 schema 生命周期
 
-**端口，而不是 DBHelper。** 引擎与数据库的对话面是 `db/port.ts` 的 `Db`：`prepare / exec / transaction / pragma / close` 五个方法（正是全仓实际用到的全部驱动 API：104 处 `prepare`、11 `exec`、9 `transaction`、6 `pragma`、4 `close`，且没有任何 `pluck/raw/iterate/columns/function` 之类的语句扩展）。`transaction()` 返回的 runner 带 `immediate()/deferred()/exclusive()`——presence 时钟与生命周期 tick 的跨进程 read-modify-write 必须用 `BEGIN IMMEDIATE`（两进程 presence 测试就是这条的守卫）。**唯一 import `better-sqlite3` 的文件是 `db/sqlite.ts`**：换绑定是一次适配器改动，而不是几十处调用点的散弹。
+**端口，而不是 DBHelper。** 引擎与数据库的对话面是 `db/port.ts` 的 `Db`：`prepare / exec / transaction / pragma / close` 五个方法（正是全仓实际用到的全部驱动 API：104 处 `prepare`、11 `exec`、9 `transaction`、6 `pragma`、4 `close`，且没有任何 `pluck/raw/iterate/columns/function` 之类的语句扩展）。`transaction()` 返回的 runner 带 `immediate()/deferred()/exclusive()`——presence 时钟与生命周期 tick 的跨进程 read-modify-write 必须用 `BEGIN IMMEDIATE`（两进程 presence 测试就是这条的守卫）。**数据库实现只有一个文件**（`db/sqlite.ts`）：引擎里再没有第二处知道"SQLite 是怎么被打开的"，换实现是一次适配器改动，而不是几十处调用点的散弹。
+
+**一个实现，一个端口（由 DSH Desktop 的 Electron 宿主促成，2026-10-01）。** `better-sqlite3` 是 NAN 扩展，`.node` 绑死在**一个** `NODE_MODULE_VERSION` 上；DSH Desktop 把 profile 宿主跑在 Electron 里（实测 Electron 44 的 `process.versions.modules = 149`，而 `dsh.cmd` 就是 `DeepSeek Harness.exe` + `ELECTRON_RUN_AS_NODE=1`），它的预编译产物只到 `electron-v132`，于是 `new Database(path)` 抛 "Could not locate the bindings file"，**整块记忆库不可用**。这类绑定**在原理上无法统一**——每个 Electron ABI 都要一份自己的产物，等于把"一个数据库系统"换成"一条 artifact 供应链"——所以引擎只跑运行时自带的 `node:sqlite`：它就在跑插件的那个进程里（实测 Node 22.23 = SQLite 3.51.3、Electron 44 = 3.53.1，两边 FTS5 与 `trigram` 都在），没有 ABI 可对不上，也没有第二条需要被证明"行为一致"的代码路径。**探测一次**（`db/sqlite.ts` 的 `sqliteProbe()`：开一个 `:memory:` 句柄，再验 FTS5 与"忽略未用命名参数"，三条拒绝分支由 `test/sqlite_adapter.spec.ts` 用假模块覆盖），结果写进 `runtime init` 行的 `sqlite=node:sqlite <版本>`。**一个真正的库文件打不开（损坏 / 被锁 / 更新版本的 schema）不算驱动问题**：它必须按原样报错并由插件降级挂载，否则等于把故障藏起来。原先的 `AVANTF_MEM_SQLITE_DRIVER` 与第二个适配器随之下线：只有一个实现时，"钉死用哪个"没有意义。
+
+**适配器欠下的契约**（`test/sqlite_adapter.spec.ts` 逐条断言；它们不是驱动怪癖，而是端口之上有调用者依赖的行为）：语句缓存（键是 SQL 文本、上限 2000、`close()` 清空——实测编译一条语句 6.03 µs vs 复用 0.31 µs，约 19 倍）；命名参数只承诺**裸 key + 任意 SQL 前缀**（带前缀的 JS key 不在契约里：它在不同 SQLite 封装之间的行为并不一致）；**BLOB 一律返回 `Buffer`**（`node:sqlite` 原生返回 `Uint8Array`，适配器用零拷贝视图归一化——`hrr/encode.ts`、`db/vectors.ts`、`hrrFromBytes` 的 `buf.buffer/byteOffset` 与 `Buffer.isBuffer` 判断都建立在这个形状上）；**语句未用到的命名参数被忽略**（DAOs 会把同一份参数对象交给用了不同子集的语句，`FactsDao.purgeArchived` 就是那条——这条也是探测会拒绝一个太老的 `node:sqlite` 的原因）；`transaction()` 在嵌套时退化成 `SAVEPOINT`，抛错回滚后原样抛出。
+
+**发布面：不再有 SQLite 依赖。** `better-sqlite3`（连同 `@types/better-sqlite3`、catalog 条目与 `allowBuilds` 项）已从两个 manifest 移除。这不是"少装一个依赖"，而是两类失败的消失：一是安装期——它作为普通依赖时 postinstall 在 Windows/Electron 上构建失败会让整单 `pnpm add` 非零退出、宿主安装器据此恢复 `package.json`/锁文件（插件根本装不进来），作为可选依赖时也只是把失败推迟到运行期；二是运行期——ABI 对不上就是整块记忆库不可用。依赖只有运行时，`engines` 写明 `node: ">=22.15.0 <23 || >=23.11.0"`（"免 flag"与"支持未用命名参数"两个下限的交集），低于它的宿主照常挂载并报出原因。`mem/scripts/pack-plugin.mjs` 仍把 `dependencies` 与 `optionalDependencies` 视作同一条"生产依赖"（自包含断言、死依赖断言都扫这两个区），少一个条目自动成立。
 
 **刻意不做的事**：不引查询构造器/ORM，也不抽象方言。FTS5（`trigram` + `bm25()` + 外部内容表与触发器）、`julianday`、`INSERT OR IGNORE`、部分唯一索引、`INDEXED BY` 都是**承载语义与性能**的 SQLite 特性（§7 的查询计划修复正是靠 `INDEXED BY`），把它们藏到 helper 后面只会更难表达；端口只固定"怎么调用"，SQL 仍是 SQL。**同步**同样是设计前提：`persistFact` 是一次全同步的写（事务内不 await），tick 是一次同步 pass，异步驱动不适配本端口——**矛盾检测刻意在事务提交之后**跑（`store/memory.ts` 的注释："After the commit, never inside the transaction"），所以它既不延长写锁、也不是"端口必须同步"的原因。（本节此前写成"`persistFact` 在事务内跑矛盾检测"，与代码相反；性能审查把这句话纠正成代码事实。）
 
@@ -366,7 +372,7 @@ avantf-mem/
 
 两条分支各有回归测试（active-day 分支需回填 `archived_clock`；calendar 分支用 `trust.enabled:false` + `purge_after_archived_days:0`，无需回填），另加"新库 DDL 不含该外键"的断言与"链过期后新进程仍能启动"的端到端用例（`test/lifecycle.spec.ts`）。
 
-**schema 生命周期（初始化 / 升级）**：`db/store.ts` 的 `openStoreDb({path, schema, tokenizer})` 统一执行"建目录 → 共享 PRAGMA（`foreign_keys`/`busy_timeout`/`WAL`/`synchronous`）→ 版本检查 → 逐个 step"，任何一步失败即关闭句柄（否则 better-sqlite3 会锁住文件）。版本存 `PRAGMA user_version`，同时把每个已应用 step 记进 `schema_migrations`（审计）；**step、它的版本号与审计行在同一个事务里**，所以不会出现"版本说升级了、数据却回滚了"。step 列表要求 1..N 连续且唯一（`validateMigrations`），配错在启动时就报错。**step 1 是基础 schema，必须保持幂等**：版本机制出现之前的库 `user_version = 0` 但表已在，adoption 只能是一次 no-op + 盖章；memory 的 step 2 是"每个配对只留一条 open 矛盾行"（先去重再建部分唯一索引，见 §11）。两个 store 现在只声明自己的 schema（`MEMORY_SCHEMA`/`KNOWLEDGE_SCHEMA`），不再各写一套 open。
+**schema 生命周期（初始化 / 升级）**：`db/store.ts` 的 `openStoreDb({path, schema, tokenizer})` 统一执行"建目录 → 共享 PRAGMA（`foreign_keys`/`busy_timeout`/`WAL`/`synchronous`）→ 版本检查 → 逐个 step"，任何一步失败即关闭句柄（否则那个句柄会继续持有 WAL 与它的锁）。版本存 `PRAGMA user_version`，同时把每个已应用 step 记进 `schema_migrations`（审计）；**step、它的版本号与审计行在同一个事务里**，所以不会出现"版本说升级了、数据却回滚了"。step 列表要求 1..N 连续且唯一（`validateMigrations`），配错在启动时就报错。**step 1 是基础 schema，必须保持幂等**：版本机制出现之前的库 `user_version = 0` 但表已在，adoption 只能是一次 no-op + 盖章；memory 的 step 2 是"每个配对只留一条 open 矛盾行"（先去重再建部分唯一索引，见 §11）。两个 store 现在只声明自己的 schema（`MEMORY_SCHEMA`/`KNOWLEDGE_SCHEMA`），不再各写一套 open。
 
 **启动即自动升级（可见 + 被守卫）**：`buildRuntime` 打开记忆库、`KnowledgeStore` 构造器打开知识库，两者都走 `openStoreDb`，所以**插件启动时数据库自动升到本构建的最新版本**，没有单独的"迁移命令"要运维记得跑。升级**发生**时各打一行只读诊断（英文，`[avantf-mem]` 口径）——`memory: schema upgraded 8 → 9 (applied: 9 contradiction-resolved-indexes)` / `knowledge: schema upgraded 1 → 2 (applied: 2 chunk-derived-state-provenance)`；**没有升级时不打**（库已最新是常态，每启动一行会淹掉信号），`describeMigrationOutcome` 仍能给出 `schema up to date (9)` 供测试断言。诊断由已返回的 `MigrationResult` 拼出，不碰数据库、不阻塞、不抛错。
 
@@ -386,7 +392,7 @@ avantf-mem/
 - **`resolveForFacts(ids)`**：每个归档 id 一条 UPDATE 的循环是 O(归档数 × 日志)，且在 tick 的**单个** IMMEDIATE 事务里（实测 1000 个 id、10 万 open 对：逐条 88.3 ms → 两条语句/500 个 id 的 6.6 ms，关闭 1859 行完全相同，因为"哪一侧匹配就用哪一侧做 loser"）。
 
 
-**预编译语句缓存（性能审查第 7 步）**：better-sqlite3 **没有**自己的语句缓存——每次 `prepare()` 都新建 `Statement` 并跑一次 `sqlite3_prepare_v3`（实测 6–8 µs，而复用一条语句只要 0.4 µs）。DAO 是按调用点现 prepare 的，一次检索约 20 条、一次写入 15–22 条，于是"编译"成了每次调用的固定税。缓存放在端口适配器里一处（`db/sqlite.ts`），键是 SQL 文本：键空间由代码里那 ~40 个 `.prepare(` 站点加上 `batches()` 产生的几种 `IN (...)` 宽度构成，天然有界；端口没有游标 API，所以复用语句对 `all`/`get`/`run` 都可重入；`close()` 时整表清空（语句依附于该句柄）。
+**预编译语句缓存（性能审查第 7 步）**：SQLite 封装**没有**自己的语句缓存——每次 `prepare()` 都要重新编译（实测在 `node:sqlite` 上 6.03 µs，而复用一条语句只要 0.31 µs，约 19 倍）。DAO 是按调用点现 prepare 的，一次检索约 20 条、一次写入 15–22 条，于是"编译"成了每次调用的固定税。缓存放在端口适配器里（`db/sqlite.ts` 一份，规则即契约），键是 SQL 文本：键空间由代码里那 ~40 个 `.prepare(` 站点加上 `batches()` 产生的几种 `IN (...)` 宽度构成，天然有界；端口没有游标 API，所以复用语句对 `all`/`get`/`run` 都可重入；`close()` 时整表清空（语句依附于该句柄）。
 
 **不存在 `count(sql)` / `query(sql)` 之类"把 SQL 交给调用方编译"的透传**：诊断报告要的每个数字也是 DAO 上意图命名的方法（`countActive` / `countPinnedActive` / `countForgettingWithin` / `countReinforcedToday` / `sumBonusGrantedToday` / `countIdleCandidates`）。透传看着省事，实际两头不占：SQL 文本留在 store 里，任何"统一批处理/加审计/改调用形状"的动作都还得回到 store 改，而 DAO 却接受任意语句（不批处理、不类型化、不可审计）。
 

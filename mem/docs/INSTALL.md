@@ -376,7 +376,7 @@ agent 把任意可读文件拉进语料库"。放开后 `~/.ssh/id_rsa`、浏览
 | 「选择」目录选择器 | ✅ 与 Linux 同一实现（宿主按摄入边界列举目录）；`C:\` 的上级停在自己 | ✅ 同左 |
 | 「编辑」/「打开目录」 | `cmd /c start ""` 交给系统默认程序；PATH 上的 `code`/`cursor` 会按 `PATHEXT`（`code.cmd`/`.exe`）探测 | `open` 交给默认程序；PATH 上的 `code`/`cursor` 直接可用 |
 | 摄入：文本 / PDF / pandoc 能读的文档格式 / xlsx / 编码识别 | ✅ 除 pandoc（受管外部二进制，启动时预装）外均为纯 JS（`unpdf` 自带 pdfjs，`exceljs` 纯 JS） | ✅ |
-| 必需的 `better-sqlite3` | ✅ 有预编译（`prebuild-install`），缺失时回退 `node-gyp`（需 VS Build Tools） | ✅ 预编译，回退需 Xcode CLT |
+| 存储层 | ✅ 无需任何原生模块：用运行时自带的 `node:sqlite`（Electron 44 与 Node ≥ 22.13/23.4 都带） | ✅ 同左 |
 | 可选 `@huggingface/transformers`（语义检索） | ✅ 安装时按平台下载 `onnxruntime-node` 二进制 | ✅ |
 | 可选 `nodejieba`（中文分词） | ⚠️ `node-pre-gyp` 预编译 + 回退编译；编不出来就退化为正则抽取 | ⚠️ 同左 |
 | 可选 `hnswlib-node`（HNSW 向量库） | ⚠️ **没有预编译，必须本地 C++ 工具链**；编不出来就退化为 numpy 向量库 | ⚠️ 同左 |
@@ -482,7 +482,7 @@ domains:              # 允许的领域；库中已有的领域始终仍然可�
 
 1. **插件必须是标准 Cordis 插件**：模型工具用 `ctx.tools.register(defineTool(...))` 注册，
    客户端↔宿主用 `TypertRemoteService`。DSH 的「动态包」`harness` 全局只在 `node:vm` 沙箱里存在，
-   而沙箱禁用 `require`/fs/网络，与本插件（better-sqlite3 + 模型下载）矛盾。
+   而沙箱禁用 `require`/fs/网络，与本插件（内置 SQLite 存储 + 模型下载）矛盾。
 2. **客户端半部必须是 DSH 的 client bundle**：宿主会扫描 Loader 里声明了 `dsh.client` 的包，
    把它 `exports["./client"]` 的文件字节拼进浏览器 combo 脚本，因此必须是
    `clientBundle` 预设产出的 `window.__ModuleLoader__.load` 工厂。

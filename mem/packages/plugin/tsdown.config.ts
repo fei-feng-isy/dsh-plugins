@@ -15,9 +15,10 @@
  * `devDependencies`, so the preset's node rule — production sections stay
  * imports, everything else inlines — folds it into `lib/index.js`. The
  * production sections of the manifest are therefore the runtime surface of the
- * published package, not a workspace convenience: `better-sqlite3` / `yaml` /
+ * published package, not a workspace convenience: `yaml` /
  * `zod` stay imports, the native accelerators stay optional imports, the
- * harness stays a peer. Moving an engine package back into `dependencies`
+ * harness stays a peer, and SQLite is the runtime's own `node:sqlite` (imported
+ * by the inlined engine, so it is never a package dependency at all). Moving an engine package back into `dependencies`
  * silently un-inlines it and ships a package that cannot resolve `@avantf/*`
  * on a user's machine; `pnpm pack:plugin` asserts the artifact is
  * self-contained, so run it after touching this file or the manifest.

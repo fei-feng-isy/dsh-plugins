@@ -112,6 +112,25 @@ describe('binary-archive provider', () => {
     expect(await exists(fs, join(home, 'tools', 'demo', '1.0.0', 'bin', 'demo'))).toBe(true)
   })
 
+  it('保留归档里可执行物的真实文件名（Windows 的 `<binary>.exe` 不再退化成 `<binary>`）', async () => {
+    // A Windows pack declares the executable by NAME (`pandoc`) while the archive ships `pandoc.exe`,
+    // and Windows cannot execute a PE image under a name without the extension. Installing it as
+    // `bin/demo` made the mandatory `--version` probe fail and quarantined the fresh download —
+    // measured on DSH Desktop, where pandoc then could not convert anything. The manifest's entry is
+    // what `probe`/`verify` read back, so it has to carry the real name.
+    const bytes = tarGz([{ name: 'demo-1.0.0/bin/demo.exe', data: '#!/bin/sh\necho demo 1.0.0\n' }])
+    const created = provisioner(archiveFetcher(bytes))
+    created.declare({ plugin: 'mem', items: [item({ spec: specWith({ url: 'https://archive.test/demo.tgz', sha256: sha256Of(bytes) }) })] } as Manifest)
+
+    const report = await created.ensure()
+    expect(report.ok).toBe(true)
+    expect(await exists(fs, join(home, 'tools', 'demo', '1.0.0', 'bin', 'demo.exe'))).toBe(true)
+    expect(await exists(fs, join(home, 'tools', 'demo', '1.0.0', 'bin', 'demo'))).toBe(false)
+    const manifest = JSON.parse(await readFile(join(home, 'tools', 'demo', '1.0.0', 'install.json'), 'utf8')) as { entry?: string }
+    expect(manifest.entry).toBe('bin/demo.exe')
+    expect(created.resolve('mem:demo').state).toBe('ready')
+  })
+
   it('sha256 不符 ⇒ 失败且不落盘', async () => {
     const bytes = archiveTarball('#!/bin/sh\necho demo 1.0.0\n')
     const created = provisioner(archiveFetcher(bytes))

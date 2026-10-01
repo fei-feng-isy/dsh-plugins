@@ -4,6 +4,51 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+### Changed（数据库系统统一为运行时内置的 `node:sqlite` + DSH Desktop 支持）
+- **存储层只剩一个实现：运行时的 `node:sqlite`，`better-sqlite3` 被彻底移除**（`db/sqlite.ts` 是唯一的
+  适配器；原来的驱动选择器 `db/binding.ts` 与第二个适配器 `db/sqlite_node.ts` 一并删除）。原因是它无法被
+  统一：`better-sqlite3` 是 NAN 扩展，`.node` 绑死在**一个** `NODE_MODULE_VERSION` 上，而 DSH Desktop 把
+  profile 宿主跑在 Electron 里（实测 Electron 44：`process.versions.modules = 149`，`dsh.cmd` 就是
+  `DeepSeek Harness.exe` + `ELECTRON_RUN_AS_NODE=1`），上游预编译只到 `electron-v132`，于是
+  `new Database()` 抛 "Could not locate the bindings file"、记忆库整块不可用。内置模块就在跑插件的那个
+  运行时里（Node 22.13 / 23.4 起免 flag；实测 Node 22.23 带 SQLite 3.51.3、Electron 44 带 3.53.1，两边
+  FTS5 与 `trigram` 都在），一份实现服务所有宿主，不再有第二条需要被证明"行为一致"的代码路径。
+  `db/port.ts` 的端口与它之上的契约逐条不变：位置参数与裸名命名参数、语句未用到的命名参数被忽略、BLOB
+  一律返回 `Buffer`、`pragma()` 读写、事务与 `SAVEPOINT` 嵌套。`runtime init` 行现在是
+  `sqlite=node:sqlite <版本>`——SQLite 版本随宿主的运行时走，正是排查"两台主机行为为何不同"要看的那一项。
+- **新增能力探测**（`sqliteProbe()`；`probeModule()` 用假模块把三条拒绝分支都单测到）：打开内存库之后
+  还要过两关——**FTS5 必须在**（两个 schema 在 open 那一刻就建 fts5 虚表），**必须支持"语句未用到的命名
+  参数"**（`setAllowUnknownNamedParameters`，Node 22.15 / 23.11 才有；DAOs 会把同一份参数对象交给用了
+  不同子集的语句，`FactsDao.purgeArchived` 就是那条）。任一不满足都给**一句原因**，插件按原有语义降级
+  挂载（8 个工具回 "memory unavailable"，不拖垮宿主启动），而不是等到 DDL 抛错或 lifecycle tick 挂掉。
+  真正的库文件打不开（损坏 / 被锁 / 更新版本的 schema）**不会**被当成驱动问题，仍按原样报出自己的原因。
+- **环境要求收紧为 `node: ">=22.15.0 <23 || >=23.11.0"`**（写进 `engines` 与 README）：这是"内置模块免
+  flag"（22.13 / 23.4）与"支持未用到的命名参数"（22.15 / 23.11）的交集。低于该下限的宿主照常挂载，只是
+  记忆库不可用并报出原因。
+- **依赖面归零**：`better-sqlite3` 与 `@types/better-sqlite3` 从两个 manifest 移除，catalog 条目与
+  `allowBuilds.better-sqlite3` 一并删掉。安装期不再有 SQLite 原生模块需要放行构建（`pnpm approve-builds`
+  只剩 nodejieba / hnswlib-node / onnxruntime 这些可选加速件），"postinstall 构建失败 → 整单 `pnpm add`
+  回滚、插件根本装不进来"这类失败也随之消失。
+- **声明组合包（`dsh.bundle.patch` → 随包的 `cordis.patch.yml`）**：DSH Desktop 的「插件」页与
+  `plugin_manager` 只接受组合包，此前本包在界面上装不了、只能手写挂载行。`dsh plugin add` 装本包时
+  会自动把它选进 `dsh.profile.bundles`（实测），挂载行随包插入，所以装完通常什么都不用做；只有用
+  npm / yarn 装、或手工编辑 profile 包清单而没有选中组合包时，才需要自己写那一行。两条都做也不会挂
+  两次（loader 按条目 id 去重，实测只挂载一次）。
+- **知识库的文档转换在 Windows/DSH Desktop 上终于可用**（底座修复）：`@avantf/dsh-plugin-base` 的
+  `binary-archive` provider 之前按**声明的名字**落盘，而 Windows 的 pandoc 归档里是 `pandoc.exe`，
+  于是装成了 `bin/pandoc`——Windows 无法执行没有扩展名的 PE 镜像，`--version` 探针失败，刚下载的
+  223 MB 被隔离。现在落盘与 `install.json` 的 `entry` 都用归档里的真实文件名，实测 Desktop 上
+  `mem:pandoc installed (installed 3.11)`，且第二次启动认作 `present`。
+- **新增 `test/sqlite_adapter.spec.ts`**（取代 `sqlite_backend.spec.ts`）：对唯一的适配器断言那份 `Db`
+  契约（多语句 exec / 位置与命名参数 / 未用到的命名参数 / pragma 读写 / 事务与 savepoint 嵌套 / BLOB
+  归一化为 `Buffer` / FTS5 / 语句缓存 / close），并用假模块覆盖能力探测的三条拒绝分支与启动描述行。
+
+### 维护提示（装机实测，别凭直觉）
+- **`dsh plugin add` 请带上版本号**。pnpm ≥ 10 的 `minimumReleaseAge` 会避开刚发布的版本：不钉版本时
+  `add @avantf/dsh-mem` 会解析到几天前那一版，而旧版的 peer 区间可能不含当前宿主的 dsh（例如
+  `0.2.0-rc.2`），于是宿主的安装门禁**直接拒绝这一单并回滚 profile**
+  （`installation rejected: … is incompatible with dsh 0.2.0-rc.2`）。README 的安装步骤已改成钉版本。
+
 ## [0.3.1] - 2026-09-28
 
 ### Fixed（dsh 0.2.0-rc 线：声明区间漏了新 rc 线）

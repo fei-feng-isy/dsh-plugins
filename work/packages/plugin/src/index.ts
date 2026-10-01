@@ -69,6 +69,20 @@ function orphanReason(probe: OwnerProbe): string {
   return 'owner 会话存在'
 }
 
+/**
+ * `$DSH_HOME` when the host set it, `~/.dsh` otherwise — the rule the launcher, `scripts/link-profile.mjs`
+ * and `scripts/workspace-doctor.mjs` already apply.
+ *
+ * DSH Desktop is why this is not simply `homedir()`: it runs the profile with `DSH_HOME` pointing at
+ * the user's harness home (usually `<home>/.dsh`, but a configured location is the norm there), and a
+ * session store read from the WRONG root is not an error — `/archive` and `/clean` would simply never
+ * find one of this plugin's own workers, or look at a tree that belongs to another installation.
+ */
+function dshHome(): string {
+  const configured = process.env['DSH_HOME']?.trim()
+  return configured === undefined || configured === '' ? join(homedir(), '.dsh') : configured
+}
+
 // Every service this plugin needs, gating `apply`: subagents (work units), storageDomain (the tree),
 // systemPrompt (guidance), tools (model surface), agents (liveness), commands (`/work`).
 export const inject = [
@@ -441,7 +455,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       await registry.archiveSession(SessionId(id))
     },
     isLive: (id: string) => ctx.get('agents')?.get(SessionId(id)) !== undefined,
-    sessionsRoot: config.sessionsRoot ?? join(homedir(), '.dsh', 'sessions'),
+    sessionsRoot: config.sessionsRoot ?? join(dshHome(), 'sessions'),
   }
 
   /** The ids the workspace registry reports as archived; empty without a registry. */

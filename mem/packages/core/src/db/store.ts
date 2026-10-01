@@ -59,8 +59,8 @@ export function wasUpgraded(migration: MigrationResult): boolean {
 
 /**
  * Open (or create) a store database: directory, PRAGMAs, then every migration newer than
- * the file's `user_version`. A failure closes the handle — better-sqlite3 keeps the file
- * locked otherwise, and a half-open store would be worse than none.
+ * the file's `user_version`. A failure closes the handle — an open handle keeps the WAL and
+ * its locks alive, and a half-open store would be worse than none.
  */
 export function openStoreDb(opts: { path: string; schema: StoreSchema; tokenizer: FtsTokenizer }): OpenedStore {
   mkdirSync(dirname(opts.path), { recursive: true })

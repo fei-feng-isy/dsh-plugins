@@ -145,6 +145,7 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | `pnpm proof:base-swap[:mount]` | 产物里没有静态 base import / 内联 kit；**被替换的** base 仍能提供提示词读写、根解析与接口门禁 |
 | `pnpm release:check:base\|:mem\|:work` | 各包自己的 typecheck → build → test → pack，**最后一步**是跨版本门 |
 | `pnpm check:old-dsh <base\|mem\|work>` | 在插件声明的 dsh peer 区间**下限**上重跑该包的 LOCAL 步骤（链接 → typecheck → build，含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
+| `pnpm check:dsh-lines` | dsh **已发布**的版本里有没有我们的 peer 声明覆盖不到的（用 dsh 启动门同一份 semver + `includePrerelease: true` 判；有新 minor 线或 dist-tag 落到未覆盖线就退出 1，并给出该补的 `\|\|` 条款） |
 
 **改动 `base/**` 之后两个插件都要回归**（base 自己的测试不会走到挂载）：
 

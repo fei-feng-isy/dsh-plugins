@@ -27,6 +27,7 @@ import { parseToolsConfig, resolveToolsDir } from '@avantf/mem-provision'
 import { loadConfig, type LoadedConfig } from './config/loader.js'
 import { knowledgeConfigPath } from './config/paths.js'
 import { MEMORY_SCHEMA, openMemoryStore, type Db } from './db/conn.js'
+import { describeSqlite } from './db/sqlite.js'
 import { describeMigrationOutcome, wasUpgraded } from './db/store.js'
 import { looksRelevant, type RelevanceHit } from './store/lexical.js'
 import { MemoryStore } from './store/memory.js'
@@ -237,7 +238,11 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
     `runtime init: dataHome=${config.home} memory.db=${memDb} knowledge.db=${config.knowledge.db.path} `
     + `semantic=${config.common.semantic.backend}/${config.common.semantic.local_model} `
     + `rerank=${config.common.rerank.backend} `
-    + `vectorStore=${config.common.vectorStore.backend}`,
+    + `vectorStore=${config.common.vectorStore.backend} `
+    // Which SQLite build is answering: the whole engine runs on the runtime's own `node:sqlite`, and
+    // the version travels with the host, so this is the first thing to quote when two hosts behave
+    // differently (and the one line that names a runtime that cannot serve a store at all).
+    + `sqlite=${describeSqlite()}`,
   )
   const memoryStore = openMemoryStore(memDb)
   // Startup auto-upgrade is silent by design unless it actually did something: an up-to-date store

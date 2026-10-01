@@ -28,7 +28,8 @@
     "release:tree": "node scripts/make-release-tree.mjs",
     "sync:rc": "bash scripts/sync-release-repo.sh",
     "clean": "node scripts/clean.mjs",
-    "check:old-dsh": "node scripts/check-old-dsh.mjs"
+    "check:old-dsh": "node scripts/check-old-dsh.mjs",
+    "check:dsh-lines": "node scripts/check-dsh-lines.mjs"
   },
   "license": "MIT"
 }

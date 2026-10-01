@@ -118,8 +118,9 @@ cd ~/.dsh/profiles/web
 pnpm add <AVANTF>/packages/plugin
 ```
 
-(These depend on `better-sqlite3`, `nodejieba`, `hnswlib-node`, `@huggingface/transformers`
-— the latter two are optional; the plugin degrades gracefully without them. The engine packages
+(Storage is the runtime's own `node:sqlite` — no native database module to build or match an ABI
+against. The optional `nodejieba`, `hnswlib-node` and `@huggingface/transformers` accelerators
+degrade gracefully when absent. The engine packages
 `@avantf/mem*` are inlined into `lib/index.js` and are NOT separate runtime installs.)
 
 ## 3. Mount it

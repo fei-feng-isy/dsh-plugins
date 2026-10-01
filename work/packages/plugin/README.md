@@ -35,15 +35,25 @@ owner 的对话里。
 ## 接入 dsh
 
 ```bash
-# 1) 装这两个包（在 profile 目录里各装一次）：插件本身，以及家族底座。
-#    底座是插件的 peer；npm 这类会自动装 peer 的包管理器会跟着装上，pnpm（关掉 autoInstallPeers）
-#    与 yarn 不会，所以要显式装。
-dsh plugin --profile <PROFILE> add @avantf/dsh-plugin-base
-dsh plugin --profile <PROFILE> add @avantf/dsh-work
+# 1) 装这两个包：插件本身，以及家族底座。底座是插件的 peer；不开 autoInstallPeers 的包管理器
+#    （pnpm / yarn）不会跟着装上，所以要显式装。
+#    版本号建议写死：pnpm ≥ 10 的 minimumReleaseAge 会避开刚发布的版本，解析到的旧版本可能不认识
+#    当前宿主（它的 peer 区间不含这个 dsh），那一单会被宿主的安装门禁直接拒绝并把 profile 回滚。
+dsh plugin --profile <PROFILE> add @avantf/dsh-plugin-base@<version>
+dsh plugin --profile <PROFILE> add @avantf/dsh-work@<version>
 ```
 
 ```yaml
-# 2) 挂载插件：编辑 ~/.dsh/profiles/<PROFILE>/cordis.patch.yml（不存在就新建）
+# 2) 挂载插件：装完通常什么都不用做。
+#
+# 本包声明了组合包（dsh.bundle.patch → 随包的 cordis.patch.yml），所以 `dsh plugin add` 装它时会
+# 顺手把这个包选进 profile 的 dsh.profile.bundles（实测），挂载行由随包的 patch 插入；DSH Desktop
+# 的「插件」页走的也是这条。只有两种情况才需要自己写那一行：
+#   · 用 npm / yarn 装（它们不认识 dsh.profile.bundles）；
+#   · 手工编辑 profile 的包清单，而没有把本包选进 bundles。
+# 两条路都做也不会挂两次（loader 按条目 id 去重，实测只挂载一次），但配置里会多一行冗余——二选一。
+#
+# 手写的那一行，放在 ~/.dsh/profiles/<PROFILE>/cordis.patch.yml（不存在就新建）：
 - insert:
     - id: avantf-work
       name: '@avantf/dsh-work'
@@ -57,7 +67,20 @@ dsh plugin --profile <PROFILE> add @avantf/dsh-work
 dsh web
 ```
 
-- `@deepseek-ai/*` 与 `zod` 由 profile 上层的 `~/.dsh/profiles/node_modules` 解析。
+### DSH Desktop
+
+Desktop 用的是同一套 profile（profile 名 `desktop`），差别只有三点：
+
+- **界面上只能装组合包**。Desktop 的「插件」页与 `plugin_manager` 只接受声明了 `dsh.bundle.patch`
+  的包（本包已声明）：在页面上装它，它会把这个包选进 `dsh.profile.bundles`，并应用随包的
+  `cordis.patch.yml`——不用手写挂载行。
+- **用它自带的 dsh**：`<安装目录>/resources/runtime/cli/bin/dsh.cmd`（或在设置里把 `dsh` 装进 PATH）。
+- **重启应用**才生效：Desktop 的宿主半边与浏览器半边一起启动。
+
+`/archive` 与 `/clean` 读的 worker 会话目录取 `$DSH_HOME/sessions`（未设置时 `~/.dsh/sessions`），
+Desktop 会显式设置 `DSH_HOME`，所以两边指向的是同一个会话库。
+
+- `@deepseek-ai/*` 与 `zod` 由宿主提供（profile 上层的运行时解析表）。
   **不要在 profile 里再装** `cordis` / `schemastery` / `zod` —— 第二份对象身份会让存储域的校验器
   拒绝本插件写入的记录。
 
@@ -91,14 +114,17 @@ dsh web
 - **配置项**：`maxConcurrent`（并发工作单元上限）、`staleMs`（多久没有进展算卡死）、
   `sessionsRoot`（worker 会话目录根，默认 `<dsh home>/sessions`）。
 - **数据**：工作树走 DSH 存储域（`avantf_work`）；每个工作单元都是**真实会话**，日志在
-  `~/.dsh/sessions` 下。`/archive` 只改归档标记，要真正腾磁盘用 `/clean archive all`。
+  `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）下。`/archive` 只改归档标记，要真正腾磁盘用
+  `/clean archive all`。
 
 ## 升级 / 卸载
 
 ```bash
 dsh plugin --profile <PROFILE> add @avantf/dsh-work@<version>   # 升级到某个版本
 dsh plugin --profile <PROFILE> remove @avantf/dsh-work          # 卸载
-# 再删掉 cordis.patch.yml 里那段 `- id: avantf-work` 挂载项，然后重启 dsh
+# 再清掉挂载项：B 路（手写的行）删掉 cordis.patch.yml 里那段 `- id: avantf-work`；A 路（组合包）
+# 把包名从 profile 的 `dsh.profile.bundles` 里去掉即可，或在 DSH Desktop 的「插件」页上卸载。
+# 然后重启 dsh。
 ```
 
 ## 环境要求

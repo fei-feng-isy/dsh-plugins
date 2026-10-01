@@ -40,20 +40,30 @@ DSH（DeepSeek Harness）原生记忆插件：给 agent 一份可长期检索的
 ## 接入 dsh
 
 ```bash
-# 1) 装这两个包（在 profile 目录里各装一次）：插件本身，以及家族底座。
-#    底座是插件的 peer；npm 这类会自动装 peer 的包管理器会跟着装上，pnpm（关掉 autoInstallPeers）
-#    与 yarn 不会，所以要显式装。
-dsh plugin --profile <PROFILE> add @avantf/dsh-plugin-base
-dsh plugin --profile <PROFILE> add @avantf/dsh-mem
+# 1) 装这两个包：插件本身，以及家族底座。底座是插件的 peer；不开 autoInstallPeers 的包管理器
+#    （pnpm / yarn）不会跟着装上，所以要显式装。
+#    版本号建议写死：pnpm ≥ 10 的 minimumReleaseAge 会避开刚发布的版本，解析到的旧版本可能不认识
+#    当前宿主（它的 peer 区间不含这个 dsh），那一单会被宿主的安装门禁直接拒绝并把 profile 回滚。
+dsh plugin --profile <PROFILE> add @avantf/dsh-plugin-base@<version>
+dsh plugin --profile <PROFILE> add @avantf/dsh-mem@<version>
 
-# 2) 放行原生依赖的构建：pnpm 10+ 默认忽略 postinstall，而 better-sqlite3 是记忆库的存储层。
-#    不放行时插件仍会正常挂载，但 8 个工具都会回 "memory unavailable"（自动降级，不拖垮宿主启动）。
+# 2) 原生依赖只剩**可选**的加速件（分词 / 向量索引 / 嵌入模型）。它们缺失只会降级检索质量，
+#    不影响记忆库本身——存储层用的是运行时自带的 node:sqlite，没有需要编译的数据库模块。
 cd ~/.dsh/profiles/<PROFILE>
-pnpm approve-builds --all     # 至少勾选 better-sqlite3；nodejieba / hnswlib-node 可选
+pnpm approve-builds --all     # 勾选 nodejieba / hnswlib-node / onnxruntime，可按需
 ```
 
 ```yaml
-# 3) 挂载插件：编辑 ~/.dsh/profiles/<PROFILE>/cordis.patch.yml（不存在就新建）
+# 3) 挂载插件：装完通常什么都不用做。
+#
+# 本包声明了组合包（dsh.bundle.patch → 随包的 cordis.patch.yml），所以 `dsh plugin add` 装它时会
+# 顺手把这个包选进 profile 的 dsh.profile.bundles（实测），挂载行由随包的 patch 插入；DSH Desktop
+# 的「插件」页走的也是这条。只有两种情况才需要自己写那一行：
+#   · 用 npm / yarn 装（它们不认识 dsh.profile.bundles）；
+#   · 手工编辑 profile 的包清单，而没有把本包选进 bundles。
+# 两条路都做也不会挂两次（loader 按条目 id 去重，实测只挂载一次），但配置里会多一行冗余——二选一。
+#
+# 手写的那一行，放在 ~/.dsh/profiles/<PROFILE>/cordis.patch.yml（不存在就新建）：
 - insert:
     - id: avantf-mem
       name: '@avantf/dsh-mem'
@@ -67,9 +77,24 @@ pnpm approve-builds --all     # 至少勾选 better-sqlite3；nodejieba / hnswli
 dsh web
 ```
 
-- 插件的 `@deepseek-ai/*` peer 由 profile 上层 `~/.dsh/profiles/node_modules` 解析
-  （`dsh plugin add` 不会另装一份）。**不要在 profile 里再装** `cordis` / `schemastery` / `dsh-tools`
-  ——两份对象身份会让工具与 typert 注册表对不上。
+### DSH Desktop
+
+Desktop 用的是同一套 profile（profile 名 `desktop`），差别只有三点：
+
+- **界面上只能装组合包**。Desktop 的「插件」页与 `plugin_manager` 只接受声明了 `dsh.bundle.patch`
+  的包（本包已声明）：在页面上装它，它会把这个包选进 `dsh.profile.bundles`，并应用随包的
+  `cordis.patch.yml`——不用手写挂载行。
+- **用它自带的 dsh**：`<安装目录>/resources/runtime/cli/bin/dsh.cmd`（或在设置里把 `dsh` 装进 PATH）。
+- **重启应用**才生效：Desktop 的宿主半边与浏览器半边一起启动，不像 Web 那样热更。
+
+Desktop 的宿主进程是 **Electron**（`NODE_MODULE_VERSION` 与同版本 Node 不同）。这正是本插件不依赖任何
+SQLite 绑定的原因：存储层用运行时自带的 `node:sqlite`，它就在跑插件的那个进程里，没有预编译产物要匹配、
+也不需要用户装 C++ 工具链。启动日志里 `sqlite=node:sqlite <版本>` 就是它；两个宿主写的是同一个 SQLite
+文件格式，换宿主不需要迁移数据。
+
+- 插件的 `@deepseek-ai/*` peer 由宿主提供（profile 上层的运行时解析表），`dsh plugin add` 不会另装一份。
+  **不要在 profile 里再装** `cordis` / `schemastery` / `dsh-tools`——两份对象身份会让工具与 typert
+  注册表对不上。
 
 ## 怎么用
 
@@ -119,19 +144,24 @@ dsh web
 # 升级（或重装）到某个版本：同一条命令，换版本号即可
 dsh plugin --profile <PROFILE> add @avantf/dsh-mem@<version>
 
-# 卸载：先删掉 profile 依赖
+# 卸载：先删掉 profile 依赖（这一步同时会取消该组合包的选中）
 dsh plugin --profile <PROFILE> remove @avantf/dsh-mem
-# 再删掉 ~/.dsh/profiles/<PROFILE>/cordis.patch.yml 里那段 `- id: avantf-mem` 挂载项
-#（该文件顶层必须是 YAML 数组：删空就写 `[]`，否则 dsh 启动会拒绝加载）
+# 再清掉挂载项：用组合包装的，包名已随上一步从 profile 的 `dsh.profile.bundles` 里去掉，无需再动；
+# 自己手写过那一行的，删掉 ~/.dsh/profiles/<PROFILE>/cordis.patch.yml 里那段 `- id: avantf-mem`
+#（该文件顶层必须是 YAML 数组：删空就写 `[]`，否则 dsh 启动会拒绝加载）。
+# DSH Desktop 的「插件」页上卸载会连着取消选中与依赖一起做。
 ```
 
 两者都需要重启 dsh 才生效。卸载**不动 `~/.avantf`**：记忆库、知识库、模型缓存全部保留。
 
 ## 环境要求
 
-- **Node ≥ 22**、**pnpm**
-- `better-sqlite3` 必需（原生模块，记忆库的存储层）；`nodejieba` / `hnswlib-node` /
-  `@huggingface/transformers` 可选，缺失时自动降级
+- **Node `>=22.15.0 <23 || >=23.11.0`**、**pnpm**。记忆与知识两个库都建在运行时自带的 `node:sqlite`
+  上，这个区间是它的两个下限的交集：模块免 flag（22.13 / 23.4）与"忽略语句未用到的命名参数"
+  （22.15 / 23.11）。低于该下限（或该构建缺 FTS5）时插件照常挂载，但 8 个工具都回
+  `memory unavailable` 并给出原因，不会拖垮宿主启动
+- `nodejieba` / `hnswlib-node` / `@huggingface/transformers` 都可选：缺失时分别降级为正则抽取 /
+  numpy 向量库 / 纯词法检索
 - 插件自包含：检索与知识引擎在构建时已内联进产物，安装不需要额外的家族包（只要底座，
   由宿主以 peer 提供）
 

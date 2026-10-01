@@ -211,10 +211,11 @@ available.`，而 `npm stage list` 会说没有 staged 版本。②只能等（2
   底座的 zod peer 已放宽到 `>=4.4.3 <5`；`zod` 在**根** `pnpm-workspace.yaml` 的 catalog 里统一成一份
   （合并后是 `4.6.5`，跟随已安装 dsh 的版本），发布底座时不要把它改回只接受单一小版本。
 
-**发布树要先装一次原生依赖**（2026-09-21 发 0.1.1 实测）：`release:check` 的第一步是
-`pnpm install --frozen-lockfile --ignore-scripts`，它只证明锁文件一致，**不会构建原生模块**。一棵全新
-（或从未装过依赖）的 `dsh-plugins-rc` 上，mount smoke 会因为 `better-sqlite3` 缺 binding 而走降级挂载 →
-判 FAIL；症状还可能被 mount-smoke 自身的错误行掩盖。先装全再跑门禁：
+**发布树要先装一次依赖**（2026-09-21 发 0.1.1 实测；2026-10-01 起不再涉及 SQLite 绑定）：`release:check`
+的第一步是 `pnpm install --frozen-lockfile --ignore-scripts`，它只证明锁文件一致，**不会构建原生模块**。
+一棵全新的 `dsh-plugins-rc` 上，mount smoke 会因为可选的 `nodejieba` / `hnswlib-node` 缺 binding 而走降级
+路径——存储层已经没有原生模块，所以**不会**再因此判 FAIL；症状还可能被 mount-smoke 自身的错误行掩盖。
+先装全再跑门禁：
 
 ```bash
 cd ../dsh-plugins-rc
