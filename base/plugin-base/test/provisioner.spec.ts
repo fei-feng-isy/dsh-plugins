@@ -228,4 +228,23 @@ describe('createProvisioner × npm provider', () => {
     const after = await created.plan()
     expect(after.entries[0]?.action).toBe('present')
   })
+
+  it('失败的条目在 status.json 里是"未决行"（version 空）并带走失败原因', async () => {
+    // 对 76408fb 的审核把 `version: ""` 读成"缺字段"。它是这个资源的**未决面**：版本之所以未知，
+    // 正是因为失败发生在学到版本之前；而按那条建议删掉这一行，等于删掉唯一一条失败记录。
+    // 这条测试把该行为钉住：行在、version 空、last_error 与报告里的 code 一致。
+    const created = provisioner(noNetwork())
+    created.declare(manifestOf([item()]))
+    const report = await created.ensure()
+    expect(report.ok).toBe(false)
+    const code = report.entries[0]?.code
+    expect(code).toBeDefined()
+
+    const status = JSON.parse(await readFile(join(home, '.envinit', 'status.json'), 'utf8')) as {
+      rows: Array<{ key: string; version: string; last_error?: { code: string } }>
+    }
+    const row = status.rows.find((entry) => entry.items.includes('mem:demo'))
+    expect(row?.version).toBe('')
+    expect(row?.last_error?.code).toBe(code)
+  })
 })

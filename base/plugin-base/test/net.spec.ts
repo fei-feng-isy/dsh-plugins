@@ -5,7 +5,8 @@
  * @module test/net
  */
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_MAX_BYTES, readCapped } from '../src/net.js'
+import { DEFAULT_MAX_BYTES, downloadBytes, readCapped } from '../src/net.js'
+import type { ProviderContext } from '../src/types.js'
 
 const bytesOf = (text: string): Uint8Array => new TextEncoder().encode(text)
 
@@ -43,5 +44,52 @@ describe('readCapped：声明长度与实际上限', () => {
   it('无 body 时也核对声明长度', async () => {
     const response = new Response(null, { status: 200, headers: { 'content-length': '5' } })
     await expect(readCapped(response)).rejects.toMatchObject({ code: 'fetch/failed' })
+  })
+})
+
+describe('downloadBytes：下载期的进度可见（DSH Desktop 上曾空转 8 分钟无一行日志）', () => {
+  /** 一个记录型 logger + 一个把 `failing` 里的 URL 回 503、其余回 'ok' 的 fetch。 */
+  function ctxFor(failing: readonly string[], lines: string[]): ProviderContext {
+    return {
+      home: '/tmp/unused',
+      logger: {
+        debug: () => undefined,
+        info: (message: string) => lines.push(`info ${message}`),
+        warn: (message: string) => lines.push(`warn ${message}`),
+        error: (message: string) => lines.push(`error ${message}`),
+      },
+      policy: {},
+      fs: undefined as never,
+      fetch: async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (failing.includes(url)) return new Response('', { status: 503 })
+        return new Response('ok', { status: 200, headers: { 'content-length': '2' } })
+      },
+    } as unknown as ProviderContext
+  }
+
+  it('每次尝试一行；被跳过的候选源带原因；成功也留痕', async () => {
+    const lines: string[] = []
+    const first = 'https://mirror-a.test/demo.tgz'
+    const second = 'https://mirror-b.test/demo.tgz'
+    const { url, bytes } = await downloadBytes(ctxFor([first], lines), [first, second], 'binary-archive+demo')
+    expect(url).toBe(second)
+    expect(new TextDecoder().decode(bytes)).toBe('ok')
+    expect(lines).toEqual([
+      `info binary-archive+demo：尝试候选源 1/2 ${first}`,
+      `warn binary-archive+demo：${first} 返回 HTTP 503，改用下一个候选源`,
+      `info binary-archive+demo：尝试候选源 2/2 ${second}`,
+      `info binary-archive+demo：下载完成 2 字节（${second}）`,
+    ])
+  })
+
+  it('全部候选源失败时，每次尝试都有日志，且最后一个不再承诺"改用下一个"', async () => {
+    const lines: string[] = []
+    const urls = ['https://mirror-a.test/demo.tgz', 'https://mirror-b.test/demo.tgz']
+    await expect(downloadBytes(ctxFor(urls, lines), urls, 'binary-archive+demo'))
+      .rejects.toMatchObject({ code: 'fetch/failed' })
+    expect(lines.filter((line) => line.startsWith('info '))).toHaveLength(2)
+    expect(lines.at(-1)).toContain('没有更多候选源')
+    expect(lines.at(-1)).not.toContain('改用下一个候选源')
   })
 })

@@ -81,7 +81,15 @@ export function candidateUrls(url: string, mirrors: readonly string[] | undefine
   return candidates
 }
 
-/** Download the first candidate that answers 2xx; throws `fetch/failed` when none does. */
+/**
+ * Download the first candidate that answers 2xx; throws `fetch/failed` when none does.
+ *
+ * DOWNLOADING IS THE SLOWEST THING THIS FRAMEWORK DOES and it used to be completely silent: a 223 MB
+ * archive on a mirror that eventually times out looked like eight minutes of nothing, and the first
+ * evidence of trouble was the final `fetch/failed` after every candidate had been tried (measured on
+ * DSH Desktop — GitHub plus three mirrors, all aborted). One line per attempt, one when a candidate
+ * is passed over with its reason, and one on success makes the wait legible while it is happening.
+ */
 export async function downloadBytes(
   ctx: ProviderContext,
   urls: readonly string[],
@@ -89,11 +97,16 @@ export async function downloadBytes(
   onProgress?: (event: ProgressEvent) => void,
 ): Promise<{ readonly bytes: Uint8Array; readonly url: string }> {
   const problems: string[] = []
-  for (const url of urls) {
+  for (const [index, url] of urls.entries()) {
+    const position = `${String(index + 1)}/${String(urls.length)}`
+    // The last candidate gets no "trying the next one" promise: there is none.
+    const next = index + 1 < urls.length ? '，改用下一个候选源' : '，没有更多候选源'
+    ctx.logger.info(`${key}：尝试候选源 ${position} ${url}`)
     try {
       const response = await fetchImplOf(ctx)(url, { signal: signalFor(ctx) })
       if (!response.ok) {
         problems.push(`${url} → HTTP ${String(response.status)}`)
+        ctx.logger.warn(`${key}：${url} 返回 HTTP ${String(response.status)}${next}`)
         continue
       }
       // A short body is a TRANSPORT failure and retries the next mirror, like a bad status or a
@@ -102,9 +115,12 @@ export async function downloadBytes(
       // distinction IS the invariant; `docs/DESIGN.md` §6 states it in the same words.
       const bytes = await readCapped(response)
       onProgress?.({ key, phase: 'download', loaded: bytes.byteLength, total: bytes.byteLength })
+      ctx.logger.info(`${key}：下载完成 ${String(bytes.byteLength)} 字节（${url}）`)
       return { bytes, url }
     } catch (error) {
-      problems.push(`${url} → ${error instanceof Error ? error.message : String(error)}`)
+      const reason = error instanceof Error ? error.message : String(error)
+      problems.push(`${url} → ${reason}`)
+      ctx.logger.warn(`${key}：${url} 失败（${reason}）${next}`)
     }
   }
   throw new ProvisionError('fetch/failed', `所有候选源都失败：${problems.join('; ')}`)

@@ -275,25 +275,46 @@ export function createProvisioner(options: ProvisionerOptions): Provisioner {
     }
   }
 
+  /**
+   * The failure a persisted row should carry: an explicit `lastError` if something ever sets one,
+   * otherwise the row's OWN terminal state.
+   *
+   * The fallback is the point. `lastError` has no writer anywhere, so before this the field was
+   * never persisted at all: a failed item whose version was still unknown wrote a bare
+   * `{key, version: "", items, plugins}` and a reader of `status.json` had no way to tell "still
+   * installing" from "all four mirrors failed" — the review of 76408fb read exactly that row as a
+   * missing field. The row stays (it is the resource's unresolved face, and folding it into the
+   * versioned row on success is what removes it); what it now carries is the reason.
+   */
+  const lastErrorOf = (row: ProvisionStatus): StatusRow['last_error'] | undefined => {
+    if (row.lastError !== undefined) return row.lastError
+    if (row.state.state === 'failed') {
+      return {
+        code: row.state.code,
+        ...(row.state.detail === undefined ? {} : { detail: row.state.detail }),
+        ...(row.state.retryAfter === undefined ? {} : { retry_after: row.state.retryAfter }),
+      }
+    }
+    if (row.state.state === 'skipped') {
+      return { code: row.state.code, ...(row.state.detail === undefined ? {} : { detail: row.state.detail }) }
+    }
+    return undefined
+  }
+
   /** The persisted view of the current rows (identity `key × version`). */
   const statusRows = (): StatusRow[] =>
-    [...rows.values()].map(row => ({
-      key: row.key,
-      version: row.version,
-      items: row.items,
-      plugins: row.plugins,
-      ...(row.source === undefined ? {} : { source: row.source }),
-      updated_at: row.updatedAt,
-      ...(row.lastError === undefined
-        ? {}
-        : {
-            last_error: {
-              code: row.lastError.code,
-              ...(row.lastError.detail === undefined ? {} : { detail: row.lastError.detail }),
-              ...(row.lastError.retryAfter === undefined ? {} : { retry_after: row.lastError.retryAfter }),
-            },
-          }),
-    }))
+    [...rows.values()].map(row => {
+      const lastError = lastErrorOf(row)
+      return {
+        key: row.key,
+        version: row.version,
+        items: row.items,
+        plugins: row.plugins,
+        ...(row.source === undefined ? {} : { source: row.source }),
+        updated_at: row.updatedAt,
+        ...(lastError === undefined ? {} : { last_error: lastError }),
+      }
+    })
 
   const emit = (event: ProvisionEvent): void => {
     for (const entry of listeners) {
