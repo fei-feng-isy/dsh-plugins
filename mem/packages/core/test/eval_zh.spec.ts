@@ -70,6 +70,17 @@ describe('zh relations eval (degraded FTS+entity path)', () => {
     //     Every one of the 12 violations is that shape: the answer is still FIRST, the tail slot is
     //     a related fact. This codebase has no absolute score thresholds by design, so the numbers
     //     are recorded as they are rather than fitted by inventing one.
+    //
+    // RE-VERIFIED, unchanged, when the relevance floors landed (`retriever.min_*`, DESIGN §20.19):
+    // this spec runs the DEGRADED path (vitest pins the model cache to a temp dir and disables
+    // download), so the floors in force are `{semantic: 0.5, fts: 1, jaccard: 0.2}` — the semantic
+    // one is inert (leg down), the FTS one relaxed to 1 (every row that matched at all hits at
+    // least one query term), and the Jaccard floor cut nothing on this 3-fact-per-case corpus.
+    // Measured across all 35 queries: `dropped_by_floor` totals `{semantic: 0, fts: 0, jaccard: 0,
+    // hrr: 0}`, so all seven numbers below are bit-identical before and after. The floor's own
+    // calibration is the semantic-LIVE scan in the CHANGELOG (0.40/0.45/0.50 tie; 0.55+ starts
+    // blocking must-include answers), and `test/floors.spec.ts` pins the boundary behaviour on both
+    // stores — NOT this degraded set.
     expect(report.summary).toEqual({
       n_queries: 35,
       mean_precision_at_k: 0.5666666666666667,

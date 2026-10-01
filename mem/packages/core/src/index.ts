@@ -27,3 +27,6 @@ export * from './store/knowledge.js'
 export * from './store/hybrid.js'
 export * from './store/source_picker.js'
 export * from './store/lexical.js'
+// The relevance floors the legs apply before fusion (`retriever.min_*`) — exported for the same
+// reason as the orchestration: a third store built on these legs must read the SAME relaxation rule.
+export * from './store/floors.js'

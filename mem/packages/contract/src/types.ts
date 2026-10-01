@@ -138,10 +138,48 @@ export interface RecallHit {
   truncated?: boolean
 }
 
+/**
+ * The relevance floors in force for ONE retrieval (`0` = that leg is not gated).
+ *
+ * These are values on the legs' OWN raw scales, applied before `fuse()`. They are reported because
+ * an empty result has two very different readings — "the floors removed every candidate" and "no
+ * leg had a candidate at all" — and only the effective values plus
+ * {@link RetrievalFloorDrops} tell them apart.
+ */
+export interface RetrievalFloors {
+  /** Cosine floor for the semantic leg (`retriever.min_semantic_similarity`). */
+  semantic: number
+  /** Distinct-query-term floor for the FTS leg (`retriever.min_fts_terms`; 1 when degraded). */
+  fts: number
+  /** Entity-overlap ratio floor (`retriever.min_jaccard`). */
+  jaccard: number
+}
+
+/**
+ * How many candidates each leg dropped because they fell below their floor.
+ *
+ * A leg absent from a query (semantic down, no query entities) reports 0 here — the counter is
+ * "dropped by a floor", not "was not consulted". `hrr` shares the Jaccard floor and is only
+ * separately named so a probe whose candidate set the floor narrowed is still attributable.
+ */
+export interface RetrievalFloorDrops {
+  semantic: number
+  fts: number
+  jaccard: number
+  hrr: number
+}
+
 export interface RecallResult {
   hits: RecallHit[]
   degraded: boolean
   weights: { semantic: number; fts: number; jaccard: number }
+  /**
+   * The effective relevance floors for this query, when it ran through the hybrid orchestration.
+   * Absent on graph-only answers (`probe`/`chain`/`reason`/`related`), which never scored a leg.
+   */
+  floors?: RetrievalFloors
+  /** Per-leg candidates removed by those floors (see {@link RetrievalFloorDrops}). */
+  dropped_by_floor?: RetrievalFloorDrops
 }
 
 /**
@@ -235,6 +273,12 @@ export interface RetrievalHealth {
    * signal — and the only one, since fusion scaling keeps a trimmed tail from moving the survivors.
    */
   legs_capped: number
+  /**
+   * Candidates dropped because they fell below a leg's relevance floor (summed per leg, see
+   * {@link RetrievalFloorDrops}). Zero-result queries are the reason this counter exists: with it,
+   * "the floors cut everything" is distinguishable from "nothing matched" after the fact.
+   */
+  candidates_dropped_by_floor: number
   updated_at: string | null
   by_kind: Record<string, KindHealth>
 }
@@ -254,6 +298,8 @@ export interface RetrievalHealthSummary {
   output_truncated: number
   /** Retrieval legs that returned exactly their cap (see `RetrievalHealth`). */
   legs_capped: number
+  /** Candidates removed by a leg's relevance floor (see `RetrievalHealth`). */
+  candidates_dropped_by_floor: number
   updated_at: string | null
   by_kind: Record<string, KindHealth>
 }

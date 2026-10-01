@@ -431,6 +431,9 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
       // Defaulting here keeps the runtime honest on its own.
       const limit = req.limit ?? 10
       const queryVector = semantic.isAvailable() ? await semantic.encode(req.query) : undefined
+      // The knowledge store answers with hits only; capture its floor report so the ONE merged
+      // result can carry both stores' drops (the memory side brings its own on the result object).
+      let kbDroppedByFloor: RecallResult['dropped_by_floor']
       const [memory, kb] = await Promise.all([
         // The per-store budgets are lifted for the fusion pool: the router ranks the merged
         // pool and applies the caller's budget to what it finally returns. `recordStats: false`
@@ -438,7 +441,15 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
         // or `queries`/`zero_result_rate`/`avg_latency` count legs — two per `kb_query` — and the
         // knowledge leg's zero-result case was not counted at all.
         this.memory.search({ query: req.query, limit: limit * 3, track: false, recordStats: false, queryVector, maxTokens: 0 }),
-        this.knowledge.search(req.query, { domain: req.domain, source: req.source, limit: limit * 3, recordStats: false, queryVector, maxTokens: 0 }),
+        this.knowledge.search(req.query, {
+          domain: req.domain,
+          source: req.source,
+          limit: limit * 3,
+          recordStats: false,
+          queryVector,
+          maxTokens: 0,
+          onResult: (r) => { kbDroppedByFloor = r.dropped_by_floor },
+        }),
       ])
       const result = crossQuery(memory, kb, {
         limit,
@@ -446,6 +457,7 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
         domain: req.domain,
         source: req.source,
         maxTokens: req.max_tokens ?? config.common.retriever.max_output_tokens,
+        ...(kbDroppedByFloor === undefined ? {} : { kbDroppedByFloor }),
       })
       // The merged outcome is what the caller saw, so it is what the health counters describe:
       // `results` is the post-filter/post-budget count, and latency is the whole cross query
@@ -458,6 +470,7 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
         semanticLive: semantic.isAvailable(),
         rerankUsed: rerank.used,
         rerankFallback: rerank.fallback,
+        ...(result.dropped_by_floor === undefined ? {} : { droppedByFloor: result.dropped_by_floor }),
       })
       // Only the facts actually returned to the caller count as recalled (R5/R21).
       this.memory.reinforce(result.hits.filter((h) => h.kind === 'fact').map((h) => h.ref_id))

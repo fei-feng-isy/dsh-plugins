@@ -25,7 +25,7 @@
  *
  * @module store/hybrid
  */
-import { DEGRADED_WEIGHTS, type Config, type RecallResult } from '@avantf/mem-contract'
+import { DEGRADED_WEIGHTS, type Config, type RecallResult, type RetrievalFloorDrops, type RetrievalFloors } from '@avantf/mem-contract'
 import {
   fitToTokenBudget,
   fuse,
@@ -39,6 +39,7 @@ import {
   type Reranker,
   type SemanticBackend,
 } from '@avantf/mem-core'
+import { emptyFloorDrops, resolveFloors } from './floors.js'
 
 /** The `limit` a caller gets when it passes nothing usable. */
 export const DEFAULT_SEARCH_LIMIT = 10
@@ -71,9 +72,19 @@ export interface HybridLeg {
    *
    * `size === cap` is the only observable "this leg was trimmed" signal — a leg that finished under
    * the cap cannot have been cut — and it feeds the health counters, so the headroom can be sized
-   * from data instead of from a constant nobody re-derives.
+   * from data instead of from a constant nobody re-derives. Measured on the leg's RAW score set:
+   * the relevance floors may shrink a capped leg afterwards, and re-deriving this from the floored
+   * size would silently erase the cap signal.
    */
   capped?: boolean
+  /**
+   * Which floor governs this leg, for {@link HybridResult.dropped_by_floor}'s per-leg breakdown.
+   * The HRR probe shares the Jaccard floor; naming it separately keeps a narrowed candidate set
+   * attributable without double-counting the Jaccard leg's own drops.
+   */
+  leg?: keyof RetrievalFloorDrops
+  /** Candidates this leg removed because they fell below its floor. */
+  droppedByFloor?: number
 }
 
 /** What the orchestrator resolved before handing control to the store's legs. */
@@ -88,6 +99,13 @@ export interface HybridContext {
   legCap: number
   /** Whether the semantic backend is live; false means the degraded weights are in force. */
   semAvail: boolean
+  /**
+   * The EFFECTIVE relevance floors for this query, already resolved for `semAvail` (see
+   * `store/floors.ts`). Handed to the store for the same reason as {@link weights}: a leg applies
+   * its own floor, and deriving the relaxed value twice is how two stores end up cutting different
+   * candidates.
+   */
+  floors: RetrievalFloors
   /**
    * The fusion weights in force, already rebalanced for `semAvail`. Handed to the store because a
    * leg's weight is part of the leg, and the degraded rebalance must be the SAME one the result
@@ -154,6 +172,10 @@ export interface HybridResult<H> {
   weights: RetrievalWeights
   /** Tokens the returned hits carry; `0` means "not computed" (an unlimited budget skips the pass). */
   used_tokens: number
+  /** The floors actually applied (post degraded-relaxation), for the caller's result envelope. */
+  floors: RetrievalFloors
+  /** How many candidates each leg dropped below its floor. */
+  dropped_by_floor: RetrievalFloorDrops
 }
 
 /**
@@ -228,6 +250,9 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
     : DEGRADED_WEIGHTS
   const overFetch = Math.max(limit, plan.overFetch ?? limit * (retriever.over_fetch_factor || DEFAULT_OVER_FETCH_FACTOR))
   const legCap = legCapFor(deps.config, overFetch)
+  // Resolved ONCE and handed to the legs: the degraded relaxation of `min_fts_terms` must be the
+  // same value the result reports, or a caller cannot tell which rule produced an empty answer.
+  const floors = resolveFloors(retriever, semAvail)
 
   const legs = await runLegs(deps, {
     query,
@@ -236,9 +261,14 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
     legCap,
     semAvail,
     weights,
+    floors,
     ...(plan.queryVector === undefined ? {} : { queryVector: plan.queryVector }),
   })
   for (const leg of legs) if (leg.capped === true) recordLegCapped()
+  const droppedByFloor = emptyFloorDrops()
+  for (const leg of legs) {
+    if (leg.leg !== undefined && leg.droppedByFloor !== undefined) droppedByFloor[leg.leg] += leg.droppedByFloor
+  }
 
   const fused = fuse(legs.map((leg) => ({ weight: leg.weight, scores: leg.scores })), overFetch)
   const texts = deps.texts(fused.map((h) => h.id))
@@ -260,9 +290,10 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
       semanticLive: semAvail,
       rerankUsed: rerank.used,
       rerankFallback: rerank.fallback,
+      droppedByFloor,
     })
   }
-  return { hits: budgeted.kept, degraded: !semAvail, weights, used_tokens: budgeted.used_tokens }
+  return { hits: budgeted.kept, degraded: !semAvail, weights, used_tokens: budgeted.used_tokens, floors, dropped_by_floor: droppedByFloor }
 }
 
 /**

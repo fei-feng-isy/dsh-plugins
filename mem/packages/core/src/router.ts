@@ -1,5 +1,6 @@
-import { DEGRADED_WEIGHTS, type RecallHit, type RecallResult } from '@avantf/mem-contract'
+import { DEGRADED_WEIGHTS, type RecallHit, type RecallResult, type RetrievalFloorDrops } from '@avantf/mem-contract'
 import { fitToTokenBudget, recordTruncation } from '@avantf/mem-core'
+import { mergeFloorDrops } from './store/floors.js'
 
 export interface CrossQueryOptions {
   limit?: number
@@ -12,10 +13,16 @@ export interface CrossQueryOptions {
    * because fusion can reorder which entries deserve the text).
    */
   maxTokens?: number
+  /**
+   * The knowledge leg's floor report. `KnowledgeStore.search` answers with hits only, so the
+   * runtime hands its captured `HybridResult` drops here; the memory side already arrives on
+   * `memory.dropped_by_floor`. Without this, the merged result would report only half the floors.
+   */
+  kbDroppedByFloor?: RetrievalFloorDrops
 }
 
 /** The memory search result the router derives degradation/weights from. */
-export type CrossQueryMemory = Pick<RecallResult, 'hits' | 'degraded' | 'weights'>
+export type CrossQueryMemory = Pick<RecallResult, 'hits' | 'degraded' | 'weights' | 'floors' | 'dropped_by_floor'>
 
 /**
  * Joint min-max normalization over the MERGED pool — the rule the cross-store score
@@ -57,6 +64,10 @@ export function normalizeMergedScores<T extends { score: number }>(pool: T[]): T
 export function crossQuery(memory: CrossQueryMemory, kb: RecallHit[], opts?: CrossQueryOptions): RecallResult {
   const limit = opts?.limit ?? 10
   const weights = memory.weights ?? DEGRADED_WEIGHTS
+  // Both stores read the SAME `retriever` floors, so the effective values are the memory leg's
+  // (post degraded-relaxation); the DROPS are per store and are merged below.
+  const floors = memory.floors
+  const droppedByFloor = mergeFloorDrops(memory.dropped_by_floor, opts?.kbDroppedByFloor)
   let pool = [...memory.hits, ...kb]
   if (opts?.kind === 'fact') pool = pool.filter((h) => h.kind === 'fact')
   if (opts?.kind === 'doc_chunk') pool = pool.filter((h) => h.kind === 'doc_chunk')
@@ -67,18 +78,18 @@ export function crossQuery(memory: CrossQueryMemory, kb: RecallHit[], opts?: Cro
   if (opts?.domain) pool = pool.filter((h) => h.kind === 'doc_chunk' && h.domain === opts.domain)
   if (opts?.source) pool = pool.filter((h) => h.kind === 'doc_chunk' && h.source === opts.source)
 
-  if (pool.length === 0) return { hits: [], degraded: memory.degraded, weights }
+  if (pool.length === 0) return { hits: [], degraded: memory.degraded, weights, floors, dropped_by_floor: droppedByFloor }
 
   const scaled = normalizeMergedScores(pool)
   scaled.sort((a, b) => b.score - a.score)
   const hits = scaled.slice(0, limit)
-  if (opts?.maxTokens === undefined) return { hits, degraded: memory.degraded, weights }
+  if (opts?.maxTokens === undefined) return { hits, degraded: memory.degraded, weights, floors, dropped_by_floor: droppedByFloor }
   // `0` = the caller lifted the budget (the stores already skipped their own passes); estimating
   // every entry just to report a number nobody reads would be the same waste one level up.
-  if (!Number.isFinite(opts.maxTokens) || opts.maxTokens <= 0) return { hits, degraded: memory.degraded, weights }
+  if (!Number.isFinite(opts.maxTokens) || opts.maxTokens <= 0) return { hits, degraded: memory.degraded, weights, floors, dropped_by_floor: droppedByFloor }
   // One budget for the whole merged result, applied AFTER fusion: bounding each leg first would
   // let the knowledge side spend tokens on hits that fusion then drops.
   const budgeted = fitToTokenBudget(hits, { maxTokens: opts.maxTokens })
   if (budgeted.truncated > 0) recordTruncation('output')
-  return { hits: budgeted.kept, degraded: memory.degraded, weights }
+  return { hits: budgeted.kept, degraded: memory.degraded, weights, floors, dropped_by_floor: droppedByFloor }
 }

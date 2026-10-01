@@ -44,10 +44,15 @@ export const DEFAULT_COMMON_CONFIG = `# avantf-mem 公共配置（分层第②�
 #     hnswlib: 2000
 #   hnswlib_ef_search: 256            # ANN 的召回/速度旋钮，语料变大先调它
 
-# retriever:                          # 三条检索腿在融合里的权重
+# retriever:                          # 三条检索腿在融合里的权重与"相关性门槛"
 #   weight_semantic: 0.55
 #   weight_fts: 0.30
 #   weight_jaccard: 0.15
+#   # 绝对门槛打在每条腿的原始分上、fuse() 之前（融合分只在一次查询内可比，不能当门槛）。
+#   # 0 = 关闭该门槛；分数等于门槛保留。语义后端不可用时 min_fts_terms 的生效值放宽到 1。
+#   min_semantic_similarity: 0.5      # 语义腿余弦；0.5 只对 bge-small-zh-v1.5/512 标定过，换模型要重标
+#   min_fts_terms: 2                  # FTS 腿：这一行命中几个不同的查询词元（拉丁词≥5字符 + CJK 3-gram）
+#   min_jaccard: 0.2                  # 实体腿 Jaccard 比值
 
 # lifecycle:
 #   purge_after_archived_days: 365    # 归档事实的物理清理窗口（活跃日）

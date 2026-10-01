@@ -33,7 +33,8 @@ import { classifySource, listTextFiles } from './source_picker.js'
 import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeTerms, type LexicalProbe } from './lexical.js'
-import { hybridSearch, RetrievalInputError, type HybridContext, type HybridDeps, type HybridLeg } from './hybrid.js'
+import { applyScoreFloor, applyTermFloor } from './floors.js'
+import { hybridSearch, RetrievalInputError, type HybridContext, type HybridDeps, type HybridLeg, type HybridResult } from './hybrid.js'
 import { evictVectors as evictVectorsOf, reportForeignVectors, vectorSpaceOf } from './common.js'
 import { ENTITY_EXTRACTOR_VERSION, extractEntities } from '../entities/extract.js'
 import {
@@ -62,6 +63,14 @@ export interface KnowledgeSearchOptions {
   maxTokens?: number
   /** See `SearchInput.recordStats`: the cross-store router records the merged query once. */
   recordStats?: boolean
+  /**
+   * Receives the full `HybridResult` (floors, per-leg floor drops, used tokens) after the search.
+   *
+   * `search` answers with the hits only, because that is what its callers want; the cross-store
+   * router still has to fold THIS store's floor drops into the one merged `kb_query` result, and a
+   * store-level "last result" field would race two concurrent queries.
+   */
+  onResult?: (result: HybridResult<RecallHit>) => void
 }
 
 /** Refuse absurd inputs at the ingestion boundary (paste/URI/file all funnel through here). */
@@ -1258,6 +1267,7 @@ export class KnowledgeStore {
       queryVector: opts?.queryVector,
       recordStats: opts?.recordStats,
     })
+    opts?.onResult?.(result)
     return result.hits
   }
 
@@ -1321,24 +1331,51 @@ export class KnowledgeStore {
     opts: KnowledgeSearchOptions | undefined,
     ctx: HybridContext,
   ): Promise<readonly (HybridLeg | Promise<HybridLeg>)[]> {
-    const leg = (scores: Map<number, number>, weight: number): HybridLeg => ({
+    /**
+     * Wrap one leg's floored scores. `raw` is the PRE-floor set: `capped` must be measured there,
+     * because the relevance floor removes the tail anyway and re-deriving the flag afterwards would
+     * erase the "cut at legCap" signal exactly when it bound.
+     */
+    const leg = (
+      scores: Map<number, number>,
+      weight: number,
+      name: 'semantic' | 'fts' | 'jaccard',
+      dropped: number,
+      raw?: Map<number, number>,
+    ): HybridLeg => ({
       weight,
       scores,
       // `size === cap` is the only observable "this leg was cut" signal, and it is what makes the
       // cap measurable instead of a silent quality cliff (DESIGN §20.17).
-      capped: scores.size === ctx.legCap,
+      capped: (raw ?? scores).size === ctx.legCap,
+      leg: name,
+      droppedByFloor: dropped,
     })
+    const ftsRaw = this.ftsPath(ctx.query, opts?.domain, opts?.source, ctx.legCap)
+    const ftsFloored = applyTermFloor(ftsRaw, this.chunkTexts([...ftsRaw.keys()]), ctx.query, ctx.floors.fts)
     return [
       // The semantic leg is capped by the pool size, not by `legCap`, so it is not flagged: comparing
       // it against `legCap` would report a trim that did not happen.
       ctx.semAvail
         ? this.semanticPath(ctx.query, ctx.overFetch, opts, ctx.queryVector)
-            .then((scores) => ({ weight: ctx.weights.semantic, scores } satisfies HybridLeg))
-        : { weight: ctx.weights.semantic, scores: new Map<number, number>() },
-      leg(this.ftsPath(ctx.query, opts?.domain, opts?.source, ctx.legCap), ctx.weights.fts),
+            .then((raw) => {
+              const floored = applyScoreFloor(raw, ctx.floors.semantic)
+              return { weight: ctx.weights.semantic, scores: floored.scores, leg: 'semantic' as const, droppedByFloor: floored.dropped } satisfies HybridLeg
+            })
+        : { weight: ctx.weights.semantic, scores: new Map<number, number>(), leg: 'semantic' as const, droppedByFloor: 0 },
+      leg(ftsFloored.scores, ctx.weights.fts, 'fts', ftsFloored.dropped, ftsRaw),
       this.jaccardPath(ctx.query, opts?.domain, opts?.source, ctx.legCap)
-        .then((scores) => leg(scores, ctx.weights.jaccard)),
+        .then((raw) => {
+          const floored = applyScoreFloor(raw, ctx.floors.jaccard)
+          return leg(floored.scores, ctx.weights.jaccard, 'jaccard', floored.dropped, raw)
+        }),
     ]
+  }
+
+  /** The texts of a candidate set, for the per-row FTS floor (one batched query). */
+  private chunkTexts(ids: number[]): Map<number, string> {
+    if (ids.length === 0) return new Map()
+    return new Map(this.chunks.hits(ids).map((row) => [row.chunk_id, row.text] as const))
   }
 
   /**

@@ -106,6 +106,33 @@ const retrieverSchema = z.object({
   max_output_tokens: z.number().int().nonnegative().default(8000),
   over_fetch_factor: z.number().int().positive().default(5),
   /**
+   * Relevance floor for the SEMANTIC leg, in cosine units (`0` = off).
+   *
+   * Applied to the leg's RAW score BEFORE `fuse()`: fusion scales each leg by its own maximum, so
+   * the fused number is relative to the query and cannot carry an absolute cutoff (DESIGN §7 /
+   * §20.19). A score EQUAL to the floor is kept — only strictly-lower candidates are dropped.
+   *
+   * The default is calibrated for the shipped embedder (`Xenova/bge-small-zh-v1.5`, dim 512,
+   * mean-pooled AND normalized). A different model is a different cosine scale: re-measure before
+   * keeping 0.5 (see DESIGN §20.19).
+   */
+  min_semantic_similarity: z.number().min(0).max(1).default(0.5),
+  /**
+   * Relevance floor for the FTS leg: the minimum number of DISTINCT query terms a row must hit
+   * (`0` = off). Judged PER ROW — the terms are `store/lexical.ts`'s `relevanceTerms()` (latin words
+   * ≥ 5 chars + every CJK 3-gram), and a row that hits fewer is dropped.
+   *
+   * `bm25` itself is unbounded and query-relative, so it cannot host an absolute floor. With the
+   * semantic leg unavailable this value is relaxed to 1 by the orchestration (FTS + entity are then
+   * the only evidence a short query has); a configured `0` stays off either way.
+   */
+  min_fts_terms: z.number().int().nonnegative().default(2),
+  /**
+   * Relevance floor for the entity-overlap (Jaccard) leg, as a ratio of the union (`0` = off).
+   * A score EQUAL to the floor is kept.
+   */
+  min_jaccard: z.number().min(0).max(1).default(0.2),
+  /**
    * Rows one non-semantic retrieval leg may hand to fusion (`0` = derived: `max(200, 4×overFetch)`).
    *
    * The legs used to return the whole matching corpus — a common phrase matched every fact — and

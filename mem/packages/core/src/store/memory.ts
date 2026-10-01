@@ -33,6 +33,7 @@ import type { Db } from '../db/conn.js'
 import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeTerms, type LexicalProbe } from './lexical.js'
+import { applyScoreFloor, applyTermFloor } from './floors.js'
 import {
   ENTITY_EXTRACTOR_VERSION,
   entitiesFromTokens,
@@ -1094,7 +1095,13 @@ export class MemoryStore {
       queryVector: input.queryVector,
       recordStats: input.recordStats,
     })
-    return { hits: result.hits, degraded: result.degraded, weights: result.weights }
+    return {
+      hits: result.hits,
+      degraded: result.degraded,
+      weights: result.weights,
+      floors: result.floors,
+      dropped_by_floor: result.dropped_by_floor,
+    }
   }
 
   /**
@@ -1150,28 +1157,55 @@ export class MemoryStore {
     const candidates = qEntities.length > 0
       ? this.entities.candidateFactsForAnyEntity(qEntities, input.category, ctx.legCap)
       : []
-    const leg = (scores: Map<number, number>, weight: number): HybridLeg => ({
+    /**
+     * Wrap one leg's raw scores. `capped` must be measured on the RAW set (before the relevance
+     * floor): the floor removes the tail anyway, and deriving the flag from the floored size would
+     * erase the "this leg was cut at legCap" signal exactly when it bound.
+     */
+    const leg = (scores: Map<number, number>, weight: number, raw?: Map<number, number>): HybridLeg => ({
       weight,
       scores,
       // `size === cap` is the only observable "this leg was cut" signal: a leg that finished under
       // the cap cannot have been trimmed.
-      capped: scores.size === ctx.legCap,
+      capped: (raw ?? scores).size === ctx.legCap,
     })
-    const fts = this.ftsPath(ctx.query, input.category, ctx.legCap)
+    // FTS floor: per ROW distinct-query-term coverage, on the terms `lexical.ts` defines. The texts
+    // are loaded once for the capped candidate set (one batched query) — a row whose text is gone
+    // scores 0 terms and is dropped, which the live filter would have done anyway.
+    const ftsRaw = this.ftsPath(ctx.query, input.category, ctx.legCap)
+    const ftsFloored = applyTermFloor(ftsRaw, this.loadTexts([...ftsRaw.keys()]), ctx.query, ctx.floors.fts)
+    // Jaccard floor: applied to the shared candidate set, then the survivors are what the HRR probe
+    // scores — an HRR bundle IS a bundle of entity atoms, so a candidate the entity floor rejected
+    // has no business in the probe either.
+    const jaccardRaw = this.jaccardPath(qEntities, candidates)
+    const jaccardFloored = applyScoreFloor(jaccardRaw, ctx.floors.jaccard)
+    const jaccardLeg = { ...leg(jaccardFloored.scores, ctx.weights.jaccard, jaccardRaw), leg: 'jaccard' as const, droppedByFloor: jaccardFloored.dropped }
     const legs: (HybridLeg | Promise<HybridLeg>)[] = [
       // The async legs (model encode) are independent — the orchestrator awaits them concurrently.
       ctx.semAvail
         ? this.semanticPath(ctx.query, input.category, ctx.overFetch, ctx.queryVector)
-            .then((scores) => ({ weight: ctx.weights.semantic, scores } satisfies HybridLeg))
-        : { weight: ctx.weights.semantic, scores: new Map<number, number>() },
-      Promise.resolve(leg(this.jaccardPath(qEntities, candidates), ctx.weights.jaccard)),
-      leg(fts, ctx.weights.fts),
+            .then((raw) => {
+              const floored = applyScoreFloor(raw, ctx.floors.semantic)
+              return { weight: ctx.weights.semantic, scores: floored.scores, leg: 'semantic' as const, droppedByFloor: floored.dropped } satisfies HybridLeg
+            })
+        : { weight: ctx.weights.semantic, scores: new Map<number, number>(), leg: 'semantic', droppedByFloor: 0 },
+      Promise.resolve(jaccardLeg),
+      { ...leg(ftsFloored.scores, ctx.weights.fts, ftsRaw), leg: 'fts', droppedByFloor: ftsFloored.dropped },
     ]
     if (input.includeHrr) {
       // The HRR probe is an entity-level leg; it shares the jaccard weight so the reported 3-key
-      // weights contract stays stable.
+      // weights contract stays stable. Its candidates are the Jaccard survivors; when the raw set
+      // was non-empty but the floor emptied it, the recency fallback must NOT fire (that would
+      // re-admit exactly the candidates the floor removed).
       legs.push(Promise.resolve(leg(
-        this.hrrPath(ctx.query, qEntities, candidates, input.category, ctx.legCap),
+        this.hrrPath(
+          ctx.query,
+          qEntities,
+          [...jaccardFloored.scores.keys()],
+          input.category,
+          ctx.legCap,
+          candidates.length === 0,
+        ),
         ctx.weights.jaccard,
       )))
     }
@@ -1319,15 +1353,24 @@ export class MemoryStore {
     candidates: number[],
     category: string | undefined,
     cap: number,
+    /**
+     * Whether the recency fallback may run. The caller passes `false` when the Jaccard floor
+     * emptied a NON-empty candidate set: the probe's candidates are that leg's survivors, and
+     * falling back to "the cap most recent facts" would re-admit exactly what the floor removed.
+     * An empty RAW set still falls back — that is the pre-existing path for a query whose entities
+     * no fact shares (and for a query with no entities at all).
+     */
+    allowRecencyFallback = candidates.length === 0,
   ): Map<number, number> {
     if (entityNames.length === 0 && !query.trim()) return new Map()
+    if (candidates.length === 0 && !allowRecencyFallback) return new Map()
     const probe = encodeHrrEntityVector(entityNames.length ? entityNames : [query.trim()])
     // Only the entity-sharing candidates are scored (the bundle's atoms ARE the entity names).
     // NOTE the fallback condition is "no candidate set at all", NOT "the query has no entities":
     // it also fires when entities were extracted but no fact shares one. In that case the leg
     // scores the `cap` MOST RECENT facts (see `activeHrrRows`) — bounded on purpose, and reported
     // once, because the alternative is decoding one 8 KB blob per active fact (1.37 s at 33k).
-    const truncatedFallback = candidates.length === 0
+    const truncatedFallback = allowRecencyFallback
     const rows = truncatedFallback
       ? this.facts.activeHrrRows(category, cap)
       : this.facts.hrrRowsForFacts(candidates, category)

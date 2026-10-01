@@ -4,6 +4,31 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+### Changed（检索相关性门槛：绝对分门槛打在融合之前，`0` = 关）
+- 三条检索腿各加一个**绝对门槛**，打在**每条腿的原始分**上、`fuse()` **之前**（`core/src/store/floors.ts`，
+  经 `HybridContext.floors` 下发，两条 store 的腿各自应用）：语义腿余弦 `min_semantic_similarity`
+  （默认 **0.5**）、FTS 腿**逐行**命中的**不同查询词元数** `min_fts_terms`（默认 **2**，词元复用
+  `store/lexical.ts` 的 `relevanceTerms()`）、实体腿 Jaccard 比值 `min_jaccard`（默认 **0.2**）。
+  **等于门槛保留**，只丢严格小于；三者 `0` = 关闭。不能用融合分当门槛：`retrieval-core/src/fusion.ts`
+  的 `scaleByMax` 让每条腿的头名恒为 1.0，融合分只在一次查询内可比（DESIGN §20.19）。
+- **降级放宽**：语义后端不可用（走 `DEGRADED_WEIGHTS`）时，`min_fts_terms` 的**生效值降为 1**；配置的
+  `0` 仍为 `0`。
+- **可观察行为变更**：`RecallResult`（`mem_recall.search`、`kb_query`、跨库）新增 `floors`（生效门槛）
+  与每腿 `dropped_by_floor`（`{semantic,fts,jaccard,hrr}`）；检索健康度新增
+  `candidates_dropped_by_floor`。这样"结果为空"能区分"门槛挡掉了 N 条"和"本来就没有候选"。HRR 探针的
+  候选集被 Jaccard 门槛收窄（原始候选非空但被清空时**不再**回退到"最近 cap 条"）。图路径
+  （`probe`/`related`/`reason`/`chain` 的图查询与 `ask` 的三元组路径）不套门槛。**工具描述与 systemPrompt
+  段一字未动。**
+- **标定与重冻**：35 条中文评测集、模型实测打开（其余两个门槛置 0 以隔离语义旋钮）：0.40/0.45/0.50 三档
+  P@k/R@k/MRR/must_include 相同，`must_exclude` 0.5143 → 0.5429 → **0.6000**、总命中 66 → 62 → 60 → 56；
+  0.55 起质量掉档（MRR 0.9857 → 0.9571、must_include → 0.9429、首次出现空结果）。**取拐点 0.50 为默认。**
+  降级路径（`eval_zh.spec.ts` 的精确断言）七个汇总数字**逐位不变**：该 spec 跑的是无模型路径，生效门槛
+  `{semantic:0.5, fts:1, jaccard:0.2}`，实测 35 条查询的 `dropped_by_floor` 合计
+  `{semantic:0, fts:0, jaccard:0, hrr:0}`（语义腿不在、FTS 门槛放宽为 1、Jaccard 门槛在这套小语料上没
+  砍到候选）——原因与复核写进该 spec 注释，边界行为由新增的 `test/floors.spec.ts` 在两条 store 上钉住。
+  **换嵌入模型必须按 DESIGN §20.19 重新标定**（0.5 只在 `Xenova/bge-small-zh-v1.5`、dim 512、mean+normalize
+  下成立）。
+
 ### Changed（数据库系统统一为运行时内置的 `node:sqlite` + DSH Desktop 支持）
 - **存储层只剩一个实现：运行时的 `node:sqlite`，`better-sqlite3` 被彻底移除**（`db/sqlite.ts` 是唯一的
   适配器；原来的驱动选择器 `db/binding.ts` 与第二个适配器 `db/sqlite_node.ts` 一并删除）。原因是它无法被

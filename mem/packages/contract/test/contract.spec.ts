@@ -118,6 +118,26 @@ describe('contract', () => {
     expect(ConfigSchema.safeParse({ retriever: { leg_cap: 1.5 } }).success).toBe(false)
   })
 
+  it('retriever relevance floors default to the calibrated values, admit 0 = off, and refuse nonsense', () => {
+    // The three floors are absolute cutoffs on the legs' OWN raw scores (cosine / distinct query
+    // terms / Jaccard ratio); `0` means "this leg is not gated". They are config + result-payload
+    // values only — deliberately NOT model-facing knobs (see the tool-schema assertion below).
+    const cfg = ConfigSchema.parse({})
+    expect(cfg.retriever.min_semantic_similarity).toBe(0.5)
+    expect(cfg.retriever.min_fts_terms).toBe(2)
+    expect(cfg.retriever.min_jaccard).toBe(0.2)
+    const off = ConfigSchema.parse({ retriever: { min_semantic_similarity: 0, min_fts_terms: 0, min_jaccard: 0 } })
+    expect(off.retriever).toMatchObject({ min_semantic_similarity: 0, min_fts_terms: 0, min_jaccard: 0 })
+    expect(ConfigSchema.safeParse({ retriever: { min_semantic_similarity: 1.1 } }).success).toBe(false)
+    expect(ConfigSchema.safeParse({ retriever: { min_semantic_similarity: -0.1 } }).success).toBe(false)
+    expect(ConfigSchema.safeParse({ retriever: { min_jaccard: -0.1 } }).success).toBe(false)
+    expect(ConfigSchema.safeParse({ retriever: { min_fts_terms: -1 } }).success).toBe(false)
+    expect(ConfigSchema.safeParse({ retriever: { min_fts_terms: 1.5 } }).success).toBe(false)
+    // DESIGN §20.19 / the tool contract: the floors must not leak into a model-visible schema.
+    const toolSchemas = JSON.stringify([REMEMBER_TOOL, RECALL_TOOL, ADMIN_TOOL, KB_TOOL, KB_ADD_TOOL, QUERY_TOOL])
+    expect(toolSchemas).not.toMatch(/min_semantic_similarity|min_fts_terms|min_jaccard/)
+  })
+
   it('bounds retrieval OUTPUT by default, and lets one call override the bound', () => {
     // `limit` bounds how many hits, never how much text, so a broad query could otherwise put
     // tens of thousands of characters into a model's context (DESIGN §20).

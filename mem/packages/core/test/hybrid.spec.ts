@@ -171,6 +171,39 @@ describe('hybridSearch', () => {
     })
   })
 
+  it('reports the effective floors and per-leg floor drops, and counts them in health', async () => {
+    const result = await hybridSearch(deps(() => [
+      { ...leg({ 1: 0.9 }), leg: 'semantic', droppedByFloor: 2 },
+      { ...leg({ 2: 0.5 }), leg: 'fts', droppedByFloor: 1 },
+      { ...leg({ 3: 0.4 }), leg: 'jaccard', droppedByFloor: 0 },
+      // The HRR probe shares the Jaccard floor and is attributed separately without double-counting.
+      { ...leg({ 4: 0.1 }), leg: 'hrr' },
+    ]), { query: '查询' })
+    expect(result.floors).toEqual({
+      semantic: config.retriever.min_semantic_similarity,
+      fts: config.retriever.min_fts_terms,
+      jaccard: config.retriever.min_jaccard,
+    })
+    expect(result.dropped_by_floor).toEqual({ semantic: 2, fts: 1, jaccard: 0, hrr: 0 })
+    expect(retrievalHealth().candidates_dropped_by_floor).toBe(3)
+  })
+
+  it('relaxes the FTS floor to 1 when the semantic backend is down (0 stays off)', async () => {
+    const seen: HybridContext[] = []
+    const down: HybridDeps<TestHit> = {
+      ...deps((ctx) => { seen.push(ctx); return [] }),
+      semantic: { ...semantic, isAvailable: () => false },
+    }
+    const result = await hybridSearch(down, { query: '查询' })
+    expect(seen[0].floors.fts).toBe(1)
+    expect(result.floors.fts).toBe(1)
+
+    config.retriever.min_fts_terms = 0
+    const off: HybridContext[] = []
+    await hybridSearch({ ...down, legs: async (ctx) => { off.push(ctx); return [] } }, { query: '查询' })
+    expect(off[0].floors.fts).toBe(0)
+  })
+
   it('counts a leg that came back exactly at the cap', async () => {
     expect(retrievalHealth().legs_capped).toBe(0)
     await hybridSearch(deps(() => [leg({ 1: 0.9 }), leg({ 2: 0.5 }, 1, true)]), { query: '查询' })

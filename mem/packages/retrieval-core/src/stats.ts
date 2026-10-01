@@ -14,7 +14,7 @@
  * The SHAPES live in `@avantf/mem-contract` (they are UI payloads — the settings page renders
  * them), so this module only owns the counting.
  */
-import type { KindHealth, RetrievalHealth, RetrievalHealthSummary } from '@avantf/mem-contract'
+import type { KindHealth, RetrievalFloorDrops, RetrievalHealth, RetrievalHealthSummary } from '@avantf/mem-contract'
 
 function empty(): RetrievalHealth {
   return {
@@ -31,6 +31,7 @@ function empty(): RetrievalHealth {
     rerank_truncated: 0,
     output_truncated: 0,
     legs_capped: 0,
+    candidates_dropped_by_floor: 0,
     updated_at: null,
     by_kind: {},
   }
@@ -46,6 +47,12 @@ export interface RetrievalEvent {
   semanticLive: boolean
   rerankUsed?: boolean
   rerankFallback?: boolean
+  /**
+   * Per-leg candidates removed by the relevance floors before fusion. The per-leg shape is what
+   * makes an empty result readable ("the FTS floor cut 7 rows" vs "no leg had a candidate"); the
+   * aggregate counter below is what survives the process.
+   */
+  droppedByFloor?: RetrievalFloorDrops
 }
 
 /** Record one completed retrieval. */
@@ -60,6 +67,11 @@ export function recordRetrieval(event: RetrievalEvent): void {
   else active.semantic_degraded += 1
   if (event.rerankUsed) active.rerank_used += 1
   if (event.rerankFallback) active.rerank_fallback += 1
+  const drops = event.droppedByFloor
+  if (drops !== undefined) {
+    const total = drops.semantic + drops.fts + drops.jaccard + drops.hrr
+    if (Number.isFinite(total) && total > 0) active.candidates_dropped_by_floor += total
+  }
   const bucket = (active.by_kind[event.kind] ??= { queries: 0, zero_results: 0, results: 0 })
   bucket.queries += 1
   bucket.results += event.results
@@ -118,6 +130,7 @@ export function retrievalHealthSummary(): RetrievalHealthSummary {
     rerank_truncated: h.rerank_truncated,
     output_truncated: h.output_truncated,
     legs_capped: h.legs_capped,
+    candidates_dropped_by_floor: h.candidates_dropped_by_floor,
     updated_at: h.updated_at,
     by_kind: h.by_kind,
   }
