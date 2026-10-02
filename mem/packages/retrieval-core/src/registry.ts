@@ -39,6 +39,12 @@ function unimplementedVStore(name: string): Factory<VectorStore> {
  * Pluggable backend registries. The DSH plugin does NOT expose these as Cordis
  * services; replacement happens inside avantf-mem by config + registry (DESIGN §5).
  * The business flow resolves backends only through these factories.
+ *
+ * The three `register*` functions below are the whole pluggability contract: register a name, put
+ * that name in `config.<semantic|rerank|vectorStore>.backend`, and the resolver picks it up — no
+ * business-flow change. They are re-exported on the PUBLISHED plugin face (`@avantf/dsh-mem`) so a
+ * consumer OUTSIDE this repo can actually use the promise DESIGN §5 makes; see `packages/core/src/index.ts`
+ * and `packages/plugin/src/index.ts`. Resolution stays a registry lookup, never duck-typing.
  */
 const semanticRegistry: Record<string, Factory<SemanticBackend>> = {
   local_bge: (cfg, opts) =>
@@ -73,6 +79,9 @@ const vstoreRegistry: Record<string, Factory<VectorStore>> = {
 
 export function registerSemanticBackend(name: string, factory: Factory<SemanticBackend>): void {
   semanticRegistry[name] = factory
+}
+export function registerReranker(name: string, factory: Factory<Reranker>): void {
+  rerankRegistry[name] = factory
 }
 export function registerVectorStore(name: string, factory: Factory<VectorStore>): void {
   vstoreRegistry[name] = factory

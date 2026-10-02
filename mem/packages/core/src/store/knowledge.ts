@@ -22,8 +22,8 @@ import {
   type RecallHit,
   type ReindexReport,
 } from '@avantf/mem-contract'
-import { retrievalLogger } from '@avantf/mem-core'
-import type { Reranker, SemanticBackend, VectorStore } from '@avantf/mem-core'
+import { retrievalLogger } from '@avantf/mem-retrieval'
+import type { Reranker, SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
 import type { Db } from '../db/conn.js'
 import { KNOWLEDGE_SCHEMA, openKnowledgeStore } from '../db/knowledge.js'
 import { describeMigrationOutcome, wasUpgraded } from '../db/store.js'

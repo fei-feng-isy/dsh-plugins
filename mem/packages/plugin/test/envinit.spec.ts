@@ -68,7 +68,14 @@ function recordingLogger() {
   }
 }
 
-/** The base surface `src/envinit.ts` uses, with every call recorded. */
+/**
+ * The base surface `src/envinit.ts` uses, with every call recorded.
+ *
+ * The npm-package provider and its kind are deliberately absent: they moved to
+ * `@avantf/dsh-plugin-base/internal` in interface generation v3, and `envinit.ts` never asks for
+ * them (it registers the archive and model-cache providers only). A fake that offered them would be
+ * testing a surface no plugin can reach through the loaded `.` entry.
+ */
 function fakeFramework(calls: Calls, resolveState: unknown, opts: { rejectBackgroundEnsure?: boolean } = {}) {
   const provisioner = {
     register: (provider: any) => { calls.register.push(provider); return { dispose: () => undefined } },
@@ -97,14 +104,12 @@ function fakeFramework(calls: Calls, resolveState: unknown, opts: { rejectBackgr
   return {
     VERSION: '0.0.0',
     ITEM_SCHEMA_VERSION: 1,
-    NPM_PACKAGE_KIND: 'npm-package',
     BINARY_ARCHIVE_KIND: 'binary-archive',
     MODEL_CACHE_KIND: 'model-cache',
     createProvisioner: (options: any) => {
       calls.createOptions.push(options)
       return opts.rejectBackgroundEnsure === true && calls.createOptions.length > 0 ? rejecting : provisioner
     },
-    npmPackageProvider: () => ({ id: '@avantf/dsh-plugin-base/npm', kinds: ['npm-package'] }),
     binaryArchiveProvider: () => ({ id: '@avantf/dsh-plugin-base/binary-archive', kinds: ['binary-archive'] }),
     modelCacheProvider: () => ({ id: '@avantf/dsh-plugin-base/model-cache', kinds: ['model-cache'] }),
   }

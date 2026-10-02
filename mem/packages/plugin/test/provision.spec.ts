@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
-import { floorOf } from '@avantf/dsh-plugin-base'
+import { floorOf } from '@avantf/dsh-plugin-base/internal'
 import { TOOL_SPECS } from '@avantf/mem-contract'
 import { inject } from '../src/inject.js'
 import {

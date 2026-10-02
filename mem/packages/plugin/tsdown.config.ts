@@ -11,7 +11,7 @@
  * the plugin directory as the working directory (see `pnpm build:dsh`).
  *
  * The Node half IS the published artifact, and it ships as ONE package: the
- * engine (`@avantf/mem-contract` → `@avantf/mem-core` → `@avantf/mem`) sits in
+ * engine (`@avantf/mem-contract` → `@avantf/mem-retrieval` → `@avantf/mem`) sits in
  * `devDependencies`, so the preset's node rule — production sections stay
  * imports, everything else inlines — folds it into `lib/index.js`. The
  * production sections of the manifest are therefore the runtime surface of the

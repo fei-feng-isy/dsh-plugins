@@ -63,7 +63,7 @@ pnpm build:dsh   # links harness packages + publishes the manifest stub, then ts
 > `DSH_ENVINIT=<checkout>` is the explicit opt-in for co-developing the base.
 > `scripts/assert-envinit-artifacts.mjs` (also run by `pnpm build:dsh`) asserts the bootstrap is
 > really inlined, base is never imported by specifier, and `lib/client.js` is clean; the tarball must
-> carry no `link:`/`file:` specifier (`pack-plugin` / `make-release-tree` both refuse one).
+> carry no `link:`/`file:` specifier (`pack-plugin` refuses one).
 > **Publish the base BEFORE the plugin** (see `docs/RELEASING.md`).
 
 > **What the gate's version line compares.** `declared` is **the dsh this artifact was compiled

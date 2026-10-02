@@ -31,7 +31,7 @@ set -euo pipefail
 
 PROFILE="${DSH_PROFILE:-web}"
 ENTRY_ID="avantf-mem"
-PACKAGES=('@avantf/dsh-mem' '@avantf/mem' '@avantf/mem-contract' '@avantf/mem-core')
+PACKAGES=('@avantf/dsh-mem' '@avantf/mem' '@avantf/mem-contract' '@avantf/mem-retrieval')
 DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
 
 DRY_RUN=0

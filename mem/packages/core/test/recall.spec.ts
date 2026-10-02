@@ -7,7 +7,7 @@ import { buildFtsQuery } from '../src/db/tokenizer.js'
 import { extractEntities } from '../src/entities/extract.js'
 import { encodeHrrEntityVector, hrrToBytes } from '../src/hrr/index.js'
 import type { RecallRequest } from '@avantf/mem-contract'
-import { resetRetrievalHealth, retrievalHealth, retrievalHealthSummary } from '@avantf/mem-core'
+import { resetRetrievalHealth, retrievalHealth, retrievalHealthSummary } from '@avantf/mem-retrieval'
 
 let dir: string
 let rt: AvantfRuntime

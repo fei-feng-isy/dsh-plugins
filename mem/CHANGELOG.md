@@ -5,6 +5,23 @@ All notable changes to `avantf-mem` are documented here.
 ## [Unreleased]
 
 ## [0.4.0] - 2026-10-01
+### Changed（接口 v3：提示词文件前缀改由 base 校验）
+- **`PromptFiles` 构造点传 `namespace: 'mem'`**（`packages/plugin/src/prompt.ts` 新增 `PROMPT_NAMESPACE`，`packages/plugin/src/index.ts` 构造时传入）：base 接口 v3 新增该字段，会校验每个提示词 `file` 都是**裸文件名**且以 `mem-` 开头，不满足就告警并退回内置默认、不碰盘——`mem-*` / `mission-*` 前缀从此由 base 校验，杜绝静默接管别的插件的用户文件。三份文件本就合规，**读取行为逐字节不变**（新增 spec 在真实目录上对比传/不传 namespace 的结果），字段可选、base 缺席或只到 v1/v2 的降级路径不变；构建 bake 随 base 升到 `interfaceVersion: 3`。
+
+### Added（Remote wire 版本标记：宿主与 client 的世代可诊断）
+- **每个 Remote 应答都带 `wire` 版本号**（`packages/plugin/src/remote.ts` 新增 `WIRE_VERSION = 1` 与 `wireOk`/`wireErr` 盖章 helper，11 处返回全部经过它；契约 `RemoteOk`/`RemoteErr` 加可选字段，由 `unwrapRemoteEnvelope` 从 application envelope 透传）：client 每次刷页面重载、而 host 只在 `dsh web` 启动时加载一次，两边世代可能不同——**此前 mem 没有任何版本标记**，skew 的症状是"某个 Remote 静默 404"（mission 早已为一次实测事故补过同样的标记）。
+- **可诊断的失败取代静默 404**：新增 `packages/plugin/src/client/wire.ts`（纯函数、无 React）给出 `hostSkew`（相等静默 / 缺标记 → "老宿主，重启 dsh web" / 数字不符 → 报出两个数字）、`hostSupports`、`staleHostText`（拒绝发送时的话术）、`transportHint`（404 → "宿主可能没注册这个接口…重启 dsh web"）；接进 `callRemote` 这唯一的调用咽喉：**已知更旧**的宿主 → 不发并给话术，**未知版本放行**（首个 gated 调用不会自锁），skew 只 `console.warn` 一次。
+- bump 规则：**增删 `@Remote` 方法才 bump，新增可选字段不 bump**；缺标记（`undefined`）按老宿主处理。
+- 同批：`remote_wire.spec.ts` 的方法名单**改为从描述符表派生**（此前手写名单漏了 `classifySource`/`browseDir`——"守卫把缺口写成了期望"），今后"声明了却没人调用"的方法会红。
+
+### Added（检索底座注册面补齐并发布：兑现 DESIGN §5 的"三者皆可注册"）
+- **补 `registerReranker`**（`packages/retrieval-core/src/registry.ts`）：与 `registerSemanticBackend` / `registerVectorStore` 同形同语义——注册一个名字、把名字写进 `rerank.backend`，业务流零改动。此前只有两个注册面，"三者皆可注册"在重排这一半不成立。
+- **注册面 re-export 到插件公开面**（`packages/core/src/index.ts` → `packages/plugin/src/index.ts`）：`registerSemanticBackend` / `registerReranker` / `registerVectorStore` 与 `SemanticBackend` / `Reranker` / `VectorStore` 三个接口现在从 `@avantf/dsh-mem` 可导入，仓外消费者无需命名私有包即可注册。注册表实例与 `buildRuntime` 解析的是同一个（跨包钉在 `packages/core/test/registry_face.spec.ts`）；`none` 重排、`auto` 升级路径与构造注入缝 `buildRuntime({semantic})` 均不变，未注册时行为逐字不变。
+
+### Changed（披露修正）
+- **README 里程碑表 M11/M12 如实标注"需 repo checkout 运行（private，不进可发布集合）"**，与 README 既有的 private 声明一致，消除与"✅ 交付"的语义冲突；不把它们加进发布面。
+- **`@avantf/mem-provision` 的弱保证边界写进包内文档/注释**（`packages/provision/src/index.ts` 模块文档 + `src/fetch.ts` 的 `publishAtomically` 注释）：保证等级 = sha256 + 双 rename，**无跨进程锁**是有论证的取舍（rename 语义下 last-writer-wins 仍产出完整树），严格**低于** base envinit 的族根锁 / pid 权威 / 慢持有告警；并写明为什么两套栈并存、加固不同步，以及 **CLI/MCP 与降级路径走的就是这一套**。行为不变。
+
 ### Fixed（良构硬化：孤立代理不再产出严格解析器拒收的 JSON）
 - **写侧归一化收口在 `packages/core/src/store/common.ts` 的 `normalizeWrite`/`normalizeWrites`**（实现是契约的 `toWellFormedText` = `toWellFormed()` + `normalize('NFC')`）：作用域是**身份 / 元数据**——知识文档的 `domain`/`source`/`title`/`source_uri`/`paths`（在**规划前**归一化，否则 NFD 标题会与等价的 NFC 行擦肩而过、冲突判断说谎）与从正文派生的标题；以及**记忆事实**的 `content`/`category`/`archive_reason` 与派生实体 / 三元组。**知识文档的正文不归一化**：正文是内容不是身份，受管副本正文与 `content_hash` 继续逐字节等于摄入的文本（实测：摄入 `e\u0301正文`，受管 `.md` 的正文码点仍是 `65,301,6b63,6587`，`content_hash` 等于该字符串的 sha256），所以 DESIGN §8 的原承诺逐字成立——"等于归一化后的文本"只对身份字段与**路径段**（`sanitizeSegment` 的文件名 NFC）成立，对正文不成立。
 - **出站唯一边界**（`packages/plugin/src/render.ts`，即 `output.render`）：递归 `toWellFormedDeep`（只修孤立代理为 `U+FFFD`、**不做 NFC**）之后才 `JSON.stringify`，所以**任何**结果（含历史坏数据）都是严格解析器可读的文本；MCP 的 JSON 边界（`packages/mcp/src/index.ts`）同规。写侧的孤立代理由 Node 的 UTF-8 编码器（`writeFileSync` 与 `node:sqlite` 绑定）替换成 `U+FFFD`，`content_hash` 用同一编码器计算，故文件正文与哈希始终一致（实测：正文 `x\uD800y` 的受管副本正文码点是 `78,fffd,79`）。

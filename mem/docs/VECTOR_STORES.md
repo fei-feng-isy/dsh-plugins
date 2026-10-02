@@ -24,7 +24,7 @@ explicit warning) so the system always missions.
 ## Activating a backend
 
 ```ts
-import { registerVectorStore } from '@avantf/mem-core'
+import { registerVectorStore } from '@avantf/mem-retrieval'
 
 registerVectorStore('my_backend', () => new MyVectorStore(512))
 ```

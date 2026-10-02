@@ -15,11 +15,11 @@ pnpm release:check --allow-uncut     # 切版本节之前的预跑：同一批�
 
 | 步骤 | 覆盖 | 备注 |
 |---|---|---|
-| preflight（元数据） | 版本只记在可发布包的 manifest 里、**私有包不带版本**（开发树 8 个私有包；发布树仍 4 个：contract / retrieval-core / core / plugin——convert 与 provision 都被内联，不单独发布）、CHANGELOG 的**第一个**版本节就是当前版本、`[Unreleased]` 已清空、插件声明了 DSH peer、**可发布的只有 plugin** | 打 tag 前真正会忘的两件事；包清单从 `packages/` 目录派生，发布树少两个包也不会崩 |
+| preflight（元数据） | 版本只记在可发布包的 manifest 里、**私有包不带版本**（开发树 8 个包；convert 与 provision 会被内联，不单独发布）、CHANGELOG 的**第一个**版本节就是当前版本、`[Unreleased]` 已清空、插件声明了 DSH peer、**可发布的只有 plugin** | 打 tag 前真正会忘的两件事；包清单从 `packages/` 目录派生 |
 | `pnpm install --frozen-lockfile` | 锁文件与 CI 一致 | CI 用的是同一条命令 |
 | `pnpm build` | 7 个引擎包（contract/retrieval-core/core/convert/provision/cli/mcp） | |
 | `pnpm typecheck` | 引擎包的 **src + test** | 测试类型也是门禁（见 AGENTS.md） |
-| `pnpm test` | 检出里所有包的测试（开发树 8 个） | 发布树没有测试源码，这一步自然消失；`packages/plugin` 的默认运行只含 **harness-free** 的 10 个 spec（见下） |
+| `pnpm test` | 检出里所有包的测试（开发树 8 个） | `packages/plugin` 的默认运行只含 **harness-free** 的 10 个 spec（见下） |
 | `pnpm test:dsh` | 插件里**需要 DSH peers 才能加载**的两个 spec（`test/provision.spec.ts` / `test/envinit.spec.ts`，都经 `src/provision.ts` 拿到 `@deepseek-ai/dsh-tools` 的**值导入**） | **仅本地**：CI 的树里没有 `@deepseek-ai/*`，加载即失败，所以 `vitest.config.ts` 把这两个排除在默认运行之外；`build:dsh` 会跑它 |
 | `pnpm typecheck:dsh` | 插件的 src + test（对着已安装的全局 dsh 的类型检查） | **仅本地**：CI 没有 dsh |
 | `pnpm build:dsh` | 插件 `tsc + tsdown`，随后 `pnpm test:dsh`、**mount smoke**（真实 Cordis 上下文 + 降级挂载）；先跑 `link-dsh` 从已安装的 dsh 软链邻居包、`link-envinit` 从安装副本 vendor 底座 bootstrap，构建后 `assert-envinit-artifacts` 断言 bootstrap 已内联；client preset 用仓库自带的 pin 住的副本 | **仅本地** |
@@ -97,8 +97,9 @@ pnpm version:set mem X.Y.Z
 #    （preflight 检查：版本只记在 packages/plugin 的 manifest 里、私有包不带版本 + 第一个版本节 == 包版本
 #      + [Unreleased] 无 `### ` 条目）
 
-# 3) 门禁（严格，不带 --allow-uncut）+ 打包冒烟
+# 3) 门禁（严格，不带 --allow-uncut）+ 发布前断言 + 打包冒烟
 pnpm release:check                 # 必须打印 RELEASE GATE PASSED (X.Y.Z)
+node ../scripts/prepublish-assert.mjs --package @avantf/dsh-mem   # 发布面不变量（只读）
 pnpm pack:plugin --mount           # 必须 PACK OK；产物 dist/avantf-dsh-mem-X.Y.Z.tgz
 
 # 4) 发布提交 + tag + 推开发仓（tag 带组前缀：三个包共用一个仓库，vX.Y.Z 会互相撞）
@@ -106,26 +107,18 @@ git add -A && git commit -m "chore(release): X.Y.Z"
 git tag -a mem-vX.Y.Z -m "avantf-mem X.Y.Z"
 git push origin master --follow-tags
 
-# 5) 同步发布树（整仓投影；版本默认取开发树，第 2 步已经改好；--gate 别放这一步，见 §2 的原生依赖说明）
-pnpm sync:rc --yes --commit
-# 发布树装出原生模块，再单独跑它自己的门禁（含三个包的门禁与 pack --mount）
-( cd ../dsh-plugins-rc && (pnpm install --frozen-lockfile || pnpm rebuild) \
-    && pnpm release:check:base && pnpm release:check:mem && pnpm release:check:mission )
-# 发布树的 tag 同样带组前缀（base-vX.Y.Z / mem-vX.Y.Z / mission-vX.Y.Z）
-git -C ../dsh-plugins-rc tag -a mem-vX.Y.Z -m "avantf-mem X.Y.Z"
-git -C ../dsh-plugins-rc push --follow-tags
-
-# 6) 只发一个包：先在发布树 pack 出 tarball，再用 npm 发它（分工与原因见 §2 的发布前提 1）
-( cd ../dsh-plugins-rc && pnpm -C mem pack:plugin )
-npm publish "$PWD/../dsh-plugins-rc/mem/dist/avantf-dsh-mem-X.Y.Z.tgz" --access public \
+# 5) 只发一个包：从**本仓** pack 出 tarball，再用 npm 发它（分工与原因见 §2 的发布前提 1；
+#    各可发布包真 publish 时会自己跑 prepublishOnly = prepublish-assert + pack-plugin）
+pnpm pack:plugin                    # 产出 mem/dist/avantf-dsh-mem-X.Y.Z.tgz
+npm publish "$PWD/dist/avantf-dsh-mem-X.Y.Z.tgz" --access public \
   --registry https://registry.npmjs.org/
 
-# 7) 按 REGISTRY 反向确认，不要只信 CLI 的 ✅
+# 6) 按 REGISTRY 反向确认，不要只信 CLI 的 ✅
 curl -sS https://registry.npmjs.org/@avantf%2Fdsh-mem \
   | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['dist-tags'], sorted(d['versions']))"
 ```
 
-**第 7 步不是形式**：2FA 账号上 publish 可能被登记成**待批准的 staged 版本**——CLI 照样打印
+**第 6 步不是形式**：2FA 账号上 publish 可能被登记成**待批准的 staged 版本**——CLI 照样打印
 `✅ Published package`，而版本端点先返回 404、再发同版本报 `409 Cannot publish over previously staged
 version`。判定以 `dist-tags.latest` 与版本列表为准；staged 时等一会/在 npmjs.com 批准
 （`npm stage list` → `npm stage approve <stageId> --otp=<code>`）；要无人值守，用勾了 **Bypass 2FA** 的
@@ -142,13 +135,11 @@ available.`，而 `npm stage list` 会说没有 staged 版本。②只能等（2
 
 ## 2. 版本策略
 
-- 开发树里的 8 个包（`@avantf/mem-contract` / `mem-core` / `mem` / `mem-convert` / `mem-provision` / `mem-cli` / `mem-mcp` / `dsh-mem`）
+- 开发树里的 8 个包（`@avantf/mem-contract` / `mem-retrieval` / `mem` / `mem-convert` / `mem-provision` / `mem-cli` / `mem-mcp` / `dsh-mem`）
   **共用同一个版本号**：插件是引擎的薄壳（且把引擎内联进自己的 `lib/index.js`），版本各走各的只会制造
   "这是哪一版的引擎"的问题。`release:check` 的 preflight 会拦下不一致（清单从目录派生）。
-- **发布树是 `dsh-plugins` 的整仓投影**（含 `packages/cli` 与 `packages/mcp`、含测试与文档）：
-  投影只是把同一个仓库形态搬进 rc，所以 rc 里能跑与开发树相同的门禁；唯一不进 rc 的是 RC 工具链自己
-  （`scripts/make-release-tree.mjs`、`scripts/sync-release-repo.sh`）。真正发布出去的仍然只有一个自包含插件包
-  `@avantf/dsh-mem`（外加底座 peer），引擎与开发入口都是 `private: true`。
+- **发布直接从开发仓做**（不再投影到 `../dsh-plugins-rc`，该目录已废弃）：真正发布出去的仍然只有一个
+  自包含插件包 `@avantf/dsh-mem`（外加底座 peer），引擎与开发入口都是 `private: true`。
 - **只发布 `@avantf/dsh-mem` 一个包**。另外 7 个在 manifest 里是 `private: true`（workspace-only），
   `pnpm -r publish` 碰不到它们；preflight 会断言"可发布的只有 plugin"，所以既不会误发引擎，
   也不会出现"插件悄悄变成 private 而没人发现"。DSH 用户装的是这一个插件包**加上**它的 peer 底座
@@ -212,24 +203,9 @@ available.`，而 `npm stage list` 会说没有 staged 版本。②只能等（2
   只需发一次底座、不必重建插件产物（唯一例外是 `typert` `strict` wire codec 与少量字面描述符约定，改它们
   需要发插件）。发布顺序因此是：**先发底座、再发插件**——底座版本往前走时先发底座。
   要就地联调底座，用 `DSH_ENVINIT=<checkout> pnpm build:dsh`（不是工作区 `overrides`）；无论怎样，
-  **打包/投影前工作区里都不能留 `link:`/`file:`**（`pack-plugin.mjs` 拒绝仍带这类 specifier 的 tarball，
-  根 `scripts/make-release-tree.mjs` 拒绝投影这样的工作区）。
+  **打包前工作区里都不能留 `link:`/`file:`**（`pack-plugin.mjs` 拒绝仍带这类 specifier 的 tarball）。
   底座的 zod peer 已放宽到 `>=4.4.3 <5`；`zod` 在**根** `pnpm-workspace.yaml` 的 catalog 里统一成一份
   （合并后是 `4.6.5`，跟随已安装 dsh 的版本），发布底座时不要把它改回只接受单一小版本。
-
-**发布树要先装一次依赖**（2026-09-21 发 0.1.1 实测；2026-10-01 起不再涉及 SQLite 绑定）：`release:check`
-的第一步是 `pnpm install --frozen-lockfile --ignore-scripts`，它只证明锁文件一致，**不会构建原生模块**。
-一棵全新的 `dsh-plugins-rc` 上，mount smoke 会因为可选的 `nodejieba` / `hnswlib-node` 缺 binding 而走降级
-路径——存储层已经没有原生模块，所以**不会**再因此判 FAIL；症状还可能被 mount-smoke 自身的错误行掩盖。
-先装全再跑门禁：
-
-```bash
-cd ../dsh-plugins-rc
-pnpm install --frozen-lockfile     # 注意：不带 --ignore-scripts
-# node_modules 已存在时 install 会短路（"Lockfile is up to date"），此时用：
-pnpm rebuild
-pnpm release:check:base && pnpm release:check:mem && pnpm release:check:mission
-```
 
 ## 3. 数据、升级与回滚
 
@@ -280,7 +256,7 @@ pnpm release:check:base && pnpm release:check:mem && pnpm release:check:mission
    确认 `trust_diagnose` / `vectors_diagnose` 的落后量在下降（§3）。
 3. 在 DSH profile 里重启一次 `dsh web`：确认 8 个工具在（`mount-smoke` 会打印）、两页能打开、3 段 prompt 与 2 个条件 context 出现、日志无 error；
    **并确认一次"坏 dataHome"下的降级挂载**（工具返回 `memory unavailable: …` 而宿主照常起来）。
-4. CHANGELOG 已改名并带日期；`[Unreleased]` 为空；版本与本检出里所有包一致（开发树 8 个 / 发布树 4 个）。
+4. CHANGELOG 已改名并带日期；`[Unreleased]` 为空；版本与本检出里所有包一致（开发树 8 个）。
 5. release notes 复制了 §4 的限制。
 6. `git tag -a mem-vX.Y.Z` + push；npm 只发 `@avantf/dsh-mem`（命令见 §2），发之前确认 peer 窗口与真实
    宿主一致，并确认 preflight 里"可发布的只有 plugin"这条是 PASS。

@@ -1,5 +1,5 @@
 import { DEGRADED_WEIGHTS, type RecallHit, type RecallResult, type RetrievalFloorDrops } from '@avantf/mem-contract'
-import { fitToTokenBudget, recordTruncation } from '@avantf/mem-core'
+import { fitToTokenBudget, recordTruncation } from '@avantf/mem-retrieval'
 import { mergeFloorDrops } from './store/floors.js'
 
 interface CrossQueryOptions {

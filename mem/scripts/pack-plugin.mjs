@@ -2,7 +2,7 @@
 /**
  * Pack `@avantf/dsh-mem` as the ONE package a user installs, and assert it is self-contained.
  *
- * The plugin's Node half IS the product: the engine (`@avantf/mem-contract` → `@avantf/mem-core`
+ * The plugin's Node half IS the product: the engine (`@avantf/mem-contract` → `@avantf/mem-retrieval`
  * → `@avantf/mem`) is inlined by the harness tsdown preset BECAUSE it sits in `devDependencies`
  * (production sections stay imports, everything else inlines). That makes "is this a single
  * installable package?" a property of two artifacts — the manifest and `lib/index.js` — that no

@@ -30,7 +30,7 @@
 
 | 目录 | 包名 | 用途 |
 |---|---|---|
-| `packages/retrieval-core` | `@avantf/mem-core` | 可插拔检索底座：接口 + 注册表 + 配置解析 + 降级 + 融合 |
+| `packages/retrieval-core` | `@avantf/mem-retrieval` | 可插拔检索底座：接口 + 注册表 + 配置解析 + 降级 + 融合 |
 | `packages/core` | `@avantf/mem` | 引擎：记忆存储、知识存储、摄入、生命周期、矛盾检测、交叉检索路由 |
 | `packages/contract` | `@avantf/mem-contract` | 工具 / 检索 / 管理契约的唯一来源（zod） |
 | `packages/convert` | `@avantf/mem-convert` | 文档格式 → Markdown 的独立转换库（注册表 + pandoc 包装器 + xlsx；core 依赖它，构建时内联进插件） |
@@ -81,8 +81,8 @@
 | M9d 文档转换（`@avantf/mem-convert`：ZIP 按中央目录区分，接入摄入管线） | ✅ |
 | M9e 转换切到 pandoc 优先 + 依赖预装（`@avantf/mem-provision`：pandoc 钉版本装进 `~/.avantf/tools`，模型预热并入同一 sweep；删掉被取代的 mammoth/turndown/csv 内置） | ✅ |
 | M10 客户端知识页（`conversation.view` 标签页「知识」） | ✅（可构建；渲染需要 web bundle） |
-| M11 完整 CLI 子命令 | ✅ |
-| M12 MCP 入口（stdio，复用契约） | ✅（`tools/list` 与 8 个工具的 `tools/call` 都在 CI 里真实派发过） |
+| M11 完整 CLI 子命令 | ✅（**需 repo checkout 运行**：`@avantf/mem-cli` 是 `private`，不进可发布集合——见下方"另外 5 个包"） |
+| M12 MCP 入口（stdio，复用契约） | ✅（`tools/list` 与 8 个工具的 `tools/call` 都在 CI 里真实派发过；**需 repo checkout 运行**：`@avantf/mem-mcp` 是 `private`，不进可发布集合） |
 | M13 一致性回归 | ✅ |
 | M13b 发布（1.0 待 tag） | ⏳ 见 [docs/RELEASING.md](docs/RELEASING.md)：`pnpm release:check` + 打 tag，尚未切版本节 |
 
@@ -125,7 +125,7 @@ rerank:
 - 下载总闸：`AVANTF_ENVINIT_AUTO_DOWNLOAD=0`（家族级）或 `AVANTF_MEM_AUTO_DOWNLOAD=0`（本项目）——任一为 `0` 都会经环境层落进 `semantic.auto_download` / `rerank.auto_download`，框架与运行时**同时**停手。
 
 - 模型未就绪时检索**自动降级**到 FTS + 实体 Jaccard（`isAvailable()` = false）；下载完成后自动升级到 `0.55 / 0.30 / 0.15` 三路融合。**降级不是终态**：启动预热失败后，后续检索/索引会自动重试（同一时刻只跑一次，最短间隔 30s），无需重启进程；`vectors_fix` 则会当场等待一次完整尝试。`auto_download: false` 时不重试（本地缺失是确定性的）。CLI 启动时同步预热；插件与 MCP 异步预热（MCP 先应答 `initialize`，再后台加载模型）。
-- `@huggingface/transformers` 已声明为 `@avantf/mem-core` 的 **optionalDependency**，`pnpm install` 会自动装上（无需额外 `pnpm add`），由适配器动态加载；首次运行时从镜像下载 BGE 权重（约 95MB，之后离线）。即使装不上也只是语义路径降级，不会报错。
+- `@huggingface/transformers` 已声明为 `@avantf/mem-retrieval` 的 **optionalDependency**，`pnpm install` 会自动装上（无需额外 `pnpm add`），由适配器动态加载；首次运行时从镜像下载 BGE 权重（约 95MB，之后离线）。即使装不上也只是语义路径降级，不会报错。
 - 重排的唯一开关是 `rerank.backend`（默认 `none`，不加载任何重排模型）；语义后端只负责嵌入。
 - agent 工具统一返回 `{ok:true,result}` / `{ok:false,error,violations}`（DSH 工具与 MCP server 一致）；`db.path` 里的 `~/` 展开为**用户 home**，留空则落在数据目录下。
 
@@ -186,8 +186,9 @@ trust:
 
 ## 发布
 
-每个包都声明了 `publishConfig.access=public` 与 `prepublishOnly=pnpm build`。
-**打 tag 之前先跑一次发布门禁**（它会检查 6 个包版本一致、CHANGELOG 已切版本节、`[Unreleased]` 已清空，
+每个包都声明了 `publishConfig.access=public`；可发布包（base 与两个插件）的 `prepublishOnly` 会在真
+`publish` 时先跑根 `scripts/prepublish-assert.mjs` 的发布面断言、再跑该包自己的门禁。
+**打 tag 之前先跑一次发布门禁**（它会检查各组版本一致、CHANGELOG 已切版本节、`[Unreleased]` 已清空，
 并依次跑 frozen-lockfile / build / typecheck / test / `typecheck:dsh` / `build:dsh`+mount smoke）：
 
 ```bash
@@ -219,8 +220,7 @@ pnpm release:check
 `WARNING` 且**不用底座的共享能力**（自带 prompt 默认正文、门禁跳过、legacy provisioning）但**照常挂载**，
 `cannot-tell` ⇒ 只告警、照常使用 —— 接口变不再要求插件同批改 peer。发布顺序是**底座先于插件**——
 `release-check` 在发布插件前会确认 registry 上已有落在插件 peer 区间内的底座版本；发布前确认
-工作区里没有 `link:`/`file:` 覆盖——`pack-plugin.mjs` 会拒绝仍带这类 specifier 的 tarball，
-`make-release-tree.mjs` 会拒绝投影这样的工作区。
+工作区里没有 `link:`/`file:` 覆盖——`pack-plugin.mjs` 会拒绝仍带这类 specifier 的 tarball。
 
 后三步（链接 / `typecheck:dsh` / `build:dsh` + mount smoke）**只对着已安装的全局 `dsh`**
 （`npm i -g @deepseek-ai/dsh`）：邻居包从它软链，`tsc` 因此对着你真正运行的那一份检查，tsdown 的
@@ -239,40 +239,34 @@ DSHHARNESS=/nonexistent pnpm build:dsh   # 反证：没有任何编译路径会�
 `note:`，都不是硬失败——checkout 领先于 pin 是重新对齐前的正常状态）；没有 checkout 时什么都不打。
 也可单独跑 `node scripts/check-preset-drift.mjs`（有漂移时 exit 1）。
 
-发布仓库 `../dsh-plugins-rc` 由**整仓投影**生成（`dsh-plugins` 的每个受控文件原样进去，不再是单插件子树），
-不要手工编辑。入口在**仓库根**（`pnpm sync:rc` / `pnpm release:tree`），不是本子树：
+发布**直接从开发仓做**：不再投影到 `../dsh-plugins-rc`（已废弃），也不再有"发布树"这一步
+（第五轮复审 §1.5/§7.11；唯一权威流程是根 `docs/RELEASING.md`）。发布前在仓库根跑发布前断言，
+再走本包自己的严格门禁：
 
 ```bash
-pnpm sync:rc                       # 预览 → 确认 → 同步 → 复查 rc 已等于投影（推荐入口）
-pnpm sync:rc --dry-run             # 只看漂移，不改任何东西（有漂移则 exit 1）
-pnpm version:set mem=0.1.2         # 切版本：只改 mem/packages/plugin/package.json（组内其余 manifest 不带版本）
-pnpm sync:rc                       # 投影：版本默认就取开发树
-pnpm sync:rc --version mem=0.1.2    # 也可以只给发布树盖一个版本（开发树不动）
-pnpm sync:rc --keep-rc-versions     # 反过来：保留 rc 现有的版本号
-pnpm sync:rc --yes --commit        # 非交互 + 在 rc 里提交 "release: sync from dsh-plugins@<sha>"
-pnpm sync:rc --yes --gate          # 同步后在 rc 里跑三个包的完整发布门禁
+# 仓库根
+pnpm prepublish:assert                              # 发布面不变量（只读）
+pnpm prepublish:assert --package @avantf/dsh-mem    # 顺带确认这是三个可发布包之一
+# mem/
+pnpm release:check                                  # 本包严格门禁（含 pack）
 ```
 
-`pnpm sync:rc` 默认**保留 rc 当前的版本号**（重复同步不会悄悄挪动发布版本），只在你显式传
-`--version` 时才盖新版本；它不会碰 `~/.avantf`、不会删 rc 未跟踪的文件（`node_modules/`、`lib/`、`dist/`），
-不传 `--commit`/`--gate` 就只做投影 + 复查。整仓投影意味着 rc 里**连测试都在**：同一个仓库形态、同一套
-门禁，投影本身不需要剥离规则（唯一不进 rc 的是 RC 工具链自己：`scripts/make-release-tree.mjs` 与
-`scripts/sync-release-repo.sh`），`pnpm-lock.yaml` 也原样投影（组版本号不写进锁文件）。
+每个可发布包的 `prepublishOnly` 也把这条断言串进真 `publish`（见 `packages/plugin/package.json`），
+所以不会漏跑。`scripts/prepublish-assert.mjs` 只读、不构建、不打包、不联网，断言四件事：可发布集合
+恰好是三个、每组版本只记在**一份** manifest 里且底座 baked `VERSION` 一致、每个包随自己的 README
+（首行是包名）、没有包通过 `files` 装进或指向发布工具链。
 
-本包的 npm 页面就是 `packages/plugin/README.md` 本身（真实文件，`files` 里有它）；rc 仓库首屏的
-`README.md` 由生成器写（本仓库没有根 README 可复制）。插件的 manifest 在 rc 里与开发树**逐字相同**
-（引擎与 `react` 放 `devDependencies` 以便内联，`dependencies` / `optionalDependencies` 就是
-引擎的运行时依赖面；底座 `@avantf/dsh-plugin-base` 是 **peer**，本仓另在 `devDependencies` 里声明一条以便
-`pnpm install` 装上）。本仓库的 `README.md`（开发向）与 `docs/**` 都会进 rc（rc 是同一个仓库的投影，不是
-一份精简的发布物）。
+本包的 npm 页面就是 `packages/plugin/README.md` 本身（真实文件，`files` 里有它）。插件的 manifest
+在开发树里就是要发布的那一份（引擎与 `react` 放 `devDependencies` 以便内联，`dependencies` /
+`optionalDependencies` 就是引擎的运行时依赖面；底座 `@avantf/dsh-plugin-base` 是 **peer**，本仓另在
+`devDependencies` 里声明一条以便 `pnpm install` 装上）。
 
-> 这份 manifest 形态是**构建正确性的一部分**，不是发布树的特例：tsdown 的规则是"production 段保持
+> 这份 manifest 形态是**构建正确性的一部分**：tsdown 的规则是"production 段保持
 > import，其余全部内联"，所以引擎一旦回到 `dependencies`，`lib/index.js` 就会悄悄**不内联**——这种产物
 > 在本仓库里照样构建、照样通过 mount smoke（workspace 的 node_modules 能解析 `@avantf/*`），
 > 但**拷进任何 DSH profile 就起不来**（`Cannot find package '@avantf/mem'`）。`pnpm pack:plugin`
-> 就是为这条断言存在的，现在它在**开发树里也成立**：`pnpm build:dsh && pnpm pack:plugin` 可以在本地
-> 就把"用户装的那一个包"验完，不必等同步到发布树。发布树的门禁（`release:check`）会带上它，
-> 并真实安装+挂载打出来的 tarball。
+> 就是为这条断言存在的，而且它在**开发树里就成立**：`pnpm build:dsh && pnpm pack:plugin` 可以在本地
+> 就把"用户装的那一个包"验完。`pnpm release:check` 会带上它，并真实安装+挂载打出来的 tarball。
 
 **版本、升级与回滚、release notes 必须带上的已知限制、以及人工确认清单**都在
 [docs/RELEASING.md](docs/RELEASING.md)。要点：6 个包**共用同一个版本号**，但本仓**只发布
@@ -346,11 +340,9 @@ node packages/cli/lib/index.js query "张伟" --kind all
 | `pnpm pack:plugin` | 打出"用户安装的那**一个**包"并断言自包含：引擎已内联、依赖里没有 `@avantf/*`、`catalog:` 已落成真实范围、`files` 含 `lib`+`README.md` | `dist/avantf-dsh-mem-<version>.tgz` |
 | `pnpm pack:plugin --mount` | 再把 tarball 解进临时 profile **真实安装并挂载**（需要已安装的全局 dsh） | `--out <dir>` 换输出目录，`--keep` 失败时保留 scratch |
 | `pnpm release:check` | 发布门禁一条命令：preflight（6 包版本一致 / CHANGELOG 已切 / 只 plugin 可发布 / 声明了 DSH peer）→ frozen-lockfile → build → typecheck → test → 插件 typecheck → `build:dsh`+mount smoke | 打 tag 前必跑；`--allow-uncut` 用于切版本节之前的预跑 |
-| `pnpm release:tree --into <rc>`（**仓库根**） | 把 `dsh-plugins` **整仓**投影成发布树，只报告漂移（有漂移 exit 1） | 只管理 rc 跟踪的文件 |
+| `pnpm prepublish:assert`（**仓库根**） | 发布前断言：可发布集合恰好三个 / 每组版本只记一处 / 每包随自己的 README / 没有包装进或指向发布工具链 | 只读；真 `publish` 时各包的 `prepublishOnly` 也会跑它 |
 | `pnpm version:set mem X.Y.Z`（**仓库根**） | 切版本：**只改一个文件** `packages/plugin/package.json`（组内其余 manifest 不带版本） | `pnpm version:check` 会拦"私有包又长出版本号"，`pnpm release:check` 也会 |
-| `pnpm release:tree --into <rc> --apply` | 同步发布树（版本默认取开发树，`--version mem=X` 可只给 rc 盖） | 规则见根 `scripts/make-release-tree.mjs` 顶部 |
-| `pnpm release:tree --out <dir>` | 生成一棵全新的发布树（含生成的根 `README.md`） | |
-| `pnpm sync:rc …`（**仓库根**） | 上面的封装：预览 → 确认 → 投影 → 复查（`--dry-run`/`--yes`/`--version <组>=<v>`/`--commit`/`--gate`/`--rc <dir>`） | 默认保留每个组在 rc 里的版本号 |
+| `pnpm prepublish:assert --tarball mem/dist/avantf-dsh-mem-<v>.tgz`（**仓库根**） | 追加"真实产物字节"断言（不带发布工具链、README 首行是包名） | 在 `pnpm pack:plugin` 之后 |
 | `pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks` | 真正发布（**只这一个包**） | 其余 5 个是 `private: true`，`pnpm -r publish` 碰不到 |
 
 #### 四、基准与辅助
@@ -368,8 +360,8 @@ node packages/cli/lib/index.js query "张伟" --kind all
 | `pnpm clean` | 删 `packages/*/{lib,dist}` 与 `node_modules/{.cache,.vite}`；之后 `pnpm build:dsh` 会走首次编译路径 |
 | `pnpm cleanup:dsh [--dry-run\|--yes\|--keep-deps\|--profile <p>]` | 从 dsh profile 卸载插件并清 `cordis.patch.yml`（不动 `~/.avantf`，也不动仓库） |
 
-> 各命令的完整旗标以 `--help` 为准：`pnpm build:dsh --help`、`node scripts/make-release-tree.mjs --help`、
-> `bash scripts/sync-release-repo.sh --help`、`bash scripts/cleanup.sh --help`。
+> 各命令的完整旗标以 `--help` 为准：`pnpm build:dsh --help`、`node scripts/release-check.mjs --help`、
+> `bash scripts/cleanup.sh --help`；仓库根的脚本（发布前断言、版本、跨版本门）见根 `docs/RELEASING.md`。
 > 编译产物的清理、插件两个半边的生效规则、链接来源与 client preset 的细节见下文各小节。
 
 ### 入库边界（`source_uri` 读什么、能读哪）
@@ -490,16 +482,16 @@ profile 里的插件就是**一条 `link:` 依赖**（发布构建把引擎内�
 `packages/plugin/node_modules/@avantf/*` workspace 链接解析引擎，所以只需要 `@avantf/dsh-mem` 一条）：
 
 ```bash
-# 接入一个 checkout（示例：开发仓库 / 发布仓库）
+# 接入一个 checkout（示例：本仓库 / 另一份 checkout）
 dsh plugin --profile web add link:/home/qunqi/opensource/avantf-mem/packages/plugin
-dsh plugin --profile web add link:/home/qunqi/opensource/avantf-mem-rc/packages/plugin
+dsh plugin --profile web add link:/home/qunqi/opensource/avantf-mem-checkout/packages/plugin
 
 # 移除接入（只是把 profile 依赖删掉，不动挂载配置）
 dsh plugin --profile web remove @avantf/dsh-mem
 
 # 切换来源 = 先移除、再接入（同一条命令换路径）
 dsh plugin --profile web remove @avantf/dsh-mem
-dsh plugin --profile web add link:/home/qunqi/opensource/avantf-mem-rc/packages/plugin
+dsh plugin --profile web add link:/home/qunqi/opensource/avantf-mem-checkout/packages/plugin
 
 # 看现在接的是谁
 dsh plugin --profile web ls --depth 0
@@ -511,8 +503,8 @@ readlink -f ~/.dsh/profiles/web/node_modules/@avantf/dsh-mem
   （`patchReload: live` 只让 patch 配置热加载，不会换模块）。重启之前运行中的进程不受影响；
 - `dsh plugin … add/remove` 只改 profile 的 `package.json` / `lockfile` / `node_modules`；
   **不在 manifest 里的残留 `@avantf/*` 符号链接 pnpm 不会回收**（切换来源后我遇到过三条），确认后手动 `rm`；
-- 换到发布仓库（`avantf-mem-rc`）后，改开发仓库的代码**不再**影响运行中的 dsh：
-  要重新走 `pnpm sync:rc` → `cd <rc> && pnpm build:dsh` → 重启 dsh。
+- 换到另一份 checkout 后，改本仓库的代码**不再**影响运行中的 dsh：
+  要在那份 checkout 里 `pnpm build:dsh` → 重启 dsh。
 
 #### 卸载插件（cleanup.sh）
 
@@ -532,7 +524,7 @@ pnpm cleanup:dsh --keep-deps    # 只改 patch，保留 profile 依赖
    等于「改前 − avantf-mem」，改后文件必须仍能载入 dsh（dsh 要求顶层是 YAML **数组**，
    所以删空时会自动补回 `[]`），否则整体中止且不写任何文件。
 2. 通过 `dsh plugin --profile <profile> remove @avantf/dsh-mem @avantf/mem @avantf/mem-contract
-   @avantf/mem-core` 卸掉 profile 依赖（更新 package.json/lockfile 并删除
+   @avantf/mem-retrieval` 卸掉 profile 依赖（更新 package.json/lockfile 并删除
    `node_modules/@avantf/*`）；命令行里**只出现这四个包名**，不会碰其他插件。
 
 **故意不动**（脚本结束时会逐条提示）：`~/.avantf/**`（数据库 / 配置 / 受管资源）、仓库（源码、`lib/`、

@@ -8,6 +8,7 @@ import {
   KNOWLEDGE_PROMPT_SECTION,
   MEMORY_PROMPT_SECTION,
   PROMPT_FILES,
+  PROMPT_NAMESPACE,
   PROMPT_TEXT_BUDGET,
   buildPromptSections,
   promptFileSpecs,
@@ -185,6 +186,62 @@ describe('editable prompt files', () => {
     expect(sections[0]?.text).toBe(MEMORY_PROMPT_SECTION.text)
     expect(sections[2]?.text).toBe(KB_EDIT_PROMPT_SECTION.text)
     expect(sections.map((section) => section.order)).toEqual([3000, 3010, 3020])
+  })
+
+  it('keeps every editable file INSIDE this plugin\'s namespace, as a bare file name', () => {
+    // The namespace is what the base validates each spec against (interface v3): a spec that is not
+    // `<namespace>-…`, or that carries a path separator, is refused with a WARNING and falls back to
+    // the built-in default. A file outside `mem-` here would therefore silently stop being editable —
+    // or, worse, name a file another plugin's user owns. The check runs over the REAL manifest, so a
+    // new prompt file must be named into the namespace or this goes red.
+    expect(PROMPT_NAMESPACE).toBe('mem')
+    for (const { file } of PROMPT_FILES) {
+      expect(file.startsWith(`${PROMPT_NAMESPACE}-`), file).toBe(true)
+      expect(file).not.toContain('/')
+      expect(file).not.toContain('\\')
+    }
+  })
+
+  it('reads byte-for-byte the same with the namespace as without it (v3 enforcement is not a behaviour change)', () => {
+    // Passing `namespace` only ADDS the prefix check; for a manifest that already respects it, every
+    // observable of the load — text, source, wrote, order — must be identical to the pre-v3 call.
+    // Two IDENTICAL directories, one per call, so neither call's file writes can change the other's
+    // answer (a single dir would make the second call read what the first just created).
+    const dirs = [mkdtempSync(join(tmpdir(), 'avantf-prompts-ns-a-')), mkdtempSync(join(tmpdir(), 'avantf-prompts-ns-b-'))]
+    try {
+      for (const dir of dirs) writeFileSync(join(dir, 'mem-kb-edit.md'), '把这篇改掉，不要新建。\n', 'utf8')
+      const specs = promptFileSpecs()
+      const legacy = new PromptFiles({ dir: dirs[0] }).load(specs)
+      const namespaced = new PromptFiles({ dir: dirs[1], namespace: PROMPT_NAMESPACE }).load(specs)
+      // `path` is the only field that must differ (the two roots differ); text/source/wrote/order must not.
+      const observables = (loaded: readonly { file: string; text: string; source: string; wrote: boolean }[]) =>
+        loaded.map(({ file, text, source, wrote }) => ({ file, text, source, wrote }))
+      expect(observables(namespaced)).toEqual(observables(legacy))
+      // And what was returned is the real reading, not three cheerful defaults: the edited file wins,
+      // the other two were materialized with their defaults.
+      expect(namespaced.map((entry) => entry.source)).toEqual(['default', 'default', 'file'])
+      expect(namespaced[2]?.text).toBe('把这篇改掉，不要新建。')
+      expect(namespaced.map((entry) => entry.wrote)).toEqual([true, true, false])
+      expect(readFileSync(join(dirs[1], 'mem-memory-usage.md'), 'utf8').trim()).toBe(MEMORY_PROMPT_SECTION.text)
+      expect(readFileSync(join(dirs[1], 'mem-kb-edit.md'), 'utf8')).toBe('把这篇改掉，不要新建。\n')
+    } finally {
+      for (const dir of dirs) rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('hands the base the namespace at the plugin\'s construction point', () => {
+    // The unit above proves the loader behaves; this one proves the ENTRY actually passes the field.
+    // `src/index.ts` cannot be imported here (its `@deepseek-ai/*` runtime imports exist only in a
+    // harness workspace, see the module comment), so this is a source assertion — the same device
+    // `domains.spec.ts` / `wire_version.spec.ts` already use. Without it, deleting `namespace:` from
+    // the call would leave every other test green while the prefix check silently stopped running.
+    const entry = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
+    const callStart = entry.indexOf('new kit.PromptFiles(')
+    expect(callStart, 'the entry must construct the base PromptFiles').toBeGreaterThan(-1)
+    const call = entry.slice(callStart, entry.indexOf('})', callStart))
+    expect(call).toContain('namespace: PROMPT_NAMESPACE')
+    // The other half of the ternary is the base-absent fallback, and it must stay untouched.
+    expect(entry).toContain('kit?.PromptFiles === undefined')
   })
 
   it('round-trips through a real directory: an edited file wins, the others are created', () => {

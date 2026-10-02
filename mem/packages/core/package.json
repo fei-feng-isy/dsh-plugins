@@ -23,7 +23,7 @@
   "dependencies": {
     "@avantf/mem-contract": "workspace:*",
     "@avantf/mem-convert": "workspace:*",
-    "@avantf/mem-core": "workspace:*",
+    "@avantf/mem-retrieval": "workspace:*",
     "@avantf/mem-provision": "workspace:*",
     "unpdf": "catalog:",
     "yaml": "catalog:"

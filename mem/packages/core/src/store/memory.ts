@@ -14,13 +14,13 @@ import {
   type VectorsDiagnostic,
   type VectorsFixReport,
 } from '@avantf/mem-contract'
-import type { Reranker, SemanticBackend, VectorStore } from '@avantf/mem-core'
+import type { Reranker, SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
 import {
   resetRetrievalHealth,
   restoreRetrievalHealth,
   retrievalHealth,
   retrievalLogger,
-} from '@avantf/mem-core'
+} from '@avantf/mem-retrieval'
 import {
   hybridSearch,
   RetrievalInputError,

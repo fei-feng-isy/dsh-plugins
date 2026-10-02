@@ -300,12 +300,12 @@ importers:
       '@avantf/mem-convert':
         specifier: workspace:*
         version: link:../convert
-      '@avantf/mem-core':
-        specifier: workspace:*
-        version: link:../retrieval-core
       '@avantf/mem-provision':
         specifier: workspace:*
         version: link:../provision
+      '@avantf/mem-retrieval':
+        specifier: workspace:*
+        version: link:../retrieval-core
       unpdf:
         specifier: 'catalog:'
         version: 1.8.1

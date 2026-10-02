@@ -9,7 +9,7 @@
  * store just stops finding things.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { setRetrievalLogger } from '@avantf/mem-core'
+import { setRetrievalLogger } from '@avantf/mem-retrieval'
 import { openSqlite } from '../src/db/sqlite.js'
 import type { Db } from '../src/db/port.js'
 import {

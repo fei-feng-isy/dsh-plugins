@@ -3,7 +3,7 @@
  * Carry the engine's DECLARATIONS into the plugin's shipped tree, and repoint every surviving
  * `@avantf/mem*` specifier at them.
  *
- * The plugin is published as ONE package: the engine (`@avantf/mem-contract` → `@avantf/mem-core` →
+ * The plugin is published as ONE package: the engine (`@avantf/mem-contract` → `@avantf/mem-retrieval` →
  * `@avantf/mem`) sits in `devDependencies`, so the harness tsdown preset folds its RUNTIME into
  * `lib/index.js`. Types are the other half of that promise and are NOT bundled: `tsc` emits
  * `lib/types/*.d.ts` verbatim, and `exports["."].types` points straight at `lib/types/index.d.ts`. A
@@ -20,7 +20,7 @@
  *
  * The set carried is the DECLARATION CLOSURE of `lib/types`, not every workspace package: the
  * plugin's own declarations name `@avantf/mem` and `@avantf/mem-contract`, whose declarations name
- * `@avantf/mem-core`, and so on. A package nothing reaches (the CLI/MCP in this checkout) is never
+ * `@avantf/mem-retrieval`, and so on. A package nothing reaches (the CLI/MCP in this checkout) is never
  * copied — shipping its declarations would be dead weight and a second surface to keep repointed.
  * `scripts/pack-plugin.mjs` then scans every shipped `.d.ts`/`.js` under `lib/` and fails if any
  * unpublished `@avantf/*` specifier survives, so this step cannot silently regress.

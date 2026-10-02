@@ -30,3 +30,17 @@ export * from './store/lexical.js'
 // The relevance floors the legs apply before fusion (`retriever.min_*`) — exported for the same
 // reason as the orchestration: a third store built on these legs must read the SAME relaxation rule.
 export * from './store/floors.js'
+// The pluggability contract itself (DESIGN §5): the three registries' entry points plus the three
+// interfaces they resolve to. Re-exported so the plugin's published face can hand them to a consumer
+// WITHOUT naming `@avantf/mem-retrieval` (a private package that is not on npm) — the declarations are
+// carried into the plugin tree by `scripts/carry-engine-types.mjs`. Registration and resolution must
+// share one module instance, which is exactly why this re-export goes through the engine rather than a
+// second import site: `buildRuntime` resolves through the same registry these mutate.
+export {
+  registerSemanticBackend,
+  registerReranker,
+  registerVectorStore,
+  type Reranker,
+  type SemanticBackend,
+  type VectorStore,
+} from '@avantf/mem-retrieval'

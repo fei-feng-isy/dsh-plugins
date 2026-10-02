@@ -172,6 +172,13 @@ export async function extractArchive(
  * to detect its own stale holders and would have to tell the waiter when the winner is done, which is
  * a coordination protocol rather than a rename — out of scope here, and recorded instead of implied.
  *
+ * This two-rename publish (over the sha256 verification in {@link fetchToFile}) IS the guarantee
+ * level of `@avantf/mem-provision`: strictly below the base's envinit framework, which adds a
+ * family-root lock with pid authority, slow-hold warnings and cross-device rejection. The CLI, the
+ * MCP server and the plugin's degraded mount run on THIS stack, and base hardening does not reach it
+ * — the full boundary and the reason both stacks coexist are in the module doc
+ * (`@avantf/mem-provision`, `src/index.ts`).
+ *
  * A crash between the two renames leaves the old tree under `<target>.old-<pid>-<rand>` beside the
  * version directory. Nothing enumerates that parent, so the residue is inert; the next install of the
  * same version replaces the target normally.

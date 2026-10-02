@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { atom, atomBatch, isValidAtom, TWO_PI, AtomDimensionError } from '../src/hrr/atoms.js'
 import { bind, bundle, phaseSimilarity, ShapeMismatchError } from '../src/hrr/algebra.js'
-import { scaleByMax } from '@avantf/mem-core'
+import { scaleByMax } from '@avantf/mem-retrieval'
 import { encodeHrrEntityVector, hrrToBytes, hrrFromBytes } from '../src/hrr/encode.js'
 
 describe('HRR atoms', () => {

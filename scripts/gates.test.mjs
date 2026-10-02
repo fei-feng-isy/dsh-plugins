@@ -64,9 +64,9 @@ function makeWorkspace() {
     name: '@avantf/dsh-mem',
     version: '1.2.3',
     peerDependencies: { [BASE]: '>=3.0.0 <4.0.0' },
-    devDependencies: { [BASE]: '>=3.0.0 <4.0.0', '@avantf/mem-core': 'workspace:*' },
+    devDependencies: { [BASE]: '>=3.0.0 <4.0.0', '@avantf/mem-retrieval': 'workspace:*' },
   })
-  write('mem/packages/core/package.json', { name: '@avantf/mem-core', private: true })
+  write('mem/packages/core/package.json', { name: '@avantf/mem-retrieval', private: true })
   write('mission/package.json', { name: 'mission-workspace', private: true })
   write('mission/packages/plugin/package.json', {
     name: '@avantf/dsh-mission',
@@ -647,14 +647,26 @@ test('S2: the measured count is read from the code, object entries with commas i
 
 // ── M10 · both plugins run their own packer before publishing ─────────────────────────────────────
 
-test('M10: both plugins declare prepublishOnly → their pack-plugin.mjs, with no recursion', () => {
+test('M10: both plugins declare prepublishOnly → (assert, then) their own packer, with no recursion', () => {
   for (const dir of ['mem/packages/plugin', 'mission/packages/plugin']) {
     const manifest = JSON.parse(readFileSync(join(workspace, dir, 'package.json'), 'utf8'))
     const script = manifest.scripts?.prepublishOnly
-    assert.equal(script, 'node ../../scripts/pack-plugin.mjs', `${dir} must run its packer before publishing`)
+    // The packer is the load-bearing half and must stay LAST: it is what turns the tree into a tarball.
+    assert.ok(
+      typeof script === 'string' && script.endsWith('node ../../scripts/pack-plugin.mjs'),
+      `${dir} must run its packer before publishing (found ${JSON.stringify(script)})`,
+    )
+    // RC projection was retired on 2026-10-03: the release invariants it enforced now run as a
+    // pre-publish assertion. When present it must name THIS package — a copy-pasted hook that asserts
+    // another package is a real hazard, and this is the only place that can catch it.
+    const asserted = /prepublish-assert\.mjs --package (\S+)/u.exec(script)
+    if (asserted !== null) {
+      assert.equal(asserted[1], manifest.name, `${dir}: the pre-publish assertion must name this package`)
+    }
     assert.ok(existsSync(join(workspace, dir, '..', '..', 'scripts', 'pack-plugin.mjs')), `${dir}: the packer must exist`)
-    // `prepublishOnly` must not call `publish`/`pnpm publish`: that is the recursion.
-    assert.doesNotMatch(script, /publish/u)
+    // `prepublishOnly` must not call `publish`/`pnpm publish`: that is the recursion. `\b` matters —
+    // a bare `/publish/` also matches the `prepublish-assert` step we deliberately run first.
+    assert.doesNotMatch(script, /\bpublish\b/u)
   }
 })
 

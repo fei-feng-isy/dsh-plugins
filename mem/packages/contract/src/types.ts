@@ -172,7 +172,7 @@ export interface RetrievalFloorDrops {
 /**
  * The floor profiles a retrieval CALL may ask for. There is deliberately no numeric per-call
  * override: the two profiles are named policies, and their values live in ONE place
- * (`@avantf/mem-core`'s `store/floors.ts`), so a caller cannot invent a third calibration.
+ * (`@avantf/mem-retrieval`'s `store/floors.ts`), so a caller cannot invent a third calibration.
  *
  *  - **omitted** — the default policy: the configured (strict) floors, and if they empty the result
  *    while having dropped candidates, ONE relaxed pass over the absolute bottom line before

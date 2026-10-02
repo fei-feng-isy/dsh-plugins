@@ -38,7 +38,7 @@ import {
   type Hit,
   type Reranker,
   type SemanticBackend,
-} from '@avantf/mem-core'
+} from '@avantf/mem-retrieval'
 import { droppedLegs, emptyFloorDrops, resolveFloors, totalFloorDrops, type FloorLeg } from './floors.js'
 import { relevanceTerms } from './lexical.js'
 

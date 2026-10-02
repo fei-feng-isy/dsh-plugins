@@ -19,7 +19,7 @@ import { join } from 'node:path'
 // Augments `Context` with the prompt registry below; type-only, so nothing of the package lands
 // in the bundle — the service itself is the host's.
 import type {} from '@deepseek-ai/dsh-system-prompt'
-import { buildPromptSections, promptFileSpecs, promptTextWarnings } from './prompt.js'
+import { buildPromptSections, PROMPT_NAMESPACE, promptFileSpecs, promptTextWarnings } from './prompt.js'
 import { hintText, messageText } from './hints.js'
 import z from '@deepseek-ai/schemastery'
 import { defineTool, type GenericCallView, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
@@ -87,6 +87,21 @@ export { inject } from './inject.js'
 
 // The section text lives in its own module so it is testable without this entry's harness imports.
 export { KNOWLEDGE_PROMPT_SECTION, MEMORY_PROMPT_SECTION } from './prompt.js'
+
+// The pluggable retrieval surface, re-exported on the PUBLISHED face (DESIGN §5 "可选注册新适配器"):
+// register a backend under a name, put that name in `config.<semantic|rerank|vectorStore>.backend`, and
+// `buildRuntime` resolves it — the business flow never changes. Without this re-export the promise was
+// unkeepable from outside the repo: the registries live in `@avantf/mem-retrieval`, a private package
+// that is inlined into `lib/index.js` and is not on npm. These are the same registry instance
+// `buildRuntime` reads, because both are this one bundled engine.
+export {
+  registerSemanticBackend,
+  registerReranker,
+  registerVectorStore,
+  type Reranker,
+  type SemanticBackend,
+  type VectorStore,
+} from '@avantf/mem'
 
 export interface Config {
   mode?: 'cordis' | 'mcp'
@@ -656,7 +671,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   //
   // The directory is SHARED by the family's plugins and each plugin owns its prefix (`mem-*` here,
   // `mission-*` in the mission engine): every avantf plugin's system prompt sits in one place, and no
-  // plugin has to guess which files are its own.
+  // plugin has to guess which files are its own. That prefix is passed to the base as `namespace`
+  // (interface v3), which REFUSES any spec outside `mem-*` — so it is checked, not just a convention.
+  // Omitting it would be valid too (pre-v3 behaviour); passing it is what closes the takeover hole.
   const promptDir = join(rt.config.home, 'prompts')
   // The loader is the BASE's, taken at RUNTIME off the module the bootstrap already loaded: fixing
   // or extending the shared prompt-file logic takes one base release, not a plugin rebuild.
@@ -672,7 +689,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         source: 'default' as const,
         wrote: false,
       }))
-    : new kit.PromptFiles({ dir: promptDir, logger }).load(promptFileSpecs())
+    : new kit.PromptFiles({ dir: promptDir, logger, namespace: PROMPT_NAMESPACE }).load(promptFileSpecs())
   const promptSections = buildPromptSections(loadedPrompts)
   for (const section of promptSections) {
     ctx.systemPrompt.section(section)

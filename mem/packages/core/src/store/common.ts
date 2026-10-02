@@ -11,8 +11,8 @@
  *
  * @module store/common
  */
-import type { SemanticBackend, VectorStore } from '@avantf/mem-core'
-import { retrievalLogger } from '@avantf/mem-core'
+import type { SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
+import { retrievalLogger } from '@avantf/mem-retrieval'
 import { toWellFormedText } from '@avantf/mem-contract'
 import { vectorSpaceId } from '../db/vectors.js'
 

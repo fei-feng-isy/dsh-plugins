@@ -108,7 +108,7 @@ pnpm add @avantf/dsh-plugin-base @avantf/dsh-mem
 ```
 
 从源码 checkout 开发时，只 link 插件就够：软链的插件从**它自己的依赖树**解析底座（`pnpm install` 已按插件
-的 `devDependencies` 把它装在那里），而引擎包（`@avantf/mem` / `@avantf/mem-contract` / `@avantf/mem-core` …）
+的 `devDependencies` 把它装在那里），而引擎包（`@avantf/mem` / `@avantf/mem-contract` / `@avantf/mem-retrieval` …）
 在构建时已经内联进 `lib/index.js`，**不需要**再装：
 
 ```bash
@@ -341,7 +341,7 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
 **卸载**
 
 1. 删除 `~/.dsh/profiles/<PROFILE>/cordis.patch.yml` 里的 `avantf-mem` insert 行；
-2. （可选）`cd ~/.dsh/profiles/<PROFILE> && pnpm remove @avantf/dsh-mem @avantf/mem @avantf/mem-core @avantf/mem-contract`；
+2. （可选）`cd ~/.dsh/profiles/<PROFILE> && pnpm remove @avantf/dsh-mem @avantf/mem @avantf/mem-retrieval @avantf/mem-contract`；
 3. 数据仍在 `~/.avantf/`，需要时手动删除。
 
 ---
@@ -388,7 +388,7 @@ agent 把任意可读文件拉进语料库"。放开后 `~/.ssh/id_rsa`、浏览
   `AVANTF_MEM_MODEL_MIRROR`/`HF_ENDPOINT` 改）；拿不到就退化为 FTS + 实体检索。
 - **长路径（Windows）**：受管副本是 `<data_home>/knowledge/docs/<domain>/<source>/<title>.md`，每段截到 80 字符，
   但整串仍可能超过传统的 260 字符上限 —— 把 `data_home` 放在短路径下，或启用 Windows 长路径支持。
-- **仓库里的开发脚本**（`pnpm cleanup:dsh`、`sync:rc` 等）是 bash，Windows 上需要 WSL 或 git-bash；
+- **仓库里的开发脚本**（`pnpm cleanup:dsh` 等）是 bash，Windows 上需要 WSL 或 git-bash；
   这些脚本不进发布包。
 - **实测边界**：以上平台分支在 WSL/Linux 上验证，纯逻辑部分（路径形状、命令名、保留字清洗）有单测钉住；
   Windows/macOS 的**真机**未跑过。

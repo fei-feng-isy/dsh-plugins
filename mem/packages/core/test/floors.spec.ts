@@ -29,7 +29,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FloorProfile, RecallHit, RecallResult } from '@avantf/mem-contract'
-import type { SemanticBackend } from '@avantf/mem-core'
+import type { SemanticBackend } from '@avantf/mem-retrieval'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import {
   LOOSE_FLOORS,

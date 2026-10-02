@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { estimateTokens, resetRetrievalHealth, type SemanticBackend } from '@avantf/mem-core'
+import { estimateTokens, resetRetrievalHealth, type SemanticBackend } from '@avantf/mem-retrieval'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import { allowAnyDomain } from './helpers.js'
 

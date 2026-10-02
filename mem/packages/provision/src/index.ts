@@ -17,6 +17,41 @@
  * silently downgrades: a missing tool is an error with the per-platform fix in it, because a
  * different version changes the output.
  *
+ * ## The weak-guarantee boundary, stated on purpose (architecture review 2026-10-03 §7.10)
+ *
+ * This is the WEAKER of the family's two provisioning stacks, and that is a frozen, reasoned
+ * trade-off — not a bug waiting to be fixed and not something a future change should quietly
+ * "level up" halfway.
+ *
+ * **What it guarantees.** Every pack is verified by size and then **sha256** before use, and the
+ * built tree is published with **two renames** (`publishAtomically`): a reader sees either the old
+ * complete tree or the new complete tree, never a half-written tool, and a failed second rename puts
+ * the old tree back. **That is the whole guarantee.**
+ *
+ * **What it does NOT guarantee — deliberately.** There is **no cross-process lock**. Two processes
+ * installing the same version both pay for the download and the extract, and the second publish
+ * wins (last-writer-wins). That is still correct because each staging tree is complete, so whichever
+ * rename lands, `bin/<binary>` is a complete binary. A real lock would have to detect its own stale
+ * holders and tell the waiter when the winner finished — a coordination protocol rather than a
+ * rename — and is out of scope here. The reasoning is recorded at the call site
+ * (`src/fetch.ts`, `publishAtomically`), not implied.
+ *
+ * **It is strictly below the base's envinit framework**, which has all of that AND: a family-root
+ * control-plane lock at `<home>/.envinit/.lock` with **pid authority** (a stale lock is reclaimed
+ * only when the recorded pid is actually gone; a long critical section held by a LIVE process is
+ * never stolen), **slow-hold warnings** when that contract is being stretched, and cross-device
+ * rejection instead of a non-atomic publish. A fix that strengthens the base therefore does NOT
+ * strengthen this path.
+ *
+ * **Why two stacks coexist, and the boundary of "hardening not synchronized".** The base is a DSH
+ * host concern: a peer the profile installs, loaded at startup through the plugin's inlined
+ * bootstrap. The CLI and the MCP server run with **no DSH host at all**, and the plugin needs a
+ * fallback when the base is absent or incompatible (see the module header above). Those callers can
+ * only use this package — removing it would make the CLI lose automatic pandoc installation. So the
+ * boundary is: **base present ⇒ the base's stronger path; base absent / CLI / MCP / degraded mount
+ * ⇒ this stack.** Improvements to the base do not propagate here, and an improvement here needs a
+ * mem release; both facts are stated rather than left to be rediscovered.
+ *
  * @module index
  */
 export {

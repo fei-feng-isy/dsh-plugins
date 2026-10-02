@@ -86,6 +86,20 @@ export const KB_EDIT_PROMPT_SECTION = {
     + '用文件工具修改。在用户明确要求时使用 `kb_remove` 删除。',
 } as const satisfies PromptSection
 
+/**
+ * This plugin's file-name prefix inside the SHARED family prompt directory — the `mem` in
+ * `mem-*.md`.
+ *
+ * It is handed to the base's `PromptFiles` as its `namespace` (interface v3), which then REFUSES to
+ * read or write any spec whose `file` is not `<namespace>-…` or is not a bare file name: the
+ * `mem-*` / `mission-*` split used to be a convention with no machine check, so a mistyped prefix
+ * could silently read or overwrite another plugin's user-edited file. The value is the SAME token
+ * {@link PROMPT_FILES} names its files with — one source for both, so the two cannot drift — and it
+ * is OPTIONAL at the base: a caller that omits it (or a base older than v3) gets the pre-v3
+ * behaviour, which is why passing it never degrades a mount.
+ */
+export const PROMPT_NAMESPACE = 'mem'
+
 /** One section and the file its text may be edited in; the file name is the loader's handle. */
 export interface PromptFileEntry {
   readonly file: string
@@ -101,6 +115,11 @@ export interface PromptFileEntry {
  * `mission-*` in the mission engine — so a deployment can find and diff all of its model-facing text in
  * one place without any plugin having to guess which files belong to it. This manifest is that
  * ownership: a `.md` it does not list is ignored (never read, never written, never deleted).
+ *
+ * Since interface v3 the prefix is machine-checked, not a convention: every `file` below is a bare
+ * name starting with `mem-`, and the loader is built with `namespace: 'mem'`
+ * ({@link PROMPT_NAMESPACE}), so the base refuses — with a warning, without touching disk — any spec
+ * that names a file outside this plugin's prefix.
  *
  * The FILE owns the text; the CODE keeps the identity. Mapping a file name to a section HERE is what
  * makes that true: no edit to the directory can move a section to a different point in the prompt

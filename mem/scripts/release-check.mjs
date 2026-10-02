@@ -18,12 +18,10 @@
  * (see `scripts/link-dsh.mjs`). Exits non-zero if any step fails. No harness source checkout is
  * needed to compile, type-check or mount — the client preset is pinned in this repository.
  *
- * Packing the single installable package (`scripts/pack-plugin.mjs`) is one of the steps BELOW, not a
- * step the release repository adds. `scripts/sync-release-repo.sh --gate` and the RC's
- * `pnpm release:check:mem` run a projected copy of THIS script, so if the pack step lived only in RC
- * the two would either double-pack or each assume the other did it. Keeping it here means the
- * tarball-level assertions (self-contained bundle, shipped declaration surface, README/LICENSE,
- * `workspace:`/`catalog:` leftovers, lib strays) run in both checkouts, from one definition.
+ * Packing the single installable package (`scripts/pack-plugin.mjs`) is one of the steps BELOW, and
+ * it is the only place the tarball-level assertions run (self-contained bundle, shipped declaration
+ * surface, README/LICENSE, `workspace:`/`catalog:` leftovers, lib strays). Publishing straight from
+ * this checkout is what makes that sufficient — there is no second tree to keep in step.
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -34,7 +32,7 @@ import { versionState } from '../../scripts/lib/versions.mjs'
 import { presetDriftWarning } from './check-preset-drift.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-/** The workspace root: `versions.mjs` and the release projection live there, one level above mem/. */
+/** The workspace root: `versions.mjs` lives there, one level above mem/. */
 const workspaceRoot = resolve(repo, '..')
 
 const argv = process.argv.slice(2)
@@ -52,8 +50,7 @@ if (argv.includes('--help') || argv.includes('-h')) {
 
 /**
  * Every package this checkout actually contains, derived from the directory rather than hardcoded:
- * the release tree ships only the plugin and the engine it inlines (cli/mcp are development-only), so
- * a fixed list would either crash there or have to be kept in two places.
+ * a fixed list would have to be kept in step by hand the moment a package is added or removed.
  */
 const PACKAGES = readdirSync(join(repo, 'packages'))
   .filter((name) => existsSync(join(repo, 'packages', name, 'package.json')))
@@ -218,16 +215,16 @@ function preflight(allowUncut) {
   const warnings = []
   // ONE version per group, recorded in exactly one manifest: the publishable package. Every private
   // manifest must carry NO version (a second copy is a second thing to update) — the rule and the
-  // mapping live in the workspace root's `scripts/lib/versions.mjs`, shared with the root gate and the
-  // release projection, so this checkout cannot disagree with either.
+  // mapping live in the workspace root's `scripts/lib/versions.mjs`, shared with the root gate, so
+  // this checkout cannot disagree with it.
   const state = versionState(workspaceRoot)
   problems.push(...state.problems, ...typeEntryPointProblems())
   const version = state.versions.mem
   if (version === undefined) problems.push('the mem group records no version (packages/plugin/package.json)')
   // The two "cut the release" checks: at the tag, the FIRST versioned section must be this version
   // and [Unreleased] must be empty ("has a section" is not the property that matters — a stale old
-  // section would satisfy it). They only apply where a CHANGELOG exists: the release repository
-  // ships the source without one, and a gate that refuses to run there would just be turned off.
+  // section would satisfy it). They only apply where a CHANGELOG exists; a checkout without one
+  // still gets the version-consistency check rather than an error.
   const changelogPath = join(repo, 'CHANGELOG.md')
   const hasChangelog = existsSync(changelogPath)
   if (!hasChangelog) {

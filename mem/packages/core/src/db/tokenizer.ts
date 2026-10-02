@@ -1,4 +1,4 @@
-import { retrievalLogger } from '@avantf/mem-core'
+import { retrievalLogger } from '@avantf/mem-retrieval'
 import type { Db } from './port.js'
 import { openSqlite } from './sqlite.js'
 

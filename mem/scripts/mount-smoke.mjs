@@ -80,7 +80,7 @@ if (packagedDir === undefined) {
   mkdirSync(join(scratch, 'node_modules', '@deepseek-ai'), { recursive: true })
   for (const [name, dir] of [
     ['mem', 'packages/core'],
-    ['mem-core', 'packages/retrieval-core'],
+    ['mem-retrieval', 'packages/retrieval-core'],
     ['mem-contract', 'packages/contract'],
     ['dsh-mem', 'packages/plugin'],
   ]) symlinkSync(join(repo, dir), join(scratch, 'node_modules', '@avantf', name))

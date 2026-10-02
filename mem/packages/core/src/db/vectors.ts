@@ -1,5 +1,5 @@
-import type { VectorStore } from '@avantf/mem-core'
-import { retrievalLogger } from '@avantf/mem-core'
+import type { VectorStore } from '@avantf/mem-retrieval'
+import { retrievalLogger } from '@avantf/mem-retrieval'
 
 /** Little-endian Float32 ↔ BLOB helpers for persisted vectors (cross-platform stable). */
 

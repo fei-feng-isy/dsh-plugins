@@ -1,11 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import { ConfigSchema } from '@avantf/mem-contract'
-import { resolveSemantic, resolveVStore, resolveReranker, registerVectorStore, registerSemanticBackend } from '../src/registry.js'
+import {
+  resolveSemantic,
+  resolveVStore,
+  resolveReranker,
+  registerVectorStore,
+  registerSemanticBackend,
+  registerReranker,
+} from '../src/registry.js'
 import { LocalNumpyVectorStore } from '../src/adapters/local_numpy.js'
 import { HnswlibVectorStore } from '../src/adapters/hnswlib.js'
 import { AutoVectorStore } from '../src/adapters/auto_vstore.js'
 import { LocalBgeBackend } from '../src/adapters/local_bge.js'
-import type { SemanticBackend, VectorStore } from '../src/interfaces.js'
+import type { Reranker, SemanticBackend, VectorStore } from '../src/interfaces.js'
 
 describe('model bootstrap config', () => {
   it('defaults to a domestic mirror with auto-download on', () => {
@@ -100,6 +107,39 @@ describe('pluggable backends', () => {
     }
     registerSemanticBackend('fake', () => fake)
     expect(resolveSemantic(cfg).isAvailable()).toBe(true)
+  })
+
+  it('lets a reranker be registered and resolved (the third leg of DESIGN §5)', () => {
+    const cfg = ConfigSchema.parse({ rerank: { backend: 'fake_rerank' } })
+    const fake: Reranker = {
+      name: 'fake_rerank',
+      isAvailable: () => true,
+      rerank: async (_query, candidates) => candidates.map((c) => c.id),
+    }
+    registerReranker('fake_rerank', () => fake)
+    const resolved = resolveReranker(cfg)
+    expect(resolved.name).toBe('fake_rerank')
+    expect(resolved.isAvailable()).toBe(true)
+  })
+
+  it('rejects an unknown name in every registry — never a silent fallback', () => {
+    // All three surfaces share one contract, and the message is the operator's only clue for a config
+    // typo, so it is pinned verbatim: a name nobody registered is an error, not a quiet built-in.
+    expect(() => resolveSemantic(ConfigSchema.parse({ semantic: { backend: 'nope' } }))).toThrow('未知的语义后端：nope')
+    expect(() => resolveReranker(ConfigSchema.parse({ rerank: { backend: 'nope' } }))).toThrow('未知的重排后端：nope')
+    expect(() => resolveVStore(ConfigSchema.parse({ vectorStore: { backend: 'nope' } }))).toThrow('未知的向量库后端：nope')
+  })
+
+  it('keeps the unregistered defaults exactly as before', () => {
+    // Adding `registerReranker` (and the re-exports) must not move the built-in resolution: with
+    // nothing registered, each surface still lands on the same adapter it always did.
+    const cfg = ConfigSchema.parse({})
+    expect(resolveSemantic(cfg).name).toBe('local_bge')
+    const reranker = resolveReranker(cfg)
+    expect(reranker.name).toBe('none')
+    // 'none' is "rerank disabled", not "a reranker that happens to be off": it is unavailable by design.
+    expect(reranker.isAvailable()).toBe(false)
+    expect(resolveVStore(cfg).name).toBe('auto:local_numpy')
   })
 
   it('threads the warm deferral through to the backend factory', () => {

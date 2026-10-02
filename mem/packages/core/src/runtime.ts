@@ -22,7 +22,7 @@ import {
   retrievalHealthSummary,
   setRetrievalLogger,
   type SemanticBackend,
-} from '@avantf/mem-core'
+} from '@avantf/mem-retrieval'
 import { setPandocProvisioning } from '@avantf/mem-convert'
 import { parseToolsConfig, resolveToolsDir } from '@avantf/mem-provision'
 import { loadConfig, type LoadedConfig } from './config/loader.js'

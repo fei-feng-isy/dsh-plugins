@@ -47,7 +47,7 @@
     "typecheck": "node ../../scripts/link-dsh.mjs && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:dsh": "vitest run --config vitest.dsh.config.ts",
-    "prepublishOnly": "node ../../scripts/pack-plugin.mjs"
+    "prepublishOnly": "node ../../../scripts/prepublish-assert.mjs --package @avantf/dsh-mem && node ../../scripts/pack-plugin.mjs"
   },
   "peerDependencies": {
     "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",

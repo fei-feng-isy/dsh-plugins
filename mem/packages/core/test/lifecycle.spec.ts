@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConfigSchema, type Config } from '@avantf/mem-contract'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
-import type { SemanticBackend } from '@avantf/mem-core'
+import type { SemanticBackend } from '@avantf/mem-retrieval'
 import { float32ToBytes } from '../src/db/vectors.js'
 import { runMaintenance } from '../src/lifecycle/maintenance.js'
 import {
