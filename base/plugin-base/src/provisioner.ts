@@ -81,8 +81,14 @@ export const ITEM_SCHEMA_VERSION = 1
 let stagingSequence = 0
 /** How long a publish waits for the family lock before reporting `lock/timeout`. */
 const LOCK_TIMEOUT_MS = 15_000
-/** A lock older than this whose pid is gone is reclaimed. */
-const STALE_LOCK_MS = 60_000
+/**
+ * A lock older than this whose pid is gone is reclaimed. It is ALSO the mtime age at which a waiter
+ * starts warning about a LIVE holder that keeps outliving the contract, so it must stay BELOW
+ * `LOCK_TIMEOUT_MS`: at `60_000` the waiter always timed out first and the R2 slow-hold warning was
+ * unreachable under this package's own wiring (P15 in `docs/review/2026-10-03-performance-review.md`).
+ * The pid rule is untouched either way — a holder that is still alive is never reclaimed.
+ */
+const STALE_LOCK_MS = 10_000
 
 interface NormalizedMissing {
   readonly atStartup: AtStartup

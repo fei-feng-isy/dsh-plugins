@@ -15,7 +15,12 @@ export const STATUS_SCHEMA_VERSION = 1
 export const LAYOUT_SCHEMA_VERSION = 1
 /** How long a status write waits for the short lock. */
 const STATUS_LOCK_TIMEOUT_MS = 5_000
-const STATUS_LOCK_STALE_MS = 30_000
+/**
+ * Must stay BELOW `STATUS_LOCK_TIMEOUT_MS`: it is both the reclaim age for a dead/undetectable
+ * holder and the mtime age at which a waiter warns about a LIVE one. At `30_000` the waiter timed
+ * out first, so that warning was unreachable (P15). Live holders are never reclaimed.
+ */
+const STATUS_LOCK_STALE_MS = 2_000
 /** Declarations older than this, from a dead pid, are dropped. */
 const DECLARED_TTL_MS = 7 * 24 * 60 * 60 * 1000
 

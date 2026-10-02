@@ -28,8 +28,12 @@ const DEFAULT_REVISION = 'main'
 const MAX_MODEL_BYTES = 4 * 1024 * 1024 * 1024
 /** How long the placement lock waits before reporting `lock/timeout`. */
 const LOCK_TIMEOUT_MS = 15_000
-/** A placement lock older than this whose pid is gone is reclaimed. */
-const STALE_LOCK_MS = 60_000
+/**
+ * A placement lock older than this whose pid is gone is reclaimed. It is ALSO the mtime age at which
+ * a waiter warns about a LIVE holder, so it must stay BELOW `LOCK_TIMEOUT_MS`; at `60_000` the
+ * waiter timed out first and the warning was dead code (P15). Live holders are never reclaimed.
+ */
+const STALE_LOCK_MS = 10_000
 
 /** A resolved commit id: 40 or 64 lowercase hex. */
 const SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/

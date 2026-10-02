@@ -206,6 +206,9 @@ type ResourceState =
     可见**），报出锁路径、holder 的 `pid` / `startedAt`、已持有 `heldMs`、`staleMs` 与本次已等待 `waitedMs`。
     它按 `(路径, holder)` 限流（窗口一个 `staleMs`，下限 1 s），轮询与重试不会刷屏；holder 换人立刻重报。
     这条告警的意义是让"临界区持续超出锁契约"成为可见事实，而不是靠抢锁静默掩盖。
+    **每个调用方的 `staleMs` 必须严格小于它自己的 `timeoutMs`**：否则从持有开始就在等的等待者会先耗尽
+    预算，告警永远来不及发（P15，见 `docs/review/2026-10-03-performance-review.md` §1.4）。这是纯常数
+    约束，不改变上面任何一条回收/等待语义。
   - **超时带诊断**：等满预算仍拿不到锁时抛 `lock/timeout`，消息里带预算、已等待 `waitedMs`、holder 的
     `pid` / `startedAt`（不可读时说明"存在但不是可读的锁文件"）、holder 进程是"仍存活（活体持有者，不
     回收）"还是"已消失（尚未满足可回收条件）"，以及锁文件 mtime 年龄与 `staleMs`。
