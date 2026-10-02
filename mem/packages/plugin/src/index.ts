@@ -45,6 +45,7 @@ import {
   KB_TOOL,
   QUERY_TOOL,
   TOOL_SPECS,
+  adoptWellFormed,
   createConsoleLogger,
   describeError,
   modelFacingToolResult,
@@ -466,6 +467,27 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     return
   }
 
+  // ── the base's well-formed helpers, when the loaded base carries them (interface v2) ──────────
+  // The family decision rule for this knowledge: "can ONE base release fix it?" YES — the lone
+  // surrogate repair is the base kit's `wellFormedText` / `wellFormedDeep` — so the plugin takes the
+  // implementation off the module the bootstrap LOADED, not from an inline copy. The base cannot be
+  // statically imported (it may be absent), so the module instance is the bridge:
+  // `adoptWellFormed` hands the loaded base to the engine's mirror (`@avantf/mem-contract`), which
+  // is what the write entry (`normalizeWrite`) and this file's model-facing `OUTPUT` both call.
+  //
+  // Availability is judged PER MEMBER — `typeof kit.wellFormedText === 'function'` — never by the
+  // interface generation: the v2 members are an OPTIONAL capability, and a v1 base (or a
+  // `cannot-tell` module) must keep mounting with the mirror. `env` is `undefined` on the two
+  // degradation routes the loader already handles (base absent, interface `incompatible`), so this
+  // is also the exact point where "no host" resolves to the mirror. It cannot throw, and it changes
+  // nothing about the mount.
+  const wellFormed = adoptWellFormed(env?.kit)
+  logger.info(
+    wellFormed.text && wellFormed.deep
+      ? "well-formed repair: the base kit's wellFormedText/wellFormedDeep (interface v2)"
+      : 'well-formed repair: the mem mirror (the base is absent, or predates the v2 helpers)',
+  )
+
   const compat = env?.compat
   let verdict: CompatVerdict | undefined
   if (compat === undefined) {
@@ -517,7 +539,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // is environmental — a corrupt or locked database, an unwritable data home, or a database
     // written by a NEWER version (`SchemaDowngradeError`) — and the loader treats a throwing `apply`
     // as a failed row, which is enough to fail the whole `dsh web` boot (observed). Degrade instead:
-    // the five tools stay registered and each answers with the REASON, so the model and the operator
+    // the eight tools stay registered and each answers with the REASON, so the model and the operator
     // get a diagnosis instead of a missing tool and a silent absence.
     const reason = describeError(error)
     logger.error(`runtime unavailable — mounting DEGRADED (tools answer with the reason): ${reason}`)

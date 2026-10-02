@@ -152,6 +152,10 @@ export interface Mounted {
     description?: string
     /** The JSON Schema the model receives; carried because its text is model-facing too. */
     parameters?: Record<string, unknown>
+    /** The tool's output contract: where the terminal text block the model reads is produced. Carried
+     *  because that text is a model-visible boundary in its own right (a lone surrogate in it makes a
+     *  strict consumer reject the whole document). */
+    output?: { render: (args: unknown, value: unknown) => readonly { type: string; text: string }[] }
     execute: (args: unknown, exec: unknown) => Promise<unknown>
   }[]
   contexts: { name: string; text: (context: { agent?: unknown }) => string }[]

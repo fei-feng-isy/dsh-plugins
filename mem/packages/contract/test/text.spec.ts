@@ -5,8 +5,8 @@
  * the property that matters is "whatever a strict JSON parser receives is well-formed", and it is
  * the escaped text that a non-JS parser sees.
  */
-import { describe, it, expect } from 'vitest'
-import { toWellFormedDeep, toWellFormedText, toWellFormedTexts } from '../src/text.js'
+import { afterEach, beforeEach, describe, it, expect } from 'vitest'
+import { adoptWellFormed, toWellFormedDeep, toWellFormedText, toWellFormedTexts } from '../src/text.js'
 
 /** Lone high surrogate (half of an astral pair). */
 const HALF_HIGH = '\uD800'
@@ -113,5 +113,68 @@ describe('toWellFormedDeep (read side)', () => {
   it('is idempotent', () => {
     const once = toWellFormedDeep({ a: `x${HALF_HIGH}y`, k: HALF_LOW })
     expect(toWellFormedDeep(once)).toEqual(once)
+  })
+})
+
+/**
+ * The host seam: the DSH plugin hands the module the bootstrap loaded in at mount, and this module
+ * uses the base kit's implementation when it carries one. The cases below are the TWO degradation
+ * routes the family requires to stay total — "the base is absent" (the loader returned `undefined`)
+ * and "the base predates the v2 helpers" (a v1-shaped module with neither member) — plus the
+ * hostile-module guard. All three must leave the mirror in force; none may throw. The switch is a
+ * per-member `typeof` check, never an interface-generation comparison.
+ */
+describe('adoptWellFormed — the base kit when it has the members, the mirror otherwise', () => {
+  beforeEach(() => { adoptWellFormed(undefined) })
+  afterEach(() => { adoptWellFormed(undefined) })
+
+  it('installs both members when the kit carries them', () => {
+    const kit = {
+      wellFormedText: (value: string): string => `T:${value}`,
+      wellFormedDeep: (value: unknown): unknown => `D:${String(value)}`,
+    }
+    expect(adoptWellFormed(kit)).toEqual({ text: true, deep: true })
+    // The write wrapper still applies NFC on top of whatever well-formed layer is installed.
+    expect(toWellFormedText('x')).toBe('T:x')
+    expect(toWellFormedText('e\u0301')).toBe('T:e\u0301'.normalize('NFC'))
+    expect(toWellFormedDeep({ a: 1 })).toBe('D:[object Object]')
+  })
+
+  it('adopts each member independently — a partial kit keeps the mirror for the other side', () => {
+    expect(adoptWellFormed({ wellFormedText: (value: string): string => `T:${value}` })).toEqual({ text: true, deep: false })
+    // The deep side is the mirror walk, but it reads the installed string layer at every call —
+    // values AND object keys.
+    expect(toWellFormedDeep({ a: 'x' })).toEqual({ 'T:a': 'T:x' })
+    expect(toWellFormedDeep(['x', 1])).toEqual(['T:x', 1])
+    // Re-adopting nothing restores BOTH defaults.
+    expect(adoptWellFormed(undefined)).toEqual({ text: false, deep: false })
+    expect(toWellFormedText('x')).toBe('x')
+    expect(toWellFormedDeep({ a: 'x' })).toEqual({ a: 'x' })
+  })
+
+  it('leaves the mirror in force when the base is ABSENT (`env` is undefined at the call site)', () => {
+    expect(adoptWellFormed(undefined)).toEqual({ text: false, deep: false })
+    // Exactly the mirror's documented semantics: write = well-formed + NFC…
+    expect(toWellFormedText(`a${HALF_HIGH}b`)).toBe(`a${REPLACEMENT}b`)
+    expect(toWellFormedText('e\u0301')).toBe('\u00e9')
+    // …read = lone surrogates only, no NFC, recursing through arrays, plain objects and keys.
+    expect(toWellFormedDeep({ a: `x${HALF_HIGH}y`, [`k${HALF_LOW}`]: 'e\u0301' }))
+      .toEqual({ a: `x${REPLACEMENT}y`, [`k${REPLACEMENT}`]: 'e\u0301' })
+  })
+
+  it('leaves the mirror in force for a v1 base — the v2 members are an OPTIONAL capability', () => {
+    // A base that predates the helpers reports its own generation and carries no such member: the
+    // plugin must NOT read that as "incompatible", it simply keeps the mirror (and the interface
+    // gate's own v1 handling is what withholds the rest of the base — never a refused mount).
+    expect(adoptWellFormed({ INTERFACE_VERSION: 1 })).toEqual({ text: false, deep: false })
+    expect(toWellFormedText(`a${HALF_HIGH}b`)).toBe(`a${REPLACEMENT}b`)
+    expect(toWellFormedDeep([`x${HALF_LOW}`])).toEqual([`x${REPLACEMENT}`])
+  })
+
+  it('never throws on a hostile module — every read is guarded', () => {
+    const hostile = new Proxy({}, { get: () => { throw new Error('shape mismatch') } })
+    expect(() => adoptWellFormed(hostile)).not.toThrow()
+    expect(adoptWellFormed(hostile)).toEqual({ text: false, deep: false })
+    expect(toWellFormedText(`a${HALF_HIGH}b`)).toBe(`a${REPLACEMENT}b`)
   })
 })

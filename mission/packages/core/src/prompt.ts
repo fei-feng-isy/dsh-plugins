@@ -4,6 +4,7 @@
  */
 import { CAPACITY, TERMINAL, type DispatchView, type NodeRecord } from './types.js'
 import type { ContinuationDelta } from './continuation.js'
+import { LOCAL_WELL_FORMED, type WellFormedSource } from './wellformed.js'
 
 /** Node statuses in the language the model reads. */
 const STATUS_ZH: Record<string, string> = {
@@ -245,19 +246,37 @@ export interface WorkerPromptOptions {
 /**
  * Build the complete prompt for one dispatch; the mission chain carries only titles and one-line context, so its size is bounded by the depth limit, and the full `description`/`context` is included for the current node only.
  * The tail branches on the CHILDREN in the view, not on the node's status: the prompt is built after `dispatch()` has already marked the node `running`, so a status test can never see the aggregate case, and a `failed` node is never dispatched at all.
+ *
+ * ── the OUTBOUND well-formed boundary ──
+ * Everything this function writes lands in the executor's context, and the tree it reads may hold a
+ * lone surrogate that an OLDER build persisted (before the inbound funnel existed) or that a foreign
+ * writer put there. So the whole view (node, chain, children) and the whole options record are
+ * recursively repaired BEFORE a single line is assembled: `wellFormedDeep` leaves numbers, booleans
+ * and `null` untouched, so nothing but lone surrogates can change. `wellFormed` is the plugin's
+ * loaded base kit when it has one and {@link LOCAL_WELL_FORMED} otherwise.
+ *
+ * @param view - the node/chain/children this dispatch renders.
+ * @param options - how this dispatch differs from a fresh executor's.
+ * @param wellFormed - the repair pair; the plugin injects the loaded base's.
  */
-export function buildWorkerPrompt(view: DispatchView, options: WorkerPromptOptions = {}): string {
-  const { node, chain, children } = view
+export function buildWorkerPrompt(
+  view: DispatchView,
+  options: WorkerPromptOptions = {},
+  wellFormed: WellFormedSource = LOCAL_WELL_FORMED,
+): string {
+  const safeView = wellFormed.deep(view)
+  const safeOptions = wellFormed.deep(options)
+  const { node, chain, children } = safeView
   const sections: string[] = []
 
-  const notice = handoffNotice(node, options.resumed === true)
+  const notice = handoffNotice(node, safeOptions.resumed === true)
   if (notice !== undefined) sections.push(notice)
 
   // Immediately after the notice and before the mission chain: both the notice and the delta are
   // "read this before you read the mission" text, and the chain below is the stable context the two
   // of them are adjusting. Nothing renders here on a fresh spawn — it never gets a `delta`.
-  if (options.delta !== undefined) {
-    const drift = deltaSection(options.delta)
+  if (safeOptions.delta !== undefined) {
+    const drift = deltaSection(safeOptions.delta)
     if (drift !== undefined) sections.push(drift)
   }
 
@@ -265,11 +284,11 @@ export function buildWorkerPrompt(view: DispatchView, options: WorkerPromptOptio
     sections.push(['任务链（根任务 → 本任务）：', ...chain.map(chainLine)].join('\n'))
   }
 
-  sections.push(['本任务：', currentNodeBlock(node, options.corrections ?? node.corrections)].join('\n'))
+  sections.push(['本任务：', currentNodeBlock(node, safeOptions.corrections ?? node.corrections)].join('\n'))
 
   // `children` holds exactly the node's terminal children, so a non-empty view means the aggregate pass.
   if (children.length > 0) {
-    sections.push(childrenBlock(view))
+    sections.push(childrenBlock(safeView))
     sections.push(AGGREGATE_TAIL_PREFIX)
   } else {
     sections.push(EXECUTE_TAIL)
@@ -285,6 +304,10 @@ export function buildWorkerPrompt(view: DispatchView, options: WorkerPromptOptio
  * The compact per-tree progress line the guidance layer carries; every clause is anchored so it stays true when read late — the counts are a statement about a moment, not about "now".
  * Granularity is deliberate: the owner is told WHETHER mission is still running and WHETHER any of it has a history of trouble, never how the mission is distributed across states, because no owner action depends on that distribution, so a per-state breakdown would only invite it to reason about a layer it cannot touch.
  * Trouble is the one fact that changes what it should do, and it is counted in WORKS, not in nodes, so the size of anything stays inside the engine.
+ *
+ * The SAME outbound rule as {@link buildWorkerPrompt}: this line is assembled into the owner's
+ * context, so titles are repaired first (see the note there). The plugin injects the loaded base's
+ * repair pair; the core's local copy is the degradation path.
  */
 export function buildProgressLine(input: {
   readonly roots: readonly NodeRecord[]
@@ -292,16 +315,17 @@ export function buildProgressLine(input: {
   readonly ongoing: number
   /** Whether any unfinished mission carries a history of stalls or failures at the engine's floors. */
   readonly troubled: boolean
-}): string {
+}, wellFormed: WellFormedSource = LOCAL_WELL_FORMED): string {
+  const safe = wellFormed.deep(input)
   const parts: string[] = []
-  if (input.ongoing > 0) {
-    parts.push(`${input.ongoing} 个进行中${input.troubled ? '（反复出过问题）' : ''}`)
+  if (safe.ongoing > 0) {
+    parts.push(`${safe.ongoing} 个进行中${safe.troubled ? '（反复出过问题）' : ''}`)
   }
-  const converged = input.roots.filter((root) => root.status === 'done' || root.status === 'failed')
+  const converged = safe.roots.filter((root) => root.status === 'done' || root.status === 'failed')
   const terminal = converged.map((root) => `[${root.id}] ${root.title}：${statusLabel(root.status)}`)
   const summary = parts.length > 0
     ? parts.join('，')
-    : input.roots.length > 0 ? '暂无进行中的' : '暂无任务'
+    : safe.roots.length > 0 ? '暂无进行中的' : '暂无任务'
   const lines = [`任务：${summary}。`]
   if (terminal.length > 0) {
     lines.push(`已结束的任务：${terminal.join(' | ')}`)

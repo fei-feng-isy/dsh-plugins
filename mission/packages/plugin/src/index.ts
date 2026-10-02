@@ -49,6 +49,7 @@ import {
 import { hostContribution } from './wire.js'
 import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createLogger } from './log.js'
+import { resolveWellFormed } from './wellformed.js'
 import {
   loadCompat,
   provision,
@@ -235,8 +236,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
   }
 
+  // The family's well-formed repair, taken off the base module the bootstrap loaded. The judgement
+  // is "does the loaded kit carry the two functions" (interface v2), NOT "which generation is it":
+  // a base that lacks them (absent, or older than v2) degrades to the core's local copy and the
+  // plugin still mounts in full — never a refusal, and never a degradation of the MOUNT.
+  const wellFormed = resolveWellFormed(compat?.kit)
+
   // Publishes itself from its `Service` base under the plugin's own scope, so it leaves with the fiber.
-  const host = new AvantfMissionHost(ctx, config, log)
+  const host = new AvantfMissionHost(ctx, config, log, wellFormed)
 
   // The host face of this plugin's Remote namespace: registered rather than shipped as a generated
   // `./typert` export, because the Typert generator only runs inside the harness workspace. Guarded,
@@ -697,8 +704,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: '列出本会话拥有的任务；命令后面跟文本时，用这段文本建一个根任务。',
     input: { hint: '[任务描述]' },
     handler: async ({ agent, rawInput }) => {
-      // The registry hands back the text after the command name INCLUDING its whitespace.
-      const request = rawInput.trim()
+      // INBOUND, the `/mission` command's text entry: this ONE string feeds the root's title, its
+      // description and the echo below, so it is repaired once here (the same rule as the tool
+      // entries; the tree repairs again on the way in, idempotently).
+      const request = wellFormed.text(rawInput).trim()
 
       if (request.length === 0) {
         const text = host.describe(agent)
@@ -714,7 +723,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       // First line names the root; the rest, if any, is its description. A root created here carries
       // no owner analysis, and the first executor is told exactly that by the prompt it receives.
       const [firstLine = '', ...rest] = request.split('\n')
-      const title = firstLine.length > TITLE_MAX ? `${firstLine.slice(0, TITLE_MAX - 1)}…` : firstLine
+      // The `TITLE_MAX` slice can land BETWEEN the two halves of an astral character and manufacture
+      // a lone surrogate out of text that arrived well-formed — the same "truncation creates the
+      // defect" case as `submitResult`'s spilled inline tail, so the result is repaired again.
+      const truncated = firstLine.length > TITLE_MAX ? `${firstLine.slice(0, TITLE_MAX - 1)}…` : firstLine
+      const title = wellFormed.text(truncated)
       const description = rest.length > 0 ? request : firstLine
 
       const result = await host.createWork(agent, title, description, [])

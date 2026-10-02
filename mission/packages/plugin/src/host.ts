@@ -18,6 +18,7 @@ import { isWorkerClaimId, newClaimId } from './claims.js'
 import {
   CAPACITY,
   DEFAULT_ENGINE_OPTIONS,
+  LOCAL_WELL_FORMED,
   TERMINAL,
   buildProgressLine,
   buildWorkerPrompt,
@@ -42,6 +43,7 @@ import {
   type SpilledText,
   type StallReport,
   type TreeRecord,
+  type WellFormedSource,
 } from '@avantf/mission-core'
 import { workDomain, TREES_TABLE } from './domain.js'
 import { createLogger, type MissionLogger } from './log.js'
@@ -263,14 +265,30 @@ export class AvantfMissionHost extends TypertRemoteService {
 
   private readonly log: MissionLogger
 
-  constructor(ctx: Context, options: HostOptions = {}, log?: MissionLogger) {
+  /**
+   * @param wellFormed - the family's well-formed repair, resolved by `apply()` from the loaded base
+   * kit (`resolveWellFormed(compat?.kit)`) and defaulted to the core's local copy. It is threaded to
+   * the three boundaries this host owns — the tree's inbound funnel (via `TreeDeps.wellFormed`), the
+   * worker prompt and the progress line (via `buildWorkerPrompt`'s third argument), and the model
+   * tool results (read by `defineWorkTools`) — so one resolution decides all of them.
+   */
+  constructor(
+    ctx: Context,
+    options: HostOptions = {},
+    log?: MissionLogger,
+    wellFormed: WellFormedSource = LOCAL_WELL_FORMED,
+  ) {
     // `TypertRemoteService` registers the service under this key AND binds it as a Remote namespace.
     super(ctx, NAMESPACE)
     this.maxConcurrent = options.maxConcurrent
     this.staleMs = options.staleMs
     this.roundMs = options.roundMs
+    this.wellFormed = wellFormed
     this.log = log ?? createLogger(ctx.logger)
   }
+
+  /** The repair pair every model-visible boundary of this host uses; see the constructor. */
+  readonly wellFormed: WellFormedSource
 
   private readonly maxConcurrent: number | undefined
   private readonly staleMs: number | undefined
@@ -374,6 +392,9 @@ export class AvantfMissionHost extends TypertRemoteService {
       spill: (text) => this.spillText(text),
       now: () => Date.now(),
       newId: () => defaultNewId(),
+      // The inbound funnel takes the same repair the outbound boundaries do, so text entering the
+      // tree and text leaving it can never disagree about what "well-formed" means.
+      wellFormed: this.wellFormed,
     })
     this.tree = tree
 
@@ -1021,7 +1042,7 @@ export class AvantfMissionHost extends TypertRemoteService {
       roots.push(root)
       if (!TERMINAL.has(root.status)) ongoing += 1
     }
-    return buildProgressLine({ roots, ongoing, troubled })
+    return buildProgressLine({ roots, ongoing, troubled }, this.wellFormed)
   }
 
   /**
@@ -1461,7 +1482,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     }
     const view = tree.view(node.id)
     if (view === undefined) return false
-    const prompt = buildWorkerPrompt(view)
+    const prompt = buildWorkerPrompt(view, {}, this.wellFormed)
     try {
       await this.ctx.subagents.sendMessage(
         parent,
@@ -1621,7 +1642,7 @@ export class AvantfMissionHost extends TypertRemoteService {
       resumed: true,
       corrections: undelivered,
       ...(drift === undefined ? {} : { delta: drift }),
-    })
+    }, this.wellFormed)
     // Stamped with the prompt itself: this session's NEXT wake subtracts from what it is being read
     // here, not from the original dispatch, or the same drift would be reported to it twice. After
     // the delivery resolved — a refused prompt was never read, and the delivery must not carry an
@@ -1674,7 +1695,7 @@ export class AvantfMissionHost extends TypertRemoteService {
       this.endStartAttempt(claimId)
       return
     }
-    const prompt = buildWorkerPrompt(view)
+    const prompt = buildWorkerPrompt(view, {}, this.wellFormed)
     // Stamped only once the child accepts it (below): a prompt the runtime refused was never read.
     this.dispatchedFor.add(owned.ownerSessionId)
 

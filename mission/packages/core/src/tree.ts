@@ -20,6 +20,7 @@ import {
   type DispatchScope,
 } from './dispatch.js'
 import { storedTime } from './liveness.js'
+import { LOCAL_WELL_FORMED, type WellFormedSource } from './wellformed.js'
 import {
   CAPACITY,
   DISPATCHABLE,
@@ -90,6 +91,13 @@ export interface TreeDeps {
   now(): number
   /** Id generator, injectable for tests. */
   newId(): string
+  /**
+   * The family's well-formed repair, injected by the plugin from the LOADED BASE KIT (interface v2,
+   * `wellFormedText` / `wellFormedDeep`). Absent means the base could not provide it — base missing,
+   * or older than v2 — and the tree uses its own {@link LOCAL_WELL_FORMED} copy instead. This is a
+   * degradation, never a refusal: a tree with no injected source still mounts and still repairs.
+   */
+  readonly wellFormed?: WellFormedSource
 }
 
 export interface CreateRootInput {
@@ -254,6 +262,15 @@ export class MissionTree {
     private readonly deps: TreeDeps,
   ) {
     this.store = store
+  }
+
+  /**
+   * The repair pair every INBOUND write uses: the base kit the plugin injected, or the local
+   * degradation copy. ONE accessor, so "which implementation" is decided in one place and every
+   * write-path entry below asks the same question.
+   */
+  private get wellFormed(): WellFormedSource {
+    return this.deps.wellFormed ?? LOCAL_WELL_FORMED
   }
 
   /** Attach the durable store. A plugin can only open its storage domain inside `apply`, so the
@@ -739,9 +756,14 @@ export class MissionTree {
 
   async createRoot(input: CreateRootInput): Promise<MutationResult<NodeRecord>> {
     return this.withLock(async () => {
+      // INBOUND, the `create_mission` path. This is the ONE point where these fields enter the tree,
+      // so one recursive repair on the whole input covers title / description / analysis / unit
+      // together — a field added to the input shape cannot be forgotten here. The repair is
+      // well-formedness only (no NFC; see the module note in `wellformed.ts`).
+      const safe = this.wellFormed.deep(input)
       // Before the id is allocated: a refused root must not consume one.
-      if (isBlank(input.title)) return refuse('blank-text', '任务标题不能只有空白')
-      if (isBlank(input.description)) return refuse('blank-text', '任务内容不能只有空白')
+      if (isBlank(safe.title)) return refuse('blank-text', '任务标题不能只有空白')
+      if (isBlank(safe.description)) return refuse('blank-text', '任务内容不能只有空白')
       const now = this.deps.now()
       const id = this.allocateId(new Set())
       if (id === undefined) {
@@ -751,10 +773,10 @@ export class MissionTree {
         id,
         rootId: id,
         parentId: null,
-        title: input.title,
-        description: input.description,
-        context: input.analysis,
-        unit: normalizeUnit(input.unit),
+        title: safe.title,
+        description: safe.description,
+        context: safe.analysis,
+        unit: normalizeUnit(safe.unit),
         depth: 1,
         now,
       })
@@ -1060,6 +1082,8 @@ export class MissionTree {
     analysis: string,
   ): Promise<MutationResult<NodeRecord>> {
     return this.withLock(async () => {
+      // INBOUND, the `note_mission` path: the ONE string this write path stores.
+      const noteText = this.wellFormed.text(analysis)
       const found = this.locate(nodeId)
       if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
       const { state, node } = found
@@ -1069,7 +1093,7 @@ export class MissionTree {
       if (TERMINAL.has(node.status)) {
         return refuse('terminal', `任务 ${nodeId} 处于 ${statusLabel(node.status)}；终态任务不能再写分析`)
       }
-      const notes = analysisLines(analysis)
+      const notes = analysisLines(noteText)
       if (notes.length === 0) {
         return refuse('no-analysis', '分析不能为空：写清缺什么前提、排除了哪条路以及为什么、子任务结果回来后要判断什么')
       }
@@ -1097,6 +1121,10 @@ export class MissionTree {
     children: readonly ChildSpec[],
   ): Promise<MutationResult<DecomposeOutcome>> {
     return this.withLock(async () => {
+      // INBOUND, the `decompose_mission` path: ONE repair on the whole children array covers every
+      // child's title / description / context / unit. It runs BEFORE the dedup scan below, so two
+      // spellings of the same child that differ only by a lone surrogate cannot create two nodes.
+      const specs = this.wellFormed.deep(children)
       const found = this.locate(nodeId)
       if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
       const { state, node } = found
@@ -1114,13 +1142,13 @@ export class MissionTree {
           `任务 ${nodeId} 这次派发还没写下为什么拆；先用 note_mission 写下这次的分析，再拆解`,
         )
       }
-      if (children.length === 0) {
+      if (specs.length === 0) {
         return refuse('no-children', '拆解至少要给一个子任务')
       }
-      if (children.length > CAPACITY.maxChildrenPerDecompose) {
+      if (specs.length > CAPACITY.maxChildrenPerDecompose) {
         return refuse(
           'too-many-children',
-          `一次拆解最多 ${CAPACITY.maxChildrenPerDecompose} 个子任务，收到 ${children.length} 个`,
+          `一次拆解最多 ${CAPACITY.maxChildrenPerDecompose} 个子任务，收到 ${specs.length} 个`,
         )
       }
       const unfinished = this.pendingChildren(node, state)
@@ -1142,7 +1170,7 @@ export class MissionTree {
       const next = new Map(state.nodes)
       const taken = new Set(next.keys())
       const now = this.deps.now()
-      const added = this.countNewChildren(next, node, children)
+      const added = this.countNewChildren(next, node, specs)
       if (state.nodes.size + added > CAPACITY.maxNodesPerTree) {
         return refuse(
           'node-limit',
@@ -1150,7 +1178,7 @@ export class MissionTree {
           + `${String(CAPACITY.maxNodesPerTree)}；把一个任务拆小一点再继续`,
         )
       }
-      for (const spec of children) {
+      for (const spec of specs) {
         const existing = this.findEquivalent(next, node, spec.title, spec.description, created)
         if (existing !== undefined) {
           reused.push(existing.id)
@@ -1217,6 +1245,9 @@ export class MissionTree {
     result: string,
   ): Promise<MutationResult<{ node: NodeRecord; parentReady: boolean }>> {
     return this.withLock(async () => {
+      // INBOUND, the `submit_mission` path: the ONE string this write path stores. Repaired before
+      // the length check so the spill decision is made on the final bytes.
+      const safeResult = this.wellFormed.text(result)
       const found = this.locate(nodeId)
       if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
       const { state, node } = found
@@ -1235,17 +1266,19 @@ export class MissionTree {
       }
       // Same rule as `no-analysis`, one field over: a blank "result" is a submission with nothing in
       // it, and it used to be stored, shown as the conclusion, and read by the judging round.
-      if (isBlank(result)) return refuse('blank-text', '结果不能只有空白')
+      if (isBlank(safeResult)) return refuse('blank-text', '结果不能只有空白')
 
-      let inline = result
+      let inline = safeResult
       let ref: string | null = null
       let hint: string | null = null
-      if (result.length > CAPACITY.maxInlineResultChars) {
-        const spilled = await this.deps.spill(result)
+      if (safeResult.length > CAPACITY.maxInlineResultChars) {
+        const spilled = await this.deps.spill(safeResult)
         if (spilled !== null) {
           ref = spilled.locator
           hint = spilled.hint
-          inline = result.slice(0, CAPACITY.maxInlineResultChars)
+          // The inline TAIL is repaired again: this `slice` can land between the two halves of an
+          // astral character and manufacture a lone surrogate out of a well-formed result.
+          inline = this.wellFormed.text(safeResult.slice(0, CAPACITY.maxInlineResultChars))
         }
         // No backend: keep the whole text on the node rather than an unresolvable locator.
       }
@@ -1273,6 +1306,9 @@ export class MissionTree {
    * aggregate round rather than living in one worker's inbox. */
   async correct(nodeId: string, callerSessionId: string, text: string): Promise<MutationResult<NodeRecord>> {
     return this.withLock(async () => {
+      // INBOUND, the `adjust_mission` path: repair BEFORE the duplicate check, so the same correction
+      // cannot be appended twice because one copy carried a lone surrogate.
+      const safeText = this.wellFormed.text(text)
       const found = this.locate(nodeId)
       if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
       const { state, node } = found
@@ -1285,9 +1321,9 @@ export class MissionTree {
       // A blank correction would be stored and then rendered onto the node's own block AND onto the
       // mission-chain line of every descendant — a line that says nothing, in the one channel that
       // reaches every dispatch.
-      if (isBlank(text)) return refuse('blank-text', '纠偏内容不能只有空白')
-      if (node.corrections.includes(text)) return accept(node)
-      const updated = this.replace(state, node, { corrections: [...node.corrections, text] })
+      if (isBlank(safeText)) return refuse('blank-text', '纠偏内容不能只有空白')
+      if (node.corrections.includes(safeText)) return accept(node)
+      const updated = this.replace(state, node, { corrections: [...node.corrections, safeText] })
       await this.flush(node.rootId)
       return accept(updated)
     })

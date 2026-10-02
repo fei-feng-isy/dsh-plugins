@@ -14,7 +14,7 @@ import {
   type ToolDefinition,
   type ToolRunContext,
 } from '@deepseek-ai/dsh-tools'
-import { CAPACITY, spillPointer, statusLabel, type Refusal } from '@avantf/mission-core'
+import { CAPACITY, spillPointer, statusLabel, type Refusal, type WellFormedSource } from '@avantf/mission-core'
 import type { AvantfMissionHost } from './host.js'
 
 /** The one result shape every tool returns, surfaced as the terminal text block. */
@@ -24,30 +24,54 @@ export interface MissionToolResult {
   data?: JsonValue
 }
 
-const OUTPUT = {
-  schema: { type: 'object', additionalProperties: true },
-  render: (_args: unknown, value: JsonValue): { type: 'text'; text: string }[] => {
-    const record = value as Record<string, JsonValue>
-    const summary = record['summary']
-    return [{ type: 'text', text: typeof summary === 'string' ? summary : JSON.stringify(value) }]
-  },
-} as const
+/** The output contract `defineTool` is given: every tool's answer is one text block. */
+interface ToolOutput {
+  readonly schema: { readonly type: 'object'; readonly additionalProperties: true }
+  readonly render: (args: unknown, value: JsonValue) => { type: 'text'; text: string }[]
+}
+
+/**
+ * The OUTBOUND boundary for tool results (the `mission_result` / `list_missions` / … answers).
+ *
+ * Every tool answer becomes one text block, either its `summary` or the JSON text of the whole
+ * value. BOTH branches must be well-formed, so the value is repaired RECURSIVELY FIRST and only then
+ * turned into text: a lone surrogate that `JSON.stringify` emits verbatim as `"\ud800"` makes a
+ * strict consumer (`printf '"\\ud800"' | jq .` → `parse error: Invalid \uXXXX\uXXXX surrogate pair
+ * escape`; Python's `json.load` accepts it but `print` raises `UnicodeEncodeError`) reject the whole
+ * document, while JavaScript's own `JSON.parse` accepts it — which is exactly why this boundary is
+ * the responsible one instead of a test.
+ *
+ * Repairing the VALUE before stringifying also covers data this process did not just write: a tree
+ * persisted by an older build (before the inbound funnel existed), or a string a foreign writer put
+ * there. `wellFormed` is the host's resolved pair — the loaded base kit when available, the local
+ * degradation copy otherwise.
+ */
+function outputFor(wellFormed: WellFormedSource): ToolOutput {
+  return {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args: unknown, value: JsonValue): { type: 'text'; text: string }[] => {
+      const repaired = wellFormed.deep(value)
+      const summary = (repaired as Record<string, JsonValue>)['summary']
+      return [{ type: 'text', text: typeof summary === 'string' ? summary : JSON.stringify(repaired) }]
+    },
+  }
+}
 
 /**
  * Convert `defineTool`'s contract into the uniform shape every tool shares:
  * `Record<string, unknown>` arguments and a `MissionToolResult` result. The conversion is
  * asserted, not re-derived — the schemas that reach the model are exactly the ones written.
  */
-function workTool(options: {
+function workTool(host: AvantfMissionHost, options: {
   name: string
   description: string
   parameters: ParameterSchemaSpec
   presentCall?: (args: Record<string, unknown>) => ToolCallView | undefined
   execute: (args: Record<string, unknown>, exec: ToolRunContext) => Promise<MissionToolResult>
 }): ToolDefinition {
-  return (defineTool as unknown as (definition: typeof options & { output: typeof OUTPUT }) => ToolDefinition)({
+  return (defineTool as unknown as (definition: typeof options & { output: ToolOutput }) => ToolDefinition)({
     ...options,
-    output: OUTPUT,
+    output: outputFor(host.wellFormed),
   })
 }
 
@@ -161,7 +185,7 @@ export function childSpecs(args: Record<string, unknown>): {
 }
 
 export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
-  const createWork = workTool({
+  const createWork = workTool(host, {
     name: 'create_mission',
     description: [
       '建一个任务交给引擎执行：独立的、需要调研的、多步的、要跑一阵的、需要逐步分解的、',
@@ -217,7 +241,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     },
   })
 
-  const decomposeWork = workTool({
+  const decomposeWork = workTool(host, {
     name: 'decompose_mission',
     description: [
       '把当前任务拆成它依赖的前置任务。每个子任务的 `context` 写清它为什么需要。',
@@ -277,7 +301,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     },
   })
 
-  const noteWork = workTool({
+  const noteWork = workTool(host, {
     name: 'note_mission',
     description: [
       '写下你这次执行当前任务的判断：为什么还没做完、缺什么前提、已经排除了哪条路以及为什么、下一步要判断什么。',
@@ -310,7 +334,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     },
   })
 
-  const submitWork = workTool({
+  const submitWork = workTool(host, {
     name: 'submit_mission',
     description: [
       '提交当前任务的结果。结果里写清结论与支持它的事实。有未完成子任务时不能提交。',
@@ -343,7 +367,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     },
   })
 
-  const workResult = workTool({
+  const workResult = workTool(host, {
     name: 'mission_result',
     description: [
       '读一个任务的完整结果。',
@@ -383,7 +407,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     },
   })
 
-  const listWorks = workTool({
+  const listWorks = workTool(host, {
     name: 'list_missions',
     description: [
       '列出你拥有的任务：每个任务一行，带它的 id、状态和标题。',
@@ -422,7 +446,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     },
   })
 
-  const finishWork = workTool({
+  const finishWork = workTool(host, {
     name: 'finish_mission',
     description: [
       '收尾一个你拥有的任务。前提：根任务已有结果，且已用 `mission_result` 读过它。',
@@ -441,7 +465,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     },
   })
 
-  const cancelWork = workTool({
+  const cancelWork = workTool(host, {
     name: 'cancel_mission',
     description: [
       '取消一个你拥有的任务（未完成的子任务记为失败，执行者停止；已提交的结果保留）。',
@@ -464,7 +488,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     },
   })
 
-  const adjustWork = workTool({
+  const adjustWork = workTool(host, {
     name: 'adjust_mission',
     description: [
       '调整一个**尚未结束的**根任务（只对根任务有效）：写清哪里不对、应该改成什么。',

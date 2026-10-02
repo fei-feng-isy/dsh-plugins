@@ -1223,6 +1223,37 @@ decompose(node, children):
 
 去重与建节点共用同一把树锁，避免"同时查、同时建"。
 
+### 9.4 文本良构（well-formed）：入站唯一收口 + 两处出站兜底（2026-10-02）
+
+**缺陷形状只有一个**：一个**孤立代理项**（lone surrogate）—— `D800–DFFF` 里的 UTF-16 码元，没有配对的另一半（孤立高位、孤立低位、或半个 emoji）。这样的串不是合法 Unicode 标量序列，但 `JSON.stringify` 会把它原样写成转义 `"\ud800"`；JS 自己的 `JSON.parse` **接受**它，所以本仓所有测试都是绿的，而严格解析器会拒收整份文档。实测证据：
+
+```
+printf '"\\ud800"' | jq .   →  parse error: Invalid \uXXXX\uXXXX surrogate pair escape
+python3 -c 'json.loads(...); print(...)'  →  UnicodeEncodeError: surrogates not allowed
+```
+
+修复是 `String.prototype.toWellFormed()`（Node ≥20）：把每个孤立代理项换成 U+FFFD（`�`）；完整 emoji、CJK 扩展 B 区字、引号/反斜杠/换行/制表符都原样不动。**不应用 NFC**：mission 的入站文本是给人/模型读的散文，没有索引或等价类需要规范化；唯一可能想要它的拆解去重本来就是启发式（trim + 折叠空白 + 小写，且刻意不把不同 description 视为等价），NFC 只会静默改写调用方自己写下的字节。入站与出站因此用**同一个**修复函数（`wellFormedDeep`），这也让"唯一收口"与"出站兜底"可证明是同一件事。
+
+**入站唯一收口在 `MissionTree` 的每个写路径入口**（不是每个字段各写一份；一处递归修复覆盖该路径的全部字段）：
+
+| 写路径 | 入口（收口点） | 覆盖字段 |
+|---|---|---|
+| `create_mission` | `MissionTree.createRoot` 开头 `this.wellFormed.deep(input)` | title / description / analysis / unit |
+| `decompose_mission` | `MissionTree.decompose` 开头 `deep(children)`（**在去重扫描之前**） | 每个 child 的 title / description / context / unit |
+| `note_mission` | `MissionTree.recordAnalysis` 开头 `text(analysis)` | analysis |
+| `submit_mission` | `MissionTree.submitResult` 开头 `text(result)`；落盘内联截断后再修一次 | result（含 `slice` 可能把完整字符切成半个的情况） |
+| `adjust_mission` | `MissionTree.correct` 开头 `text(text)`（**在去重判断之前**） | correction |
+| `/mission` 命令 | `apply` 的 handler 入口 `text(rawInput)`；标题 ellipsis 截断后再修一次 | title / description |
+
+**两处出站边界**（都要递归先修、再成文本；也覆盖历史坏数据——旧版本写进持久化树的坏串）：
+
+| 边界 | 位置 | 做法 |
+|---|---|---|
+| 工具返回值 | `plugin/src/tools.ts` 的 `outputFor(wellFormed)`（原来是 `tools.ts:32` 的 `typeof summary === 'string' ? summary : JSON.stringify(value)`） | 先 `wellFormed.deep(value)`，再走 summary / `JSON.stringify` 两个分支；`summary` 分支与 JSON 分支都不可能带出孤立代理项 |
+| 执行者 prompt | `core/src/prompt.ts` 的 `buildWorkerPrompt`（以及同文件的 `buildProgressLine`） | 组装前对整个 `view`（node / chain / children）与 `options` 递归良构；数字/布尔/null 原样 |
+
+**base 消费与回退（接口 v2）**：正本是 base kit 的 `wellFormedText` / `wellFormedDeep`。`plugin/src/wellformed.ts` 的 `resolveWellFormed(kit)` **只看"这两个函数在不在"**：在，就用加载到的 base（一次 base 发版即可修）；不在（base 缺席，或早于 v2），就用 core 的本地副本 `LOCAL_WELL_FORMED`（`core/src/wellformed.ts`，注释写明这是降级路径）。这**不是**兼容性判决，也**绝不**拒载或降级挂载：base 缺席/v1 时，同一套 9 个工具、3 条命令、prompt 段、Remote 与 UI 全部照常注册，只是修复改用本地副本。插件从不按值 import base——kit 是 bootstrap 在运行时加载、经 `apply` 传进 host 的（见 §10.2 与根 `AGENTS.md`）。
+
 ---
 
 ## 九点五、客户端半边：**任务**标签

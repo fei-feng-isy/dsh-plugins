@@ -322,6 +322,31 @@ describe('envinit loader', () => {
     expect(calls.declare).toHaveLength(0)
   })
 
+  it('withholds a v1 base too — the v2 well-formed helpers are optional, so the mirror takes over', async () => {
+    const env = await freshEnvinit()
+    const calls = emptyCalls()
+    const home = mkdtempSync(join(tmpdir(), 'avantf-mem-envinit-'))
+    const { log, lines } = recordingLogger()
+    // The OTHER direction of the interface axis, and the one this task's degradation path rides on:
+    // the loaded base reports generation 1 (it predates `wellFormedText`/`wellFormedDeep`), while the
+    // build was baked against the current generation. `checkInterface` says incompatible, so
+    // `loadEnvinit` returns `undefined` — exactly the route "the base is unavailable" takes — and the
+    // plugin's consumption point (`adoptWellFormed(env?.kit)` in `index.ts`) sees no kit, leaving the
+    // mem mirror in force. The mount itself is never refused (the mount smoke proves that end to end).
+    const framework = {
+      ...fakeFramework(calls, undefined),
+      INTERFACE_VERSION: 1,
+      checkInterface: base.checkInterface,
+      readInterfaceRequirement: () => ({ baseVersion: '0.2.0', interfaceVersion: base.INTERFACE_VERSION }),
+    }
+    const runtime = await env.loadEnvinit({ log, home, autoDownload: false, framework: framework as never })
+    expect(runtime).toBeUndefined()
+    expect(lines.warn.join('\n')).toContain('interface:')
+    expect(lines.warn.join('\n')).toContain('shared capabilities are NOT used')
+    expect(calls.provision).toHaveLength(0)
+    expect(calls.declare).toHaveLength(0)
+  })
+
   it('uses the base normally when the interface generation cannot be told', async () => {
     const env = await freshEnvinit()
     const calls = emptyCalls()
