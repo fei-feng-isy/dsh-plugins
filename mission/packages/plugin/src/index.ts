@@ -41,11 +41,19 @@ import { OWNER_TOOL_DENY, visibleTo } from './faces.js'
 import {
   archiveWorkers,
   bytes,
-  removeWorker,
+  cleanWorkers,
+  foreignWorkerIds,
+  ghostArchiveIds,
+  reconcileArchivedGhosts,
   workerSessions,
   type ArchiveRegistry,
+  type GhostReconcile,
+  type SessionCorpus,
+  type WorkerCleanup,
   type WorkerSession,
 } from './workerSessions.js'
+import { listProjectionCacheIds } from './projectionCache.js'
+import { isWorkerClaimId } from './claims.js'
 import { descriptors, hostContribution, SNAPSHOT_WIRE_VERSION } from './wire.js'
 import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createLogger } from './log.js'
@@ -124,6 +132,10 @@ export interface Config {
   /** Root of the session store `/archive` and `/clean` act on (default `<dsh home>/sessions`); only a
    * directory directly under it named exactly a session id is ever touched, so a wrong value removes nothing. */
   sessionsRoot?: string
+  /** Root of the host's projection-cache record directory `/clean` prunes alongside a released
+   *  session (default `<dsh home>/storages/session_projcache/sessions`). Only a file named exactly
+   *  `mission-<8 hex>.json` is ever touched, so a wrong value removes nothing. */
+  projectionCacheRoot?: string
   /** The avantf data home (default `$AVANTF_HOME`, else `~/.avantf`). Only its `prompts/` subdirectory
    * is used — the shared directory holding every avantf plugin's editable system-prompt text. */
   dataHome?: string
@@ -137,6 +149,7 @@ export const Config: z<Config> = z.object({
   staleMs: z.natural(),
   roundMs: z.natural(),
   sessionsRoot: z.string(),
+  projectionCacheRoot: z.string(),
   dataHome: z.string(),
 })
 
@@ -468,8 +481,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── `/archive` and `/clean`: worker logs and orphan trees ────────────────
   // Workers are real sessions, so they accumulate one directory per dispatch. Archiving goes through
   // the workspace registry; removing has no harness API and is done here against the session store,
-  // with the guardrails in `workerSessions.ts` — ours only, settled only, and for `archive all`
-  // archived only. Orphan trees are the other scope: their owner session is gone or unobservable,
+  // with the guardrails in `workerSessions.ts` — ours only, settled only, and ARCHIVE BEFORE REMOVE:
+  // `/clean archive` archives a settled worker and only then deletes it, in one pass, so a person does
+  // not have to run `/archive` first. A live worker is never interrupted and another session's worker
+  // is never touched. Orphan trees are the other scope: their owner session is gone or unobservable,
   // which is the one case where this command may touch a tree belonging to another session.
   const registryOf = (): ArchiveRegistry | undefined =>
     ctx.get('workspaceRegistry') as ArchiveRegistry | undefined
@@ -493,25 +508,186 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (registry === undefined) throw new Error('workspace registry is not mounted')
       await registry.archiveSession(SessionId(id))
     },
+    // Step 3 of the cleanup lifecycle: lift the marker once the record is gone. Best-effort by
+    // construction — `cleanWorkers` reports a rejection instead of undoing the deletion.
+    unarchive: async (id: string) => {
+      const registry = registryOf()
+      if (registry === undefined) throw new Error('workspace registry is not mounted')
+      if (registry.unarchiveSession === undefined) throw new Error('workspace registry has no unarchiveSession')
+      await registry.unarchiveSession(SessionId(id))
+    },
     isLive: (id: string) => ctx.get('agents')?.get(SessionId(id)) !== undefined,
     sessionsRoot: config.sessionsRoot ?? join(dshHome(), 'sessions'),
+    // The host keeps a disposed session's projection checkpoint (and exposes no eviction API), so a
+    // released worker still reads back as a subagent until this file is gone. Same derivation as the
+    // host's storage root; a wrong value can only fail to delete, never delete the wrong thing.
+    projectionCacheRoot: config.projectionCacheRoot
+      ?? join(dshHome(), 'storages', 'session_projcache', 'sessions'),
   }
 
   /** The ids the workspace registry reports as archived; empty without a registry. */
   const archivedIds = (): ReadonlySet<string> =>
     new Set((registryOf()?.archivedSessionIds ?? []).map((id) => String(id)))
 
-  /** The `archive` scope as a read-only listing: what would be freed, and what is held back. */
-  const archiveScopeLines = (workers: readonly WorkerSession[], archived: ReadonlySet<string>): string[] => {
-    const ready = workers.filter((worker) => !worker.live && archived.has(worker.id))
-    const pending = workers.filter((worker) => !worker.live && !archived.has(worker.id))
+  /**
+   * The live-preferred session corpus, for the ghost pass. `readable: false` when there is no
+   * session query at all: absence must be PROVEN before an archive marker is lifted, so an
+   * unaskable corpus reconciles nothing rather than treating "no answer" as "no record".
+   */
+  const sessionCorpus = async (): Promise<SessionCorpus> => {
+    if (ctx.get('sessionQuery') === undefined) return { readable: false, known: new Set() }
+    const records = await sessionDeps.list()
+    return { readable: true, known: new Set(records.map((record) => record.header.id)) }
+  }
+
+  /** Ghost markers to show in a read-only listing; empty without a registry or anything archived. */
+  const listedGhosts = async (archived: ReadonlySet<string>): Promise<readonly string[]> => {
+    if (![...archived].some((id) => isWorkerClaimId(id))) return []
+    const corpus = await sessionCorpus()
+    if (!corpus.readable) return []
+    return ghostArchiveIds(archived, corpus.known, sessionDeps.sessionsRoot)
+  }
+
+  /**
+   * The one-shot reconciliation of what older cleanups left behind. Two layers, one pass:
+   *
+   *  - **projection-cache residue** — the pass's PRIMARY input is the cache directory itself, not
+   *    the archive set. `/clean` now unarchives after releasing a record, so the archive set can be
+   *    empty while residue persists; enumerating the cache directory and asking "is the record
+   *    proven gone?" (corpus AND sessions root both silent) is what actually clears the invisible
+   *    workers. Registry-independent, so it runs even without a workspace registry.
+   *  - **ghost archive markers** — archived, mission-shaped ids whose records are gone, lifted via
+   *    the host's idempotent `unarchiveSession` when a registry provides it.
+   *
+   * Runs once at mount and again inside `/clean archive all`. Never throws (the mount call wraps it
+   * anyway); every failure is reported, never fatal.
+   */
+  const reconcileGhosts = async (): Promise<GhostReconcile> => {
+    const registry = registryOf()
+    const archived = archivedIds()
+    const markers = [...archived].some((id) => isWorkerClaimId(id))
+    const canUnarchive = registry !== undefined && registry.unarchiveSession !== undefined
+    const residue = listProjectionCacheIds(sessionDeps.projectionCacheRoot)
+    // NOTHING to consider (no residue file, no mission-shaped archive marker): do not read the
+    // session corpus at all. An ordinary mount must keep its zero-session-read cost — only a mount
+    // that actually has something to reconcile pays for the proof of absence.
+    if (residue.length === 0 && !markers) {
+      return { released: [], failed: [], purged: [], purgeFailures: [], supported: canUnarchive, readable: true }
+    }
+    if (registry !== undefined && markers && !canUnarchive) {
+      log.warn('workspace registry has no unarchiveSession; archived ids whose records are gone '
+        + 'cannot be reconciled and will keep showing in the subagent list')
+    }
+    const corpus = await sessionCorpus()
+    // Without a usable unarchive API the marker half is skipped, but the residue purge still runs:
+    // proving a record gone needs no archive marker, only the corpus and the sessions root.
+    const result = await reconcileArchivedGhosts(sessionDeps, canUnarchive ? archived : new Set(), corpus)
+    if (result.released.length > 0) {
+      log.info(`ghost archive reconciliation: released ${String(result.released.length)} id(s): `
+        + result.released.join(', '))
+    }
+    for (const failure of result.failed) {
+      log.warn(`ghost archive reconciliation failed for ${failure.id}: ${failure.reason}`)
+    }
+    if (result.purged.length > 0) {
+      log.info(`projection-cache residue: removed ${String(result.purged.length)} file(s): `
+        + result.purged.join(', '))
+    }
+    for (const failure of result.purgeFailures) {
+      log.warn(`projection-cache residue removal failed for ${failure.id}: ${failure.reason}`)
+    }
+    // Only warn when something WOULD have been considered: a silent, residue-free headless mount
+    // should not print a "skipped" line on every start.
+    if (!result.readable && (markers || listProjectionCacheIds(sessionDeps.projectionCacheRoot).length > 0)) {
+      log.warn('worker residue reconciliation skipped: no sessionQuery, so absence cannot be proven')
+    }
+    return result
+  }
+
+  /** No registry means no archive marker, and no archive marker means no release: said out loud. */
+  const NO_REGISTRY = '这个部署没有挂载 workspace registry，无法归档 ⇒ 无法清理。'
+
+  /** The `archive` scope as a read-only listing: what a cleanup pass would free, and what it would skip. */
+  const archiveScopeLines = (
+    workers: readonly WorkerSession[],
+    archived: ReadonlySet<string>,
+    listing: { readonly archivable: boolean; readonly foreign: readonly string[]; readonly ghosts: readonly string[] },
+  ): string[] => {
+    const ready = workers.filter((worker) => !worker.live)
+    const running = workers.filter((worker) => worker.live)
     return [
-      `可清理（已归档、非运行）${String(ready.length)} 个，共 ${bytes(ready.reduce((sum, worker) => sum + worker.bytes, 0))}：`,
-      ...ready.map((worker) => `  ${worker.id}  ${bytes(worker.bytes)}`),
-      ...(pending.length === 0
+      `可清理（非运行）${String(ready.length)} 个，共 ${bytes(ready.reduce((sum, worker) => sum + worker.bytes, 0))}：`,
+      ...ready.map((worker) =>
+        `  ${worker.id}  ${bytes(worker.bytes)}  （${archived.has(worker.id) ? '已归档，记录仍在' : '已完成未归档，清理时先归档'}）`),
+      // A separate class, not a worker: the record is GONE, only the archive marker survives. Shown
+      // apart from "已完成未归档" because the action differs — nothing to delete, only to reconcile.
+      ...(listing.ghosts.length === 0
         ? []
-        : [`另有 ${String(pending.length)} 个已完成但未归档，先执行 /archive 再清理（或用 /clean archive <mission-xxxxxxxx> 单独指定）。`]),
-      '执行 /clean archive all 清理上面这些；/clean archive <mission-xxxxxxxx> 只清理一个。',
+        : [
+            `已归档但记录已不在（幽灵）${String(listing.ghosts.length)} 个（会话记录已释放，只剩归档标记；`
+            + '/clean archive all 或下次挂载会取消归档）：',
+            ...listing.ghosts.map((id) => `  ${id}`),
+          ]),
+      ...(running.length === 0
+        ? []
+        : [`因仍在运行跳过 ${String(running.length)} 个：`, ...running.map((worker) => `  ${worker.id}`)]),
+      ...(listing.foreign.length === 0
+        ? []
+        : [`不属于本会话跳过 ${String(listing.foreign.length)} 个：`, ...listing.foreign.map((id) => `  ${id}`)]),
+      ...(listing.archivable ? [] : [NO_REGISTRY]),
+      '清理是三步：标记归档 → 释放记录 → 取消归档。执行 /clean archive all 一趟完成；'
+      + '/clean archive <mission-xxxxxxxx> 只清理一个。',
+    ]
+  }
+
+  /** What one cleanup pass did, in the buckets the guardrails produce. */
+  const cleanupScopeLines = (result: WorkerCleanup): string[] => {
+    const lines: string[] = []
+    if (result.cleaned.length > 0) {
+      const freed = result.cleaned.reduce((sum, entry) => sum + entry.freed, 0)
+      lines.push(`已归档并清理 ${String(result.cleaned.length)} 个 mission 会话，释放约 ${bytes(freed)}：`)
+      for (const entry of result.cleaned) {
+        lines.push(`  ${entry.id}  ${bytes(entry.freed)}  （${entry.archivedNow ? '本次归档' : '原本已归档'}）`)
+      }
+    }
+    if (result.unarchiveFailures.length > 0) {
+      // The deletion stands: the files are gone, so only the marker outlived them.
+      lines.push(`已删除但取消归档失败 ${String(result.unarchiveFailures.length)} 个`
+        + '（记录已释放，归档标记会留到下次挂载对账）：')
+      for (const entry of result.unarchiveFailures) lines.push(`  ${entry.id}：${entry.reason}`)
+    }
+    if (result.refused.length > 0) {
+      lines.push(`归档失败，记录保留 ${String(result.refused.length)} 个：`)
+      for (const entry of result.refused) lines.push(`  ${entry.id}：${entry.reason}`)
+    }
+    if (result.running.length > 0) {
+      lines.push(`因仍在运行跳过 ${String(result.running.length)} 个：`, ...result.running.map((id) => `  ${id}`))
+    }
+    if (result.foreign.length > 0) {
+      lines.push(`不属于本会话跳过 ${String(result.foreign.length)} 个：`, ...result.foreign.map((id) => `  ${id}`))
+    }
+    return lines
+  }
+
+  /** What the ghost reconcile pass found, as an output section: absent when it released nothing. */
+  const ghostScopeLines = (result: GhostReconcile): string[] => {
+    if (result.released.length === 0) return []
+    return [
+      `对账清理了 ${String(result.released.length)} 个幽灵 id（已归档但记录已不存在）：`,
+      ...result.released.map((id) => `  ${id}`),
+    ]
+  }
+
+  /**
+   * Projection-cache residue removed, as its own section with its own count — reported SEPARATELY
+   * from the released records, because the two are different layers and a person reading "released
+   * N" must be able to see that the layer below it was cleared too.
+   */
+  const purgeScopeLines = (purged: readonly string[]): string[] => {
+    if (purged.length === 0) return []
+    return [
+      `清理残留投影缓存 ${String(purged.length)} 个（宿主保留已释放会话的投影缓存且无驱逐 API，释放记录时一并删除）：`,
+      ...purged.map((id) => `  ${id}`),
     ]
   }
 
@@ -615,7 +791,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     name: 'clean',
     // The two scopes are the command's whole grammar, so the description names both and states the one
     // rule that is easy to get wrong: no argument only LISTS; deleting needs a scope AND a target.
-    description: '清理 worker 会话记录或孤儿记录：archive 作用域针对本会话已归档、非运行的 worker 会话记录；'
+    description: '清理 worker 会话记录或孤儿记录：archive 作用域清理本会话已完成的 worker 会话记录'
+      + '（先归档、再释放、最后取消归档，三步一趟完成；运行中的永不触碰）；'
       + 'orphans 作用域针对 owner 会话已不存在或不可观测的记录。无参只列不删，删除必须同时给作用域与目标（all 或具体 id）。',
     input: { hint: '[archive [all|mission-xxxxxxxx] | orphans [all|root-xxxxxxxx]]' },
     handler: async ({ agent, rawInput }) => {
@@ -625,19 +802,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       // No argument is the read-only overview: both scopes, nothing removed.
       if (scope === '') {
         const workers = await workerSessions(sessionDeps, agent.id)
+        const archived = archivedIds()
+        const ghosts = await listedGhosts(archived)
         const orphans = await host.orphanTreeReports({ fresh: true })
-        if (workers.length === 0 && orphans.length === 0) {
+        if (workers.length === 0 && orphans.length === 0 && ghosts.length === 0) {
           return { kind: 'success', text: '本会话没有 mission 会话记录，也没有孤儿任务树。' }
         }
         log.info(
           `/clean (list) from ${agent.id}: ${String(workers.length)} session record(s), `
-          + `${String(orphans.length)} orphan tree(s)`,
+          + `${String(orphans.length)} orphan tree(s), ${String(ghosts.length)} ghost archive marker(s)`,
         )
         return {
           kind: 'success',
           text: [
             '任务会话记录（archive 作用域）：',
-            ...archiveScopeLines(workers, archivedIds()),
+            ...archiveScopeLines(workers, archived, {
+              archivable: registryOf() !== undefined,
+              foreign: await foreignWorkerIds(sessionDeps, agent.id),
+              ghosts,
+            }),
             // Absent rather than empty when there is nothing to say: an "orphans: 0" section is noise.
             ...(orphans.length === 0 ? [] : ['', ...orphanScopeLines(orphans)]),
           ].join('\n'),
@@ -651,8 +834,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         return {
           kind: 'error',
           text: scope === 'all'
-            ? '作用域必填：改用 /clean archive all（已归档会话记录）或 /clean orphans all（孤儿任务树）。'
-            : `作用域必填：改用 /clean archive ${scope}（已归档会话记录）或 /clean orphans <root-xxxxxxxx>（孤儿树）。`,
+            ? '作用域必填：改用 /clean archive all（已完成会话记录）或 /clean orphans all（孤儿任务树）。'
+            : `作用域必填：改用 /clean archive ${scope}（已完成会话记录）或 /clean orphans <root-xxxxxxxx>（孤儿树）。`,
         }
       }
       if (extra.length > 0) {
@@ -675,47 +858,89 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         return await removeOrphanTrees(agent.id, [target])
       }
 
-      const workers = await workerSessions(sessionDeps, agent.id)
+      // ── archive scope ────────────────────────────────────────────────────
+      // Ours only, settled only. Every candidate is archived FIRST and removed only once that
+      // succeeded, so one `/clean` finishes the job that used to need `/archive` then `/clean`.
       if (target === '') {
-        // The archive scope's read-only listing — today's dry run, now with its scope spelled out.
-        if (workers.length === 0) return { kind: 'success', text: '本会话没有 mission 会话记录。' }
-        return { kind: 'success', text: archiveScopeLines(workers, archivedIds()).join('\n') }
-      }
-      if (target === 'all') {
+        // The archive scope's read-only listing — the dry run, with its scope spelled out.
+        const workers = await workerSessions(sessionDeps, agent.id)
         const archived = archivedIds()
-        const doomed = workers.filter((worker) => !worker.live && archived.has(worker.id))
-        if (doomed.length === 0) {
-          return { kind: 'success', text: '没有已归档的 mission 会话可清理（先 /archive）。' }
+        const ghosts = await listedGhosts(archived)
+        if (workers.length === 0 && ghosts.length === 0) {
+          return { kind: 'success', text: '本会话没有 mission 会话记录。' }
         }
-        let freed = 0
-        const removed: string[] = []
-        for (const worker of doomed) {
-          freed += removeWorker(worker)
-          removed.push(worker.id)
-        }
-        log.info(`/clean archive all from ${agent.id}: removed ${String(removed.length)} session(s), ${bytes(freed)}`)
         return {
           kind: 'success',
-          text: [
-            `已清理 ${String(removed.length)} 个 mission 会话，释放约 ${bytes(freed)}：`,
-            ...removed.map((id) => `  ${id}`),
-          ].join('\n'),
+          text: archiveScopeLines(workers, archived, {
+            archivable: registryOf() !== undefined,
+            foreign: await foreignWorkerIds(sessionDeps, agent.id),
+            ghosts,
+          }).join('\n'),
+        }
+      }
+      if (registryOf() === undefined) return { kind: 'error', text: NO_REGISTRY }
+
+      if (target === 'all') {
+        const result = await cleanWorkers(sessionDeps, agent.id, (id) => archivedIds().has(id))
+        // The same pass also reconciles what EARLIER runs left behind: `cleanWorkers` lifted the
+        // markers of what it removed just now, cleared their projection-cache residue, and this
+        // clears the historical ghosts and any residue whose record the corpus/sessions root no
+        // longer knows. Both counts are reported separately, records first, residue second.
+        const ghosts = await reconcileGhosts()
+        const purged = [...result.purged, ...ghosts.purged]
+        if (result.cleaned.length === 0 && result.refused.length === 0) {
+          return {
+            kind: 'success',
+            text: ['没有可清理的 mission 会话。', ...cleanupScopeLines(result), ...ghostScopeLines(ghosts),
+              ...purgeScopeLines(purged)].join('\n'),
+          }
+        }
+        log.info(
+          `/clean archive all from ${agent.id}: archived+removed ${String(result.cleaned.length)}, `
+          + `archive failed ${String(result.refused.length)}, unarchive failed ${String(result.unarchiveFailures.length)}, `
+          + `ghosts released ${String(ghosts.released.length)}, cache purged ${String(purged.length)}, `
+          + `running ${String(result.running.length)}, foreign ${String(result.foreign.length)}`,
+        )
+        return {
+          kind: result.cleaned.length === 0 ? 'error' : 'success',
+          text: [...cleanupScopeLines(result), ...ghostScopeLines(ghosts), ...purgeScopeLines(purged)].join('\n'),
         }
       }
 
       // A named record is looked up ONLY among this session's own workers, so a `/clean archive <id>`
       // can never reach another session's log. (The orphans scope is the one deliberate exception,
       // and only for a tree whose owner is missing or unobservable.)
-      const named = workers.find((worker) => worker.id === target)
-      if (named === undefined) {
-        return { kind: 'error', text: `${target} 不是本会话的 mission 会话（用 /clean archive 看清单）。` }
+      const named = await cleanWorkers(sessionDeps, agent.id, (id) => archivedIds().has(id), { only: target })
+      const done = named.cleaned[0]
+      if (done !== undefined) {
+        log.info(`/clean archive ${done.id} from ${agent.id}: ${bytes(done.freed)}`)
+        // Step 3 is best-effort: a failed unarchive is only ever reported, never a reason to undo the
+        // deletion — the files are gone, and keeping the marker is the worse outcome (a ghost id).
+        const unarchiveFailure = named.unarchiveFailures[0]
+        if (unarchiveFailure !== undefined) {
+          log.warn(`/clean archive ${unarchiveFailure.id} from ${agent.id}: deleted, but unarchive failed — `
+            + unarchiveFailure.reason)
+        }
+        return {
+          kind: 'success',
+          text: [
+            `已归档并清理 ${done.id}，释放约 ${bytes(done.freed)}（${done.archivedNow ? '本次归档' : '原本已归档'}）。`,
+            ...(unarchiveFailure === undefined
+              ? []
+              : [`取消归档失败（记录已释放，标记留到下次挂载对账）：${unarchiveFailure.reason}`]),
+            ...purgeScopeLines(named.purged),
+          ].join('\n'),
+        }
       }
-      if (named.live) {
+      const refused = named.refused[0]
+      if (refused !== undefined) {
+        log.warn(`/clean archive ${refused.id} from ${agent.id}: archive failed — ${refused.reason}`)
+        return { kind: 'error', text: `${refused.id} 归档失败，记录保留未清理：${refused.reason}` }
+      }
+      if (named.running.includes(target)) {
         return { kind: 'error', text: `${target} 还在运行，不能清理。` }
       }
-      const freed = removeWorker(named)
-      log.info(`/clean archive ${named.id} from ${agent.id}: ${bytes(freed)}`)
-      return { kind: 'success', text: `已清理 ${named.id}，释放约 ${bytes(freed)}。` }
+      return { kind: 'error', text: `${target} 不是本会话的 mission 会话（用 /clean archive 看清单）。` }
     },
   })
 
@@ -777,6 +1002,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
     },
   })
+
+  // ── ghost archive reconciliation, once per mount ─────────────────────────
+  // Archived worker ids whose records `/clean` released in an earlier run stayed in the registry's
+  // archive set, and every surface reading that set (the subagent list above all) kept showing them.
+  // The pass is narrow by construction (see `reconcileArchivedGhosts`) and cannot throw out of this
+  // mount: a storage hiccup here is a warning, never a failed plugin row.
+  try {
+    await reconcileGhosts()
+  } catch (error: unknown) {
+    log.warn(`ghost archive reconciliation at mount failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 
   log.info(
     `mounted: /mission command, ${String(tools.length)} tools (/archive, /clean), guidance context, pre-step gate`,

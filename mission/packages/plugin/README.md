@@ -21,7 +21,18 @@ owner 的对话里。
   - `/mission`：列出本会话的任务树；后面跟文本则用这段文本建一个根任务；
   - `/archive`：把本会话**已完成**的 worker 会话标记为归档（只标记，不释放磁盘）；
   - `/clean`：释放磁盘或清理孤儿任务树，两个作用域同形 —— 无参数只列不删，删除必须给 `all` 或具体 id：
-    `/clean archive all` 清理本会话所有**已归档**的 worker 会话记录，`/clean archive <mission-xxxxxxxx>` 只清一个；
+    `/clean archive all` 一趟清理本会话所有**已完成**的 worker 会话记录，走**三步**：
+    **标记归档 → 释放记录 → 取消归档**（最后一步失败只记日志，不会把已删的记录找回来）；
+    释放记录的同时**删掉它的投影缓存残留**（`<dsh home>/storages/session_projcache/sessions/
+    <mission-id>.json`）——宿主保留已释放会话的投影缓存且没有驱逐 API，不删它子智能体列表就还会
+    把那一次派活显示出来；输出把两个数字分开报：「释放会话记录 N 个 / 清理残留投影缓存 M 个」；
+    `/clean archive <mission-xxxxxxxx>` 只清一个（同样三步）；**运行中的 worker 永不触碰**，
+    要清它得等它结束；
+    清单把「已完成未归档」与「已归档但记录已不在（幽灵）」分开显示：幽灵是历史遗留的归档标记
+    （记录已释放、标记还在），挂载时与 `/clean archive all` 都会对账取消归档；
+    同一次对账还会**以投影缓存目录为输入**（不是以归档集合为输入——记录释放后会取消归档，归档集合
+    通常是空的），只删"会话语料库与会话目录**都查不到**该 id"的 `mission-*` 缓存文件，否则子智能体
+    列表会一直显示那些已经删掉的会话；
     `/clean orphans` 列出 owner 会话已不存在或不可观测的任务树，`/clean orphans all` 或
     `/clean orphans <root-xxxxxxxx>` 清理它们（删除前会重新探测 owner，期间恢复的树会跳过）。
 - **一个「任务」标签**：会话视图条里排在「对话」「轨迹」之后，树形展示本会话的任务树；引擎一变就把
@@ -126,6 +137,8 @@ Desktop 会显式设置 `DSH_HOME`，所以两边指向的是同一个会话库�
   （空闲内存下限，低于它先不派新任务）、`staleMs`（多久没有进展算卡死）、`roundMs`（单轮派发的墙钟
   上限，默认 1 小时，下限取 10 分钟与 `staleMs` 中的较大者）、
   `sessionsRoot`（worker 会话目录根，默认 `<dsh home>/sessions`）、
+  `projectionCacheRoot`（宿主投影缓存目录，默认 `<dsh home>/storages/session_projcache/sessions`；
+  `/clean` 只删其中形如 `mission-<8 hex>.json` 的文件）、
   `dataHome`（avantf 数据根，默认 `$AVANTF_HOME`，否则 `~/.avantf`；本插件只用其 `prompts/` 子目录）。
   容量是**派发闸门**：装不下只会排队，绝不拒绝；「任务」面板会显示每个排队中的任务在等什么
   （`mission_result` 只在任务终态可读 —— 排队中的任务不是终态，所以那条通道读不到等待原因）。
@@ -134,8 +147,15 @@ Desktop 会显式设置 `DSH_HOME`，所以两边指向的是同一个会话库�
   mem 插件的 `mem-*.md` 与本插件无关（各自只碰自己前缀的文件）。未装底座时退回内置默认正文，且不往
   磁盘写文件。
 - **数据**：任务树走 DSH 存储域（`avantf_mission`）；每个任务单元都是**真实会话**，日志在
-  `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）下。`/archive` 只改归档标记，要真正腾磁盘用
-  `/clean archive all`。
+  `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）下，投影缓存在
+  `$DSH_HOME/storages/session_projcache/sessions`（默认 `~/.dsh/storages/...`）下。`/archive` 只改
+  归档标记、不释放磁盘；`/clean archive all` 一趟完成三步「标记归档 → 释放记录 → 取消归档」并在释放
+  记录时一并删掉它的投影缓存残留（运行中的 worker 要等它结束）。
+  归档标记是释放记录的授权，记录没了它就该被取消；遗留的标记（幽灵 id）会在挂载时与
+  `/clean archive all` 对账清理 —— 只对 `mission-*`、且会话语料库与会话目录都查不到的 id 动手。
+  同一趟对账还清**投影缓存残留**：宿主保留已释放会话的投影缓存且没有驱逐 API，所以本插件在释放记录时
+  把它删掉；对账以缓存目录本身为输入（归档集合通常是空的），只删"语料库与会话目录都查不到"的
+  `mission-*` 缓存文件，**仍在用的会话（含运行中的 worker）的缓存绝不触碰**。
 
 ### 存储域打不开时：降级挂载，绝不带崩宿主
 

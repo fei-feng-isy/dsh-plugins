@@ -1,10 +1,11 @@
 /**
  * `/clean`'s two scopes, through the real registered commands.
  *
- * The archive scope keeps every guardrail it had (ours only, settled only, `all` archived only, a
- * named id looked up inside this session). The orphans scope is what this rework adds: a listing
- * grouped by the probe's reason, a re-probe before every delete, and the one aggregate start-up
- * report that replaced the per-tree WARN the user saw on every launch.
+ * The archive scope keeps every guardrail it had (ours only, settled only, a named id looked up
+ * inside this session) and now finishes in ONE pass: a settled worker is archived first and removed
+ * only once that succeeded, so `/archive` is no longer a prerequisite. The orphans scope is what
+ * this rework adds: a listing grouped by the probe's reason, a re-probe before every delete, and the
+ * one aggregate start-up report that replaced the per-tree WARN the user saw on every launch.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -50,6 +51,15 @@ function treeAlive(mounted: Mounted, rootId: string): boolean {
 }
 
 const projectDir = (root: string, id: string): string => join(root, '--tmp-project--', id)
+
+/** A projection-cache root holding one record file per mission id, plus any extra file names. */
+function projectionCache(ids: readonly string[], extra: readonly string[] = []): string {
+  const root = mkdtempSync(join(tmpdir(), 'avwf-projcache-'))
+  roots.push(root)
+  for (const id of ids) writeFileSync(join(root, `${id}.json`), '{"version":7}')
+  for (const name of extra) writeFileSync(join(root, name), '{}')
+  return root
+}
 
 describe('/clean with no argument', () => {
   it('lists both scopes and removes nothing', async () => {
@@ -98,22 +108,83 @@ describe('/clean archive', () => {
     expect(existsSync(projectDir(root, ARCHIVED))).toBe(true)
   })
 
-  it('removes only archived, non-live records with all', async () => {
-    const root = sessionRoot([ARCHIVED, UNSETTLED, RUNNING])
+  it('archives a settled worker, removes it, and lifts the marker in the same pass — no /archive first', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const mounted = await mount({ workspaceRegistry: true, pluginConfig: { sessionsRoot: root } })
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('已归档并清理 1 个')
+    expect(result.text).toContain('本次归档')
+    expect(result.text).toContain(UNSETTLED)
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(false)
+    // Step 3: the marker that authorized the release is gone too. Left behind it would be a ghost
+    // id — durable in the registry, absent on disk, and still listed among the subagents.
+    expect(mounted.archivedSessions.has(UNSETTLED)).toBe(false)
+    expect(mounted.registryCalls).toEqual([`archive:${UNSETTLED}`, `unarchive:${UNSETTLED}`])
+  })
+
+  it('keeps the already-archived path, and never touches a live or another session\'s worker', async () => {
+    const foreign = 'mission-8888bbbb'
+    const root = sessionRoot([ARCHIVED, UNSETTLED, RUNNING, foreign])
     const mounted = await mount({ workspaceRegistry: true, pluginConfig: { sessionsRoot: root } })
     mounted.archivedSessions.add(ARCHIVED)
     listWorker(mounted, ARCHIVED)
     listWorker(mounted, UNSETTLED)
     listWorker(mounted, RUNNING, true)
+    listWorker(mounted, foreign, false, 'session-other')
 
     const result = await mounted.runCommand('clean', 'archive all')
     expect(result.kind).toBe('success')
-    expect(result.text).toContain(ARCHIVED)
-    expect(result.text).not.toContain(UNSETTLED)
-    expect(result.text).not.toContain(RUNNING)
+    expect(result.text).toContain('已归档并清理 2 个')
+    expect(result.text).toContain('原本已归档')
+    expect(result.text).toContain('本次归档')
+    expect(result.text).toContain('因仍在运行跳过 1 个')
+    expect(result.text).toContain('不属于本会话跳过 1 个')
+    // Ours and settled: released, and their markers lifted (the pre-existing one included).
     expect(existsSync(projectDir(root, ARCHIVED))).toBe(false)
-    expect(existsSync(projectDir(root, UNSETTLED))).toBe(true)
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(false)
+    expect(mounted.archivedSessions.has(ARCHIVED)).toBe(false)
+    expect(mounted.archivedSessions.has(UNSETTLED)).toBe(false)
+    expect(mounted.registryCalls).toEqual([
+      `unarchive:${ARCHIVED}`, `archive:${UNSETTLED}`, `unarchive:${UNSETTLED}`,
+    ])
+    // Live: kept, and NOT archived. Another session's: kept, NOT archived, and its marker — had it
+    // one — would be corpus-protected rather than reconciled.
     expect(existsSync(projectDir(root, RUNNING))).toBe(true)
+    expect(existsSync(projectDir(root, foreign))).toBe(true)
+    expect(mounted.archivedSessions.has(RUNNING)).toBe(false)
+    expect(mounted.archivedSessions.has(foreign)).toBe(false)
+  })
+
+  it('refuses to touch a live worker, even when it is named explicitly', async () => {
+    const root = sessionRoot([RUNNING])
+    const mounted = await mount({ workspaceRegistry: true, pluginConfig: { sessionsRoot: root } })
+    listWorker(mounted, RUNNING, true)
+
+    const all = await mounted.runCommand('clean', 'archive all')
+    expect(all.kind).toBe('success')
+    expect(all.text).toContain('因仍在运行跳过 1 个')
+
+    const named = await mounted.runCommand('clean', `archive ${RUNNING}`)
+    expect(named.kind).toBe('error')
+    expect(named.text).toContain('还在运行')
+    expect(mounted.archivedSessions.has(RUNNING)).toBe(false)
+    expect(existsSync(projectDir(root, RUNNING))).toBe(true)
+  })
+
+  it('archives a named settled worker before deleting it, and lifts its marker', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const mounted = await mount({ workspaceRegistry: true, pluginConfig: { sessionsRoot: root } })
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', `archive ${UNSETTLED}`)
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('本次归档')
+    expect(mounted.archivedSessions.has(UNSETTLED)).toBe(false)
+    expect(mounted.registryCalls).toEqual([`archive:${UNSETTLED}`, `unarchive:${UNSETTLED}`])
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(false)
   })
 
   it('never reaches another session\'s records through a named id', async () => {
@@ -125,7 +196,155 @@ describe('/clean archive', () => {
     const result = await mounted.runCommand('clean', `archive ${foreign}`)
     expect(result.kind).toBe('error')
     expect(result.text).toContain('不是本会话')
+    expect(mounted.archivedSessions.has(foreign)).toBe(false)
     expect(existsSync(projectDir(root, foreign))).toBe(true)
+  })
+})
+
+describe('the /clean archive unarchive step', () => {
+  it('keeps the deletion and reports a failed unarchive instead of throwing', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      unarchiveThrows: true,
+      pluginConfig: { sessionsRoot: root },
+    })
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    // The command still succeeds: the record is gone, and undoing that is not an option.
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('取消归档失败 1 个')
+    expect(result.text).toContain(UNSETTLED)
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(false)
+    // The marker is still there — reported, and left for a later mount to reconcile.
+    expect(mounted.archivedSessions.has(UNSETTLED)).toBe(true)
+  })
+
+  it('reports a failed unarchive on the named form too, without undoing the deletion', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      unarchiveThrows: true,
+      pluginConfig: { sessionsRoot: root },
+    })
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', `archive ${UNSETTLED}`)
+    // Same discipline as `all`: the one id named is released, and step 3's failure is reported
+    // rather than swallowed or rolled back.
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('已归档并清理')
+    expect(result.text).toContain('取消归档失败')
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(false)
+    expect(mounted.archivedSessions.has(UNSETTLED)).toBe(true)
+    expect(mounted.registryCalls).toEqual([`archive:${UNSETTLED}`, `unarchive:${UNSETTLED}`])
+  })
+})
+
+describe('/clean archive ghost reconciliation', () => {
+  const GHOST = 'mission-deadbeef'
+  const STILL_LISTED = 'mission-aaaaaaaa'
+
+  it('lifts a historical ghost and reports it, while leaving a still-listed record alone', async () => {
+    const root = sessionRoot([])
+    const mounted = await mount({ workspaceRegistry: true, pluginConfig: { sessionsRoot: root } })
+    // A marker an earlier cleanup left behind, plus a foreign worker whose record is still known.
+    mounted.archivedSessions.add(GHOST)
+    mounted.archivedSessions.add(STILL_LISTED)
+    listWorker(mounted, STILL_LISTED, false, 'session-other')
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('对账清理了 1 个幽灵 id')
+    expect(result.text).toContain(GHOST)
+    expect(mounted.archivedSessions.has(GHOST)).toBe(false)
+    // The corpus still knows this one, so its archive marker still means something.
+    expect(mounted.archivedSessions.has(STILL_LISTED)).toBe(true)
+    expect(mounted.registryCalls).toEqual([`unarchive:${GHOST}`])
+  })
+
+  it('shows ghosts apart from "已完成未归档" in the read-only listing', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const mounted = await mount({ workspaceRegistry: true, pluginConfig: { sessionsRoot: root } })
+    mounted.archivedSessions.add(GHOST)
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', 'archive')
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('已完成未归档，清理时先归档')
+    expect(result.text).toContain('已归档但记录已不在（幽灵）1 个')
+    expect(result.text).toContain(GHOST)
+    // Still read-only: a listing neither lifts a marker nor deletes a record.
+    expect(mounted.archivedSessions.has(GHOST)).toBe(true)
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(true)
+  })
+
+  it('reconciles nothing when sessionQuery is absent, because absence is unproven', async () => {
+    const mounted = await mount({ workspaceRegistry: true, noSessionQuery: true, archivedSessions: [GHOST] })
+    expect(mounted.archivedSessions.has(GHOST)).toBe(true)
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.kind).toBe('success')
+    expect(result.text).not.toContain('对账清理了')
+    expect(mounted.archivedSessions.has(GHOST)).toBe(true)
+  })
+})
+
+describe('the mount-time ghost archive reconciliation', () => {
+  const GHOST = 'mission-deadbeef'
+  const ON_DISK = 'mission-11112222'
+  const OTHER_SHAPE = 'session-abcdef'
+
+  it('lifts only the mission-shaped marker with no record anywhere', async () => {
+    const root = sessionRoot([ON_DISK])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      archivedSessions: [GHOST, ON_DISK, OTHER_SHAPE],
+      pluginConfig: { sessionsRoot: root },
+    })
+    expect(mounted.archivedSessions.has(GHOST)).toBe(false)
+    // A directory on disk IS a record: its marker still means something.
+    expect(mounted.archivedSessions.has(ON_DISK)).toBe(true)
+    // Not this plugin's shape: another subsystem's archive entry, never touched.
+    expect(mounted.archivedSessions.has(OTHER_SHAPE)).toBe(true)
+    expect(mounted.registryCalls).toEqual([`unarchive:${GHOST}`])
+  })
+})
+
+describe('/clean archive without a workspace registry', () => {
+  it('says it cannot archive, therefore cannot clean, and deletes nothing', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const mounted = await mount({ pluginConfig: { sessionsRoot: root } })
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.kind).toBe('error')
+    expect(result.text).toContain('无法归档')
+    expect(result.text).toContain('无法清理')
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(true)
+  })
+
+  it('says the same for a named id', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const mounted = await mount({ pluginConfig: { sessionsRoot: root } })
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', `archive ${UNSETTLED}`)
+    expect(result.kind).toBe('error')
+    expect(result.text).toContain('无法归档')
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(true)
+  })
+
+  it('still lists the scope read-only, naming the reason it cannot clean', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const mounted = await mount({ pluginConfig: { sessionsRoot: root } })
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', 'archive')
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('未归档，清理时先归档')
+    expect(result.text).toContain('无法归档')
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(true)
   })
 })
 
@@ -276,5 +495,85 @@ describe('the /clean orphans audit line', () => {
     expect(audit).toHaveLength(1)
     expect(audit[0]).toContain('removed 0 tree(s)')
     expect(audit[0]).toContain(`skipped 1: ${absent}（任务树已不存在）`)
+  })
+})
+
+describe('projection-cache residue (the "invisible worker" layer)', () => {
+  const GONE = 'mission-deadbeef'
+
+  it('removes a released worker\'s residue in the same /clean archive all pass, and reports both counts', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const cache = projectionCache([UNSETTLED])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      pluginConfig: { sessionsRoot: root, projectionCacheRoot: cache },
+    })
+    listWorker(mounted, UNSETTLED)
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.kind).toBe('success')
+    // The two layers are reported as two numbers: the record released, and the residue cleared.
+    expect(result.text).toContain('已归档并清理 1 个')
+    expect(result.text).toContain('清理残留投影缓存 1 个')
+    expect(result.text).toContain(UNSETTLED)
+    expect(existsSync(projectDir(root, UNSETTLED))).toBe(false)
+    expect(existsSync(join(cache, `${UNSETTLED}.json`))).toBe(false)
+  })
+
+  it('purges residue whose record is gone at mount, while a record on disk and foreign names survive', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const cache = projectionCache([GONE, UNSETTLED], ['not-a-mission.json', 'session-ffff0000.json'])
+    // The mount-time reconcile runs before any listing exists; the proof is the sessions root alone.
+    await mount({ workspaceRegistry: true, pluginConfig: { sessionsRoot: root, projectionCacheRoot: cache } })
+
+    expect(existsSync(join(cache, `${GONE}.json`))).toBe(false)
+    // A record with a session directory still exists → its cache is in use → untouched.
+    expect(existsSync(join(cache, `${UNSETTLED}.json`))).toBe(true)
+    // Never a mission-shaped name → never a candidate.
+    expect(existsSync(join(cache, 'not-a-mission.json'))).toBe(true)
+    expect(existsSync(join(cache, 'session-ffff0000.json'))).toBe(true)
+  })
+
+  it('keeps the residue of an id the corpus still lists, during the command pass', async () => {
+    const root = sessionRoot([])
+    const cache = projectionCache([])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      pluginConfig: { sessionsRoot: root, projectionCacheRoot: cache },
+    })
+    // Written AFTER mount, so only the command-time reconcile sees it: the corpus still lists the
+    // id (a worker in use), so its cache must be left alone even though no directory exists.
+    writeFileSync(join(cache, `${RUNNING}.json`), '{"version":7}')
+    listWorker(mounted, RUNNING, true)
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.text).not.toContain('清理残留投影缓存')
+    expect(existsSync(join(cache, `${RUNNING}.json`))).toBe(true)
+  })
+
+  it('removes nothing at mount when sessionQuery is absent: absence is unproven', async () => {
+    const root = sessionRoot([])
+    const cache = projectionCache([GONE])
+    await mount({
+      workspaceRegistry: true,
+      noSessionQuery: true,
+      pluginConfig: { sessionsRoot: root, projectionCacheRoot: cache },
+    })
+    expect(existsSync(join(cache, `${GONE}.json`))).toBe(true)
+  })
+
+  it('is idempotent: a second pass reports no residue left to clear', async () => {
+    const root = sessionRoot([UNSETTLED])
+    const cache = projectionCache([UNSETTLED])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      pluginConfig: { sessionsRoot: root, projectionCacheRoot: cache },
+    })
+    listWorker(mounted, UNSETTLED)
+
+    const first = await mounted.runCommand('clean', 'archive all')
+    expect(first.text).toContain('清理残留投影缓存 1 个')
+    const second = await mounted.runCommand('clean', 'archive all')
+    expect(second.text).not.toContain('清理残留投影缓存')
   })
 })

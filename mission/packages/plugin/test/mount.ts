@@ -200,6 +200,11 @@ export interface Mounted {
   unobservableSessions: Set<string>
   /** Session ids the workspace registry reports as archived. Mutable, for `/clean archive all`. */
   archivedSessions: Set<string>
+  /**
+   * Every `archiveSession` / `unarchiveSession` call the fake registry received, in order, as
+   * `archive:<id>` / `unarchive:<id>` — the sequence the three-step cleanup lifecycle is asserted on.
+   */
+  registryCalls: string[]
   /** The root ids of the trees seeded by `options.seedTrees`, in the order they were seeded. */
   seededRoots: string[]
   /** Materialize one session away, as a delete would: the next probe cannot see it live. */
@@ -348,6 +353,14 @@ export async function mount(
     /** Mount a workspace registry whose archive set is `mounted.archivedSessions`. */
     workspaceRegistry?: boolean
     /**
+     * Ids already archived BEFORE the plugin opens, as a restart over a registry that kept markers
+     * whose session records `/clean` released in an earlier run does. This is what the mount-time
+     * ghost reconciliation (and only it) is allowed to lift.
+     */
+    archivedSessions?: readonly string[]
+    /** Make `unarchiveSession` reject, as a registry write refused at the wrong moment would. */
+    unarchiveThrows?: boolean
+    /**
      * Mount WITHOUT the optional `sessionQuery` service, as a headless deployment (or a host whose
      * session store is not composed) does. The click-time executor lookup must degrade to "cannot
      * look up" rather than throw, and nothing else in the plugin may notice.
@@ -392,7 +405,9 @@ export async function mount(
   const owners = new Set<string>(['owner'])
   const sessions = new Set<string>(['owner', ...(options.sessions ?? [])])
   const unobservableSessions = new Set<string>(options.unobservableSessions ?? [])
-  const archivedSessions = new Set<string>()
+  const archivedSessions = new Set<string>(options.archivedSessions ?? [])
+  /** Registry calls in order, so the archive → release → unarchive lifecycle is assertable. */
+  const registryCalls: string[] = []
   const seededRoots: string[] = []
   /** Sessions `listSessions()` reports; tests push entries to exercise the commands. */
   const listedSessions: { header: Record<string, unknown>; live: boolean }[] = []
@@ -670,7 +685,17 @@ export async function mount(
         return [...archivedSessions]
       },
       archiveSession: (id: string) => {
+        registryCalls.push(`archive:${String(id)}`)
         archivedSessions.add(String(id))
+        return Promise.resolve()
+      },
+      // Mirrors the real host: dropping an id from the set, idempotent, and no existence check.
+      unarchiveSession: (id: string) => {
+        registryCalls.push(`unarchive:${String(id)}`)
+        if (options.unarchiveThrows === true) {
+          return Promise.reject(new Error('stubbed: registry write refused'))
+        }
+        archivedSessions.delete(String(id))
         return Promise.resolve()
       },
     })
@@ -693,7 +718,13 @@ export async function mount(
     })
   }
 
-  await ctx.plugin({ name, inject, apply: applyPlugin }, options.pluginConfig ?? {})
+  await ctx.plugin({ name, inject, apply: applyPlugin }, {
+    // A test must NEVER read (or delete from) the developer's real projection cache, and an
+    // unspecified root would default to `<DSH_HOME>/storages/session_projcache/sessions`. Point it
+    // at a path that cannot exist; a case that wants residue passes its own `projectionCacheRoot`.
+    projectionCacheRoot: join(tmpdir(), 'avantf-mission-projcache-absent'),
+    ...options.pluginConfig,
+  })
   const host = ctx.get('avantfMission') as unknown as AvantfMissionHost
   // Most tests want a fully opened engine. `awaitReady: false` is for the DEGRADED-mount case: it
   // reproduces the real fire-and-forget shape, where `apply` kicks `start()` off and NOTHING awaits
@@ -759,6 +790,7 @@ export async function mount(
     sessions,
     unobservableSessions,
     archivedSessions,
+    registryCalls,
     seededRoots,
     dropLive: (sessionId: string) => {
       live.delete(sessionId)

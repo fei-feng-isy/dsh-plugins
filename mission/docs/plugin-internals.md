@@ -18,7 +18,7 @@ DSH（DeepSeek Harness）原生 Cordis 插件：**任务树引擎**。
 | 一段引导上下文 | 每轮把树的状态写进 owner 的 prompt |
 | 一个 `agent/pre-step` 钩子 | 过滤 worker 结算通知、决定某一步带什么进模型；引擎的唤醒信号在没有可处理状态时被**清空**（不是 reject，reject 会截断这一轮并把队列搁置）|
 | `/archive` 命令 | 把本会话**已完成**的 mission 会话记录标记为归档（走 workspace registry 的官方接口，durable、可 unarchive）。只标记，**不释放磁盘** |
-| `/clean` 命令 | 两个作用域，删除必须同时给作用域与目标：`/clean`（无参数）=只读总览、`/clean archive [all\|mission-xxxxxxxx]` 释放已归档的 worker 会话日志、`/clean orphans [all\|root-xxxxxxxx]` 清理 owner 会话已不存在或不可观测的孤立任务树 |
+| `/clean` 命令 | 两个作用域，删除必须同时给作用域与目标：`/clean`（无参数）=只读总览、`/clean archive [all\|mission-xxxxxxxx]` 清理本会话已完成的 worker 会话日志（三步一趟完成：标记归档 → 释放记录 → 取消归档）、`/clean orphans [all\|root-xxxxxxxx]` 清理 owner 会话已不存在或不可观测的孤立任务树 |
 | `/mission` 命令 | 无参数：列出本会话拥有的任务树；**带文本：用它建一个根任务**（等价于 agent 调 `create_mission`）|
 | **"任务"标签**（客户端半边）| 会话视图条里排在"对话""轨迹"之后的第三个标签，用树形展示本会话的任务树；**引擎一变就推给标签**（`watch` 流），点任务标题按需读该任务详情并在**弹窗**里按标签展示（左侧"内容/上下文/拆解信息/纠偏/结果/子任务"，右侧一次一个分区、单独滚动；空的分区不出现，每个分区前有一行说明它装什么；任务标题是弹窗的标题栏，连同节点 id/状态/派发次数/深度）；**每棵**任务树的标题栏带"删除"按钮（二次确认；树还在跑时按钮可见但禁用并说明原因）；**在跑的节点默认展开、已完成的默认折叠**（点击可覆盖，且覆盖之后不再被状态改回）|
 
@@ -89,25 +89,46 @@ dsh plugin --profile web add @avantf/dsh-mission
     # 单轮派发的墙钟硬上限（毫秒，默认 1 小时，下限 10 分钟且不低于 staleMs）：无论 worker
     # 报了多少事件，超过即按"活着但无产出"回收。它是传输层一直刷新时间戳时的兜底，不看进度时间戳。
     roundMs: 3600000
+    # worker 会话目录根（默认 <dsh home>/sessions）。只有直接位于其下、名字正好是 session id 的
+    # 目录才会被触碰；根给错只会"什么都删不到"。
+    # sessionsRoot: /home/me/.dsh/sessions
+    # 宿主投影缓存目录（默认 <dsh home>/storages/session_projcache/sessions）。宿主保留已释放会话的
+    # 投影缓存且没有驱逐 API，/clean 在释放记录时删掉对应文件；只认 mission-<8 hex>.json 形状。
+    # projectionCacheRoot: /home/me/.dsh/storages/session_projcache/sessions
 ```
 
 ## `/archive` 与 `/clean`（worker 会话日志与孤儿任务树）
 
 worker 是真实会话，所以每派活一次就多一个会话目录（本机实测每个约 40 KB）。两条命令分工明确：
 
-- **`/archive`**：把本会话已完成的 mission 会话标记为归档。走 `workspaceRegistry.archiveSession()` —— harness 的官方接口，durable，可用 unarchive 撤销。**它只改标记，不释放任何磁盘。**
+- **`/archive`**：把本会话已完成的 mission 会话标记为归档。走 `workspaceRegistry.archiveSession()` —— harness 的官方接口，durable，可用 unarchive 撤销。**它只改标记，不释放任何磁盘。** 它是 `/clean` 的便捷前置，但**不再是必须**的：`/clean archive` 自己会先归档。
 - **`/clean`**：两个作用域同形，**只给作用域永远只列不删**，删除必须 `all` 或具体 id；旧的无作用域形式 `/clean all`、`/clean <mission-id>` 一律报错并指路（不静默当别名）：
-  - `/clean`（无参数）→ 只读总览：archive 作用域的可清理清单 + orphans 作用域的按原因分组清单；
-  - `/clean archive` → 只列 archive 作用域；`/clean archive all` → 删除所有**已归档、非运行**的 worker 会话目录；`/clean archive <mission-xxxxxxxx>` → 只删这一个（需是本会话的、且不在运行）；
+  - `/clean`（无参数）→ 只读总览：archive 作用域的可清理清单（含幽灵 id 一节）+ orphans 作用域的按原因分组清单；
+  - `/clean archive` → 只列 archive 作用域；`/clean archive all` → 一趟清理本会话所有**已完成（非运行）**的 worker 会话记录，走**三步生命周期：标记归档 → 释放记录 → 取消归档**（尚未归档的先调 `archiveSession`，归档成功后才删目录，删完再调 `unarchiveSession` 撤掉标记），并在**释放记录的同一步**删掉它的投影缓存残留（见下）；`/clean archive <mission-xxxxxxxx>` → 只清这一个（同样三步，且必须在**本会话**的 worker 里找到）；
+  - 输出分桶说明发生了什么：**归档并清理 N 个**（逐个标出"本次归档 / 原本已归档"）、**清理残留投影缓存 M 个**（与 N 分开报，见下）、**已删除但取消归档失败 X 个**（删除成立，只记日志/输出，不回滚）、**因仍在运行跳过 M 个**、**不属于本会话跳过 K 个**、以及**对账清理了 G 个幽灵 id**。没有 `workspaceRegistry` 时直接报"无法归档 ⇒ 无法清理"，一个记录都不删（归档标记来自 registry，没有它就无从授权释放）；
+  - 清单把「已完成未归档」（记录仍在、值得清理）与「已归档但记录已不在（幽灵）」（记录已释放、只剩标记）分开显示：前者要删，后者只需取消归档；
   - `/clean orphans` → 只列孤立任务树（按原因分节）；`/clean orphans all` → 删除列出的每一棵；`/clean orphans <root-xxxxxxxx>` → 只删一棵；
   - 删除前**逐个重新探测** owner：期间变回可观测的、或已经不存在的树会被跳过并在输出里说明。这是唯一允许触碰别的会话的任务树的路径，且仅当该树的 owner 不存在或不可观测。
 
-**为什么"删除"要自己动手**：harness 的会话持久化只有 `create`/`open`/`list`/`stat`，**没有 delete**，GUI 也只有归档。所以释放磁盘只能由本插件删目录，护栏写在 `src/workerSessions.ts`：
+**清理是"标记归档 → 释放记录 → 取消归档"三步，一趟完成**：作用域 = 本会话的 + 已结算的（`isOurWorker` 且 `!live`）。尚未归档的先归档，归档**成功之后**才删会话记录，删完再撤掉标记；归档失败（或部署里根本没有 registry）就**保留记录**并在输出里说明。第三步是 best-effort：**取消归档失败不回滚删除** —— 文件已经没了，留着标记只会变成幽灵 id（更糟）；失败进输出与日志，留给下次对账。**运行中的 worker 永不触碰** —— 用户明确不要打断它们，要清就得等它结束；别的会话的 worker 只被计入"不属于本会话跳过"，绝不删。
+
+**"幽灵 id"对账（为什么存在第三步）**：归档标记的唯一作用是授权释放记录。记录一删，标记就再没有意义 —— 但它是 durable 写进 registry 的，删除目录并不会顺手清掉它。留下的后果是**子智能体列表**（以及一切读 `archivedSessionIds` 的面）会一直把已经删掉的会话显示出来：本机实测 `archivedSessionIds` 里积了 64 个 `mission-*`，而磁盘上只剩 3 个。因此插件在**挂载时**与 **`/clean archive all` 里**各跑一次对账（`reconcileArchivedGhosts`），对每条"已归档、`mission-*` 形状、且**会话语料库 `sessionQuery.listSessions()` 与 `sessionsRoot` 都查不到**"的 id 调 `unarchiveSession`。边界是刻意收窄的：只用 `mission-*` 形状（非本插件形状绝不碰）、只在**缺席被证实**时动手（没有 `sessionQuery` 时判"无法证明"而不是"不存在"，一条都不动）、仍然存在的记录不动。宿主接口本身是幂等的（"An id that is not archived resolves without writing"），所以重复挂载/重复对账安全。
+
+**第四层：投影缓存残留（"看不见的 worker"）。** 释放会话目录并不是最后一个落盘痕迹。宿主 `dsh-session-projection-cache` 给每个会话在 `<dsh home>/storages/session_projcache/sessions/<id>.json` 存一份 durable 投影检查点：`session/created` 时写、`session/disposed` 时 `flushSoft('detach')` 后**刻意保留**（为了重开时预热），而且**没有公开的驱逐 API**（域里的 `delete(`/`clear(` 只是它内部 Map 的操作）。于是记录删掉之后，父会话仍能把这份缓存里的 `rows.subagent` 读回来，把它当作一个子代理列出来 —— 用户看到"清完 worker 但列表里还在"。实测现场（2026-10-03）：磁盘上 mission 会话目录 **0**、归档登记表里 mission id **0**，而缓存目录里有 **70 个 `mission-*.json`**，与 UI 上那批 worker 数量一致。
+
+所以 `/clean` 在**释放记录的同一步**删掉该 worker 的缓存文件，对账也把它当作一层：
+
+- **对账的输入是缓存目录本身，不是归档集合**（`purgeOrphanProjectionCache` / `orphanProjectionCacheIds`）。这一点是必须的：U2 让"删除记录后取消归档"，所以归档集合通常是**空的**，从它出发一个文件都清不到；枚举 `mission-<8 hex>.json` 才对得上现场。
+- 删的条件与幽灵 id **共用同一条缺席判据**：该 id 在 `sessionQuery.listSessions()` 与 `sessionsRoot` **都查不到**才删；`sessionQuery` 不可读时**一条不动**（缺席未被证实）。仍在用的会话（含**运行中的 worker**）的缓存绝不触碰。
+- 只认 `^mission-[0-9a-f]{8}\.json$` 形状的非 mission 文件绝不碰；文件/目录缺失或删除失败都只 warn，**绝不影响挂载与命令成功**；**不改**宿主的 `session_projcache.json` 索引（那是 storage domain 的文件，与宿主自身写入并发会打架）。
+- 挂载时跑一次：只有在**确有可考虑对象**（缓存目录里有 mission 形状文件，或有 mission 形状归档标记）时才读语料库，否则直接跳过 —— 普通挂载的"零会话读"成本不变。
+
+**为什么"删除"要自己动手**：harness 的会话持久化只有 `create`/`open`/`list`/`stat`，**没有 delete**，GUI 也只有归档。所以释放磁盘只能由本插件删目录，护栏写在 `src/workerSessions.ts`（缓存文件那一层在 `src/projectionCache.ts`）：
 
 1. 只认本插件派出的 worker（claim id 形状 `mission-<8 hex>` + 头里 `origin: subagent`、`delegationDepth: 1`、`parentSession` 是本会话）；
 2. 绝不动仍在运行的会话（结算后的 worker 没有 agent、也没有打开的写入者）；
-3. `/clean archive all` 只碰**已归档**的 —— 丢弃一定是有人明确做过的决定；单独指定 id 才跳过这道闸；
-4. 目录必须**正好以 session id 命名**、且位于配置的会话根之下（`config.sessionsRoot`，默认 `<dsh home>/sessions`）—— 根给错时"什么都删不到"，而不是删错东西。
+3. **标记归档 → 删除 → 取消归档**：`/clean archive` 自己写归档标记，因此不再需要先跑 `/archive`；归档失败或有记录未归档的部署（无 registry）时**不删**；删成功后调 `unarchiveSession` 撤掉标记（失败只记日志，不回滚删除），挂载时再对账清掉历史遗留的幽灵 id 与投影缓存残留；
+4. 目录必须**正好以 session id 命名**、且位于配置的会话根之下（`config.sessionsRoot`，默认 `<dsh home>/sessions`）；缓存文件必须是 `<config.projectionCacheRoot>/<id>.json`（默认 `<dsh home>/storages/session_projcache/sessions`）且名为 `mission-<8 hex>.json` —— 根给错时"什么都删不到"，而不是删错东西。
 
 **孤儿任务树的判定是三态，不是布尔**（`MissionTree.orphanedTrees()`，`TreeDeps.probeOwner`）：
 
