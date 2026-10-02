@@ -7,11 +7,12 @@
  * `restricted` mirrors "the allowlist is non-empty" — then the control is a closed `<select>` and
  * a new domain is a config change, not a second spelling of an existing one. An explicitly empty
  * allowlist means no restriction, so the control stays a free input.
+ *
+ * `DomainCatalog` itself is the CONTRACT's type (type-only import, erased from the bundle): the
+ * host store's `domainCatalog()` return and this picker name the same declaration, so the shape
+ * cannot be copied wrong on one half.
  */
-export interface DomainCatalog {
-  domains: string[]
-  restricted: boolean
-}
+import type { DomainCatalog } from '@avantf/mem-contract'
 
 /** One `<option>`: `value` is what the form sends, `label` is what the user reads. */
 export interface DomainOption {

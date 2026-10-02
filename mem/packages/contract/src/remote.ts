@@ -16,12 +16,22 @@
  * `unwrapRemoteEnvelope` peels both, in order, and also tolerates a bare payload
  * (a gateway that returns raw values, or a future protocol change), so the pages
  * never render an envelope as if it were data.
+ *
+ * The application envelope also carries the **wire revision** (`wire`, optional): the host stamps
+ * the revision of the Remote FACE it publishes onto every answer (see `@avantf/dsh-mem`'s
+ * `remote.ts` `WIRE_VERSION`), and the client half reads it back to tell a rebuilt browser bundle
+ * from the host process that `dsh web` loaded before it. It rides the envelope rather than one
+ * method's payload because this plugin has no single entry point — each tab makes its own first
+ * call — while the envelope is the one object every answer shares. Absent means "a host older
+ * than the marker": still readable, but the client may not assume a method it knows about exists.
  */
 
 /** Successful application result. */
 export interface RemoteOk<T> {
   ok: true
   value: T
+  /** The publisher's wire revision, when it reports one (see the module doc). */
+  wire?: number
 }
 
 /** Failed application result (validation violations are optional). */
@@ -29,6 +39,8 @@ export interface RemoteErr {
   ok: false
   error: string
   violations?: string[]
+  /** The publisher's wire revision, when it reports one (see the module doc). */
+  wire?: number
 }
 
 export type RemoteEnvelope<T> = RemoteOk<T> | RemoteErr
@@ -70,15 +82,20 @@ export function unwrapRemoteEnvelope<T>(result: unknown): RemoteEnvelope<T> {
   const inner = result['value']
   // Layer 2: the application envelope, when the host adds one.
   if (isRecord(inner) && typeof inner['ok'] === 'boolean') {
+    // The wire revision rides the application envelope. Carried through so the caller's ONE decode
+    // point is also where the host's revision is observed — an unrecognized/absent revision must
+    // stay a note the caller can read, never a decode failure (see the module doc).
+    const wire = typeof inner['wire'] === 'number' ? inner['wire'] : undefined
     if (inner['ok'] === false) {
       const violations = Array.isArray(inner['violations']) ? inner['violations'].map(String) : undefined
       return {
         ok: false,
         error: remoteErrorText(inner['error']),
         ...(violations && violations.length > 0 ? { violations } : {}),
+        ...(wire === undefined ? {} : { wire }),
       }
     }
-    return { ok: true, value: inner['value'] as T }
+    return { ok: true, value: inner['value'] as T, ...(wire === undefined ? {} : { wire }) }
   }
 
   // Transport succeeded and the host returned a bare payload.

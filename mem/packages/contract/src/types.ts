@@ -640,3 +640,42 @@ export interface BrowseListing {
   readonly unrestricted: boolean
   readonly entries: readonly BrowseEntry[]
 }
+
+/**
+ * The 知识页 domain picker's option list: the configured `knowledge.domains` allowlist ∪ the
+ * domains the library already holds, plus whether the allowlist is active.
+ *
+ * `restricted` mirrors "the allowlist is non-empty": then the control is a closed `<select>` and a
+ * new domain is a config change, not a second spelling of an existing one; an explicitly empty
+ * allowlist means no restriction, so the control stays a free input. The union half is not a
+ * compatibility layer — without it, narrowing the allowlist would make every existing document
+ * un-re-ingestable.
+ *
+ * It lives in the CONTRACT rather than being mirrored on both halves for the reason every UI payload
+ * here does: the host half declared it as an anonymous shape and the browser half hand-copied it,
+ * which is exactly how a field goes missing. `KnowledgeStore.domainCatalog()` / `addDomain()` (the
+ * real producers) and the picker (the real consumer) now name this one type.
+ */
+export interface DomainCatalog {
+  readonly domains: readonly string[]
+  readonly restricted: boolean
+}
+
+/** Which of the two things a document row can open (`openDoc`). */
+export type OpenTarget = 'file' | 'dir'
+
+/**
+ * What `openDoc` launched, for the UI's status line.
+ *
+ * In the contract, not beside `openDocumentPath` (the host-side producer), for the same reason as
+ * {@link DomainCatalog}: the browser half cannot import that module — it pulls `node:child_process` —
+ * and used to hand-copy `{ path, opener }` (dropping `target`). The host Remote declaration annotates
+ * its payload with this interface, so producer and wire cannot drift without a type error.
+ */
+export interface OpenOutcome {
+  /** The managed path actually handed to the opener (the file, or the directory holding it). */
+  readonly path: string
+  readonly target: OpenTarget
+  /** The command that was actually used (`code`, `explorer.exe`, …). */
+  readonly opener: string
+}

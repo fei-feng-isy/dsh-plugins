@@ -29,17 +29,10 @@
 import { accessSync, constants, existsSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { delimiter, join, dirname } from 'node:path'
-
-/** Which of the two things a document row can open. */
-export type OpenTarget = 'file' | 'dir'
-
-/** What was launched, for the UI's status line. */
-export interface OpenOutcome {
-  path: string
-  target: OpenTarget
-  /** The command that was actually used (`code`, `explorer.exe`, …). */
-  opener: string
-}
+// `OpenTarget` / `OpenOutcome` are the CONTRACT's: the browser half consumes the same shape through
+// the wire and cannot import this module (it pulls `node:child_process`), so the one source has to
+// live where both halves can name it. See `DomainCatalog` for the same reasoning.
+import type { OpenOutcome, OpenTarget } from '@avantf/mem-contract'
 
 /**
  * The file names one command can have on PATH.

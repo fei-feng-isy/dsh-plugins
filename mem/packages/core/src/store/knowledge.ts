@@ -10,6 +10,7 @@ import {
   type Config,
   type DocumentDetail,
   type DocumentSummary,
+  type DomainCatalog,
   type FloorProfile,
   type ImportResult,
   type IngestResult,
@@ -356,7 +357,7 @@ export class KnowledgeStore {
    * the allowlist would make every existing document un-re-ingestable, and the picker would offer
    * a name the store then refuses.
    */
-  domainCatalog(): { domains: string[]; restricted: boolean } {
+  domainCatalog(): DomainCatalog {
     return { domains: [...this.allowedDomains], restricted: this.domainsRestricted }
   }
 
@@ -389,7 +390,7 @@ export class KnowledgeStore {
    * agree, and it REFUSES while the allowlist is `[]` ("no restriction"): appending to an unfettered
    * list would silently turn it into a restricted one.
    */
-  addDomain(raw: string): { domains: string[]; restricted: boolean } {
+  addDomain(raw: string): DomainCatalog {
     // Same write entry as every other stored text: the name lands in the store config AND becomes a
     // managed directory, so a lone surrogate must be repaired before either.
     const domain = normalizeWrite(raw).trim()

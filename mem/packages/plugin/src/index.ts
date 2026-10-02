@@ -54,6 +54,8 @@ import {
   validationError,
   remoteErrorText,
   type BrowseListing,
+  type OpenOutcome,
+  type OpenTarget,
   type RecallResult,
   type RemoteEnvelope,
   type RemoteErr,
@@ -61,7 +63,7 @@ import {
   type AvantfLogger,
   type ToolSpec,
 } from '@avantf/mem-contract'
-import { hostContribution } from './remote.js'
+import { hostContribution, wireErr, wireOk } from './remote.js'
 import { configDataHome } from './data_home.js'
 import { provision, registerCompatMegaphone, verifyRegisteredFaces, type CompatVerdict } from './provision.js'
 import { createCorpusReconciler } from './reconcile.js'
@@ -75,7 +77,7 @@ import {
 } from './envinit.js'
 import { parseToolsConfig, resolveToolsDir } from '@avantf/mem-provision'
 import { resetPandocResolution, setPandocProvisioning } from '@avantf/mem-convert'
-import { openDocumentPath, type OpenOutcome, type OpenTarget } from './open.js'
+import { openDocumentPath } from './open.js'
 import { browseDirectory, classifySource } from '@avantf/mem'
 import { flattenToolSpec } from './tool_schema.js'
 import { OUTPUT } from './render.js'
@@ -154,6 +156,11 @@ function defined(args: WireArgs): WireArgs {
  * re-validated with the contract zod union before dispatch (same guarantee the
  * tools give the model), and results are wrapped in the contract's
  * `{ok:true,value}` / `{ok:false,error,violations}` RemoteEnvelope the client decodes.
+ *
+ * Every envelope — success and failure, tool-backed and UI-only — is built through `wireOk`/`wireErr`
+ * so it carries this build's `WIRE_VERSION`. That is what lets a freshly reloaded browser half tell
+ * whether the host process predates a method it is about to call, instead of reading the gateway's
+ * 404 as "the record is gone" (see `remote.ts`).
  */
 export class AvantfMemGateway extends TypertRemoteService {
   private readonly rt: AvantfRuntime
@@ -176,13 +183,13 @@ export class AvantfMemGateway extends TypertRemoteService {
     const parsed = spec.input.safeParse(payload)
     if (!parsed.success) {
       // Same message + violations format the agent tools return (contract helper).
-      return validationError(spec.name, parsed.error.issues) as RemoteErr
+      return wireErr(validationError(spec.name, parsed.error.issues) as Omit<RemoteErr, 'wire'>)
     }
     try {
       const value = await dispatchToolKey(this.rt, key, parsed.data as WireArgs)
-      return { ok: true, value: (value ?? null) as T }
+      return wireOk((value ?? null) as T)
     } catch (error) {
-      return { ok: false, error: remoteErrorText(error) }
+      return wireErr({ ok: false, error: remoteErrorText(error) })
     }
   }
 
@@ -237,9 +244,9 @@ export class AvantfMemGateway extends TypertRemoteService {
     try {
       const payload = defined(args)
       const text = typeof payload.text === 'string' ? payload.text : ''
-      return { ok: true, value: classifySource(text, this.rt.config.knowledge.ingest) }
+      return wireOk(classifySource(text, this.rt.config.knowledge.ingest))
     } catch (error) {
-      return { ok: false, error: remoteErrorText(error) }
+      return wireErr({ ok: false, error: remoteErrorText(error) })
     }
   }
 
@@ -249,9 +256,9 @@ export class AvantfMemGateway extends TypertRemoteService {
     try {
       const payload = defined(args)
       const path = typeof payload.path === 'string' && payload.path !== '' ? payload.path : undefined
-      return { ok: true, value: browseDirectory(path, this.rt.config.knowledge.ingest) }
+      return wireOk(browseDirectory(path, this.rt.config.knowledge.ingest))
     } catch (error) {
-      return { ok: false, error: remoteErrorText(error) }
+      return wireErr({ ok: false, error: remoteErrorText(error) })
     }
   }
 
@@ -263,9 +270,9 @@ export class AvantfMemGateway extends TypertRemoteService {
   @Remote('kbDomains')
   async kbDomains(_args: WireArgs): Promise<RemoteEnvelope<StoreResult<KnowledgeStore, 'domainCatalog'>>> {
     try {
-      return { ok: true, value: this.rt.knowledge.domainCatalog() }
+      return wireOk(this.rt.knowledge.domainCatalog())
     } catch (error) {
-      return { ok: false, error: remoteErrorText(error) }
+      return wireErr({ ok: false, error: remoteErrorText(error) })
     }
   }
 
@@ -279,9 +286,9 @@ export class AvantfMemGateway extends TypertRemoteService {
     try {
       const payload = defined(args)
       const domain = typeof payload.domain === 'string' ? payload.domain : ''
-      return { ok: true, value: this.rt.knowledge.addDomain(domain) }
+      return wireOk(this.rt.knowledge.addDomain(domain))
     } catch (error) {
-      return { ok: false, error: remoteErrorText(error) }
+      return wireErr({ ok: false, error: remoteErrorText(error) })
     }
   }
 
@@ -296,17 +303,17 @@ export class AvantfMemGateway extends TypertRemoteService {
     try {
       const payload = defined(args)
       const docId = typeof payload.doc_id === 'number' ? payload.doc_id : undefined
-      if (docId === undefined) return { ok: false, error: 'openDoc 需要 doc_id' }
+      if (docId === undefined) return wireErr({ ok: false, error: 'openDoc 需要 doc_id' })
       const path = this.rt.knowledge.docFilePath(docId)
-      if (path === null) return { ok: false, error: `文档 #${String(docId)} 不存在` }
+      if (path === null) return wireErr({ ok: false, error: `文档 #${String(docId)} 不存在` })
       const target: OpenTarget = payload.target === 'dir' ? 'dir' : 'file'
       if (target === 'file' && !existsSync(path)) {
-        return { ok: false, error: `受管文件不存在：${path}（重新摄入会重建它）` }
+        return wireErr({ ok: false, error: `受管文件不存在：${path}（重新摄入会重建它）` })
       }
       const outcome = openDocumentPath(path, target, this.rt.config.knowledge.open.editor)
-      return { ok: true, value: outcome }
+      return wireOk(outcome)
     } catch (error) {
-      return { ok: false, error: remoteErrorText(error) }
+      return wireErr({ ok: false, error: remoteErrorText(error) })
     }
   }
 }

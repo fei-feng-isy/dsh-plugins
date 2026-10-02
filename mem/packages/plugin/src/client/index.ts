@@ -40,11 +40,14 @@ import type {
   ContradictionRecord,
   DocumentDetail,
   DocumentSummary,
+  DomainCatalog,
   FactDetail,
   FactPage,
   FactSummary,
   KbDocFile,
   KbSyncReport,
+  OpenOutcome,
+  OpenTarget,
   RecallHit,
   RecallResult,
   SourceClassification,
@@ -53,8 +56,9 @@ import type {
 } from '@avantf/mem-contract'
 import { summarize } from './summarize.js'
 import { mergeDocs, mergePage } from './paging.js'
-import { checkNewDomain, domainOptions, domainPickerMode, type DomainCatalog } from './domains.js'
+import { checkNewDomain, domainOptions, domainPickerMode } from './domains.js'
 import { conflictMessage, ingestConflict } from './ingest.js'
+import { hostSkew, hostSupports, staleHostText, transportHint } from './wire.js'
 
 const h = React.createElement
 
@@ -136,24 +140,64 @@ const AUTO_LOAD_MARGIN_PX = 300
 const DOC_PAGE_SIZE = 50
 
 /**
+ * The wire revision the host last reported, and whether its absence/mismatch was logged.
+ *
+ * Module state, not React state, on purpose: EVERY call goes through {@link callRemote}, so the
+ * first answer teaches the client which host process it is talking to, whichever panel asked. The
+ * host is loaded once, so this cannot change under a session — one write is the whole story.
+ */
+let hostWire: number | undefined
+let skewLogged = false
+
+/**
  * Run one Remote call and normalize every shape it can take: the transport's
  * `{ok,value}` envelope wrapping the gateway's own `{ok,value}` /
  * `{ok,error,violations}` envelope, a bare value, or a thrown carrier failure.
  * Both layers are peeled (see `unwrapRemoteEnvelope`), so `value` is always the
  * payload and `error` is always the host's message. Failures are returned, never
  * swallowed.
+ *
+ * `requires` is the wire revision that FIRST carried this method, and is how the version marker
+ * becomes a gate: a host whose REPORTED revision predates the method is never asked (the call is not
+ * sent), and the failure names the remedy instead of surfacing the gateway's 404. No current method
+ * needs it — all ten predate the marker — but a method added later MUST pass its revision here; see
+ * `src/remote.ts` `WIRE_VERSION`'s bump rule.
+ *
+ * An UNKNOWN revision (no answer observed yet: this is the first call) does not block — refusing
+ * there would deadlock a gated method that happens to be first, and would refuse every host during
+ * an upgrade. It is sent, and a host that really is too old answers with the 404 that
+ * {@link transportHint} explains.
  */
-async function callRemote<T>(label: string, pending: Promise<unknown>): Promise<RemoteOutcome<T>> {
+async function callRemote<T>(
+  label: string,
+  pending: Promise<unknown>,
+  requires?: number,
+): Promise<RemoteOutcome<T>> {
+  if (requires !== undefined && hostWire !== undefined && !hostSupports(hostWire, requires)) {
+    return { ok: false, error: staleHostText(hostWire, requires, label) }
+  }
   try {
     const result = await pending
     console.log(`[avantf-mem] ${label} ->`, result)
     const decoded = unwrapRemoteEnvelope<T>(result)
+    if (typeof decoded.wire === 'number') hostWire = decoded.wire
+    // A version skew is a NOTE, never a failure: an unrecognized revision usually still carries the
+    // fields the panels render. Logged once per session (the host cannot change under it). Only a
+    // SUCCESSFUL read (or one that did report a revision) can say anything about the two halves — a
+    // transport failure carries no envelope, and its own message is the useful one.
+    const skew = decoded.ok || decoded.wire !== undefined ? hostSkew(decoded.wire) : undefined
+    if (skew !== undefined && !skewLogged) {
+      skewLogged = true
+      console.warn(`[avantf-mem] ${skew}`)
+    }
     if (decoded.ok) return { ok: true, value: decoded.value }
     const violations = formatViolations(decoded.violations)
     return { ok: false, error: violations ? `${decoded.error}（${violations}）` : decoded.error }
   } catch (error) {
     console.error(`[avantf-mem] ${label} failed`, error)
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    // A rejected carrier call is where a host too old to know the method shows up; say that rather
+    // than forwarding a bare "404" that reads like a missing record.
+    return { ok: false, error: transportHint(error) }
   }
 }
 
@@ -1078,10 +1122,10 @@ function KnowledgePanel(props: { remote?: AvantfRemote }) {
    * Open one document's managed file (or the directory holding it) in the user's editor.
    * The host resolves the path from `doc_id`; the client only says which of the two.
    */
-  const openDoc = (docId: number, target: 'file' | 'dir'): void => {
+  const openDoc = (docId: number, target: OpenTarget): void => {
     const remote = props.remote
     if (remote === undefined) return
-    void callRemote<{ path: string; opener: string }>('kb.openDoc', remote.openDoc({ doc_id: docId, target }))
+    void callRemote<OpenOutcome>('kb.openDoc', remote.openDoc({ doc_id: docId, target }))
       .then((outcome) => {
         if (outcome.ok) {
           const opener = outcome.value?.opener ?? '编辑器'

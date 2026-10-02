@@ -16,8 +16,10 @@
  * including the ones a source scan cannot see (`kbCall(label, args)` forwards a variable, and a
  * conditional spread hides its keys from a regex).
  *
- * The client-source scan is kept as a SECOND net for the UI-only methods (`openDoc`, `kbDomains`,
- * `kbAddDomain`), which have no contract union behind them.
+ * The client-source scan is kept as a SECOND net for the UI-only methods (`openDoc`,
+ * `classifySource`, `browseDir`, `kbDomains`, `kbAddDomain`), which have no contract union behind
+ * them. BOTH the scan's method alternation and its expectations are derived from `descriptors`, so
+ * the guard cannot drift from the face it guards.
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -116,11 +118,25 @@ function collectKeys(expression: string, out: Set<string>): void {
   }
 }
 
+/**
+ * Every method the wire face declares, longest name first so `kbDomains` is never matched as `kb`.
+ *
+ * DERIVED from `descriptors`, never hand-listed: this scan is the SECOND net for the methods with no
+ * contract union behind them (`openDoc` / `classifySource` / `browseDir` / `kbDomains` /
+ * `kbAddDomain`), and a hand-written alternation is exactly what let `classifySource` and `browseDir`
+ * go unguarded — the miss had been written down below as an expectation. Deriving means a method
+ * added to the face enters the scan (and its own client call site is required) automatically.
+ */
+const WIRE_METHODS: readonly string[] = [...descriptors]
+  .map(descriptor => descriptor.method)
+  .sort((left, right) => right.length - left.length)
+
+const CALL = new RegExp(`remote\\.(${WIRE_METHODS.join('|')})\\(`, 'gu')
+
 /** Every key sent through one `remote.<method>(…)` call, whatever shape the argument takes. */
 function sentFields(source: string): Map<string, Set<string>> {
   const found = new Map<string, Set<string>>()
-  const call = /remote\.(remember|recall|admin|kbAddDomain|kbDomains|kb|query|openDoc)\(/g
-  for (const match of source.matchAll(call)) {
+  for (const match of source.matchAll(CALL)) {
     const open = match.index + match[0].length - 1
     const end = matchBracket(source, open)
     if (end === -1) continue
@@ -182,8 +198,10 @@ describe('remote wire schemas', () => {
   const sent = sentFields(CLIENT_SOURCE)
 
   it('found the client call sites it is supposed to guard', () => {
-    // A regex that silently matches nothing would make every case below vacuously pass.
-    expect([...sent.keys()].sort()).toEqual(['admin', 'kb', 'kbAddDomain', 'kbDomains', 'openDoc', 'query', 'recall', 'remember'])
+    // A regex that silently matches nothing would make every case below vacuously pass. Both sides
+    // are DERIVED from `descriptors`, so a declared method the client never calls fails here rather
+    // than sitting silently outside the guard — which is how `classifySource`/`browseDir` hid.
+    expect([...sent.keys()].sort()).toEqual([...WIRE_METHODS].sort())
     expect(sent.get('admin')?.size ?? 0).toBeGreaterThanOrEqual(8)
     // `kb`'s literal call sites are few — most of its traffic goes through the `kbCall`/`ingestCall`
     // wrappers, which is exactly why the contract-superset invariant above is the primary one.
@@ -208,7 +226,7 @@ describe('remote wire schemas', () => {
     },
   )
 
-  it.each([...['remember', 'recall', 'admin', 'kb', 'query', 'openDoc', 'kbDomains', 'kbAddDomain']])(
+  it.each(WIRE_METHODS)(
     '%s declares every field the client source sends',
     (method) => {
       const declared = new Set(declaredFields(method))

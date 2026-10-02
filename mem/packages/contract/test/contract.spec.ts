@@ -573,6 +573,23 @@ describe('unwrapRemoteEnvelope', () => {
     expect(unwrapRemoteEnvelope([1, 2])).toEqual({ ok: true, value: [1, 2] })
     expect(unwrapRemoteEnvelope(undefined)).toEqual({ ok: true, value: undefined })
   })
+
+  it('carries the host wire revision through, on success and on a gateway error', () => {
+    // The revision rides the APPLICATION envelope (the second layer). It must survive the decode or
+    // the client cannot tell a rebuilt bundle from the host process `dsh web` loaded once.
+    expect(unwrapRemoteEnvelope({ ok: true, value: { ok: true, value: ['hit'], wire: 7 } }))
+      .toEqual({ ok: true, value: ['hit'], wire: 7 })
+    expect(unwrapRemoteEnvelope({ ok: true, value: { ok: false, error: 'bad', violations: ['x: Required'], wire: 7 } }))
+      .toEqual({ ok: false, error: 'bad', violations: ['x: Required'], wire: 7 })
+  })
+
+  it('omits `wire` rather than inventing one when the host predates the marker', () => {
+    // Absent means "older host": it must stay distinguishable from a host that reported a number,
+    // and must never turn a readable answer into a shape failure.
+    const out = unwrapRemoteEnvelope({ ok: true, value: { ok: true, value: 'x' } })
+    expect(out).toEqual({ ok: true, value: 'x' })
+    expect('wire' in out).toBe(false)
+  })
 })
 
 /** The agent-facing envelope shared by the DSH tools and the MCP server. */

@@ -29,6 +29,9 @@ import type {
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
 import type { TypertContribution } from '@deepseek-ai/dsh-typert-registry/types'
+// The application envelope shape the marker rides on; type-only, so the client bundle still pulls
+// no contract runtime from here.
+import type { RemoteErr, RemoteOk } from '@avantf/mem-contract'
 // The registry package augments TypertRegistryContract (host register) from its
 // main entry; import the module type so the augmentation joins the program.
 import type {} from '@deepseek-ai/dsh-typert-registry'
@@ -218,6 +221,65 @@ export const descriptors: readonly InvocationDescriptor[] = [
 export const clientContribution: TypertRemoteContribution = {
   package: PACKAGE,
   descriptors,
+}
+
+/**
+ * The revision of the Remote FACE `descriptors` publishes.
+ *
+ * WHY THIS EXISTS. The two halves of this plugin do not update together: the browser bundle is
+ * re-read on every page load, the host half only when `dsh web` starts. So a rebuilt client
+ * routinely talks to a host process loaded before a method existed, and the gateway answers an
+ * unpublished method with an HTTP 404 — which reads exactly like "the record or the file is gone",
+ * the two things it does NOT mean. Mission paid this tuition with a measured 404
+ * (`SNAPSHOT_WIRE_VERSION`); mem has the same skew with no marker at all. The host now stamps this
+ * number onto every application envelope (see `wireOk`/`wireErr`), and the client half reads it back
+ * (contract's `unwrapRemoteEnvelope`) so it can refuse to SEND a call the host cannot have, and say
+ * "restart dsh web" instead of surfacing a bare 404.
+ *
+ * WHY THE ENVELOPE AND NOT ONE METHOD'S PAYLOAD. Mission's `snapshot` is the panel's one entry point,
+ * so its marker rides that payload. mem has no such method: the 记忆 tab opens with `admin.list` and
+ * the 知识 tab with `kb.list`/`kb.domains`, either can be first, and neither is mandatory. The one
+ * object EVERY answer shares is the application envelope, so the revision rides there — same
+ * guarantee, stamped in the one place every method already goes through (`wireOk`/`wireErr`).
+ *
+ * BUMP RULE. Bump on every added/removed `@Remote` method — the number tracks the SET of methods the
+ * face publishes, not the shape of one payload. Do NOT bump for a new optional FIELD: a
+ * `.default(...)`-carrying schema (and the `acceptsUndefined` parameters) already absorb that across
+ * the gap. When you add a method, also declare `export const <NAME>_WIRE_VERSION = <new value>`
+ * beside this constant and gate the client call on it (`client/wire.ts` `hostSupports` /
+ * `staleHostText`), exactly as mission's `EXECUTOR_LOOKUP_WIRE_VERSION` does.
+ *
+ * ABSENT MEANS OLD. An old host sends no `wire` at all; the client must treat that as "older than the
+ * marker", never as a decode failure — the answer is still readable.
+ *
+ * Revision history:
+ * - 1: the first marker. The face at this point is the ten methods in `descriptors`
+ *   (remember / recall / admin / kb / query + openDoc / classifySource / browseDir / kbDomains /
+ *   kbAddDomain), all of which predate the marker — so nothing is gated on revision 1; the mechanism
+ *   exists for the NEXT method.
+ */
+export const WIRE_VERSION = 1
+
+/**
+ * The successful application envelope, with the wire revision stamped on.
+ *
+ * A helper rather than a literal at each return site (the shared `call` covers the five tool-backed
+ * methods; the five UI-only methods return directly): "every answer carries the marker" is then a
+ * property of the code, not of six copies staying in step. The result is structurally the contract's
+ * `RemoteOk`.
+ */
+export function wireOk<T>(value: T): RemoteOk<T> {
+  return { ok: true, value, wire: WIRE_VERSION }
+}
+
+/**
+ * The failed application envelope, with the wire revision stamped on.
+ *
+ * Takes the failure body already built (`{ok:false, error}` / validation's `{ok:false,error,violations}`)
+ * so the message and violations keep coming from their existing single sources.
+ */
+export function wireErr(failure: Omit<RemoteErr, 'wire'>): RemoteErr {
+  return { ...failure, wire: WIRE_VERSION }
 }
 
 /**
