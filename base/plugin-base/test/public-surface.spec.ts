@@ -5,11 +5,14 @@
  *
  * The surface is stated ONCE, by the interface type itself (`src/interface.ts`):
  *
- *   - `VALUE_NAMES_V1` / `TYPE_NAMES_V1` are the only lists (they partition `keyof BaseRuntimeV1`),
- *   - the real module is assigned to a `BaseRuntimeV1`-typed binding, so a missing member is a
+ *   - `VALUE_NAMES_V2` / `TYPE_NAMES_V2` are the only lists for the CURRENT generation (they partition
+ *     `keyof BaseRuntimeV2`), and the frozen `VALUE_NAMES_V1` / `TYPE_NAMES_V1` are kept beside them so
+ *     this file can prove v2 is ADDITIVE over v1,
+ *   - the real module is assigned to a `BaseRuntimeV2`-typed binding, so a missing member is a
  *     TYPE error (a type-only test would be erased, so the assignment is also exercised at runtime),
- *   - `api/interface-v1.json` records the frozen names + counts, and this file is the gate that keeps
- *     the snapshot, the lists and the module's actual exports equal.
+ *   - `api/interface-v2.json` records the current names + counts, `api/interface-v1.json` stays as the
+ *     superseded generation's record, and this file is the gate that keeps the snapshot, the lists and
+ *     the module's actual exports equal.
  *
  * There is deliberately NO hand-written equality whitelist here any more: a second copy of the surface
  * is exactly the drift the snapshot exists to prevent. `INTERFACE.md` §5.
@@ -27,16 +30,19 @@ import * as internal from '../src/internal.js'
 import {
   INTERFACE_VERSION,
   TYPE_NAMES_V1,
+  TYPE_NAMES_V2,
   VALUE_NAMES_V1,
+  VALUE_NAMES_V2,
   type BaseRuntimeV1,
-  type BaseTypeSurfaceV1,
+  type BaseRuntimeV2,
+  type BaseTypeSurfaceV2,
 } from '../src/interface.js'
 
 /**
  * The module as the interface type says it is. If any member of `api` were missing or had the wrong
  * shape, THIS assignment would not compile — the same check a plugin gets on its side of the tree.
  */
-const runtime: BaseRuntimeV1 = api
+const runtime: BaseRuntimeV2 = api
 
 /** The snapshot for the generation this module declares. The file name's N is `INTERFACE_VERSION`. */
 const SNAPSHOT_URL = new URL(`../api/interface-v${String(INTERFACE_VERSION)}.json`, import.meta.url)
@@ -71,26 +77,40 @@ describe('the interface type is the single carrier of the public surface', () =>
   it('each name list is exactly the `keyof` its interface declares', () => {
     // Compile-time completeness: an interface member that appears in NEITHER list, or a list entry
     // that is not a member, is a type error here before any runtime assertion runs.
-    const strayValues: Stray<(typeof VALUE_NAMES_V1)[number], keyof BaseRuntimeV1>[] = []
-    const missingValues: Stray<keyof BaseRuntimeV1, (typeof VALUE_NAMES_V1)[number]>[] = []
-    const strayTypes: Stray<(typeof TYPE_NAMES_V1)[number], keyof BaseTypeSurfaceV1>[] = []
-    const missingTypes: Stray<keyof BaseTypeSurfaceV1, (typeof TYPE_NAMES_V1)[number]>[] = []
+    const strayValues: Stray<(typeof VALUE_NAMES_V2)[number], keyof BaseRuntimeV2>[] = []
+    const missingValues: Stray<keyof BaseRuntimeV2, (typeof VALUE_NAMES_V2)[number]>[] = []
+    const strayTypes: Stray<(typeof TYPE_NAMES_V2)[number], keyof BaseTypeSurfaceV2>[] = []
+    const missingTypes: Stray<keyof BaseTypeSurfaceV2, (typeof TYPE_NAMES_V2)[number]>[] = []
     expect([...strayValues, ...missingValues, ...strayTypes, ...missingTypes]).toEqual([])
     // …and no name belongs to both halves.
-    const both = VALUE_NAMES_V1.filter((name) => (TYPE_NAMES_V1 as readonly string[]).includes(name))
+    const both = VALUE_NAMES_V2.filter((name) => (TYPE_NAMES_V2 as readonly string[]).includes(name))
     expect(both).toEqual([])
+  })
+
+  it('v2 is ADDITIVE over v1: every v1 name survives, and nothing else moved', () => {
+    // Compile-time half: v2 `extends` v1, and a real v2 module still satisfies the v1 type — a member
+    // that v2 dropped or reshaped would stop this assignment from compiling.
+    const v1View: BaseRuntimeV1 = api
+    expect(v1View.INTERFACE_VERSION).toBe(INTERFACE_VERSION)
+    // Runtime half: the v1 lists are subsets of the v2 lists…
+    for (const name of VALUE_NAMES_V1) expect(VALUE_NAMES_V2 as readonly string[]).toContain(name)
+    for (const name of TYPE_NAMES_V1) expect(TYPE_NAMES_V2 as readonly string[]).toContain(name)
+    // …and the only additions are the two well-formed-text members (v2 adds no named type), so the
+    // bump cannot hide a rename or a removal inside "additive".
+    expect(VALUE_NAMES_V2.length).toBe(VALUE_NAMES_V1.length + 2)
+    expect(TYPE_NAMES_V2.length).toBe(TYPE_NAMES_V1.length)
   })
 
   it('the module really exports every VALUE name, and exactly those', () => {
     // Runtime equality in both directions: a name the code exports but the interface does not declare
     // is a silent widening; a name the interface declares but the code dropped is a broken promise.
-    expect(actualValueNames().sort()).toEqual(sortedUnique(VALUE_NAMES_V1))
+    expect(actualValueNames().sort()).toEqual(sortedUnique(VALUE_NAMES_V2))
   })
 
   it('every VALUE name is really a member of the typed module', () => {
     // The type says so; this is the runtime half, so a name that resolves to `undefined` (a typo in
     // the list, a lost re-export) cannot hide behind types.
-    const missing = VALUE_NAMES_V1.filter((name) => (runtime as unknown as Record<string, unknown>)[name] === undefined)
+    const missing = VALUE_NAMES_V2.filter((name) => (runtime as unknown as Record<string, unknown>)[name] === undefined)
     expect(missing).toEqual([])
   })
 
@@ -113,23 +133,34 @@ describe('the snapshot is the frozen name surface (api/interface-vN.json)', () =
     // the interface lists members in a reading order that carries meaning.
     expect([...snapshot.exportedValueNames].sort()).toEqual(actualValueNames().sort())
     expect(snapshot.exportedValueCount).toBe(actualValueNames().length)
-    expect(snapshot.exportedValueCount).toBe(VALUE_NAMES_V1.length)
-    expect(snapshot.exportedValueNames).toEqual(sortedUnique(VALUE_NAMES_V1))
+    expect(snapshot.exportedValueCount).toBe(VALUE_NAMES_V2.length)
+    expect(snapshot.exportedValueNames).toEqual(sortedUnique(VALUE_NAMES_V2))
   })
 
   it('records the interface type\'s declared type names and their count', () => {
-    expect(snapshot.exportedTypeNames).toEqual(sortedUnique(TYPE_NAMES_V1))
-    expect(snapshot.exportedTypeCount).toBe(TYPE_NAMES_V1.length)
+    expect(snapshot.exportedTypeNames).toEqual(sortedUnique(TYPE_NAMES_V2))
+    expect(snapshot.exportedTypeCount).toBe(TYPE_NAMES_V2.length)
+  })
+
+  it('keeps the superseded v1 snapshot as the frozen v1 record', () => {
+    // v1 is not read by the gate any more, but it stays in the tree as that generation's record — and
+    // it must keep matching the frozen v1 lists, so "archived" does not become "left to rot".
+    const v1 = JSON.parse(readFileSync(new URL('../api/interface-v1.json', import.meta.url), 'utf8')) as InterfaceSnapshot
+    expect(v1.interfaceVersion).toBe(1)
+    expect(v1.exportedValueNames).toEqual(sortedUnique(VALUE_NAMES_V1))
+    expect(v1.exportedValueCount).toBe(VALUE_NAMES_V1.length)
+    expect(v1.exportedTypeNames).toEqual(sortedUnique(TYPE_NAMES_V1))
+    expect(v1.exportedTypeCount).toBe(TYPE_NAMES_V1.length)
   })
 
   it('is regenerated only by an explicit command, never by a test run', () => {
     if (process.env['UPDATE_INTERFACE_SNAPSHOT'] !== '1') return
     const next: InterfaceSnapshot = {
       interfaceVersion: INTERFACE_VERSION,
-      exportedValueNames: sortedUnique(VALUE_NAMES_V1),
-      exportedValueCount: VALUE_NAMES_V1.length,
-      exportedTypeNames: sortedUnique(TYPE_NAMES_V1),
-      exportedTypeCount: TYPE_NAMES_V1.length,
+      exportedValueNames: sortedUnique(VALUE_NAMES_V2),
+      exportedValueCount: VALUE_NAMES_V2.length,
+      exportedTypeNames: sortedUnique(TYPE_NAMES_V2),
+      exportedTypeCount: TYPE_NAMES_V2.length,
     }
     writeFileSync(SNAPSHOT_URL, `${JSON.stringify(next, null, 2)}\n`)
     console.warn(`public-surface: rewrote ${SNAPSHOT_URL.pathname} from the current exports`)

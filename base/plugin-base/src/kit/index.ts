@@ -11,7 +11,10 @@
  *  - the plugin logger (`createPluginLogger`),
  *  - the family path conventions (`familyHome` / `familyToolsDir` / `familyModelsDir` /
  *    `resolveDataHome` / `expandHome`),
- *  - the Typert wire conventions (`strictCodec` / endpoint and field symbols).
+ *  - the Typert wire conventions (`strictCodec` / endpoint and field symbols),
+ *  - well-formed text (`wellFormedText` / `wellFormedDeep`): the lone-surrogate repair every
+ *    model-visible boundary needs, with a local fallback for engines without
+ *    `String.prototype.toWellFormed`.
  *
  * When the base is unavailable, every consumer degrades instead of failing: the prompt layer falls
  * back to the plugin's OWN built-in default bodies, the compatibility gate logs its `compat:`
@@ -23,3 +26,4 @@ export * from './prompt_files.js'
 export * from './logger.js'
 export * from './typert.js'
 export * from './family.js'
+export * from './wellformed.js'

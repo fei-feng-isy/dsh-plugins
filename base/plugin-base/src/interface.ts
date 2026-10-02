@@ -1,5 +1,5 @@
 /**
- * The base's INTERFACE TYPE — the named, frozen v1 surface of `@avantf/dsh-plugin-base`'s `.` entry.
+ * The base's INTERFACE TYPE — the named, frozen surface of `@avantf/dsh-plugin-base`'s `.` entry.
  *
  * Plugins load the base through the inlined bootstrap and never name it by specifier at runtime; they
  * describe what they loaded with `typeof import('@avantf/dsh-plugin-base')`, a namespace type that
@@ -13,14 +13,22 @@
  *
  * The surface has TWO halves and they are named separately because they are checked differently:
  *
- *  - {@link BaseRuntimeV1} — the VALUE members. A real module can be structurally assigned to it, so
- *    a missing or reshaped value member is a compile error, and `keyof` matches the runtime exports.
- *  - {@link BaseTypeSurfaceV1} — the TYPES a caller names when using those members (types are erased,
+ *  - {@link BaseRuntimeV2} — the VALUE members of the CURRENT generation. A real module can be
+ *    structurally assigned to it, so a missing or reshaped value member is a compile error, and
+ *    `keyof` matches the runtime exports.
+ *  - {@link BaseTypeSurfaceV2} — the TYPES a caller names when using those members (types are erased,
  *    so no runtime value can carry them). `keyof` is the type-name list.
  *
- * `VALUE_NAMES_V1` and `TYPE_NAMES_V1` are the same two lists as data, because the snapshot gate needs
- * to compare string sets. The gate asserts they are exactly the two `keyof`s, so a member can never be
- * added to the interface and forgotten in the snapshot (or vice versa).
+ * GENERATIONS ARE ADDITIVE. {@link BaseRuntimeV1} / {@link BaseTypeSurfaceV1} stay exported and
+ * unchanged — a caller still compiled against v1 (the `mem` / `mission` plugins are) keeps its type —
+ * and the v2 interfaces `extend` them, so a v2 module IS structurally a v1 module and the compiler
+ * rejects a v2 that drops or reshapes anything from v1. `VALUE_NAMES_V1` / `TYPE_NAMES_V1` are the
+ * frozen v1 lists, `VALUE_NAMES_V2` / `TYPE_NAMES_V2` the current ones; the gate asserts v2 is a
+ * superset of v1 (INTERFACE.md §5).
+ *
+ * The name lists are the same surface as data, because the snapshot gate needs to compare string sets.
+ * The gate asserts they are exactly the two `keyof`s, so a member can never be added to the interface
+ * and forgotten in the snapshot (or vice versa).
  *
  * `INTERFACE_VERSION` is the integer the plugins bake at build time and compare against the value
  * reported by the base they actually loaded at startup. It moves only for an INTERFACE change (the set
@@ -78,15 +86,19 @@ import type {
 /**
  * The integer interface generation this module implements.
  *
- * `1` is the first frozen generation: the surface recorded by `api/interface-v1.json`. The file name's
- * `N` and this constant are the SAME fact — `test/public-surface.spec.ts` asserts that the snapshot for
- * this constant exists and that its `interfaceVersion` field equals it, so "the JSON says v2, the
- * constant says 1" cannot happen. Bump it (and add `api/interface-vN.json`) only for an interface
- * change (INTERFACE.md §1); a behaviour change or a fix does NOT touch it. The plugins bake this number
- * into their artifacts and compare it, at startup, with the number the base they loaded reports — a
- * difference is a warning and a capability-level degradation, never a refused mount.
+ * `2` is the CURRENT generation: v1's surface plus the well-formed-text kit (`api/interface-v2.json`).
+ * The file name's `N` and this constant are the SAME fact — `test/public-surface.spec.ts` asserts that
+ * the snapshot for this constant exists and that its `interfaceVersion` field equals it, so "the JSON
+ * says v3, the constant says 2" cannot happen. Bump it (and add `api/interface-vN.json`) only for an
+ * interface change (INTERFACE.md §1); a behaviour change or a fix does NOT touch it. The plugins bake
+ * this number into their artifacts and compare it, at startup, with the number the base they loaded
+ * reports — a difference is a warning and a capability-level degradation, never a refused mount.
+ *
+ * `1` is the first frozen generation (`api/interface-v1.json`). It stays in the tree as that
+ * generation's record; the v2 types below are additive over it, which is why the plugins compiled
+ * against v1 keep compiling.
  */
-export const INTERFACE_VERSION = 1
+export const INTERFACE_VERSION = 2
 
 /**
  * The VALUE half of the v1 `.` surface: every member that exists at runtime.
@@ -221,6 +233,32 @@ export interface BaseRuntimeV1 {
 }
 
 /**
+ * The VALUE half of the CURRENT (v2) `.` surface: v1 plus the well-formed-text kit.
+ *
+ * Additive by construction — it `extends` {@link BaseRuntimeV1}, so a v2 that dropped or reshaped a v1
+ * member is a compile error, and `keyof BaseRuntimeV2` is exactly v1's members plus the two below. The
+ * members come off the loaded module at runtime, never inlined (root `AGENTS.md` 「抽取共用业务」): the
+ * well-formed repair is generic, non-DSH knowledge, so one base release must be able to fix it for
+ * every consumer.
+ */
+export interface BaseRuntimeV2 extends BaseRuntimeV1 {
+  /**
+   * Repair lone surrogates in ONE string: every unpaired UTF-16 code unit in `D800–DFFF` becomes
+   * U+FFFD. Pure, idempotent and total — it uses `String.prototype.toWellFormed()` when the engine has
+   * it (Node ≥20) and an EQUIVALENT `charCodeAt` scan otherwise, so an older Node degrades in
+   * behaviour, never in availability. It does NOT normalize (NFC is a persistence policy that belongs
+   * to the caller).
+   */
+  readonly wellFormedText: typeof import('./kit/wellformed.js').wellFormedText
+  /**
+   * {@link BaseRuntimeV2.wellFormedText} over a JSON-shaped value: strings and object KEYS are
+   * repaired, arrays are mapped, and everything else (including any object with a `toJSON`) is
+   * returned as-is, so the value's JSON meaning cannot change.
+   */
+  readonly wellFormedDeep: typeof import('./kit/wellformed.js').wellFormedDeep
+}
+
+/**
  * The TYPE half of the v1 `.` surface: every type a caller names when it uses the members above.
  *
  * These members exist only at compile time (types are erased), so they are declared as properties of
@@ -291,6 +329,16 @@ export interface BaseTypeSurfaceV1 {
   readonly InterfaceVerdict: InterfaceVerdict
   readonly InterfaceRequirement: InterfaceRequirement
 }
+
+/**
+ * The TYPE half of the CURRENT (v2) `.` surface.
+ *
+ * v2 is additive at runtime only: the well-formed-text helpers take and return `string` / a generic
+ * `T`, so they introduce no named type. This interface therefore adds nothing to
+ * {@link BaseTypeSurfaceV1}; it exists so the generation's type half has a name of its own and
+ * `TYPE_NAMES_V2` derives from something.
+ */
+export interface BaseTypeSurfaceV2 extends BaseTypeSurfaceV1 {}
 
 /**
  * Every VALUE name of the v1 `.` surface, in {@link BaseRuntimeV1} declaration order.
@@ -416,3 +464,25 @@ export const TYPE_NAMES_V1 = [
   'InterfaceVerdict',
   'InterfaceRequirement',
 ] as const satisfies readonly (keyof BaseTypeSurfaceV1)[]
+
+/**
+ * Every VALUE name of the CURRENT (v2) `.` surface, in {@link BaseRuntimeV2} declaration order: the v1
+ * list verbatim, then the two well-formed-text members.
+ *
+ * The spread is the point — an additive generation states itself as "v1 plus these", so a member that
+ * disappears from v1 cannot quietly disappear from v2 too. The `satisfies` clause still checks the
+ * whole v2 `keyof`, so a member added to the interface and not to this list is a compile error.
+ */
+export const VALUE_NAMES_V2 = [
+  ...VALUE_NAMES_V1,
+  'wellFormedText',
+  'wellFormedDeep',
+] as const satisfies readonly (keyof BaseRuntimeV2)[]
+
+/**
+ * Every TYPE name of the CURRENT (v2) `.` surface, in {@link BaseTypeSurfaceV2} declaration order.
+ *
+ * v2 adds no named type, so this is the v1 list; the `satisfies` clause still ties it to
+ * {@link BaseTypeSurfaceV2}, and the gate asserts v1 ⊆ v2 for both halves.
+ */
+export const TYPE_NAMES_V2 = [...TYPE_NAMES_V1] as const satisfies readonly (keyof BaseTypeSurfaceV2)[]
