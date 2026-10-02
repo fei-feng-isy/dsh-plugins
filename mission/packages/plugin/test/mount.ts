@@ -303,6 +303,16 @@ export async function mount(
      */
     typertThrows?: boolean
     /**
+     * Make `storageDomain.open` reject: the storage domain cannot be opened at all. The plugin must
+     * still mount DEGRADED — tools registered, each answering the reason, no unhandled rejection.
+     */
+    failDomainOpen?: boolean
+    /**
+     * Do NOT await `host.whenReady()` before returning. The production `apply` never awaits start-up;
+     * this reproduces that shape so a start-up failure would be observable as an unhandled rejection.
+     */
+    awaitReady?: boolean
+    /**
      * Make `subagents.sendMessage` reject, as waking a parked session does when the session
      * was cleaned up or the runtime refuses to resume it. The wake must degrade to a fresh
      * session, never fail the tree.
@@ -452,6 +462,12 @@ export async function mount(
   }
   const storageDomainService = {
     open: (spec: { name: string }) => {
+      // The one failure the DEGRADED mount exists for: the domain cannot be opened at all (a locked or
+      // corrupt backend, a storage service that is down). The rejection is what `host.start()` must
+      // absorb into `degradedReason()` without leaving an unhandled rejection behind.
+      if (options.failDomainOpen === true) {
+        return Promise.reject(new Error(`domain '${spec.name}' could not be opened`))
+      }
       if (open) throw new Error(`domain '${spec.name}' is already open`)
       open = true
       domainOpens += 1
@@ -679,7 +695,10 @@ export async function mount(
 
   await ctx.plugin({ name, inject, apply: applyPlugin }, options.pluginConfig ?? {})
   const host = ctx.get('avantfMission') as unknown as AvantfMissionHost
-  await host.whenReady()
+  // Most tests want a fully opened engine. `awaitReady: false` is for the DEGRADED-mount case: it
+  // reproduces the real fire-and-forget shape, where `apply` kicks `start()` off and NOTHING awaits
+  // it, so a rejected start would surface as an unhandled rejection before the test reads anything.
+  if (options.awaitReady !== false) await host.whenReady()
 
   // The stubs carry only the fields the plugin reads, so the typed overload (which
   // wants a real Agent and UserMessage[]) does not apply at this boundary. Going

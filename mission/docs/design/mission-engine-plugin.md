@@ -1048,6 +1048,19 @@ Cordis 的 `ctx.effect()` 就是 install/uninstall 接线：**disposer 在 fiber
 
 **核心分界**：数据生命周期由**事实**（master 会话是否存在）决定，不由**我们自己的装卸**决定。
 
+#### 8.6.1 存储域打不开 = 降级挂载（2026-10-03）
+
+`apply` **不等** `host.start()`（开存储域要经过若干 `await`，不该占住启动预算），所以 `start()` 返回的 Promise 在真实部署里没有消费者。旧实现让它的 `.catch` 记录后再 `throw`，于是失败变成**未处理 rejection**；实测 dsh 的 `installFailLoud` 把它升级为**整代 fatal（`exit(1)`）**——一次存储抖动带走整个宿主，而代码注释自称的"fails the plugin row loudly"与事实相反。三次实测结论：`apply` 抛错 / 被 `await` 的 rejection = 只该行失败（0.1.7、0.2.0 线）；**未处理 rejection = 全代际 fatal**；0.1.5 线任何未激活行都会让 boot 抛错。
+
+因此 `AvantfMissionHost.start()` **永不 reject**：fiber 还活着时，失败记进 `degradedReason()`，打**一条 ERROR** 说明原因，插件**照常挂载**。降级面的行为与 mem 的 DEGRADED 一致：
+
+- 9 个工具与 3 条命令照常注册；每个工具在 `workTool` 的同一个就绪门后返回 `ok:false / code:'not-ready'` + 原因，不落到 `requireTree()` 的抛错；
+- `/mission` 用它既有的错误结果形态报告同一原因；
+- `whenReady()` 在降级路径上**照常 resolve**（"就绪"问的是"启动流程走完了"，不是"引擎可用"），所以任何 await 它的人都不会把降级误读成拒绝；
+- 失败发生在 fiber **卸载之后**时仍是 teardown 噪声：一条 `start-up did not finish before unmount` WARN，不置降级位（那条竞态由 `test/lifecycle-open.spec.ts` 守）。
+
+守卫：`test/degraded-mount.spec.ts`（在**真实 fire-and-forget 路径**上 `awaitReady:false` 挂载：插件仍在、9 个工具仍注册、工具与 `/mission` 都返回可读原因、恰好一条 ERROR、无 `unhandledRejection`、`whenReady()` resolve）。
+
 ---
 
 ## 九、异常与边界

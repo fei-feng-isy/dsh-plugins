@@ -505,27 +505,58 @@ export class AvantfMissionHost extends TypertRemoteService {
 
   // ── lifecycle ────────────────────────────────────────────────────────────
 
-  /** Open storage, reconcile, and arm the sweep. Runs inside `apply` so an environmental failure fails
-   *  the plugin row loudly rather than leaving tools that answer "not ready"; the domain opens exactly
-   *  once (`storage-domain` refuses a second open). */
+  /**
+   * Open storage, reconcile, and arm the sweep. The domain opens exactly once (`storage-domain`
+   * refuses a second open).
+   *
+   * **This promise NEVER rejects.** Measured on the installed loader, a start-up failure has exactly
+   * three outcomes, and all three argue for absorbing it here:
+   * - `apply` throws, or awaits a rejection → only THIS entry fails (0.1.7 / 0.2.0 lines). That is
+   *   contained, but it still costs the whole plugin row over what is an environmental fault.
+   * - an UNHANDLED rejection → a process-level fatal (`installFailLoud` → `exit(1)`) on every
+   *   generation. A storage hiccup must never take down the host.
+   * - on the 0.1.5 line, any inactive row makes the whole boot throw.
+   *
+   * So a failure that lands while the fiber is alive is recorded as {@link degradedReason} and the
+   * plugin mounts DEGRADED: the tools stay registered and answer the reason, `/mission` reports it,
+   * and the process keeps running. A failure that lands after unmount is teardown noise.
+   */
   async start(): Promise<void> {
     // Idempotent: opening the domain twice would fail with `already-open`, the guard against two owners.
     if (this.starting !== undefined) return this.starting
     const starting = this.open().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error)
       // A failure on a disposed fiber is teardown noise, not a verdict: `apply` never awaits this
       // promise, so an unhandled rejection becomes dsh's fatal load failure. `open()` guards what it
       // can see; this covers the orderings it cannot.
       if (!this.stillActive()) {
-        this.log.warn(`start-up did not finish before unmount; ignored: ${error instanceof Error ? error.message : String(error)}`)
+        this.log.warn(`start-up did not finish before unmount; ignored: ${detail}`)
         return
       }
-      throw error
+      // Mount DEGRADED rather than throw: the plugin row survives, the operator gets one loud ERROR
+      // naming the cause, and every tool answers "not ready + reason" instead of throwing out of a
+      // missing tree.
+      this.degradedReasonValue = detail
+      this.log.error(`start-up FAILED — mounting DEGRADED (tools answer with the reason): ${detail}`)
     })
     this.starting = starting
     return starting
   }
 
   private starting?: Promise<void>
+
+  /** Why start-up ended DEGRADED, or `undefined` while healthy (or still opening). Set at most once. */
+  private degradedReasonValue?: string
+
+  /**
+   * The DEGRADED marker the tool surface and `/mission` read: `undefined` means the engine opened
+   * normally, a string is the cause the storage domain could not be opened. Kept separate from
+   * `whenReady()` on purpose — readiness still RESOLVES on the degraded path, so nothing that awaits
+   * it can mistake a degraded mount for a rejected one.
+   */
+  degradedReason(): string | undefined {
+    return this.degradedReasonValue
+  }
 
   private async open(): Promise<void> {
     this.log.info('start-up: opening the mission-tree storage domain')

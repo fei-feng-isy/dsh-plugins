@@ -61,6 +61,11 @@ function outputFor(wellFormed: WellFormedSource): ToolOutput {
  * Convert `defineTool`'s contract into the uniform shape every tool shares:
  * `Record<string, unknown>` arguments and a `MissionToolResult` result. The conversion is
  * asserted, not re-derived — the schemas that reach the model are exactly the ones written.
+ *
+ * Every tool ALSO goes through one readiness gate: a DEGRADED mount (storage never opened, see
+ * `AvantfMissionHost.start`) keeps the whole surface registered but has nothing to read or write, so
+ * each entry answers the same readable reason instead of throwing a `TypeError` out of a missing
+ * tree. Mirrors mem's DEGRADED tools (`mem/packages/plugin/src/index.ts`).
  */
 function workTool(host: AvantfMissionHost, options: {
   name: string
@@ -72,7 +77,20 @@ function workTool(host: AvantfMissionHost, options: {
   return (defineTool as unknown as (definition: typeof options & { output: ToolOutput }) => ToolDefinition)({
     ...options,
     output: outputFor(host.wellFormed),
+    execute: (args: Record<string, unknown>, exec: ToolRunContext): Promise<MissionToolResult> => {
+      const reason = host.degradedReason()
+      return reason === undefined ? options.execute(args, exec) : Promise.resolve(notReady(reason))
+    },
   })
+}
+
+/** The uniform answer of a DEGRADED mount, shaped like every other result (`ok:false` + `data.code`). */
+function notReady(reason: string): MissionToolResult {
+  return {
+    ok: false,
+    summary: `任务引擎未就绪（存储域未能打开）：${reason}\n修复后重启 dsh 即可恢复。`,
+    data: { code: 'not-ready', message: reason },
+  }
 }
 
 function present(title: string, args: Record<string, unknown>): ToolCallView {

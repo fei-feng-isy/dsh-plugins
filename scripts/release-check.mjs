@@ -318,20 +318,35 @@ if (baseManifest !== undefined) {
   }
 }
 
-// ── 4b. the one-zod rule's PLUGIN half: the plugin takes the host's copy, never a nested one ─────
-// Section 4 pins the base's zod PEER; this pins the other manifest that uses zod at runtime (N15). A
-// `zod` moved out of `peerDependencies`, or marked optional, would let the installer nest a second
-// copy — two copies, even of one major, have incompatible schema type identities. mission's zod is
-// DELIBERATELY an optional peer (zero runtime use), so only mem is asserted here.
+// ── 4b. the one-zod rule's PLUGIN half: BOTH plugins take the host's copy, never a nested one ────
+// Section 4 pins the base's zod PEER; this pins the other two manifests that use zod at runtime (N15):
+// mem's wire codecs AND mission's `domain.ts`/`wire.ts` are runtime VALUE imports of the host's copy.
+// A `zod` moved out of `peerDependencies`, or marked optional, would let the installer nest a second
+// copy — two copies, even of one major, have incompatible schema type identities (mem DESIGN §20.11).
+// Declaring it optional while the runtime resolves it is a DISHONEST manifest: the install succeeds
+// and the plugin then loads a zod the host never agreed to provide. Both trees must say the same
+// thing, because a host install is judged by whichever manifest it happens to read.
+//
+// The RANGE is a note, not a failure: `^4.4.3` and `>=4.4.3 <5` denote the same set, and the one-zod
+// rule is about WHERE zod comes from, not the spelling of the range (S1 aligned the spelling anyway).
 {
-  const memDir = 'mem/packages/plugin'
-  const memManifest = seen.get(memDir)
-  if (memManifest !== undefined) {
-    const zodProblems = requiredPeerProblems(memManifest.name, memManifest, 'zod')
+  const zodRanges = new Map()
+  for (const plugin of PLUGINS) {
+    const manifest = seen.get(plugin.dir)
+    if (manifest === undefined) continue
+    const zodProblems = requiredPeerProblems(plugin.name, manifest, 'zod')
     for (const problem of zodProblems) fail(problem)
     if (zodProblems.length === 0) {
-      note(`${memManifest.name} peer zod = "${memManifest.peerDependencies.zod}" (required, host-provided: one copy)`)
+      zodRanges.set(plugin.name, manifest.peerDependencies.zod)
+      note(`${plugin.name} peer zod = "${manifest.peerDependencies.zod}" (required, host-provided: one copy)`)
     }
+  }
+  const distinctZodRanges = new Set(zodRanges.values())
+  if (distinctZodRanges.size > 1) {
+    note(
+      `WARNING: the two plugins declare different zod peer ranges (${[...distinctZodRanges].join(', ')}) `
+      + '— keep them in step: one zod, one set of accepted versions',
+    )
   }
 }
 

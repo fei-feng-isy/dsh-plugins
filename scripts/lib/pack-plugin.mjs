@@ -20,10 +20,15 @@
  * `pnpm pack` is required rather than `npm pack`: it rewrites `catalog:` / `workspace:` into real
  * ranges, and the tarball's manifest is one of the things asserted.
  *
- * ONE THING HERE IS NOT AN ASSERTION. `shippedDeclarationNote` prints how many shipped exported
- * symbols nothing in the repo ever consumes — an OBSERVATION about how fast the surface sediments,
- * not a gate: it proves no single property and can never fail a run (a gate must prove one thing).
- * Everything else in this module is an assertion and does fail.
+ * TWO THINGS HERE ARE NOT ASSERTIONS. `shippedDeclarationNote` prints how many shipped exported
+ * symbols nothing in the repo ever consumes — an OBSERVATION about how fast the surface sediments.
+ * `documentationCountNote` prints the counts a PUBLISHED README (or AGENTS.md) states that no longer
+ * match the code producing them. Neither is a gate: each proves no single property and can never fail
+ * a run (a gate must prove one thing). Everything else in this module is an assertion and does fail.
+ *
+ * **改可观察行为必须同步 README/DESIGN.** The shipped README IS the npm page and AGENTS.md is what the
+ * next contributor reads, so a number that drifted from the code (a tool added, a command retired, a
+ * prompt section merged) is a DEFECT, not cosmetics — see AGENTS.md「发布 README 的内容要求」.
  *
  * @module scripts/lib/pack-plugin
  */
@@ -155,6 +160,44 @@ export function stripComments(source) {
  */
 export function versionPackageNames(arrayBody) {
   return [...stripComments(arrayBody).matchAll(/'([^']+)'/gu)].map((match) => match[1])
+}
+
+/**
+ * The entries of a `const NAME … = [ … ]` array literal, split at TOP-LEVEL commas only.
+ *
+ * `stripComments` runs first — the bodies are prose-heavy, and an apostrophe in a comment would pair
+ * with the next quote and swallow the list (the defect {@link versionPackageNames} documents). The
+ * scan then tracks bracket depth and string state, so an entry that is itself an object carrying a
+ * comma (`{ file: 'a.md', section: X }`) stays ONE entry instead of being counted as two.
+ *
+ * @param source - the module's text.
+ * @param name - the identifier the array is bound to.
+ * @returns the trimmed entries, or `undefined` when the declaration is not there to count.
+ */
+export function arrayEntries(source, name) {
+  const code = stripComments(source)
+  const body = new RegExp(`\\b${name}\\b[^=]*=\\s*\\[([\\s\\S]*?)\\]`, 'u').exec(code)?.[1]
+  if (body === undefined) return undefined
+  const entries = []
+  let current = ''
+  let depth = 0
+  let quote = null
+  for (let index = 0; index < body.length; index += 1) {
+    const ch = body[index]
+    if (quote !== null) {
+      current += ch
+      if (ch === '\\') { current += body[index + 1] ?? ''; index += 1; continue }
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; current += ch; continue }
+    if (ch === '(' || ch === '[' || ch === '{') { depth += 1; current += ch; continue }
+    if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; current += ch; continue }
+    if (ch === ',' && depth === 0) { if (current.trim() !== '') entries.push(current.trim()); current = ''; continue }
+    current += ch
+  }
+  if (current.trim() !== '') entries.push(current.trim())
+  return entries
 }
 
 /**
@@ -679,6 +722,121 @@ export function shippedDeclarationNote(config, entries, read) {
   }
 }
 
+/** The small Chinese numerals the published READMEs use in prose (`三段` = 3, `两条` = 2). */
+const DOCUMENTED_COUNTS = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
+
+/**
+ * The number a document states, from a claim's first capture group — a digit string, or one of the
+ * small Chinese numerals the READMEs write in prose. `undefined` when it is neither.
+ */
+export function documentedCount(raw) {
+  const text = String(raw).trim()
+  if (/^\d+$/u.test(text)) return Number(text)
+  return DOCUMENTED_COUNTS[text]
+}
+
+/**
+ * Compare the counts a PUBLISHED document states about itself with the counts the code produces.
+ *
+ * Each claim is `{ label, text, pattern, measured }`:
+ *  - `text` — the document's content, or `undefined` when it could not be read;
+ *  - `pattern` — a regex whose FIRST capture group is the documented number (`(\d+)`, or a Chinese
+ *    numeral class); it must not carry the `g` flag, or `exec` would carry state between claims;
+ *  - `measured` — the number the code actually produces, or `undefined` when unmeasurable.
+ *
+ * An undecidable claim is SILENT: an unreadable document, a number the document does not state, or a
+ * measurement the tree could not compute yields nothing at all. This feeds an OBSERVATION (see the
+ * module header), so it must never manufacture a finding out of a missing input — the only thing it
+ * may report is a genuine disagreement between two numbers it actually holds.
+ *
+ * @returns one line per mismatch, in claim order; empty when everything agrees or nothing is decidable.
+ */
+export function documentedCountMismatches(claims) {
+  const lines = []
+  for (const claim of claims) {
+    if (typeof claim.text !== 'string') continue
+    if (typeof claim.measured !== 'number' || !Number.isFinite(claim.measured)) continue
+    const match = claim.pattern.exec(claim.text)
+    if (match === null) continue
+    const documented = documentedCount(match[1])
+    if (documented === undefined) continue
+    if (documented === claim.measured) continue
+    lines.push(`${claim.label}: documented ${String(documented)}, measured ${String(claim.measured)}`)
+  }
+  return lines
+}
+
+/**
+ * The published documents this pack can cross-check, and the number each claim should state.
+ *
+ * Every claim names the document, the regex whose first capture is the number AS WRITTEN, and the
+ * measurement read from the code that produces it. A measurement that cannot be taken (`undefined`)
+ * makes its claim silent rather than wrong — see {@link documentedCountMismatches}.
+ *
+ * WHY THE REMINDER IS HERE. **改可观察行为必须同步 README/DESIGN.** Adding a tool, retiring a command
+ * or merging a prompt section is a MINOR change that must land with its documentation: the shipped
+ * README IS the npm page, and AGENTS.md is what the next contributor reads. A stale number in a
+ * published document is a defect (AGENTS.md「发布 README 的内容要求」), not cosmetics. This is the one
+ * place every release passes through, so it is where the drift is made visible.
+ */
+function documentationCountClaims(read) {
+  const memTools = arrayEntries(read('mem/packages/contract/src/tools.ts'), 'TOOL_SPECS')?.length
+  const memSections = arrayEntries(read('mem/packages/plugin/src/prompt.ts'), 'PROMPT_FILES')?.length
+  const missionSections = arrayEntries(read('mission/packages/plugin/src/prompt.ts'), 'PROMPT_FILES')?.length
+  const missionTools = (() => {
+    const source = read('mission/packages/plugin/src/tools.ts')
+    if (typeof source !== 'string') return undefined
+    const found = (source.match(/^\s*name: '[a-z][a-z_]*',\s*$/gmu) ?? []).length
+    return found === 0 ? undefined : found
+  })()
+  const missionCommands = (() => {
+    const source = read('mission/packages/plugin/src/index.ts')
+    if (typeof source !== 'string') return undefined
+    const found = (source.match(/ctx\.commands\.register\s*\(/gu) ?? []).length
+    return found === 0 ? undefined : found
+  })()
+
+  const memReadme = read('mem/packages/plugin/README.md')
+  const missionReadme = read('mission/packages/plugin/README.md')
+  const agents = read('AGENTS.md')
+  return [
+    { label: 'mem README model tools', text: memReadme, pattern: /(\d+)\s*个模型工具/u, measured: memTools },
+    { label: 'mem README prompt sections', text: memReadme, pattern: /([一二三四五六七八九十两])\s*段\*{0,2}\s*用法提示/u, measured: memSections },
+    { label: 'AGENTS.md mem model tools', text: agents, pattern: /（(\d+)\s*个模型工具/u, measured: memTools },
+    { label: 'AGENTS.md mem tool face', text: agents, pattern: /工具面就是[^0-9]*(\d+)\s*个/u, measured: memTools },
+    { label: 'mission README model tools', text: missionReadme, pattern: /(\d+)\s*个模型工具/u, measured: missionTools },
+    { label: 'mission README commands', text: missionReadme, pattern: /([一二三四五六七八九十两])\s*条命令/u, measured: missionCommands },
+    { label: 'mission README prompt sections', text: missionReadme, pattern: /([一二三四五六七八九十两])\s*段静态系统提示词段/u, measured: missionSections },
+  ]
+}
+
+/**
+ * The documented-count OBSERVATION printed by a pack run — one line, never a gate.
+ *
+ * The counts in a shipped README are the npm page: "8 个模型工具", "9 个模型工具 / 三条命令", a prompt
+ * section count. Each is produced by code somewhere in this repo, so each can be cross-checked —
+ * and a number that no longer matches is a defect the type-checker cannot see. Like the dead-export
+ * note above, this PRINTS and never checks: no `fail`, no exit code, and any unreadable document or
+ * unmeasurable count degrades to silence rather than becoming a new failure source.
+ *
+ * @returns the note text, or `undefined` when every count agrees or nothing could be decided.
+ */
+export function documentationCountNote(config) {
+  try {
+    if (typeof config.repo !== 'string') return undefined
+    const workspace = workspaceRoot(config.repo)
+    if (workspace === undefined) return undefined
+    const read = (relative) => {
+      try { return readFileSync(join(workspace, relative), 'utf8') } catch { return undefined }
+    }
+    const mismatches = documentedCountMismatches(documentationCountClaims(read))
+    if (mismatches.length === 0) return undefined
+    return `note  documented counts: ${mismatches.join('; ')} (a published README/AGENTS number no longer matches the code — 改可观察行为必须同步 README/DESIGN)`
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * The tarball-side assertions: what the registry would actually serve. Runs on the bytes, so a
  * `files` whitelist that drops a needed file or lets a stale one through is caught here and nowhere
@@ -851,6 +1009,13 @@ export function assertTarball(config, tarball) {
   // if the artifact or the checkouts cannot be read it says nothing at all.
   const declarationNote = shippedDeclarationNote(config, contents, read)
   if (declarationNote !== undefined) console.log(declarationNote)
+
+  // ── the documented-count OBSERVATION (never a gate): a stale number in a published README ─────
+  // **改可观察行为必须同步 README/DESIGN** — a tool added or a command retired must land with the doc
+  // that counts it (AGENTS.md「发布 README 的内容要求」). Printed, never checked, exactly like the
+  // dead-export note above: an unreadable doc or an unmeasurable count says nothing.
+  const countNote = documentationCountNote(config)
+  if (countNote !== undefined) console.log(countNote)
 
   // ── the relative-import closure of the shipped declaration tree ────────────────────────────────
   // The carry step repoints `@avantf/<engine>` to relative specifiers. Nothing checked the other end:

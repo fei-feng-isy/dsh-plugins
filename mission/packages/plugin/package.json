@@ -55,7 +55,7 @@
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2",
     "@deepseek-ai/dsh-util-values": "^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.2",
-    "zod": "^4.4.3"
+    "zod": ">=4.4.3 <5"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -104,9 +104,6 @@
       "optional": true
     },
     "@deepseek-ai/schemastery": {
-      "optional": true
-    },
-    "zod": {
       "optional": true
     }
   },

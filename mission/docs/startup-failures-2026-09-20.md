@@ -61,6 +61,8 @@ rejection，落进 dsh 的 `installFailLoud` → `fatal load failure` → `exit(
   记为 `WARN start-up did not finish before unmount; ignored: …` 并**吞掉**；
   否则照旧抛出、照旧由 `apply` 记录 `start-up FAILED`。这样"卸载后才落地"的失败
   （存储单元被关掉、在两次 await 之间被卸载）也不会再变成 unhandled rejection。
+  > **2026-10-03 修订：** "否则照旧抛出"这一半已作废 —— fiber 活着时的失败现在也**吞掉**，
+  > 改成降级挂载（一条 ERROR + `degradedReason()`，工具返回"未就绪 + 原因"）。见文末第四节。
 - `index.ts` 的 `apply` 前置检查保持不变，`:667` 的 `markReady(ready)` 也照旧。
 
 ### “是否完全避免”
@@ -138,3 +140,26 @@ pnpm workspace:doctor -- --fix                 # 先备份再写回修复后的�
 即：即使没有第 1 条，只要 `workspace.json` 里那双记录还在，`dsh web` 同样起不来；
 反过来，修掉第 1 条也不会让第 2 条消失。两条都需要各自处理：
 代码侧改动解决第 1 条，`workspace-doctor` 负责第 2 条的诊断与恢复。
+
+---
+
+## 四、2026-10-03 修订：fiber **活着**时的启动失败也改成降级挂载
+
+第一节的修复只覆盖了"失败落在卸载之后"。**另一半仍在**：`apply` 不等 `start()`，一旦
+`open()` 在 fiber 还活着时失败（存储后端被占用、损坏、磁盘只读……），`start()` 的
+`.catch` 会 `throw`，而那条 Promise 在真实部署里**没有消费者** —— 于是成为
+**未处理 rejection**，被 dsh 的 `installFailLoud` 升级为 `fatal load failure` + `exit(1)`。
+
+R4 实测的三层行为：
+
+| 失败形态 | 后果 |
+|---|---|
+| `apply` 抛错 / 被 `await` 的 rejection | **只该行失败**（0.1.7、0.2.0 线）|
+| **未处理 rejection** | **全代际 fatal**（`installFailLoud` → `exit(1)`）|
+| 0.1.5 线，任何未激活行 | 整个 boot 抛错 |
+
+所以 `AvantfMissionHost.start()` 现在**永不 reject**：fiber 活着时的失败记进
+`degradedReason()`，打一条 ERROR（`start-up FAILED — mounting DEGRADED (tools answer with the
+reason): …`），插件**照常挂载**；9 个工具与 3 条命令照常注册，工具经 `workTool` 的就绪门返回
+`ok:false / code:'not-ready'` + 原因，`/mission` 报同一原因，`whenReady()` 照常 resolve。
+不再有未处理 rejection，不再有 fatal。守卫：`test/degraded-mount.spec.ts`。

@@ -5,10 +5,11 @@
  * The root `scripts/` have no test runner of their own, and two of these assertions are exactly the
  * kind that must be proven on constructed input: "does the version materializer touch a second
  * group's manifests?" and "does one tree missing a dsh line fail the gate?". So the decisions live in
- * `scripts/lib/` (versions.mjs, gates.mjs, published-base.mjs) and this file replays them — M7
- * (group-scoped version materialization), §2.2-2 (the base peer↔dev pair), M8 (per-tree dsh-line
- * coverage), M10 (the plugin prepublishOnly wiring), N15 (the plugin half of the one-zod rule) and R1
- * (the published base's interface generation vs the plugin's bake).
+ * `scripts/lib/` (versions.mjs, gates.mjs, published-base.mjs, pack-plugin.mjs) and this file replays
+ * them — M7 (group-scoped version materialization), §2.2-2 (the base peer↔dev pair), M8 (per-tree
+ * dsh-line coverage), M10 (the plugin prepublishOnly wiring), N15 (the plugin half of the one-zod rule,
+ * for BOTH trees), R1 (the published base's interface generation vs the plugin's bake) and S2 (the
+ * documented-count observation a pack prints — silent on agreement or a missing input).
  *
  *   node scripts/gates.test.mjs
  *
@@ -37,7 +38,7 @@ import {
   readTarballEntry,
 } from './lib/published-base.mjs'
 import { execToolSync } from './lib/win-spawn.mjs'
-import { exportedSymbolNames, shippedDeclarationNote, unconsumedExports, versionPackageNames } from './lib/pack-plugin.mjs'
+import { arrayEntries, documentedCountMismatches, exportedSymbolNames, shippedDeclarationNote, unconsumedExports, versionPackageNames } from './lib/pack-plugin.mjs'
 import { groupWorkspaceTargets, workspaceTargets, withWorkspaceVersions } from './lib/versions.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -191,41 +192,48 @@ test('release-check: the two REAL plugin manifests declare a matching base pair'
 // ── N15 · the one-zod rule reaches the plugin PUBLISH manifest, not just catalog and base ──────────
 
 test('N15: a host-provided dependency must stay a REQUIRED peer, in peerDependencies only', () => {
-  assert.deepEqual(requiredPeerProblems('@avantf/dsh-mem', {
-    peerDependencies: { zod: '>=4.4.3 <5' },
-  }, 'zod'), [])
+  // BOTH trees: a host install is judged by whichever manifest it reads, so each must declare the
+  // same disposition — zod required, in peerDependencies, never nested. (`^4.4.3` and `>=4.4.3 <5`
+  // both pass: the rule is about WHERE zod comes from, not the spelling of the range.)
+  for (const name of ['@avantf/dsh-mem', '@avantf/dsh-mission']) {
+    assert.deepEqual(requiredPeerProblems(name, {
+      peerDependencies: { zod: '>=4.4.3 <5' },
+    }, 'zod'), [], name)
 
-  // Moved into `dependencies`: the installer nests a second copy beside the host's.
-  const moved = requiredPeerProblems('@avantf/dsh-mem', { dependencies: { zod: '>=4.4.3 <5' } }, 'zod')
-  assert.match(moved.join('\n'), /does not declare zod in peerDependencies/u)
-  assert.match(moved.join('\n'), /SECOND copy/u)
+    // Moved into `dependencies`: the installer nests a second copy beside the host's.
+    const moved = requiredPeerProblems(name, { dependencies: { zod: '>=4.4.3 <5' } }, 'zod')
+    assert.match(moved.join('\n'), /does not declare zod in peerDependencies/u)
+    assert.match(moved.join('\n'), /SECOND copy/u)
 
-  // Present as a peer, but optional: the host is not required to provide it.
-  const optional = requiredPeerProblems('@avantf/dsh-mem', {
-    peerDependencies: { zod: '>=4.4.3 <5' }, peerDependenciesMeta: { zod: { optional: true } },
-  }, 'zod')
-  assert.match(optional.join('\n'), /OPTIONAL peer/u)
+    // Present as a peer, but optional: the host is not required to provide it.
+    const optional = requiredPeerProblems(name, {
+      peerDependencies: { zod: '>=4.4.3 <5' }, peerDependenciesMeta: { zod: { optional: true } },
+    }, 'zod')
+    assert.match(optional.join('\n'), /OPTIONAL peer/u)
 
-  // Both at once: a peer AND a nested runtime copy — the exact drift the rule exists for.
-  const both = requiredPeerProblems('@avantf/dsh-mem', {
-    peerDependencies: { zod: '>=4.4.3 <5' }, dependencies: { zod: '^4.6.5' },
-  }, 'zod')
-  assert.match(both.join('\n'), /lists zod in dependencies/u)
-  assert.match(both.join('\n'), /SECOND copy/u)
+    // Both at once: a peer AND a nested runtime copy — the exact drift the rule exists for.
+    const both = requiredPeerProblems(name, {
+      peerDependencies: { zod: '>=4.4.3 <5' }, dependencies: { zod: '^4.6.5' },
+    }, 'zod')
+    assert.match(both.join('\n'), /lists zod in dependencies/u)
+    assert.match(both.join('\n'), /SECOND copy/u)
 
-  const optionalDependency = requiredPeerProblems('@avantf/dsh-mem', {
-    peerDependencies: { zod: '>=4.4.3 <5' }, optionalDependencies: { zod: '^4.6.5' },
-  }, 'zod')
-  assert.match(optionalDependency.join('\n'), /optionalDependencies/u)
+    const optionalDependency = requiredPeerProblems(name, {
+      peerDependencies: { zod: '>=4.4.3 <5' }, optionalDependencies: { zod: '^4.6.5' },
+    }, 'zod')
+    assert.match(optionalDependency.join('\n'), /optionalDependencies/u)
+  }
 })
 
-test('N15: the REAL mem manifest gets its single zod from the host', () => {
-  const manifest = JSON.parse(readFileSync(join(workspace, 'mem/packages/plugin/package.json'), 'utf8'))
-  assert.deepEqual(
-    requiredPeerProblems(manifest.name, manifest, 'zod'),
-    [],
-    'mem/packages/plugin must take zod as a required peer (mission\'s optional peer is deliberate and exempt)',
-  )
+test('N15: the REAL manifests of BOTH trees get their single zod from the host', () => {
+  for (const dir of ['mem/packages/plugin', 'mission/packages/plugin']) {
+    const manifest = JSON.parse(readFileSync(join(workspace, dir, 'package.json'), 'utf8'))
+    assert.deepEqual(
+      requiredPeerProblems(manifest.name, manifest, 'zod'),
+      [],
+      `${dir} must take zod as a required peer (S1 aligned mission with mem — both use it at runtime)`,
+    )
+  }
 })
 
 // ── M8 · a line ONE tree misses is a failure, even when the union covers it ──────────────────────
@@ -585,6 +593,56 @@ test('C5: the mirror/frozen names are excluded, and an unreadable artifact degra
   // No declaration entries at all, and no repo on the config: also silence, never a throw.
   assert.equal(shippedDeclarationNote({ repo: '/nonexistent' }, ['package/lib/index.js'], () => ''), undefined)
   assert.equal(shippedDeclarationNote({}, ['package/lib/types/index.d.ts'], () => 'export declare const a = 1;'), undefined)
+})
+
+// ── S2 · the documented-count OBSERVATION (printed by a pack, never a gate) ───────────────────────
+//
+// A shipped README IS the npm page: "8 个模型工具", "9 个模型工具 / 三条命令", a prompt-section count.
+// Each number is produced by code in this repo, so a drift is visible — but this is a note, so the
+// comparison has to separate three inputs: agree (silent), disagree (one line), and a MISSING input
+// (silent, never a manufactured finding).
+
+const countClaim = (text, measured, pattern = /(\d+)\s*个模型工具/u, label = 'mem README model tools') =>
+  ({ label, text, pattern, measured })
+
+test('S2: a documented count is reported only when both numbers are known and disagree', () => {
+  // Agree: nothing printed.
+  assert.deepEqual(documentedCountMismatches([countClaim('提供 8 个模型工具', 8)]), [])
+  // Disagree: one line naming both numbers.
+  const drifted = documentedCountMismatches([countClaim('提供 9 个模型工具', 8)])
+  assert.equal(drifted.length, 1)
+  assert.match(drifted[0], /mem README model tools: documented 9, measured 8/u)
+
+  // A Chinese numeral is read the same way (`三段用法提示` = 3, `两条命令` = 2).
+  const sections = /([一二三四五六七八九十两])\s*段用法提示/u
+  assert.deepEqual(documentedCountMismatches([countClaim('三段用法提示', 3, sections)]), [])
+  assert.match(
+    documentedCountMismatches([countClaim('两段用法提示', 3, sections)])[0],
+    /documented 2, measured 3/u,
+  )
+
+  // Missing input on EITHER side is silence, not a finding: the document could not be read, the
+  // number is not stated, the count could not be measured, or the capture is not a count at all.
+  assert.deepEqual(documentedCountMismatches([
+    countClaim(undefined, 8),
+    countClaim('这里没有数字', 8),
+    countClaim('提供 8 个模型工具', undefined),
+    countClaim('提供了若干模型工具', 8, /(若干)\s*个模型工具/u),
+  ]), [])
+})
+
+test('S2: the measured count is read from the code, object entries with commas included', () => {
+  assert.deepEqual(
+    arrayEntries("export const TOOL_SPECS: ToolSpec[] = [\n  REMEMBER_TOOL,\n  RECALL_TOOL,\n  ADMIN_TOOL,\n]", 'TOOL_SPECS'),
+    ['REMEMBER_TOOL', 'RECALL_TOOL', 'ADMIN_TOOL'],
+  )
+  // An object entry carries a comma of its own — it is ONE entry, not two (`PROMPT_FILES`).
+  assert.deepEqual(
+    arrayEntries("export const PROMPT_FILES = [\n  { file: 'a.md', section: A },\n  { file: 'b.md', section: B },\n]", 'PROMPT_FILES'),
+    ["{ file: 'a.md', section: A }", "{ file: 'b.md', section: B }"],
+  )
+  // A declaration that is not there yields `undefined` — the claim goes silent, never a wrong count.
+  assert.equal(arrayEntries('const OTHER: string[] = []', 'PROMPT_FILES'), undefined)
 })
 
 // ── M10 · both plugins run their own packer before publishing ─────────────────────────────────────

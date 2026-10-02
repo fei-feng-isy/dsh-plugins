@@ -20,7 +20,9 @@
   （那会装出多份副本，跨副本的 registry 与类型身份会分叉）。
 - **只有一份 `zod`**：由**宿主**提供——base 与 `@avantf/dsh-mem` 声明 **required peer** `>=4.4.3 <5`
   （下限已实测跑通）；本仓自己解析的那份来自根 catalog（改 catalog、不改发布区间），免得副本分叉 schema
-  类型身份。mission 的 zod 是 **optional** peer、零运行期使用。
+  类型身份。**三棵树都把 zod 声明为 required peer**，`release:check` 断言两棵插件树这一点（区间文本不同只 WARNING）；
+  mission 的 `zod` 曾标 optional，实测 `domain.ts`/`wire.ts` 是**运行期值 import**（53 处 `z.`），
+  与 mem 同理由，**已改 required**（`>=4.4.3 <5`，与 mem 逐字相同）。
 - **dsh 侧 peer 是"每条 minor 线一个 `||` 子句"的链**：现状
   `^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2`（**真实下限 `0.1.5-rc.2`**，`check:old-dsh` 就跑它）。启动门按
   `peerDependencies` 判兼容、不兼容就**禁用那一行**（不是告警），判定用 `includePrerelease: true`，故 caret
@@ -50,6 +52,21 @@ WARNING，**照常使用全部能力、不降级**（世代是纯增量，旧插
 | 兼容门禁 | 一条 `compat:` WARNING，门禁跳过。裁决语义不变：只有**被证实**的不兼容才拒载，"说不清"只是备注，版本差异只是警告 |
 | 资源 provision | 旧的 `@avantf/mem-provision` / legacy tools 目录 |
 | 工具 / service / Remote / UI | 不受影响 —— 插件完整挂载 |
+
+## 家族的统一失败口径：环境故障降级，绝不杀宿主
+
+**实测的三层 loader 行为**（2026-10-02，依据见第四轮审查的 X1 与 `mission/docs/startup-failures-2026-09-20.md`）：
+
+1. 插件行 `apply` **抛错**、或返回一个被 `await`/`return` 的 rejected promise → **只该行 FAILED、宿主照常起**
+   （0.1.7/0.2.0 线；`Entry._init()` 既不 await 也不 rethrow，`boot()` 只对 bootstrap include 与全局 required 名单抛错）；
+2. `apply` 里留下的**未处理 rejection** → `installFailLoud` 接管 → **exit 1**，**所有**受支持版本；
+3. **0.1.5 线**（真实下限）任何未激活行都会让 boot 抛错——那一代没有 required 名单。
+
+**因此家族口径**：环境故障（存储域打不开、资源缺失…）→ **降级挂载**：插件照常挂载、日志一条响亮的 ERROR/WARN、
+工具面回答"未就绪 + 原因"、`/mem` · `/mission` 命令报告同一原因；**绝不留下未处理 rejection、绝不 terminate 宿主**。
+这是唯一在三种 loader 行为下都安全的策略（mem 一直如此；mission 在 X1 修复后 `host.start()` 也"永不 reject"，工具面走
+`notReady`）。在 `apply` 里做异步初始化时：**要么 await/return、要么把 rejection 收进自己的降级状态**——
+**绝不用 `void promise` 悬着**（那正是 mission 曾经"注释说行失败、实际进程 fatal"的形态）。
 
 ## 新增插件怎么用 base
 

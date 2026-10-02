@@ -295,13 +295,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
   }
 
-  // Start-up is asynchronous and awaited by the first caller that needs it; the outcome is logged on
-  // both paths, since a silent failure makes "the tools exist but nothing dispatches" undiagnosable.
-  // The failure must be loud but never an unhandled rejection, which dsh exits the process on.
-  const ready = host.start().catch((error: unknown) => {
-    log.error(`start-up FAILED: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
-    throw error
-  })
+  // Start-up is asynchronous and awaited by the first caller that needs it. `host.start()` NEVER
+  // rejects (see its own doc): a storage failure is absorbed there into a DEGRADED mount — one loud
+  // ERROR naming the cause, the tools answering the reason, the process untouched. Awaiting it here
+  // or re-throwing would be an unhandled rejection (a process-level fatal on every generation) or a
+  // failed plugin row; both are the outcomes this mount exists to avoid.
+  const ready = host.start()
   ctx.effect(() => () => {
     log.info('unmounting')
     void host.stop()
@@ -728,6 +727,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: '列出本会话拥有的任务；命令后面跟文本时，用这段文本建一个根任务。',
     input: { hint: '[任务描述]' },
     handler: async ({ agent, rawInput }) => {
+      // DEGRADED mount (storage never opened): the command surface is still registered, so it reports
+      // the reason through its ordinary error shape instead of throwing out of `requireTree()`.
+      const degraded = host.degradedReason()
+      if (degraded !== undefined) {
+        log.warn(`/mission refused: the engine is not ready — ${degraded}`)
+        return {
+          kind: 'error',
+          text: `任务引擎未就绪（存储域未能打开）：${degraded}\n修复后重启 dsh 即可恢复。`,
+        }
+      }
+
       // INBOUND, the `/mission` command's text entry: this ONE string feeds the root's title, its
       // description and the echo below, so it is repaired once here (the same rule as the tool
       // entries; the tree repairs again on the way in, idempotently).
