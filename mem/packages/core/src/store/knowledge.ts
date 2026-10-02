@@ -36,7 +36,7 @@ import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsT
 import { probeTerms, type LexicalProbe } from './lexical.js'
 import { applyScoreFloor, applyTermFloor } from './floors.js'
 import { hybridSearch, RetrievalInputError, type HybridContext, type HybridDeps, type HybridLeg, type HybridResult } from './hybrid.js'
-import { evictVectors as evictVectorsOf, reportForeignVectors, vectorSpaceOf } from './common.js'
+import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportForeignVectors, vectorSpaceOf } from './common.js'
 import { ENTITY_EXTRACTOR_VERSION, extractEntities } from '../entities/extract.js'
 import {
   assertFetchableUrl,
@@ -384,7 +384,9 @@ export class KnowledgeStore {
    * list would silently turn it into a restricted one.
    */
   addDomain(raw: string): { domains: string[]; restricted: boolean } {
-    const domain = raw.trim()
+    // Same write entry as every other stored text: the name lands in the store config AND becomes a
+    // managed directory, so a lone surrogate must be repaired before either.
+    const domain = normalizeWrite(raw).trim()
     if (domain === '') throw new Error('知识域不能为空')
     // The name becomes one level of the managed path (`docs/<domain>/<source>/<title>.md`) and
     // `sanitizeSegment` would rewrite a separator — so the picker would show a name that is not the
@@ -425,14 +427,27 @@ export class KnowledgeStore {
    *    request. All-or-nothing, so a partial write can never sit behind a confirmation dialog.
    */
   async ingestRequest(req: IngestRequest, mode: IngestMode): Promise<IngestResult | ImportResult | KbConflictReport> {
-    const source = req.source ?? DEFAULT_KB_SOURCE
-    const plan = this.planIngest({ ...req, source })
+    // Normalize the request's TEXT fields before planning. Stage ① decides document IDENTITY
+    // (`(domain, source, title)`) by looking the row up, so the text it compares must be the text
+    // that will be persisted — otherwise a decomposed title would miss the NFC row it equals and
+    // the collision check would lie. The body `text` is content, not identity, and is left alone
+    // here (the outbound boundary covers what a model sees).
+    const normalized: IngestRequest = {
+      ...req,
+      domain: normalizeWrite(req.domain),
+      ...(req.source === undefined ? {} : { source: normalizeWrite(req.source) }),
+      ...(req.title === undefined ? {} : { title: normalizeWrite(req.title) }),
+      ...(req.source_uri === undefined ? {} : { source_uri: normalizeWrite(req.source_uri) }),
+      ...(req.paths === undefined ? {} : { paths: normalizeWrites(req.paths) }),
+    }
+    const source = normalized.source ?? DEFAULT_KB_SOURCE
+    const plan = this.planIngest({ ...normalized, source })
     const conflicts = plan.targets.flatMap((target) => (target.existing === undefined ? [] : [target.existing]))
-    if (mode === 'add') return this.runAdd(plan, req.domain, source)
-    if (conflicts.length > 0 && req.overwrite !== true) {
+    if (mode === 'add') return this.runAdd(plan, normalized.domain, source)
+    if (conflicts.length > 0 && normalized.overwrite !== true) {
       return this.conflictReport(conflicts, plan.targets.length - conflicts.length)
     }
-    return this.runReplace(plan, req.domain, source)
+    return this.runReplace(plan, normalized.domain, source)
   }
 
   /**
@@ -451,11 +466,15 @@ export class KnowledgeStore {
 
   /** One target's identity plus whatever document already owns it. */
   private target(title: string, path: string | undefined, domain: string, source: string): IngestTarget {
-    const row = this.docs.find(domain, source, title)
+    // The single title choke point: a caller-provided title was normalized in `ingestRequest`, but
+    // `planText` DERIVES one from the body — normalize here so both reach the identity lookup (and
+    // the conflict report) in the same form `ingest` will persist.
+    const safeTitle = normalizeWrite(title)
+    const row = this.docs.find(domain, source, safeTitle)
     const existing = row === null
       ? undefined
       : { doc_id: row.doc_id, title: row.title, path: this.docFilePathOf(row) }
-    return { title, ...(path === undefined ? {} : { path }), ...(existing === undefined ? {} : { existing }) }
+    return { title: safeTitle, ...(path === undefined ? {} : { path }), ...(existing === undefined ? {} : { existing }) }
   }
 
   private planText(text: string, domain: string, source: string, title?: string): IngestPlan {
@@ -597,13 +616,20 @@ export class KnowledgeStore {
     /** What that conversion could not carry over. */
     warnings?: string[],
   ): Promise<IngestResult> {
-    this.assertDomainAllowed(domain)
+    // The ONE storage entry for a knowledge document: `ingestRequest` (plan + dispatch),
+    // `ingestUri`, `importPaths`, `adoptUnclaimed` and `sync`'s re-ingest all funnel through here,
+    // so this is where a direct caller that skipped the plan stage gets the same normalization the
+    // plan uses for identity.
+    const safeDomain = normalizeWrite(domain)
+    const safeSource = normalizeWrite(source)
+    const safeSourceUri = sourceUri === undefined ? undefined : normalizeWrite(sourceUri)
+    this.assertDomainAllowed(safeDomain)
     if (text.length > MAX_DOC_CHARS) throw new Error(`文档过大：${text.length} 字符（上限 ${MAX_DOC_CHARS}）`)
     const chunks = chunkText(text, this.kbConfig.chunk_size, this.kbConfig.chunk_overlap)
     // `source` no longer doubles as a title: it defaults to one shared value, so a paste without a
     // title would land on one identity per domain. The title is DERIVED from the body instead
     // (`ingestUri`/`importPaths` pass an explicit basename or URL, so they never reach this fallback).
-    const docTitle = title ?? deriveDocTitle(text)
+    const docTitle = normalizeWrite(title ?? deriveDocTitle(text))
     // IMMEDIATE, not the default DEFERRED: this is a read-modify-write (upsert the doc → read the
     // old chunk ids → delete → re-insert) and a DEFERRED transaction takes its write lock only at the
     // first write, AFTER the reads. A shared data home is a supported shape (plugin and CLI at once),
@@ -612,21 +638,21 @@ export class KnowledgeStore {
     // `setVector`s those now-dead chunk ids — leaving phantom vectors in the live index. Taking the
     // write lock up front serializes the pair, like `memory.ts` does for the same shape.
     const tx = this.db.transaction(() => {
-      const docId = this.docs.upsert(domain, source, docTitle, sourceUri)
+      const docId = this.docs.upsert(safeDomain, safeSource, docTitle, safeSourceUri)
       const oldChunkIds = this.chunks.idsForDoc(docId)
       // Read the vectors BEFORE the replace, keyed by content hash: a chunk whose text did not
       // change keeps its embedding instead of paying the ONNX forward pass again. `--overwrite`, a
       // repeated ingest and `adoptUnclaimed` (recovering an overwritten file) all take this path.
       const reusable = this.reusableByHash(docId, this.vectorSpace())
       this.chunks.deleteForDoc(docId) // re-ingest replaces chunks
-      this.docs.touch(docId, sourceUri)
+      this.docs.touch(docId, safeSourceUri)
       const newChunkIds = this.chunks.insertMany(
         docId,
         chunks.map((chunk, idx) => ({
           idx,
           text: chunk.text,
           headingsPath: chunk.headingsPath,
-          sourceRef: `${domain}:${source}:${docId}:${idx}`,
+          sourceRef: `${safeDomain}:${safeSource}:${docId}:${idx}`,
           charStart: chunk.start,
           charEnd: chunk.end,
         })),
@@ -652,7 +678,7 @@ export class KnowledgeStore {
       // The managed copy is written AFTER the index is live, and a failure here must not fail the
       // ingest: the document is searchable either way, and `sync` reports the document as
       // `missing` so the user sees why the file buttons have nothing to open.
-      ...this.writeManagedFile(result.doc_id, { domain, source, title: docTitle, sourceUri, converter }, text, gitAction),
+      ...this.writeManagedFile(result.doc_id, { domain: safeDomain, source: safeSource, title: docTitle, sourceUri: safeSourceUri, converter }, text, gitAction),
     }
   }
 

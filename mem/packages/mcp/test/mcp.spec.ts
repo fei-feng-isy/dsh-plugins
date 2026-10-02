@@ -3,8 +3,26 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime, supportsToolKey, type AvantfRuntime } from '@avantf/mem'
-import { buildMcpServer, jsonSchema } from '../src/index.js'
+import { buildMcpServer, jsonSchema, textResult } from '../src/index.js'
 import { REMEMBER_TOOL, QUERY_TOOL, TOOL_SPECS } from '@avantf/mem-contract'
+
+/** Every string reachable from the value must be well-formed (JSON.parse accepts lone surrogates). */
+function expectWellFormedEverywhere(value: unknown, path = '$'): void {
+  if (typeof value === 'string') {
+    expect(value.isWellFormed(), `${path}: ${JSON.stringify(value)}`).toBe(true)
+    return
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => expectWellFormedEverywhere(item, `${path}[${i}]`))
+    return
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      expect(key.isWellFormed(), `${path} key`).toBe(true)
+      expectWellFormedEverywhere(item, `${path}.${key}`)
+    }
+  }
+}
 
 let dir: string
 let rt: AvantfRuntime
@@ -163,5 +181,25 @@ describe('MCP server', () => {
     expect(bad.body.ok).toBe(false)
     expect(bad.body.error).toContain('参数不合法')
     expect(bad.body.violations?.join()).toContain('query')
+  })
+
+  it('serializes a result carrying a lone surrogate into strictly-parseable text', () => {
+    // A payload this process did not just write (an older build's row, a foreign driver's) — the
+    // MCP boundary is the last place it can be repaired before the text leaves.
+    const payload = {
+      ok: true,
+      result: { content: 'legacy\uD800row\uDC00', entities: ['\uD800ent', '🐟', '𠀀'], nested: { ['k\uD800']: '"\\\n\t' } },
+    }
+    expect(JSON.stringify(payload)).toContain('\\ud800') // the defect the boundary closes
+
+    const text = textResult(payload).content[0].text
+    expect(text).not.toContain('\\ud800')
+    expect(text).not.toContain('\\udc00')
+    expectWellFormedEverywhere(JSON.parse(text))
+  })
+
+  it('every live handler answer is well-formed', async () => {
+    const answer = await callTool('mem_remember', { action: 'add', content: '边界完整性检查' })
+    expectWellFormedEverywhere(answer.body)
   })
 })

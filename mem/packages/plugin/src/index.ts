@@ -76,6 +76,7 @@ import { resetPandocResolution, setPandocProvisioning } from '@avantf/mem-conver
 import { openDocumentPath, type OpenOutcome, type OpenTarget } from './open.js'
 import { browseDirectory, classifySource } from '@avantf/mem'
 import { flattenToolSpec } from './tool_schema.js'
+import { OUTPUT } from './render.js'
 
 export const name = 'avantf-mem'
 export { inject } from './inject.js'
@@ -132,11 +133,6 @@ async function runToolSpec(spec: ToolSpec, rt: AvantfRuntime, args: unknown): Pr
     return toolErr(error) as unknown as Record<string, JsonValue>
   }
 }
-
-const OUTPUT = {
-  schema: { type: 'object', additionalProperties: true },
-  render: (_args: unknown, value: JsonValue): { type: 'text'; text: string }[] => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
-} as const
 
 function present(spec: ToolSpec, args: Record<string, unknown>): GenericCallView {
   return { card: 'generic', title: spec.name, kind: 'other', rawInput: args }

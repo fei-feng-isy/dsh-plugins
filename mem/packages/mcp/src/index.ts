@@ -9,6 +9,7 @@ import {
   modelFacingToolResult,
   toolOk,
   toolErr,
+  toWellFormedDeep,
   validationError,
   type ToolSpec,
 } from '@avantf/mem-contract'
@@ -18,9 +19,18 @@ export function jsonSchema(spec: ToolSpec): Record<string, unknown> {
   return toolInputJsonSchema(spec)
 }
 
-/** One MCP text result carrying the shared tool envelope (see ToolEnvelope). */
-function textResult(payload: unknown, isError = false): { isError?: boolean; content: { type: 'text'; text: string }[] } {
-  return { ...(isError ? { isError: true } : {}), content: [{ type: 'text', text: JSON.stringify(payload) }] }
+/**
+ * The ONE model-facing output boundary of the MCP server.
+ *
+ * Every `tools/call` answer — success envelope, validation error, thrown failure — leaves through
+ * here, so this is the last place before `JSON.stringify`. `toWellFormedDeep` repairs every string
+ * in the payload first: the MCP result can carry a database row this process did not just write (an
+ * older build's data, a foreign driver's), and `JSON.stringify` would otherwise emit a lone
+ * surrogate as `"\ud800"` — legal to JavaScript's parser, rejected by strict ones. Exported so the
+ * boundary itself can be asserted without standing up a transport.
+ */
+export function textResult(payload: unknown, isError = false): { isError?: boolean; content: { type: 'text'; text: string }[] } {
+  return { ...(isError ? { isError: true } : {}), content: [{ type: 'text', text: JSON.stringify(toWellFormedDeep(payload)) }] }
 }
 
 /**

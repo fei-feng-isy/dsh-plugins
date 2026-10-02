@@ -29,7 +29,7 @@ import {
   type HybridDeps,
   type HybridLeg,
 } from './hybrid.js'
-import { evictVectors as evictVectorsOf, reportForeignVectors, vectorSpaceOf } from './common.js'
+import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportForeignVectors, vectorSpaceOf } from './common.js'
 import type { Db } from '../db/conn.js'
 import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
@@ -353,17 +353,26 @@ export class MemoryStore {
   }
 
   async add(content: string, category?: string, ttlDays?: number): Promise<RememberResult> {
-    const normalized = content.trim()
+    // Normalize BEFORE tagging: the row, every derived entity/triple and the `entities` this call
+    // RETURNS all descend from this one string, so repairing it here is what lets them agree
+    // (`normalizeWrite` = well-formed + NFC; see store/common).
+    const normalized = normalizeWrite(content).trim()
     if (!normalized) throw new Error('内容不能为空')
 
     // ONE tagging pass drives both extractors (they used to tag the same content separately).
     const tokens = await tagText(normalized)
-    const entities = entitiesFromTokens(tokens, normalized).map((e) => e.name)
-    const triples = triplesFromTokens(tokens)
+    const entities = normalizeWrites(entitiesFromTokens(tokens, normalized).map((e) => e.name))
+    const triples = this.normalizeTriples(triplesFromTokens(tokens))
 
     // `category`/`ttlDays` stay `undefined` when unset, so a duplicate-content hit keeps the
     // existing row's values instead of resetting them (see `persistFact`).
-    const { fact_id, is_new, revived } = this.persistFact(normalized, category, ttlDays, entities, triples)
+    const { fact_id, is_new, revived } = this.persistFact(
+      normalized,
+      category === undefined ? undefined : normalizeWrite(category),
+      ttlDays,
+      entities,
+      triples,
+    )
     if (is_new || revived) {
       // Index BEFORE checking: the embedding leg can only see a vector that exists,
       // and the fact being written should participate in its own check.
@@ -443,21 +452,23 @@ export class MemoryStore {
   async update(fact_id: number, content: string, category?: string, ttlDays?: number): Promise<RememberResult> {
     const row = this.getRow(fact_id)
     if (!row) throw new Error(`找不到 fact_id=${fact_id}`)
-    const normalized = content.trim()
+    // Same entry as `add`: normalize before tagging, so the replaced row, its derived data and the
+    // echoed `entities` all describe the SAME text (see there).
+    const normalized = normalizeWrite(content).trim()
     if (!normalized) throw new Error('内容不能为空')
     // Re-extract for the NEW content: an updated fact must stay visible to the
     // entity/jaccard/ask paths and to semantic search, exactly like a fresh add.
     // ONE tagging pass drives both extractors (they used to tag the same content separately).
     const tokens = await tagText(normalized)
-    const entities = entitiesFromTokens(tokens, normalized).map((e) => e.name)
-    const triples = triplesFromTokens(tokens)
+    const entities = normalizeWrites(entitiesFromTokens(tokens, normalized).map((e) => e.name))
+    const triples = this.normalizeTriples(triplesFromTokens(tokens))
     // Archive old and create a fresh fact linked by supersedes_id.
     // A revision is the same fact rewritten: `persistFact` carries the replaced row's
     // category and TTL over unless the caller gave new ones, so an update no longer
     // silently drops an explicit TTL (or retags the fact a merge lands on).
     const { fact_id: newId, is_new, revived } = this.persistFact(
       normalized,
-      category,
+      category === undefined ? undefined : normalizeWrite(category),
       ttlDays,
       entities,
       triples,
@@ -483,7 +494,9 @@ export class MemoryStore {
     const status = this.facts.statusOf(fact_id)
     if (status === undefined) return false
     if (status === 'archived') return true
-    const changed = this.facts.archive(fact_id, readClock(this.db), reason)
+    // The one writer of `archive_reason` — the contract's `reason` AND the lifecycle's own literals
+    // both land here, so normalizing at this entry covers every caller.
+    const changed = this.facts.archive(fact_id, readClock(this.db), normalizeWrite(reason))
     // The live index tracks ACTIVE facts only (see reloadIndex): drop the vector.
     if (changed > 0) {
       this.vstore.remove(fact_id)
@@ -1019,8 +1032,8 @@ export class MemoryStore {
       for (const row of rows) {
         // Tag ONCE for both extractors (the write path does the same — see `tagText`).
         const tokens = await tagText(row.content)
-        const entities = entitiesFromTokens(tokens, row.content).map((e) => e.name)
-        const triples = triplesFromTokens(tokens)
+        const entities = normalizeWrites(entitiesFromTokens(tokens, row.content).map((e) => e.name))
+        const triples = this.normalizeTriples(triplesFromTokens(tokens))
         const hrr = hrrToBytes(encodeHrrEntityVector(entities))
         this.db.transaction(() => {
           this.entities.unlinkFact(row.fact_id)
@@ -1614,6 +1627,22 @@ export class MemoryStore {
 
   private linkEntities(fact_id: number, entities: string[]): void {
     this.entities.linkFact(fact_id, entities)
+  }
+
+  /**
+   * Normalize the SPO slots of extracted triples through the same write entry as fact content.
+   *
+   * The triples are DERIVED (from an already-normalized content string, in `add`/`update`), but a
+   * tokenizer is free to hand back a half code unit, and a future truncation rule could split a
+   * surrogate pair — so the derived rows cross the same entry instead of trusting the producer.
+   */
+  private normalizeTriples(triples: ExtractedTriple[]): ExtractedTriple[] {
+    return triples.map((t) => ({
+      ...t,
+      subj: normalizeWrite(t.subj),
+      pred: normalizeWrite(t.pred),
+      obj: normalizeWrite(t.obj),
+    }))
   }
 
   private insertTriples(fact_id: number, triples: ExtractedTriple[]): void {

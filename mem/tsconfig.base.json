@@ -3,7 +3,10 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
+    // `ES2024.String` adds `toWellFormed`/`isWellFormed` (see packages/contract/src/text.ts). The
+    // runtime floor is Node ≥22.15, which has them; the engine is UTF-16-string based, so the rest
+    // of ES2024 is not implied.
+    "lib": ["ES2022", "ES2024.String"],
     "strict": true,
     "declaration": true,
     "declarationMap": true,

@@ -13,7 +13,27 @@
  */
 import type { SemanticBackend, VectorStore } from '@avantf/mem-core'
 import { retrievalLogger } from '@avantf/mem-core'
+import { toWellFormedText } from '@avantf/mem-contract'
 import { vectorSpaceId } from '../db/vectors.js'
+
+/**
+ * The ONE write-side normalization both stores call before anything reaches the database.
+ *
+ * `@avantf/mem-contract`'s `toWellFormedText` is the implementation (well-formed + NFC); this name
+ * is the store-layer entry, so the write paths say WHAT they are doing ("normalize this for a
+ * write") rather than repeating a Unicode recipe. Every text field a store persists — fact content,
+ * category, archive reason, a document's domain/source/title/uri, entity names and the SPO slots of
+ * extracted triples — goes through here, which is what keeps a lone surrogate (and the strict-JSON
+ * failure it causes downstream) out of the database in the first place.
+ */
+export function normalizeWrite(value: string): string {
+  return toWellFormedText(value)
+}
+
+/** {@link normalizeWrite} over a batch (entity names, caller paths, …). */
+export function normalizeWrites(values: readonly string[]): string[] {
+  return values.map(normalizeWrite)
+}
 
 /**
  * Identity of the vector space a store currently writes into.

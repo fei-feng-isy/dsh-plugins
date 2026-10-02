@@ -27,6 +27,30 @@ function runFail(args: string[], home: string): { status: number; stderr: string
   }
 }
 
+/**
+ * Every string reachable from the CLI's RAW stdout must be well-formed.
+ *
+ * `JSON.parse` alone proves nothing here: JavaScript's parser accepts the `"\ud800"` escape a lone
+ * surrogate serializes to, while a strict parser rejects it. So the assertion walks the parsed
+ * value.
+ */
+function expectWellFormedEverywhere(value: unknown, path = '$'): void {
+  if (typeof value === 'string') {
+    expect(value.isWellFormed(), `${path}: ${JSON.stringify(value)}`).toBe(true)
+    return
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => expectWellFormedEverywhere(item, `${path}[${i}]`))
+    return
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      expect(key.isWellFormed(), `${path} key`).toBe(true)
+      expectWellFormedEverywhere(item, `${path}.${key}`)
+    }
+  }
+}
+
 describe('CLI', () => {
   let home: string
   beforeAll(() => {
@@ -186,6 +210,28 @@ describe('CLI', () => {
   it('kb reindex reports the processed chunk count', () => {
     const out = JSON.parse(run(['kb', 'reindex'], home))
     expect(out.chunks).toBeGreaterThan(0)
+  })
+
+  it('add with a lone surrogate prints strictly parseable, well-formed JSON', () => {
+    // A real subprocess, capturing the RAW stdout (never the function's return value). Note that
+    // Node encodes argv as UTF-8, so the lone surrogate below reaches the child as U+FFFD — the
+    // assertion is still exactly the one that matters: what the CLI printed is well-formed JSON.
+    const content = 'CLI\uD800半\uDC00个 🐟 "引号" \\ 反斜杠 \n 换行 \t 制表'
+    const raw = run(['add', content], home)
+    const parsed = JSON.parse(raw) as { fact_id: number }
+    expectWellFormedEverywhere(parsed)
+    expect(raw).not.toContain('\\ud800')
+    expect(raw).not.toContain('\\udc00')
+  })
+
+  it('add normalizes to NFC end-to-end (decomposed input comes back composed)', () => {
+    // `e` + combining acute is representable in argv (unlike a lone surrogate), so this exercises
+    // the write-side normalization through the real process boundary.
+    const added = JSON.parse(run(['add', 'cafe\u0301 记忆'], home)) as { fact_id: number }
+    const shown = JSON.parse(run(['show', String(added.fact_id)], home)) as { content: string }
+    expect(shown.content).toBe('café 记忆')
+    expect(shown.content).not.toContain('\u0301')
+    expectWellFormedEverywhere(shown)
   })
 
   afterAll(() => {
