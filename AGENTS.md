@@ -145,20 +145,22 @@ pnpm build:dsh mission && node mission/scripts/mount-smoke.mjs    # 或 pnpm -C 
 
 ## 体量与枢纽文件（hub）
 
-实测（2026-10-02）：417 个源文件、91225 行，其中 **>800 行且非测试脚手架的只有 10 个** —— 问题不是
-"大文件多"，而是少数**枢纽**被反复改动（最近 60 次提交里各 4–6 次）。名单（行数 / 备注）：
+实测（2026-10-02，六条车道收尾后）：436 个源文件、95693 行，其中 **>800 行且非测试脚手架的 11 个** —— 问题
+不是"大文件多"，而是少数**枢纽**被反复改动。**注意：它们本轮全部比上次更大**——抽缝的收益是"抑制增长"，
+不是"变小"（`tree.ts` 抽走 `dispatch.ts` 之后仍净增，因为同一波次加进来的功能更多）。名单（行数 / 备注）：
 
 | 文件 | 行数 | 备注 |
 |---|---|---|
-| `mission/packages/plugin/src/host.ts` | 1913 | 唯一**持续回长**的枢纽，每个新特性都插一脚 |
-| `mem/packages/core/src/store/memory.ts` | 1694 | 含实测性能结论的 SQL/索引形状，慎动 |
+| `mission/packages/plugin/src/host.ts` | 1998 | 唯一**持续回长**的枢纽，每个新特性都插一脚 |
+| `mem/packages/core/src/store/memory.ts` | 1723 | 含实测性能结论的 SQL/索引形状，慎动 |
+| `mission/packages/core/src/tree.ts` | 1690 | 状态机 + 持久化 + 投影 |
 | `mem/packages/plugin/src/client/index.ts` | 1678 | hyperscript 内联 UI，可按页面拆 |
-| `mem/packages/core/src/store/knowledge.ts` | 1583 | 同上（SQL 形状慎动） |
-| `mission/packages/core/src/tree.ts` | 1574 | 状态机 + 持久化 + 投影 |
+| `mem/packages/core/src/store/knowledge.ts` | 1609 | 同上（SQL 形状慎动） |
 | `base/plugin-base/src/provisioner.ts` | 1101 | base 枢纽，最后动 |
 | `mem/packages/core/src/db/dao/facts.ts` | 992 | |
 | `base/plugin-base/src/compat.ts` / `conformance.ts` | 937 / 877 | base 枢纽，最后动 |
-| `mem/packages/plugin/src/index.ts` | 813 | 插件装配入口 |
+| `mission/packages/plugin/src/client/MissionTreeView.tsx` | 891 | 面板 UI（加执行者会话跳转后越过 800） |
+| `mem/packages/plugin/src/index.ts` | 831 | 插件装配入口 |
 
 **规矩**：① **触及枢纽时，若正在加的关注点能干净分离，就顺手抽成独立模块**——`claims.ts` /
 `continuation.ts` / `prompt.ts` / `hybrid.ts` / `dao/facts.ts` 都是这么来的，**不专门开重构线**；
