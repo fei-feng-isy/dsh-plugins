@@ -726,6 +726,7 @@ describe('the browser half\'s wire face', () => {
       'detail',
       'result',
       'delete',
+      'cleanFinished',
       'resolveExecutorSession',
       'watch',
     ])
@@ -734,6 +735,8 @@ describe('the browser half\'s wire face', () => {
       'snapshotResult',
       'deleteargs',
       'deleteResult',
+      'cleanFinishedargs',
+      'cleanFinishedResult',
       'detailargs',
       'detailResult',
       'resultargs',

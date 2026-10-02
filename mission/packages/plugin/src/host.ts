@@ -314,6 +314,12 @@ export class AvantfMissionHost extends TypertRemoteService {
   private engine?: MissionEngine
   private domain?: { close(): Promise<void> }
   private sweepDispose?: () => void
+  /**
+   * Extra best-effort passes to run after every sweep. Automatic worker retention registers here so
+   * it rides the EXISTING sweep cadence instead of arming a second timer. The host never awaits a
+   * pass: a slow or failing one must not delay dispatch, and a rejection is reported, not surfaced.
+   */
+  private readonly sweepListeners = new Set<() => void | Promise<void>>()
   private readonly workerAborts = new Map<string, AbortController>()
   /** Every child session id reserved for a worker, for the process lifetime: answers "is this settling
    *  agent one of ours?" even after the node's binding is gone. */
@@ -663,6 +669,7 @@ export class AvantfMissionHost extends TypertRemoteService {
   async stop(): Promise<void> {
     this.sweepDispose?.()
     this.sweepDispose = undefined
+    this.sweepListeners.clear()
     // The controller owns only the start; an accepted worker is stopped through `subagents.interrupt`.
     for (const controller of this.workerAborts.values()) {
       controller.abort(new Error('avantf-mission: plugin unloading'))
@@ -699,7 +706,31 @@ export class AvantfMissionHost extends TypertRemoteService {
     }
     // A sweep is the engine acting on its own — the one change no session-side signal can carry.
     if (result.reclaimed + result.dispatched > 0) this.announceAllTrees()
+    // Post-sweep passes (automatic worker retention) ride this cadence, never a timer of their own.
+    this.runSweepListeners()
     return result
+  }
+
+  /**
+   * Register one best-effort pass to run after every {@link sweep}. Used by automatic worker
+   * retention, which must ride the existing cadence rather than arm a second timer. The pass is
+   * never awaited: it cannot delay or fail a sweep, and a rejection becomes one warning.
+   */
+  onSweep(pass: () => void | Promise<void>): void {
+    this.sweepListeners.add(pass)
+  }
+
+  /** Fire each registered post-sweep pass without awaiting it. A throw or rejection is a warning. */
+  private runSweepListeners(): void {
+    for (const pass of [...this.sweepListeners]) {
+      try {
+        Promise.resolve(pass()).catch((error: unknown) => {
+          this.log.warn(`sweep listener failed: ${error instanceof Error ? error.message : String(error)}`)
+        })
+      } catch (error: unknown) {
+        this.log.warn(`sweep listener failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
   }
 
   /**
@@ -1449,6 +1480,81 @@ export class AvantfMissionHost extends TypertRemoteService {
     // By owner, not root id: the tree is gone from the store, so a root lookup would find nothing.
     this.announceOwner(record.ownerSessionId)
     return { deleted: result.value }
+  }
+
+  /**
+   * Delete EVERY closed tree this session owns, in one pass — the panel's "清理已完成" and
+   * `/clean missions all`.
+   *
+   * Guardrails, per tree: `ownerSessionId` must equal the caller (another session's tree is never
+   * even a candidate), and `closedAt` must be set (a tree that has not been retired through
+   * `finish_mission` is skipped and reported, never deleted). `finish` can only set `closedAt` on a
+   * terminal root, and `deleteTree` re-checks terminality, so a running tree cannot slip through —
+   * but a refusal is still bucketed rather than thrown. Deletion goes through the same
+   * `tree.deleteTree` the single-tree `delete` uses; the panel is told once, by owner.
+   */
+  @Remote('cleanFinished')
+  async cleanFinished(args: { sessionId?: string }): Promise<{ deleted: readonly string[]; skipped: readonly string[] }> {
+    const tree = this.tree
+    const sessionId = args.sessionId
+    if (tree === undefined || sessionId === undefined || sessionId === '') {
+      return { deleted: [], skipped: [] }
+    }
+    const owned = tree.trees().filter((entry) => entry.ownerSessionId === sessionId)
+    // Not closed out ⇒ kept, and reported in its own bucket. Another session's tree never reaches here.
+    const skipped: string[] = owned
+      .filter((entry) => entry.closedAt === null)
+      .map((entry) => entry.rootId)
+    const deleted: string[] = []
+    for (const entry of owned) {
+      if (entry.closedAt === null) continue
+      const result = await tree.deleteTree(entry.rootId)
+      if (result.ok) {
+        deleted.push(entry.rootId)
+        this.log.info(
+          `cleanFinished: removed tree ${entry.rootId} with ${String(result.value.length)} node(s)`,
+        )
+      } else {
+        // Defensive: a closed tree's root is terminal, so this is unreachable in normal operation.
+        skipped.push(entry.rootId)
+        this.log.warn(`cleanFinished: kept ${entry.rootId}: ${result.code} — ${result.message}`)
+      }
+    }
+    if (deleted.length > 0) this.announceOwner(sessionId)
+    return { deleted, skipped }
+  }
+
+  /** Root ids of every tree one session owns, newest first (empty before the engine is ready). */
+  ownedTreeIds(sessionId: string): readonly string[] {
+    return this.tree?.trees()
+      .filter((entry) => entry.ownerSessionId === sessionId)
+      .map((entry) => entry.rootId)
+      .reverse() ?? []
+  }
+
+  /**
+   * Distinct owner session ids the task library knows about: the scope of per-owner background
+   * passes (automatic worker retention runs once per owner). Read from the durable trees, so it
+   * covers owners whose trees survived a restart, not just the ones seen this process. Empty before
+   * the engine is ready.
+   */
+  ownerSessionIds(): readonly string[] {
+    const seen = new Set<string>()
+    for (const entry of this.tree?.trees() ?? []) seen.add(entry.ownerSessionId)
+    return [...seen]
+  }
+
+  /**
+   * Root ids of the trees one session owns and has CLOSED OUT (`finish_mission`): the batch-clean
+   * candidates. A tree whose nodes all reached a terminal status but which was never retired is
+   * deliberately NOT a candidate — completion is the owner's `finish_mission`, and such a tree stays
+   * deletable one at a time from the panel (the per-tree "删除" button).
+   */
+  finishedTreeIds(sessionId: string): readonly string[] {
+    return this.tree?.trees()
+      .filter((entry) => entry.ownerSessionId === sessionId && entry.closedAt !== null)
+      .map((entry) => entry.rootId)
+      .reverse() ?? []
   }
 
   @Remote({ mode: 'stream' })

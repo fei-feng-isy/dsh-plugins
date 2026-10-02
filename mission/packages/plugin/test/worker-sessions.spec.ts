@@ -18,8 +18,10 @@ import {
   reconcileArchivedGhosts,
   removeWorker,
   sessionDirFor,
+  workerRetention,
   workerSessions,
   type StoredSession,
+  type WorkerSession,
   type WorkerSessionDeps,
 } from '../src/workerSessions.js'
 
@@ -512,5 +514,147 @@ describe('the projection cache is cleared with the record it belongs to', () => 
     const result = await cleanWorkers(fake, OWNER, () => false)
     expect(result.purged).toEqual([])
     expect(result.purgeFailures).toEqual([])
+  })
+})
+
+describe('automatic retention: keep the newest N settled workers per owner', () => {
+  /** A deterministic worker id in the claim shape, from an index. */
+  const workerId = (index: number): string => `mission-${index.toString(16).padStart(8, '0')}`
+
+  /** `count` settled workers, OLDEST first by `createdAt`, as the projection reports them. */
+  function settledWorkers(count: number, baseAt = 1000): WorkerSession[] {
+    return Array.from({ length: count }, (_, index) => ({
+      id: workerId(index),
+      createdAt: baseAt + index,
+      live: false,
+      bytes: 0,
+      dir: undefined,
+    }))
+  }
+
+  /** `count` live workers, oldest first, with createdAt above every settled one. */
+  function liveWorkers(count: number, baseAt = 5000): WorkerSession[] {
+    return Array.from({ length: count }, (_, index) => ({
+      id: workerId(100 + index),
+      createdAt: baseAt + index,
+      live: true,
+      bytes: 0,
+      dir: undefined,
+    }))
+  }
+
+  it('keeps the newest 10 of 13 and releases the 3 older ones, by injected createdAt', () => {
+    const state = workerRetention(settledWorkers(13), 10)
+    expect(state.enabled).toBe(true)
+    // Newest first, proven by the injected timestamps — never by wall-clock time.
+    expect(state.settled.map((worker) => worker.createdAt)).toEqual([
+      1012, 1011, 1010, 1009, 1008, 1007, 1006, 1005, 1004, 1003, 1002, 1001, 1000,
+    ])
+    // The boundary is exact: the newest ten are retained, the three oldest are releasable.
+    expect(state.retained.map((worker) => worker.createdAt)).toEqual([
+      1012, 1011, 1010, 1009, 1008, 1007, 1006, 1005, 1004, 1003,
+    ])
+    expect(state.releasable.map((worker) => worker.createdAt)).toEqual([1002, 1001, 1000])
+  })
+
+  it('never counts a live worker against the budget, and never releases one', () => {
+    // 3 finished + 8 running: the finished count is 3 <= 10, so NOTHING is released even though the
+    // session has 11 worker records in total.
+    const fewSettled = workerRetention([...settledWorkers(3), ...liveWorkers(8)], 10)
+    expect(fewSettled.releasable).toEqual([])
+    expect(fewSettled.live).toHaveLength(8)
+
+    // 13 finished + 4 running: still exactly the 3 oldest FINISHED workers, with the live ones intact.
+    const manySettled = workerRetention([...settledWorkers(13), ...liveWorkers(4)], 10)
+    expect(manySettled.releasable.map((worker) => worker.createdAt)).toEqual([1002, 1001, 1000])
+    expect(manySettled.releasable.every((worker) => !worker.live)).toBe(true)
+    expect(manySettled.live).toHaveLength(4)
+    expect(manySettled.retained.every((worker) => !worker.live)).toBe(true)
+  })
+
+  it('treats keep=0 as "keep all", never as "keep none"', () => {
+    const state = workerRetention(settledWorkers(13), 0)
+    expect(state.enabled).toBe(false)
+    expect(state.releasable).toEqual([])
+    expect(state.retained).toHaveLength(13)
+  })
+
+  it('releases the overflow through the archive → delete → unarchive → purge chain', async () => {
+    const ids = Array.from({ length: 13 }, (_, index) => workerId(index))
+    const root = sessionRoot(ids)
+    const cache = projectionCacheRoot(ids)
+    const seen: string[] = []
+    const archived: string[] = []
+    const fake: WorkerSessionDeps = {
+      // Deliberately OLDEST LAST in the listing: only the injected createdAt may decide the order.
+      list: () => Promise.resolve(ids.map((id, index) => stored(id, { createdAt: 1000 + index })).reverse()),
+      archive: (id) => {
+        archived.push(id)
+        seen.push(`archive:${id}`)
+        return Promise.resolve()
+      },
+      unarchive: (id) => {
+        seen.push(`unarchive:${id}:${sessionDirFor(root, id) === undefined ? 'record-gone' : 'record-present'}`)
+        return Promise.resolve()
+      },
+      isLive: () => false,
+      sessionsRoot: root,
+      projectionCacheRoot: cache,
+    }
+
+    const result = await cleanWorkers(fake, OWNER, () => false, { retain: 10 })
+
+    // The three OLDEST go, newest-of-the-overflow first; the ten newer records stay on disk.
+    expect(result.cleaned.map((entry) => entry.id)).toEqual([ids[2], ids[1], ids[0]])
+    for (const id of ids.slice(3)) expect(sessionDirFor(root, id)).toBeDefined()
+    for (const id of ids.slice(0, 3)) expect(sessionDirFor(root, id)).toBeUndefined()
+    // Step 3 runs AFTER the record is gone, one worker at a time — the same pipeline `/clean` uses.
+    expect(seen).toEqual([
+      `archive:${ids[2]}`, `unarchive:${ids[2]}:record-gone`,
+      `archive:${ids[1]}`, `unarchive:${ids[1]}:record-gone`,
+      `archive:${ids[0]}`, `unarchive:${ids[0]}:record-gone`,
+    ])
+    // And the projection-cache residue of each released record is purged with it.
+    expect([...result.purged].sort()).toEqual([ids[0], ids[1], ids[2]].sort())
+    // Only the released overflow was ever archived: the ten retained records were not touched.
+    expect(archived).toEqual([ids[2], ids[1], ids[0]])
+  })
+
+  it('is a no-op when the settled count is exactly N', async () => {
+    const ids = Array.from({ length: 10 }, (_, index) => workerId(index))
+    const root = sessionRoot(ids)
+    const fake = deps(root, ids.map((id, index) => stored(id, { createdAt: 1000 + index })))
+    const result = await cleanWorkers(fake, OWNER, () => false, { retain: 10 })
+    expect(result.cleaned).toEqual([])
+    expect(fake.archived).toEqual([])
+    for (const id of ids) expect(sessionDirFor(root, id)).toBeDefined()
+  })
+
+  it('releases nothing when the policy is off (keep=0)', async () => {
+    const ids = Array.from({ length: 13 }, (_, index) => workerId(index))
+    const root = sessionRoot(ids)
+    const fake = deps(root, ids.map((id, index) => stored(id, { createdAt: 1000 + index })))
+    const result = await cleanWorkers(fake, OWNER, () => false, { retain: 0 })
+    expect(result.cleaned).toEqual([])
+    expect(fake.archived).toEqual([])
+    for (const id of ids) expect(sessionDirFor(root, id)).toBeDefined()
+  })
+
+  it('never reaches another owner session\'s workers', async () => {
+    const mine = Array.from({ length: 3 }, (_, index) => workerId(index))
+    const foreign = [workerId(200), workerId(201)]
+    const root = sessionRoot([...mine, ...foreign])
+    const list = [
+      ...mine.map((id, index) => stored(id, { createdAt: 1000 + index })),
+      ...foreign.map((id, index) => stored(id, { createdAt: 500 + index, parentSession: 'session-other' })),
+    ]
+    const fake = deps(root, list)
+    // keep=2 with 3 of ours settled: only OUR oldest overflow is released; the foreign two, which are
+    // older still, are not even candidates.
+    const result = await cleanWorkers(fake, OWNER, () => false, { retain: 2 })
+    expect(result.cleaned.map((entry) => entry.id)).toEqual([mine[0]])
+    expect([...result.foreign].sort()).toEqual([...foreign].sort())
+    expect(fake.archived).toEqual([mine[0]])
+    for (const id of foreign) expect(sessionDirFor(root, id)).toBeDefined()
   })
 })

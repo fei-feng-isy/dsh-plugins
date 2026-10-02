@@ -2,8 +2,10 @@
  * @module @avantf/dsh-mission/client/api
  */
 import {
+  CLEAN_FINISHED_WIRE_VERSION,
   EXECUTOR_LOOKUP_WIRE_VERSION,
   SNAPSHOT_WIRE_VERSION,
+  cleanFinishedResultSchema,
   detailResultSchema,
   snapshotResultSchema,
 } from '../wire.js'
@@ -32,6 +34,10 @@ export interface MissionRemote {
   snapshot: (args: { sessionId: string }) => Promise<unknown>
   detail: (args: { sessionId: string; nodeId: string }) => Promise<unknown>
   delete: (args: { sessionId: string; rootId: string }) => Promise<unknown>
+  /** Delete EVERY closed tree this session owns (the panel's "清理已完成"). Optional for the same
+   *  reason as `result`: an older host has no such method, and the panel refuses to send the call
+   *  rather than reading the gateway's 404 as "the missions are gone". */
+  cleanFinished?: (args: { sessionId: string }) => Promise<unknown>
   /** The FULL text behind a spilled result. Optional for the same reason `watch` is: an older host
    *  simply does not have it, and the pane falls back to showing the locator. */
   result?: (args: { sessionId: string; nodeId: string }) => Promise<unknown>
@@ -190,6 +196,44 @@ export async function deleteWork(remote: MissionRemote, sessionId: string, rootI
   return Array.isArray(deleted) ? (deleted as string[]) : []
 }
 
+/**
+ * Delete EVERY closed tree this session owns — the batch entry behind the panel's "清理已完成".
+ *
+ * The first half is the version-skew gate, exactly as {@link fetchExecutorSession}'s: against a host
+ * whose `wire` predates the method, sending the call can only produce a gateway 404 that reads like
+ * "the missions are gone". The call is not sent, and the sentence names the remedy (restart dsh).
+ *
+ * Returns the two id lists the host reported — the roots removed and the roots kept because they were
+ * never retired — so the caller can render "N removed / M skipped" without parsing prose.
+ */
+export async function cleanFinishedWork(
+  remote: MissionRemote,
+  sessionId: string,
+  hostWire?: number,
+): Promise<{ deleted: readonly string[]; skipped: readonly string[] }> {
+  if (hostWire === undefined || hostWire < CLEAN_FINISHED_WIRE_VERSION) {
+    throw new Error(staleCleanHostText(hostWire))
+  }
+  const clean = remote.cleanFinished
+  if (typeof clean !== 'function') {
+    throw new Error(
+      '宿主可能没有注册这个接口（旧版本 / 未重启）：Remote 面没有 cleanFinished 调用，'
+      + '宿主只在 dsh web 启动时加载一次，重启 dsh web 后再试。',
+    )
+  }
+  let response: unknown
+  try {
+    response = await clean({ sessionId })
+  } catch (cause: unknown) {
+    throw new Error(transportHint(cause))
+  }
+  const { value, error } = unwrap(response)
+  if (error !== undefined) throw new Error(error)
+  const parsed = cleanFinishedResultSchema.safeParse(value)
+  if (!parsed.success) throw new Error(skewHint('已完成任务清理', issueText(parsed.error)))
+  return { deleted: parsed.data.deleted, skipped: parsed.data.skipped }
+}
+
 export function asDetail(value: unknown): Partial<MissionNodeDetail> & { error?: string } {
   const parsed = detailResultSchema.safeParse(value)
   if (!parsed.success) return { error: skewHint('任务详情', issueText(parsed.error)) }
@@ -239,6 +283,15 @@ function staleHostLookupText(hostWire: number | undefined): string {
     : `宿主仍在运行旧版本（wire ${String(hostWire)} < ${String(EXECUTOR_LOOKUP_WIRE_VERSION)}）`
   return `${state}：它还没有注册 resolveExecutorSession 这条调用，所以这次查找没有发出去。`
     + '重启 dsh 后即可点击历史任务。'
+}
+
+/** The same gate as {@link staleHostLookupText}, for the batch clean: the call is never sent. */
+function staleCleanHostText(hostWire: number | undefined): string {
+  const state = hostWire === undefined
+    ? `宿主没有回报 wire 版本（本客户端需要 ${String(CLEAN_FINISHED_WIRE_VERSION)}）`
+    : `宿主仍在运行旧版本（wire ${String(hostWire)} < ${String(CLEAN_FINISHED_WIRE_VERSION)}）`
+  return `${state}：它还没有注册 cleanFinished 这条调用，所以这次清理没有发出去。`
+    + '重启 dsh web 后即可批量清理已完成任务（也可以先用 /clean missions all）。'
 }
 
 /**

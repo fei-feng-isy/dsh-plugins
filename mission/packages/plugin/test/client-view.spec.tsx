@@ -1136,4 +1136,69 @@ describe('MissionTreeView', () => {
     expect(button).not.toContain('disabled')
     expect(button).toContain('>删除<')
   })
+
+  it('offers a batch clean button, disabled while no tree is closed out', () => {
+    // The batch entry is separate from the per-tree delete: same control vocabulary, its own row,
+    // and it refuses (visibly, with the reason) while nothing has been retired through finish_mission.
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data: snapshot(), loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        onCleanFinished={() => Promise.resolve({ deleted: [], skipped: [] })}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+      />,
+    )
+    // The toolbar sits above the scrolling list, so the slice stops at it.
+    const bar = html.slice(html.indexOf('avwf-clean'), html.indexOf('avwf-scroll'))
+    expect(bar).toContain('清理已完成')
+    expect(bar).toContain('disabled')
+    expect(bar).toContain('本会话没有已完成')
+  })
+
+  it('counts the closed trees on the batch button once one is archived', () => {
+    const data: MissionSnapshot = { trees: [{ ...snapshot().trees[0]!, closedAt: 123 }] }
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        onCleanFinished={() => Promise.resolve({ deleted: ['r1'], skipped: [] })}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+      />,
+    )
+    const bar = html.slice(html.indexOf('avwf-clean'), html.indexOf('avwf-scroll'))
+    expect(bar).toContain('清理已完成（1）')
+    expect(bar).not.toContain('disabled')
+  })
+
+  it('renders no batch bar without the host call, nor for a session with no tree', () => {
+    // An older host has no `cleanFinished`: offering the button would be a promise it cannot keep.
+    const noCall = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data: snapshot(), loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+      />,
+    )
+    expect(noCall).not.toContain('avwf-clean')
+
+    // The call exists but the session owns nothing: the empty panel stays empty, markup and all.
+    const empty = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data: history(0), loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        onCleanFinished={() => Promise.resolve({ deleted: [], skipped: [] })}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+      />,
+    )
+    expect(empty).not.toContain('avwf-clean')
+    expect(empty.replace(/<[^>]*>/gu, '').replace(/<!--.*?-->/gu, '').trim()).toBe('')
+  })
 })

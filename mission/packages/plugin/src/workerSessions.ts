@@ -169,6 +169,49 @@ function toWorkers(deps: WorkerSessionDeps, records: readonly StoredSession[]): 
     .sort((a, b) => a.createdAt - b.createdAt)
 }
 
+/** One owner session's retention picture, computed from its own workers (never from the store). */
+export interface WorkerRetention {
+  /** Settled workers (`!live`), newest first; ties broken by id so the order is deterministic. */
+  readonly settled: readonly WorkerSession[]
+  /** Live workers: excluded from the count entirely, and never a release candidate. */
+  readonly live: readonly WorkerSession[]
+  /** The newest `keep` settled workers the policy holds (all of them when the policy is off). */
+  readonly retained: readonly WorkerSession[]
+  /** Settled workers OLDER than the retained ones: what automatic retention would release. */
+  readonly releasable: readonly WorkerSession[]
+  /** `false` when `keep <= 0`: automatic retention is OFF, so nothing is releasable. */
+  readonly enabled: boolean
+}
+
+/**
+ * Split one owner's workers into what the retention policy KEEPS and what it would release.
+ *
+ * The count is over SETTLED (`!live`) workers only. A live worker does not occupy a retention slot
+ * and is never a candidate, so "keep the newest N" means "keep the newest N FINISHED workers",
+ * however many are still running: 13 finished + 4 running with N=10 releases 3, and 3 finished +
+ * 8 running with N=10 releases nothing.
+ *
+ * Ordering is by `header.createdAt` descending — newest first — with the id as a deterministic
+ * tie-break, so a listing and a pass can never disagree about which worker sits on the boundary.
+ * `keep <= 0` disables the policy: everything is kept and nothing is releasable (the disabled
+ * spelling is "keep all", NOT "keep none").
+ */
+export function workerRetention(workers: readonly WorkerSession[], keep: number): WorkerRetention {
+  const settled = workers
+    .filter((worker) => !worker.live)
+    .slice()
+    .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const live = workers.filter((worker) => worker.live)
+  const enabled = keep > 0
+  return {
+    settled,
+    live,
+    retained: enabled ? settled.slice(0, keep) : settled,
+    releasable: enabled ? settled.slice(keep) : [],
+    enabled,
+  }
+}
+
 export function bytes(n: number): string {
   if (n < 1024) return `${String(n)} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
@@ -251,12 +294,18 @@ function reasonOf(error: unknown): string {
  * deletion still stands (the files are gone) and the failure is reported in `unarchiveFailures`.
  * `only` narrows the pass to one named id, still looked up inside this session's own workers. Without
  * a registry the pass is `supported: false` and removes nothing.
+ *
+ * `retain` is the AUTOMATIC retention half: it narrows the candidates to the settled workers OLDER
+ * than the newest `retain` (see {@link workerRetention}) and reuses this same archive → delete →
+ * unarchive → purge pipeline. Live workers are excluded from the count, so they never occupy a
+ * retention slot and are never released. `retain <= 0` means "policy off", which keeps everything.
+ * A named `only` pass is an explicit manual action and ignores `retain`.
  */
 export async function cleanWorkers(
   deps: WorkerSessionDeps,
   ownerId: string,
   archived: (id: string) => boolean,
-  options: { readonly only?: string } = {},
+  options: { readonly only?: string; readonly retain?: number } = {},
 ): Promise<WorkerCleanup> {
   const all = await deps.list()
   const foreign = all
@@ -266,6 +315,11 @@ export async function cleanWorkers(
     isOurWorker(record, ownerId) && (options.only === undefined || record.header.id === options.only))
   const workers = toWorkers(deps, mine)
   const running = workers.filter((worker) => worker.live).map((worker) => worker.id)
+  // Automatic retention: release only what falls outside the newest `retain` settled workers. The
+  // named form is manual and explicit, so it is never narrowed.
+  const candidates = options.only === undefined && options.retain !== undefined
+    ? workerRetention(workers, options.retain).releasable
+    : workers
 
   if (deps.archive === undefined) {
     return {
@@ -285,7 +339,7 @@ export async function cleanWorkers(
   const unarchiveFailures: RefusedWorker[] = []
   const purged: string[] = []
   const purgeFailures: RefusedWorker[] = []
-  for (const worker of workers) {
+  for (const worker of candidates) {
     if (worker.live) continue
     const already = archived(worker.id)
     if (!already) {

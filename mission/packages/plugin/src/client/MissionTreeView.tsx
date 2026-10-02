@@ -988,14 +988,62 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession,
   )
 }
 
+/**
+ * The batch entry above the list: "清理已完成", armed on the first click and carried out on the
+ * second, the same two-gesture rule the per-tree delete uses. Disabled — with the reason in its
+ * tooltip — when the session has no closed tree yet. Rendered only when the host advertises the call
+ * and the session owns at least one tree, so the empty panel stays empty.
+ */
+function CleanFinishedBar({ finished, busy, onClean }: {
+  finished: number
+  busy: boolean
+  onClean: () => void
+}): ReactNode {
+  const [confirming, setConfirming] = useState(false)
+
+  // An armed button must not stay armed, or a later click runs the batch unconfirmed.
+  useEffect(() => {
+    if (!confirming) return undefined
+    const timer = setTimeout(() => { setConfirming(false) }, CONFIRM_MS)
+    return () => { clearTimeout(timer) }
+  }, [confirming])
+
+  const disabled = finished === 0 || busy
+  return (
+    <div className="avwf-toolbar">
+      <button
+        type="button"
+        className={confirming ? 'avwf-clean avwf-clean-armed' : 'avwf-clean'}
+        disabled={disabled}
+        title={finished === 0
+          ? '本会话没有已完成（finish_mission 收尾）的任务树'
+          : `删除本会话全部 ${String(finished)} 棵已完成任务树：节点与结果一并删除，不可恢复`}
+        onClick={() => {
+          if (!confirming) {
+            setConfirming(true)
+            return
+          }
+          setConfirming(false)
+          onClean()
+        }}
+      >
+        {busy ? '清理中…' : confirming ? `确认清理 ${String(finished)} 棵` : `清理已完成${finished === 0 ? '' : `（${String(finished)}）`}`}
+      </button>
+    </div>
+  )
+}
+
 /** Render the session's mission trees. */
 export function MissionTreeView({
-  useSnapshot, onDeleteTree, loadDetail, loadResult, sessionId, openWorkerSession, resolveWorkerSession,
+  useSnapshot, onDeleteTree, onCleanFinished, loadDetail, loadResult, sessionId, openWorkerSession, resolveWorkerSession,
 }: MissionViewProps): ReactNode {
   INSTALL_STYLES()
   const state = useSnapshot()
   const [busy, setBusy] = useState<string | undefined>(undefined)
   const [failure, setFailure] = useState<string | undefined>(undefined)
+  const [cleaning, setCleaning] = useState(false)
+  const [cleanNote, setCleanNote] = useState<string | undefined>(undefined)
+  const [cleanFailed, setCleanFailed] = useState(false)
   const [openId, setOpenId] = useState<string | undefined>(undefined)
   const [dialog, setDialog] = useState<DialogState | undefined>(undefined)
 
@@ -1014,6 +1062,26 @@ export function MissionTreeView({
         setFailure(cause instanceof Error ? cause.message : String(cause))
       })
       .finally(() => { setBusy(undefined) })
+  }
+
+  /** Delete every closed tree, then re-read; the host's two counts become one line. */
+  const cleanFinished = (): void => {
+    if (onCleanFinished === undefined) return
+    setCleaning(true)
+    setCleanNote(undefined)
+    setCleanFailed(false)
+    void onCleanFinished()
+      .then((result) => {
+        setCleanNote(result.deleted.length === 0
+          ? `没有已完成的任务树可清理（跳过 ${String(result.skipped.length)} 棵未收尾）。`
+          : `已清理 ${String(result.deleted.length)} 棵已完成任务（跳过 ${String(result.skipped.length)} 棵仍在进行）。`)
+        return state.refresh()
+      })
+      .catch((cause: unknown) => {
+        setCleanFailed(true)
+        setCleanNote(cause instanceof Error ? cause.message : String(cause))
+      })
+      .finally(() => { setCleaning(false) })
   }
 
   // The writes below are keyed to `nodeId` on purpose: a read that was in flight when the
@@ -1060,6 +1128,9 @@ export function MissionTreeView({
 
   const openDetail = (nodeId: string): void => { setOpenId(nodeId) }
   const actions: RowActions = { openId, onOpenDetail: openDetail }
+  // Only CLOSED trees (finish_mission) are batch-clean candidates; an un-retired tree is skipped and
+  // reported by the host. Counting here is for the button's label and its enabled/disabled state.
+  const finishedCount = trees.filter((tree) => tree.closedAt !== null).length
 
   const renderTree = (tree: MissionTreeViewData, slot?: { style: CSSProperties; index: number }): ReactNode => (
     <div
@@ -1087,6 +1158,14 @@ export function MissionTreeView({
       {/* Version skew is a NOTE, not a failure: the snapshot still renders below it. */}
       {state.data?.skew !== undefined ? <div className="avwf-warn">{state.data.skew}</div> : null}
       {failure !== undefined ? <div className="avwf-error">删除失败：{failure}</div> : null}
+      {/* The batch entry sits ABOVE the scrolling list, and only when there is a list to act on:
+          a session with no tree keeps the empty panel empty. */}
+      {onCleanFinished === undefined || trees.length === 0
+        ? null
+        : <CleanFinishedBar finished={finishedCount} busy={cleaning} onClean={cleanFinished} />}
+      {cleanNote === undefined
+        ? null
+        : <div className={cleanFailed ? 'avwf-error' : 'avwf-meta'}>{cleanNote}</div>}
       {state.loading && state.data === undefined ? <div className="avwf-empty">读取中…</div> : null}
       {/* No empty-state message: a session with no trees shows an empty panel. */}
       {/* The scroll container owns the viewport the window is computed from, so it is

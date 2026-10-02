@@ -164,6 +164,13 @@ export interface MissionViewProps {
   readonly useSnapshot: () => MissionSnapshotState
   /** Delete one whole finished mission tree by root; rejects with the host's reason, which the view shows. */
   readonly onDeleteTree: (rootId: string) => Promise<void>
+  /**
+   * Delete EVERY closed (finish_mission-archived) tree this session owns, in one batch — the panel's
+   * "清理已完成". ABSENT when this host has no such call (an older host): the button is then not
+   * rendered at all rather than offered and doomed. Rejects with the host's reason, which the view
+   * shows; resolves to the two root-id lists the host reported so the panel can say what happened.
+   */
+  readonly onCleanFinished?: () => Promise<{ deleted: readonly string[]; skipped: readonly string[] }>
   readonly loadDetail: (nodeId: string) => Promise<MissionNodeDetail>
   /** Read the FULL text behind a spilled result; rejects with the host's reason, which the pane shows. */
   readonly loadResult: (nodeId: string) => Promise<string>

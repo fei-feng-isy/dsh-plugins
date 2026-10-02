@@ -12,7 +12,7 @@ DSH（DeepSeek Harness）原生 Cordis 插件：**任务树引擎**。
 
 | 贡献 | 作用 |
 |---|---|
-| 宿主服务 `avantfMission` | 拥有任务树、存储域与派活循环；Remote 面给"任务"标签读树（`snapshot`）、读单个任务详情（`detail`）、**按需读回落盘的完整结果**（`result`）、删任务（`delete`）、**点击时查找历史任务的执行者会话**（`resolveExecutorSession`），并把每次变更推给已打开的标签（`watch`，stream 调用）|
+| 宿主服务 `avantfMission` | 拥有任务树、存储域与派活循环；Remote 面给"任务"标签读树（`snapshot`）、读单个任务详情（`detail`）、**按需读回落盘的完整结果**（`result`）、删任务（`delete`）、**批量删除本会话已关闭任务树**（`cleanFinished`，面板「清理已完成」与 `/clean missions all` 共用）、**点击时查找历史任务的执行者会话**（`resolveExecutorSession`），并把每次变更推给已打开的标签（`watch`，stream 调用）|
 | 9 个模型工具，分两张面孔 | `create_mission` / `adjust_mission` / `note_mission` / `decompose_mission` / `submit_mission` / `mission_result` / `list_missions` / `finish_mission` / `cancel_mission`。**owner 面孔**（顶层会话）见 6 个：`create_mission`/`adjust_mission`/`mission_result`/`list_missions`/`finish_mission`/`cancel_mission`；**executor 面孔**（任务单元）见 3 个：`note_mission`/`decompose_mission`/`submit_mission`。`note_mission` 只给执行者：它写下本轮自己的分析，而 `decompose_mission` 会拒绝一个没写过分析的拆解。回收是引擎自己的事，不给模型一个手动回收的工具 —— 见下。**owner 看不到任务内部**：`list_missions` 只说一个任务还在跑、或者反复出过问题（`troubled`，是历史而非现值），不报它被拆成了什么、各部分什么状态 —— owner 只对整棵树有动作（`adjust_mission` / `cancel_mission`），内部结构是引擎的事 |
 | 一段静态系统提示词段 | 告诉模型**什么时候**该把活交出去（判据是"能不能连验收标准一起交出去"，不是复不复杂；需要拆与不需要拆的都算）、以及"谁在等、别轮询、别替它做"，并附一句**写法提示**（要交付长规格或长清单时，先写进仓库里的文件、描述里指向它 —— 超长工具参数是实测的失败源）。参数怎么填、任务能不能包含某类内容都**不在这段里**（前者属于工具的说明，后者由 owner 自己判断）。与 `create_mission` 的授权判据同一个判据，worker 视角返回空串。**正文可编辑**：家族共享目录 `<data home>/prompts/mission-tree-guide.md`（缺失或空白写回默认，启动时读一次；见根 README「自定义系统提示词」） |
 | 一段引导上下文 | 每轮把树的状态写进 owner 的 prompt |
@@ -103,14 +103,24 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 
 - **`/archive`**：把本会话已完成的 mission 会话标记为归档。走 `workspaceRegistry.archiveSession()` —— harness 的官方接口，durable，可用 unarchive 撤销。**它只改标记，不释放任何磁盘。** 它是 `/clean` 的便捷前置，但**不再是必须**的：`/clean archive` 自己会先归档。
 - **`/clean`**：两个作用域同形，**只给作用域永远只列不删**，删除必须 `all` 或具体 id；旧的无作用域形式 `/clean all`、`/clean <mission-id>` 一律报错并指路（不静默当别名）：
-  - `/clean`（无参数）→ 只读总览：archive 作用域的可清理清单（含幽灵 id 一节）+ orphans 作用域的按原因分组清单；
-  - `/clean archive` → 只列 archive 作用域；`/clean archive all` → 一趟清理本会话所有**已完成（非运行）**的 worker 会话记录，走**三步生命周期：标记归档 → 释放记录 → 取消归档**（尚未归档的先调 `archiveSession`，归档成功后才删目录，删完再调 `unarchiveSession` 撤掉标记），并在**释放记录的同一步**删掉它的投影缓存残留（见下）；`/clean archive <mission-xxxxxxxx>` → 只清这一个（同样三步，且必须在**本会话**的 worker 里找到）；
+  - `/clean`（无参数）→ 只读总览：archive 作用域的可清理清单（含**保留状态**两行与幽灵 id 一节）+ orphans 作用域的按原因分组清单；
+  - `/clean archive` → 只列 archive 作用域（同样带保留状态）；`/clean archive all` → 一趟清理本会话所有**已完成（非运行）**的 worker 会话记录（**手动全清，不受 `keepWorkers` 保留数限制**），走**三步生命周期：标记归档 → 释放记录 → 取消归档**（尚未归档的先调 `archiveSession`，归档成功后才删目录，删完再调 `unarchiveSession` 撤掉标记），并在**释放记录的同一步**删掉它的投影缓存残留（见下）；`/clean archive <mission-xxxxxxxx>` → 只清这一个（同样三步，且必须在**本会话**的 worker 里找到）；
   - 输出分桶说明发生了什么：**归档并清理 N 个**（逐个标出"本次归档 / 原本已归档"）、**清理残留投影缓存 M 个**（与 N 分开报，见下）、**已删除但取消归档失败 X 个**（删除成立，只记日志/输出，不回滚）、**因仍在运行跳过 M 个**、**不属于本会话跳过 K 个**、以及**对账清理了 G 个幽灵 id**。没有 `workspaceRegistry` 时直接报"无法归档 ⇒ 无法清理"，一个记录都不删（归档标记来自 registry，没有它就无从授权释放）；
   - 清单把「已完成未归档」（记录仍在、值得清理）与「已归档但记录已不在（幽灵）」（记录已释放、只剩标记）分开显示：前者要删，后者只需取消归档；
   - `/clean orphans` → 只列孤立任务树（按原因分节）；`/clean orphans all` → 删除列出的每一棵；`/clean orphans <root-xxxxxxxx>` → 只删一棵；
   - 删除前**逐个重新探测** owner：期间变回可观测的、或已经不存在的树会被跳过并在输出里说明。这是唯一允许触碰别的会话的任务树的路径，且仅当该树的 owner 不存在或不可观测。
 
 **清理是"标记归档 → 释放记录 → 取消归档"三步，一趟完成**：作用域 = 本会话的 + 已结算的（`isOurWorker` 且 `!live`）。尚未归档的先归档，归档**成功之后**才删会话记录，删完再撤掉标记；归档失败（或部署里根本没有 registry）就**保留记录**并在输出里说明。第三步是 best-effort：**取消归档失败不回滚删除** —— 文件已经没了，留着标记只会变成幽灵 id（更糟）；失败进输出与日志，留给下次对账。**运行中的 worker 永不触碰** —— 用户明确不要打断它们，要清就得等它结束；别的会话的 worker 只被计入"不属于本会话跳过"，绝不删。
+
+**自动保留（`keepWorkers`，默认 10）：只数已完成的，每属主会话各留最新 N 个。** 光靠手动 `/clean` 会让磁盘随派活次数无界增长，所以插件加了一条按数量的自动策略，复用上面同一条链路（`cleanWorkers(..., { retain: N })` 只收窄候选集）：
+
+- 候选 = **本属主会话的、`mission-*` 的、`!live`** 的 worker，按会话头 `createdAt` **降序**取最新 N 个保留，其余释放。**live 既不算名额、也不释放**：13 个已完成 + 4 个在执行 → 释放 3 个（最旧的已完成）；3 个已完成 + 8 个在执行 → **零释放**。
+- **按属主会话各自保留**：命令路径（`/clean` 清单）用调用者会话；挂载与扫描路径用任务库里已知的属主会话（`host.ownerSessionIds()`，取自 `tree.trees()` 的 `ownerSessionId`）逐个跑。
+- **触发点**：① 挂载时一次（链在 `host.start()` 的 `ready` 上、**不 await** —— `apply` 必须能在存储还没打开时返回；链尾 `catch`，不留未处理拒绝）；② 每轮 `host.sweep()` 之后（`host.onSweep` 注册，**不新造计时器**）。
+- **`keepWorkers = 0` 关闭自动保留**（= 保留全部），**不是**"一个都不留"；配置 schema 只接受非负整数，代码再把 `<= 0` 当关闭。
+- **自动保留 vs 手动全清**：自动只释放**超出 N 的旧记录**；`/clean archive all` 是显式手势，一次释放本会话**所有**已完成记录，**不受 N 限制**。
+- **best-effort**：释放失败只 warn，绝不影响挂载与命令结果；**绝不中断任何 live worker**。
+- **`/clean` 清单分两行显示**：「已完成 worker：X 个（保留最新 10 → 可自动清理 Y 个）」与「正在执行：Z 个（不计入保留名额、不会被清理）」。
 
 **"幽灵 id"对账（为什么存在第三步）**：归档标记的唯一作用是授权释放记录。记录一删，标记就再没有意义 —— 但它是 durable 写进 registry 的，删除目录并不会顺手清掉它。留下的后果是**子智能体列表**（以及一切读 `archivedSessionIds` 的面）会一直把已经删掉的会话显示出来：本机实测 `archivedSessionIds` 里积了 64 个 `mission-*`，而磁盘上只剩 3 个。因此插件在**挂载时**与 **`/clean archive all` 里**各跑一次对账（`reconcileArchivedGhosts`），对每条"已归档、`mission-*` 形状、且**会话语料库 `sessionQuery.listSessions()` 与 `sessionsRoot` 都查不到**"的 id 调 `unarchiveSession`。边界是刻意收窄的：只用 `mission-*` 形状（非本插件形状绝不碰）、只在**缺席被证实**时动手（没有 `sessionQuery` 时判"无法证明"而不是"不存在"，一条都不动）、仍然存在的记录不动。宿主接口本身是幂等的（"An id that is not archived resolves without writing"），所以重复挂载/重复对账安全。
 
@@ -166,7 +176,7 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 | 时机 | 行 |
 |---|---|
 | `apply` 进入 | `mounting: config=… inject=…` |
-| typert 注册后 | `typert host face registered (namespace avantfMission, 6 invocations: snapshot, detail, result, delete, resolveExecutorSession, watch)` |
+| typert 注册后 | `typert host face registered (namespace avantfMission, 7 invocations: snapshot, detail, result, delete, cleanFinished, resolveExecutorSession, watch)` |
 | 工具注册后 | `registered N tools: …` |
 | 挂载收尾 | `mounted: /mission command, 9 tools (/archive, /clean), guidance context, pre-step gate` |
 | 开存储域 | `start-up: opening the mission-tree storage domain` |

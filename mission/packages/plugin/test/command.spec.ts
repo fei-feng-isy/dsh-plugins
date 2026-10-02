@@ -46,9 +46,9 @@ describe('the /archive and /clean registrations', () => {
       expect(command?.description, name).toMatch(/[\u4e00-\u9fff]/)
       expect(command?.description, name).toMatch(/mission|会话/)
     }
-    // The hint is the grammar in one line: both scopes, both targets, and the id shapes.
+    // The hint is the grammar in one line: all three scopes, every target, and the id shapes.
     expect(mounted.commands.find((entry) => entry.name === 'clean')?.input?.hint)
-      .toBe('[archive [all|mission-xxxxxxxx] | orphans [all|root-xxxxxxxx]]')
+      .toBe('[archive [all|mission-xxxxxxxx] | missions [all] | orphans [all|root-xxxxxxxx]]')
   })
 
   it('reports an empty store instead of failing', async () => {

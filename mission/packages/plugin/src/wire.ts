@@ -142,9 +142,10 @@ const treeSchema = z.object({
 /**
  * The wire surface: `snapshot` the summary, `detail` one node's full record, `result` the FULL text
  * behind a spilled one (on demand — a reader asks for it, the panel never prefetches it), `delete`
- * one finished tree, `watch` a revision on every change (the engine pushing, not polling), and
- * `resolveExecutorSession` the CLICK-TIME lookup of a historical node's executor session (W18 — it
- * reads session logs, so it is deliberately NOT part of any render path).
+ * one finished tree, `cleanFinished` every CLOSED tree this session owns (the panel's batch entry),
+ * `watch` a revision on every change (the engine pushing, not polling), and `resolveExecutorSession`
+ * the CLICK-TIME lookup of a historical node's executor session (W18 — it reads session logs, so it
+ * is deliberately NOT part of any render path).
  * Every method carries a session id because a Remote invocation has no caller identity.
  */
 export const descriptors: readonly InvocationDescriptor[] = [
@@ -152,6 +153,7 @@ export const descriptors: readonly InvocationDescriptor[] = [
   direct('detail', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('result', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('delete', z.object({ sessionId: z.string().optional(), rootId: z.string() })),
+  direct('cleanFinished', z.object({ sessionId: z.string().optional() })),
   direct('resolveExecutorSession', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('watch', z.object({ sessionId: z.string().optional() }), [], { stream: true }),
 ]
@@ -183,8 +185,10 @@ export const descriptors: readonly InvocationDescriptor[] = [
  * - 1: `snapshot` / `detail` / `result` / `delete` / `watch`.
  * - 2: `resolveExecutorSession` added (W18) — it shipped WITHOUT this bump, which is the defect the
  *   revision repairs.
+ * - 3: `cleanFinished` added — the panel's batch entry for a session's CLOSED task trees (the same
+ *   semantics as `/clean missions all`).
  */
-export const SNAPSHOT_WIRE_VERSION = 2
+export const SNAPSHOT_WIRE_VERSION = 3
 
 /**
  * The wire revision that FIRST carried `resolveExecutorSession`. A host reporting less than this — or
@@ -194,6 +198,14 @@ export const SNAPSHOT_WIRE_VERSION = 2
  * advertises the newer one.
  */
 export const EXECUTOR_LOOKUP_WIRE_VERSION = 2
+
+/**
+ * The wire revision that FIRST carried `cleanFinished`. Same gate as the executor lookup, for the
+ * same reason: a rebuilt panel talking to a host process from before the method existed would get a
+ * gateway 404, which reads like "the mission is gone". The panel refuses to send the call and names
+ * the remedy instead.
+ */
+export const CLEAN_FINISHED_WIRE_VERSION = 3
 
 export const snapshotResultSchema = z.object({
   wire: z.number().optional(),
@@ -217,6 +229,17 @@ const resultTextSchema = z.object({
 const deleteResultSchema = z.object({
   deleted: z.array(z.string()),
   error: z.string().optional(),
+})
+
+/**
+ * What one batch cleanup did: the ROOT ids of the closed trees removed, and the root ids left
+ * standing. `skipped` is the session's own trees that are not closed out — never another session's
+ * tree, which this call does not even look at. Both halves are plain id lists so the panel can say
+ * "N removed / M skipped" without parsing prose.
+ */
+export const cleanFinishedResultSchema = z.object({
+  deleted: z.array(z.string()),
+  skipped: z.array(z.string()),
 })
 
 const detailNodeSchema = z.object({
@@ -283,6 +306,8 @@ declaredSchemas.push(
   declare('snapshotResult', snapshotResultSchema),
   declare('deleteargs', z.object({ sessionId: z.string().optional(), rootId: z.string() })),
   declare('deleteResult', deleteResultSchema),
+  declare('cleanFinishedargs', z.object({ sessionId: z.string().optional() })),
+  declare('cleanFinishedResult', cleanFinishedResultSchema),
   declare('detailargs', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   declare('detailResult', detailResultSchema),
   declare('resultargs', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),

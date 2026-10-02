@@ -45,6 +45,7 @@ import {
   foreignWorkerIds,
   ghostArchiveIds,
   reconcileArchivedGhosts,
+  workerRetention,
   workerSessions,
   type ArchiveRegistry,
   type GhostReconcile,
@@ -69,6 +70,13 @@ export const name = 'avantf-mission'
 
 // A title is one line by convention (the mission chain renders one per ancestor), so a pasted paragraph must not become one.
 const TITLE_MAX = 80
+
+/**
+ * How many SETTLED worker sessions automatic retention keeps per owner session: newest by
+ * `header.createdAt` first, live workers not counted. `0` (or a negative value) turns the automatic
+ * policy off — "keep all", never "keep none"; `/clean archive all` is the manual full clean.
+ */
+const DEFAULT_KEEP_WORKERS = 10
 
 /** Why a tree counts as an orphan, as `/clean orphans` groups and renders it: the operator reads the
  *  difference between a session that is GONE (reconciled automatically) and a host that cannot answer
@@ -136,6 +144,11 @@ export interface Config {
    *  session (default `<dsh home>/storages/session_projcache/sessions`). Only a file named exactly
    *  `mission-<8 hex>.json` is ever touched, so a wrong value removes nothing. */
   projectionCacheRoot?: string
+  /** How many SETTLED (finished) worker sessions to keep per owner session; older ones are released
+   *  automatically at mount and on every sweep. Default 10. Live workers never count against it and
+   *  are never released. `0` disables automatic retention entirely (keep everything); it does NOT
+   *  mean "keep none" — the manual `/clean archive all` is what releases every settled worker. */
+  keepWorkers?: number
   /** The avantf data home (default `$AVANTF_HOME`, else `~/.avantf`). Only its `prompts/` subdirectory
    * is used — the shared directory holding every avantf plugin's editable system-prompt text. */
   dataHome?: string
@@ -150,6 +163,7 @@ export const Config: z<Config> = z.object({
   roundMs: z.natural(),
   sessionsRoot: z.string(),
   projectionCacheRoot: z.string(),
+  keepWorkers: z.natural(),
   dataHome: z.string(),
 })
 
@@ -288,7 +302,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       log.info(
         `typert host face registered (namespace avantfMission, ${
           String((hostContribution as unknown as { invocations?: readonly unknown[] }).invocations?.length ?? 0)
-        } invocations: snapshot, detail, result, delete, resolveExecutorSession, watch)`,
+        } invocations: snapshot, detail, result, delete, cleanFinished, resolveExecutorSession, watch)`,
       )
       // One line that settles "which half is stale?" without a debugger: the two halves of this plugin
       // update on different schedules (the browser bundle per page load, this face only when `dsh web`
@@ -525,6 +539,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       ?? join(dshHome(), 'storages', 'session_projcache', 'sessions'),
   }
 
+  // Automatic retention: keep the newest N settled workers PER OWNER SESSION. `0` (or a negative
+  // configured value) disables the policy; it never means "keep none" (see `DEFAULT_KEEP_WORKERS`).
+  const keepWorkers = config.keepWorkers ?? DEFAULT_KEEP_WORKERS
+
   /** The ids the workspace registry reports as archived; empty without a registry. */
   const archivedIds = (): ReadonlySet<string> =>
     new Set((registryOf()?.archivedSessionIds ?? []).map((id) => String(id)))
@@ -607,16 +625,75 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   /** No registry means no archive marker, and no archive marker means no release: said out loud. */
   const NO_REGISTRY = '这个部署没有挂载 workspace registry，无法归档 ⇒ 无法清理。'
 
+  /**
+   * Automatic retention for ONE owner session: keep the newest `keepWorkers` SETTLED worker sessions
+   * and release the rest through the same archive → delete → unarchive → projection-cache purge
+   * pipeline `/clean archive` uses (`cleanWorkers` with `retain`). Live workers are excluded from the
+   * count and never touched. Best-effort by construction: every failure is a warning, and the caller
+   * (mount or sweep) is never affected. `undefined` when the policy is off or nothing can be archived.
+   */
+  const retainWorkersFor = async (ownerId: string): Promise<WorkerCleanup | undefined> => {
+    if (keepWorkers <= 0 || registryOf() === undefined) return undefined
+    try {
+      const result = await cleanWorkers(sessionDeps, ownerId, (id) => archivedIds().has(id), { retain: keepWorkers })
+      if (result.cleaned.length > 0) {
+        log.info(
+          `retention: ${ownerId} kept the newest ${String(keepWorkers)} settled worker(s), `
+          + `released ${String(result.cleaned.length)}: ${result.cleaned.map((entry) => entry.id).join(', ')}`,
+        )
+      }
+      for (const failure of result.refused) {
+        log.warn(`retention: ${failure.id} kept, archive failed — ${failure.reason}`)
+      }
+      for (const failure of result.unarchiveFailures) {
+        log.warn(`retention: ${failure.id} released, but unarchive failed — ${failure.reason}`)
+      }
+      for (const failure of result.purgeFailures) {
+        log.warn(`retention: ${failure.id} released, but projection cache purge failed — ${failure.reason}`)
+      }
+      return result
+    } catch (error: unknown) {
+      log.warn(`retention pass for ${ownerId} failed: ${error instanceof Error ? error.message : String(error)}`)
+      return undefined
+    }
+  }
+
+  /**
+   * The automatic retention pass over EVERY owner session the task library knows about. Runs once at
+   * mount and on every sweep (registered through `host.onSweep`), so it rides the existing cadence
+   * instead of arming a second timer. Each owner is handled independently — one owner's failure never
+   * stops another's pass — and the whole thing never throws.
+   */
+  const retentionPass = async (): Promise<void> => {
+    if (keepWorkers <= 0) return
+    for (const ownerId of host.ownerSessionIds()) await retainWorkersFor(ownerId)
+  }
+
+  // The sweep half of the trigger pair. Registered here (after the pass is defined); the interval
+  // armed by `host.start()` fires well after mount, and the pass is fire-and-forget inside the host.
+  host.onSweep(retentionPass)
+
   /** The `archive` scope as a read-only listing: what a cleanup pass would free, and what it would skip. */
   const archiveScopeLines = (
     workers: readonly WorkerSession[],
     archived: ReadonlySet<string>,
     listing: { readonly archivable: boolean; readonly foreign: readonly string[]; readonly ghosts: readonly string[] },
   ): string[] => {
-    const ready = workers.filter((worker) => !worker.live)
-    const running = workers.filter((worker) => worker.live)
+    // The retention picture is shown SEPARATELY from the manual scope: "what automatic retention
+    // would release" and "what /clean archive all would release" are two different numbers, and a
+    // person staring at a list that stops at N has to be able to see why it stops there.
+    const retention = workerRetention(workers, keepWorkers)
+    const ready = retention.settled
+    const running = retention.live
     return [
-      `可清理（非运行）${String(ready.length)} 个，共 ${bytes(ready.reduce((sum, worker) => sum + worker.bytes, 0))}：`,
+      ...(retention.enabled
+        ? [
+            `保留策略：每属主会话保留最新 ${String(keepWorkers)} 个已完成 worker（先归档 → 再释放 → 最后取消归档；live 不计入名额、永不清理）。`,
+            `已完成 worker：${String(ready.length)} 个（保留最新 ${String(keepWorkers)} → 可自动清理 ${String(retention.releasable.length)} 个）`,
+          ]
+        : ['保留策略已关闭（keepWorkers=0）：不按数量自动释放；要全清用 /clean archive all。']),
+      `正在执行：${String(running.length)} 个（不计入保留名额、不会被清理）`,
+      `手动 /clean archive all 可清理（本会话全部已完成）${String(ready.length)} 个，共 ${bytes(ready.reduce((sum, worker) => sum + worker.bytes, 0))}：`,
       ...ready.map((worker) =>
         `  ${worker.id}  ${bytes(worker.bytes)}  （${archived.has(worker.id) ? '已归档，记录仍在' : '已完成未归档，清理时先归档'}）`),
       // A separate class, not a worker: the record is GONE, only the archive marker survives. Shown
@@ -689,6 +766,48 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       `清理残留投影缓存 ${String(purged.length)} 个（宿主保留已释放会话的投影缓存且无驱逐 API，释放记录时一并删除）：`,
       ...purged.map((id) => `  ${id}`),
     ]
+  }
+
+  /**
+   * The `missions` scope, read-only: the CLOSED trees a batch pass would delete, and the trees that
+   * are skipped because they were never retired through `finish_mission`. This is the boundary the
+   * operator has to see: a task TREE (this plugin's record) is a different thing from the worker
+   * SESSION logs `/clean archive` releases, and only a closed tree is a batch-clean candidate.
+   */
+  const missionsListLines = (finished: readonly string[], ongoing: readonly string[]): string[] => {
+    const lines: string[] = []
+    if (finished.length === 0) {
+      lines.push(ongoing.length === 0
+        ? '没有可清理的已完成任务。'
+        : `没有可清理的已完成任务（跳过 ${String(ongoing.length)} 棵仍在进行）。`)
+    } else {
+      lines.push(`可清理的已完成任务 ${String(finished.length)} 棵：`)
+      for (const id of finished) lines.push(`  ${id}`)
+      lines.push('执行 /clean missions all 清理上面这些（只删本会话已关闭的任务树，不动 worker 会话记录）。')
+    }
+    if (ongoing.length > 0) {
+      lines.push(`未收尾跳过 ${String(ongoing.length)} 棵（仍在进行或尚未 finish_mission）：`)
+      for (const id of ongoing) lines.push(`  ${id}`)
+    }
+    return lines
+  }
+
+  /** What one `/clean missions all` pass did, in the two buckets the guardrails produce. */
+  const missionsCleanupLines = (deleted: readonly string[], skipped: readonly string[]): string[] => {
+    const lines: string[] = []
+    if (deleted.length === 0) {
+      lines.push(skipped.length === 0
+        ? '没有可清理的已完成任务。'
+        : `没有可清理的已完成任务（跳过 ${String(skipped.length)} 棵仍在进行）。`)
+    } else {
+      lines.push(`已清理 ${String(deleted.length)} 棵已完成任务（跳过 ${String(skipped.length)} 棵仍在进行）：`)
+      for (const id of deleted) lines.push(`  ${id}`)
+    }
+    if (skipped.length > 0) {
+      lines.push(`未收尾跳过 ${String(skipped.length)} 棵（仍在进行或尚未 finish_mission）：`)
+      for (const id of skipped) lines.push(`  ${id}`)
+    }
+    return lines
   }
 
   /** The `orphans` scope as a read-only listing, grouped by the reason each probe came back with. */
@@ -789,28 +908,34 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   ctx.commands.register({
     name: 'clean',
-    // The two scopes are the command's whole grammar, so the description names both and states the one
-    // rule that is easy to get wrong: no argument only LISTS; deleting needs a scope AND a target.
-    description: '清理 worker 会话记录或孤儿记录：archive 作用域清理本会话已完成的 worker 会话记录'
+    // The three scopes are the command's whole grammar, so the description names all of them and
+    // states the rule that is easy to get wrong: no argument only LISTS; deleting needs a scope AND
+    // a target.
+    description: '清理 worker 会话记录、已完成任务或孤儿记录：archive 作用域清理本会话已完成的 worker 会话记录'
       + '（先归档、再释放、最后取消归档，三步一趟完成；运行中的永不触碰）；'
-      + 'orphans 作用域针对 owner 会话已不存在或不可观测的记录。无参只列不删，删除必须同时给作用域与目标（all 或具体 id）。',
-    input: { hint: '[archive [all|mission-xxxxxxxx] | orphans [all|root-xxxxxxxx]]' },
+      + 'missions 作用域删除本会话已关闭（finish_mission 收尾）的已完成任务记录，只删任务记录、不动 worker 会话记录，用 all 一次清掉；'
+      + 'orphans 作用域针对 owner 会话已不存在或不可观测的孤儿记录。'
+      + '无参只列不删；删除必须同时给作用域与目标（archive/orphans 接受 all 或具体 id，missions 只接受 all）。',
+    input: { hint: '[archive [all|mission-xxxxxxxx] | missions [all] | orphans [all|root-xxxxxxxx]]' },
     handler: async ({ agent, rawInput }) => {
       const words = rawInput.trim().split(/\s+/u).filter((word) => word.length > 0)
       const [scope = '', target = '', ...extra] = words
 
-      // No argument is the read-only overview: both scopes, nothing removed.
+      // No argument is the read-only overview: all three scopes, nothing removed.
       if (scope === '') {
         const workers = await workerSessions(sessionDeps, agent.id)
         const archived = archivedIds()
         const ghosts = await listedGhosts(archived)
         const orphans = await host.orphanTreeReports({ fresh: true })
-        if (workers.length === 0 && orphans.length === 0 && ghosts.length === 0) {
-          return { kind: 'success', text: '本会话没有 mission 会话记录，也没有孤儿任务树。' }
+        const finished = host.finishedTreeIds(agent.id)
+        const ongoing = host.ownedTreeIds(agent.id).filter((id) => !finished.includes(id))
+        if (workers.length === 0 && orphans.length === 0 && ghosts.length === 0 && finished.length === 0) {
+          return { kind: 'success', text: '本会话没有 mission 会话记录，也没有孤儿任务树或已完成任务。' }
         }
         log.info(
           `/clean (list) from ${agent.id}: ${String(workers.length)} session record(s), `
-          + `${String(orphans.length)} orphan tree(s), ${String(ghosts.length)} ghost archive marker(s)`,
+          + `${String(orphans.length)} orphan tree(s), ${String(ghosts.length)} ghost archive marker(s), `
+          + `${String(finished.length)} closed tree(s)`,
         )
         return {
           kind: 'success',
@@ -822,6 +947,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
               ghosts,
             }),
             // Absent rather than empty when there is nothing to say: an "orphans: 0" section is noise.
+            ...(finished.length === 0 ? [] : ['', '本会话任务树（missions 作用域）：', ...missionsListLines(finished, ongoing)]),
             ...(orphans.length === 0 ? [] : ['', ...orphanScopeLines(orphans)]),
           ].join('\n'),
         }
@@ -830,16 +956,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       // One command, one spelling. The pre-scope forms (`/clean all`, `/clean <id>`) are ERRORS that
       // name their replacement — never silent aliases, because two spellings for one intent is what
       // this grammar exists to remove.
-      if (scope !== 'archive' && scope !== 'orphans') {
+      if (scope !== 'archive' && scope !== 'orphans' && scope !== 'missions') {
         return {
           kind: 'error',
           text: scope === 'all'
-            ? '作用域必填：改用 /clean archive all（已完成会话记录）或 /clean orphans all（孤儿任务树）。'
-            : `作用域必填：改用 /clean archive ${scope}（已完成会话记录）或 /clean orphans <root-xxxxxxxx>（孤儿树）。`,
+            ? '作用域必填：改用 /clean archive all（已完成会话记录）、/clean missions all（本会话已完成任务树）或 /clean orphans all（孤儿任务树）。'
+            : `作用域必填：改用 /clean archive ${scope}（已完成会话记录）、/clean missions（已完成任务树）或 /clean orphans <root-xxxxxxxx>（孤儿树）。`,
         }
       }
       if (extra.length > 0) {
         return { kind: 'error', text: `参数太多：/clean ${scope} 只接受 all 或一个 id。` }
+      }
+
+      if (scope === 'missions') {
+        const finished = host.finishedTreeIds(agent.id)
+        const ongoing = host.ownedTreeIds(agent.id).filter((id) => !finished.includes(id))
+        if (target === '') {
+          // The read-only dry run. Same two buckets the delete reports, so a listing and a pass agree.
+          log.info(`/clean missions (list) from ${agent.id}: ${String(finished.length)} closed, ${String(ongoing.length)} open`)
+          return { kind: 'success', text: missionsListLines(finished, ongoing).join('\n') }
+        }
+        if (target !== 'all') {
+          return {
+            kind: 'error',
+            text: `missions 只接受 all（批量删除本会话已关闭的任务树）：/clean missions all。`
+              + `要删单独一棵（含已完成未收尾的）用任务面板上的「删除」。`,
+          }
+        }
+        const result = await host.cleanFinished({ sessionId: agent.id })
+        log.info(
+          `/clean missions all from ${agent.id}: removed ${String(result.deleted.length)} tree(s), `
+          + `skipped ${String(result.skipped.length)} not-closed tree(s)`,
+        )
+        return { kind: 'success', text: missionsCleanupLines(result.deleted, result.skipped).join('\n') }
       }
 
       if (scope === 'orphans') {
@@ -1013,6 +1162,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   } catch (error: unknown) {
     log.warn(`ghost archive reconciliation at mount failed: ${error instanceof Error ? error.message : String(error)}`)
   }
+
+  // ── automatic worker retention, once per mount ───────────────────────────
+  // The tree — the only source of owner session ids — exists only after `start()` opened storage, so
+  // this is chained on `ready`. It is deliberately NOT awaited: `apply` must resolve while storage is
+  // still opening (a fast unmount lands inside that window — see `lifecycle-open.spec.ts`), and the
+  // sweep listener registered above repeats the pass on every tick anyway. The chain ends in a catch,
+  // so a failure is one warning and never an unhandled rejection (a process-level fatal).
+  void ready
+    .then(() => retentionPass())
+    .catch((error: unknown) => {
+      log.warn(`worker retention at mount failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
 
   log.info(
     `mounted: /mission command, ${String(tools.length)} tools (/archive, /clean), guidance context, pre-step gate`,

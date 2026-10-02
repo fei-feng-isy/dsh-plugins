@@ -14,8 +14,8 @@
  * This is the static half: it reads `descriptors` from `src/wire.ts` and recovers each host
  * method's own parameter names from `Function.prototype.toString()`, then asserts they line up
  * with the descriptor's wire fields one for one — for EVERY invocation (snapshot / detail / result /
- * delete / resolveExecutorSession / watch), which the existing wire assertions do not do (they only count the invocations
- * and check that `watch` carries `mode: 'stream'`).
+ * delete / cleanFinished / resolveExecutorSession / watch), which the existing wire assertions do not
+ * do (they only count the invocations and check that `watch` carries `mode: 'stream'`).
  *
  * The dynamic half — mounting a real `@deepseek-ai/dsh-typert-registry` and calling the six
  * methods through a gateway client — is deliberately NOT mocked here. The gateway is not
@@ -107,11 +107,12 @@ describe('the wire face: host method parameters match the descriptor, in order',
       'detail',
       'result',
       'delete',
+      'cleanFinished',
       'resolveExecutorSession',
       'watch',
     ])
     // The pairing below is only meaningful if every invocation is actually present.
-    expect(descriptors).toHaveLength(6)
+    expect(descriptors).toHaveLength(7)
   })
 
   it('gives each host method exactly the positional parameters its descriptor declares', () => {

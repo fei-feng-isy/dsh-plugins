@@ -7,6 +7,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import {
+  CLEAN_FINISHED_WIRE_VERSION,
   EXECUTOR_LOOKUP_WIRE_VERSION,
   SNAPSHOT_WIRE_VERSION,
   detailResultSchema,
@@ -16,6 +17,7 @@ import {
   POLL_INTERVAL_MS,
   REFRESH_COALESCE_MS,
   STREAM_REOPEN_MS,
+  cleanFinishedWork,
   coalesce,
   deleteWork,
   errorText,
@@ -260,6 +262,69 @@ describe('deleteWork', () => {
       value: { deleted: [], error: 'tree r1 is running; only a finished tree can be deleted' },
     })
     await expect(deleteWork(remote, 'session-1', 'r1')).rejects.toThrow('only a finished tree')
+  })
+})
+
+describe('cleanFinishedWork (the panel\'s batch clean)', () => {
+  /** A Remote with the batch call, recording it. */
+  function cleanRemote(answer: unknown, calls: { method: string; args: unknown }[] = []): MissionRemote {
+    return {
+      ...remoteReturning({ ok: true, value: { trees: [] } }),
+      cleanFinished: (args) => {
+        calls.push({ method: 'cleanFinished', args })
+        return Promise.resolve(answer)
+      },
+    }
+  }
+
+  it('sends the session and returns the two root-id lists the host reported', async () => {
+    const calls: { method: string; args: unknown }[] = []
+    const remote = cleanRemote({ ok: true, value: { deleted: ['r1', 'r2'], skipped: ['r3'] } }, calls)
+    await expect(cleanFinishedWork(remote, 'session-1', CLEAN_FINISHED_WIRE_VERSION))
+      .resolves.toEqual({ deleted: ['r1', 'r2'], skipped: ['r3'] })
+    expect(calls).toEqual([{ method: 'cleanFinished', args: { sessionId: 'session-1' } }])
+  })
+
+  it('does NOT SEND the call against a host whose wire predates the method', async () => {
+    // Same measured failure the executor lookup guards: the gateway's 404 for an unregistered method
+    // reads like "the missions are gone", so the call must not be made at all.
+    const calls: string[] = []
+    const remote: MissionRemote = {
+      ...remoteReturning({ ok: true, value: { trees: [] } }),
+      cleanFinished: () => {
+        calls.push('sent')
+        return Promise.resolve({ ok: true, value: { deleted: [], skipped: [] } })
+      },
+    }
+    await expect(cleanFinishedWork(remote, 'session-1', CLEAN_FINISHED_WIRE_VERSION - 1))
+      .rejects.toThrow('宿主仍在运行旧版本')
+    await expect(cleanFinishedWork(remote, 'session-1', CLEAN_FINISHED_WIRE_VERSION - 1))
+      .rejects.toThrow('重启 dsh web')
+    // No revision at all is the same vintage: the host predates the marker.
+    await expect(cleanFinishedWork(remote, 'session-1')).rejects.toThrow('没有回报 wire 版本')
+    expect(calls).toEqual([])
+  })
+
+  it('names a host that predates the method, and a 404, as a stale process', async () => {
+    const { cleanFinished: _omitted, ...withoutCall } = remoteReturning({ ok: true, value: { trees: [] } })
+    await expect(cleanFinishedWork(withoutCall, 'session-1', CLEAN_FINISHED_WIRE_VERSION))
+      .rejects.toThrow('宿主可能没有注册这个接口')
+
+    const stale: MissionRemote = {
+      ...remoteReturning({ ok: true, value: { trees: [] } }),
+      cleanFinished: () => Promise.reject(new Error(
+        'client api: avantfMission/cleanFinished failed: HTTP 404',
+      )),
+    }
+    await expect(cleanFinishedWork(stale, 'session-1', CLEAN_FINISHED_WIRE_VERSION))
+      .rejects.toThrow('重启 dsh web')
+  })
+
+  it('rejects a payload it cannot recognise instead of reporting "0 removed"', async () => {
+    // A strict codec is what keeps "the host answered something else" from reading as success.
+    const remote = cleanRemote({ ok: true, value: { deleted: 'nope' } })
+    await expect(cleanFinishedWork(remote, 'session-1', CLEAN_FINISHED_WIRE_VERSION))
+      .rejects.toThrow('无法识别的数据')
   })
 })
 

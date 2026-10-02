@@ -22,7 +22,7 @@ DSH（DeepSeek Harness）的**任务树引擎**插件：`@avantf/dsh-mission`。
 | 包 | 内容 |
 |---|---|
 | [`@avantf/mission-core`](packages/core) | 节点模型、状态机、派活循环、worker prompt 构造器。**零 DSH 依赖**，环境事实（活性、spill、时钟、id）全部注入，所以整套任务树行为可以脱离 harness 测试。**内部包，不单独发布**：plugin 的产物同时带上它的运行时（入口内联）与类型（`lib/mission-core/`）|
-| [`@avantf/dsh-mission`](packages/plugin) | DSH 插件（两半）：宿主侧服务、9 个模型工具（分 owner / executor 两张面孔）、引导上下文、`agent/pre-step` 钩子、`/mission`（列出或建根）、`/archive`、`/clean` 三条命令；客户端侧"任务"标签（会话视图条里排在"对话""轨迹"之后）|
+| [`@avantf/dsh-mission`](packages/plugin) | DSH 插件（两半）：宿主侧服务、9 个模型工具（分 owner / executor 两张面孔）、引导上下文、`agent/pre-step` 钩子、`/mission`（列出或建根）、`/archive`、`/clean`（archive / missions / orphans 三个作用域）三条命令；客户端侧"任务"标签（会话视图条里排在"对话""轨迹"之后）|
 
 ## 四条设计原则
 
@@ -46,6 +46,24 @@ DSH（DeepSeek Harness）的**任务树引擎**插件：`@avantf/dsh-mission`。
 | 失败预算 `failures` | 5（worker 被回收即失败一次；成功的提交与拆解，含汇总轮，都不消耗） |
 | 启动失败预算 `spawnFailures` | 5（派发即失败才 +1，按 `30s × 2^(n-1)` 退避后重试，成功启动即清零） |
 | 结果内联阈值 | 2000 字（超出走 `ctx.spillStore` 落盘，并保留后端给的取回指引）|
+
+## worker 会话的自动保留
+
+每个任务单元都是一次**真实会话**，日志会持续堆在 `$DSH_HOME/sessions` 下。插件按**数量**保留：每个
+属主会话最多留**最新 10 个已完成**的 worker（配置项 `keepWorkers`，默认 **10**；按会话头的 `createdAt`
+降序，越新越保留），超出的、更旧的已完成记录在**挂载时**与**每轮后台 sweep** 时，按与 `/clean archive all`
+相同的链路（**标记归档 → 释放记录 → 取消归档 → 清投影缓存残留**）自动释放。
+
+- **正在执行的 worker 不占名额、永不被清理**：13 个已完成 + 4 个在执行 → 只释放最旧的 3 个已完成；
+  3 个已完成 + 8 个在执行 → 一个都不释放（已完成 3 ≤ 10）。
+- **`keepWorkers: 0` 关闭自动保留**（保留全部），**不是**"一个都不留"；负数与 0 同义（配置 schema 只接受
+  非负整数，代码再把 `<= 0` 当作关闭）。
+- 与**手动全清**的区别：`/clean archive all` 是用户显式动作，一次释放本会话**所有**已完成的 worker 会话
+  记录，**不受保留数限制**；自动保留只是在后台按数量维持上限。
+- `/clean` 清单把两组分开报：「已完成 worker：X 个（保留最新 10 → 可自动清理 Y 个）」与
+  「正在执行：Z 个（不计入保留名额、不会被清理）」——这样"数字为什么停在 10"是可见的。
+- 所有自动释放动作都是 **best-effort**：失败只记 WARN，绝不影响挂载与命令结果；live worker 不做任何
+  中断。
 
 ## 依赖的 DSH 既有能力
 
@@ -103,7 +121,7 @@ node scripts/mount-smoke.mjs --runtime
 | 验证 | 内容 |
 |---|---|
 | `@avantf/mission-core` 单测（`pnpm test`，数量以门禁为准） | 状态机、终态工具双向互斥、配额、聚合就绪、拆解去重、启动对账、纠偏与子任务取消、拆解分析门禁（`analysis-missing` / `no-analysis`）、prompt 措辞与「执行本任务时写下的分析」一节的渲染次序 |
-| `@avantf/dsh-mission` 挂载级测试（`pnpm release:check`，数量以门禁为准） | 真实 Cordis Context + 真实事件链；覆盖"递归拆分：root → 子任务 → 孙任务 → 逐层聚合 → 根收敛"整条链路、两张工具面孔（含 `note_mission` 对 owner 不可见 / 对 worker 可见）、`note_mission` → `decompose_mission` 的完整门禁序列与真实聚合 prompt 片段、结构化参数容错（数组 / JSON 文本 / 一行一条）、旧文档缺 `analysisNotes` 仍能 parse 且 `DOMAIN_VERSION` 仍为 1、`typert.register` 抛错时照常挂载、纠偏、复用边的可见性、`/archive` 与 `/clean` 的护栏、环境初始化（envinit）的门禁/拒绝/复查形状、直接挂载 `apply` 的两条环境出口（拒绝挂载、准备期间被卸载）、真实 `@avantf/dsh-plugin-base` 的版本漂移告警，以及任务页无树时的空态 |
+| `@avantf/dsh-mission` 挂载级测试（`pnpm release:check`，数量以门禁为准） | 真实 Cordis Context + 真实事件链；覆盖"递归拆分：root → 子任务 → 孙任务 → 逐层聚合 → 根收敛"整条链路、两张工具面孔（含 `note_mission` 对 owner 不可见 / 对 worker 可见）、`note_mission` → `decompose_mission` 的完整门禁序列与真实聚合 prompt 片段、结构化参数容错（数组 / JSON 文本 / 一行一条）、旧文档缺 `analysisNotes` 仍能 parse 且 `DOMAIN_VERSION` 仍为 1、`typert.register` 抛错时照常挂载、纠偏、复用边的可见性、`/archive` 与 `/clean`（archive / missions / orphans 三个作用域）的护栏、环境初始化（envinit）的门禁/拒绝/复查形状、直接挂载 `apply` 的两条环境出口（拒绝挂载、准备期间被卸载）、真实 `@avantf/dsh-plugin-base` 的版本漂移告警，以及任务页无树时的空态 |
 | 宿主挂载冒烟 | 对**已安装 dsh** 跑（`pnpm build:dsh` 的一部分）：门禁由底座 `@avantf/dsh-plugin-base` 本身提供（没有 `mission:compat` item、不下载、没有受管 compat 根）；冒烟会断言门禁走的是哪一侧，走 ABSENT 路径时明说 `ABSENT, as documented`，不是静默。**底座没装进插件会红**（bootstrap 只警告并降级挂载，降级态不许当成绿），所以先 `pnpm install` |
 | 客户端 bundle 冒烟 | 沙箱执行 `lib/client.js`，断言自注册、插件形状、"任务"标签座位与 order、不注入 dotted remote key |
 

@@ -79,6 +79,13 @@ const CSS = `
 /* A disabled control is allowed to read as inert; an enabled one is not. */
 .avwf-delete:disabled { opacity: .4; cursor: default; }
 .avwf-delete-armed { color: var(--dsw-alias-state-error-primary, #d9534f); border-color: currentColor; }
+/* The batch-clean bar above the list. Same control vocabulary as the per-tree delete, one row of its
+   own so the two gestures are never confused: this one acts on EVERY closed tree. */
+.avwf-toolbar { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.avwf-clean { flex: 0 0 auto; font: inherit; font-size: 11px; padding: 0 8px; border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 4px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.avwf-clean:hover { color: var(--dsw-alias-label-primary); }
+.avwf-clean:disabled { opacity: .4; cursor: default; }
+.avwf-clean-armed { color: var(--dsw-alias-state-error-primary, #d9534f); border-color: currentColor; }
 .avwf-detail-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .avwf-detail-none { color: var(--dsw-alias-label-secondary); }
 .avwf-detail-pointer { color: var(--dsw-alias-label-secondary); font-family: ui-monospace, monospace; }

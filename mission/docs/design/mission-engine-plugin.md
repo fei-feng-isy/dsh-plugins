@@ -785,14 +785,20 @@ DSH 的运行时上下文快照是**持久**的（内容变化时追加一条，
 
 ---
 
-## 六点五、worker 会话日志的归档与清理
+## 六点五、worker 会话日志与任务树的归档、清理
 
-worker 是真实会话，所以磁盘占用随派活次数线性增长（本机实测每会话约 40 KB）。两条命令，**两种不同的接口可行性**：
+worker 是真实会话，所以磁盘占用随派活次数线性增长（本机实测每会话约 40 KB）。三条命令，**两种不同的接口可行性**，而且**动的是两种不同的数据**。先划清这层边界——它正是用户困惑的点：
+
+- **任务树**：本插件在 DSH 存储域（`avantf_mission`）里的记录，一棵树 = 一个根记录 + 它的节点记录。`finish_mission` **关闭并保留**它（写 `closedAt`，也就是界面上的「已归档」）；`/clean missions all` 与面板顶部的「清理已完成」**批量删除**它；面板上每棵树的「删除」按钮删单独一棵。这是"我的任务"列表里的东西。
+- **worker 会话记录**：每个任务单元被派发时都是**真实会话**，日志落在 `$DSH_HOME/sessions/<id>`，投影缓存在 `<dsh home>/storages/session_projcache/sessions/<id>.json`。`/archive` 与 `/clean archive` 处理的是这一层。两层**互相独立**：删掉会话日志不会删掉任务树记录，删掉任务树记录也不会动会话日志。
+
+所以"清理我已经完成的任务"用 `missions`，"清理不再需要的 worker 日志"用 `archive`；`orphans` 是第三种：owner 会话已不存在或不可观测的**任务树**。
 
 | 命令 | 走什么 | 可行性 |
 |---|---|---|
 | `/archive` | `workspaceRegistry.archiveSession(id)` | **官方接口**：durable 写进 registry 的归档集合，可 unarchive。只改标记，**不释放磁盘**。是 `/clean` 的便捷前置，**不再必须** |
-| `/clean archive all\| <mission-id>` | **三步**：`archiveSession`（仅当尚未归档）→ 直接删会话目录 + 该 worker 的投影缓存文件 → `unarchiveSession` | 归档走官方接口；删除**没有任何官方接口**（`SessionPersistence` 只有 `create`/`open`/`list`/`stat`，GUI 只有归档），只能由插件删目录与缓存文件；取消归档同样走官方接口（幂等）。**一趟完成**：作用域 = 本会话的 + 已结算的（`isOurWorker` 且 `!live`），归档**成功后**才删；归档失败或无 registry 就保留记录；取消归档是 best-effort，**失败不回滚删除** |
+| `/clean archive all\| <mission-id>` | **三步**：`archiveSession`（仅当尚未归档）→ 直接删会话目录 + 该 worker 的投影缓存文件 → `unarchiveSession` | 归档走官方接口；删除**没有任何官方接口**（`SessionPersistence` 只有 `create`/`open`/`list`/`stat`，GUI 只有归档），只能由插件删目录与缓存文件；取消归档同样走官方接口（幂等）。**一趟完成**：作用域 = 本会话的 + 已结算的（`isOurWorker` 且 `!live`），归档**成功后**才删；归档失败或无 registry 就保留记录；取消归档是 best-effort，**失败不回滚删除**。`all` 是**手动全清**，不受自动保留的 `keepWorkers` 限制（见下文「自动保留」） |
+| `/clean missions all` | `tree.deleteTree()` | 删的是插件**自己的**树记录：**本会话**的、**已关闭**（`closedAt !== null`）的任务树。与 `archive` 是两层（见上）。未关闭的一律跳过并报「仍在进行」；别的会话的树连候选都不是。面板顶部的「清理已完成」走同一条 `cleanFinished` |
 | `/clean orphans all\| <root-id>` | `tree.destroyTree()` | 删的是插件**自己的**树记录：owner 会话已不存在或不可观测时才允许，删除前逐个重新探测 |
 
 护栏（`src/workerSessions.ts` 与缓存那一层的 `src/projectionCache.ts`，见两处模块注释）：
@@ -801,6 +807,7 @@ worker 是真实会话，所以磁盘占用随派活次数线性增长（本机�
 2. **绝不动在跑的会话**（`live` 为真或 `agents.get(id)` 有答案就跳）：不中断、不归档、不删除；用户要清它就得等它结束。输出里单列"因仍在运行跳过 M 个"；
 3. **标记归档 → 释放记录 → 取消归档，一趟完成**：`/clean archive` 自己写归档标记，所以 `/archive` 不再是必须的前置。尚未归档的先归档，**归档成功之后**才删会话记录；删成功后调 `unarchiveSession` 撤掉标记（**失败只记日志/输出，绝不回滚删除** —— 文件已删，留着标记只会变成幽灵 id）；归档失败（或部署里根本没有 `workspaceRegistry`）时**一条都不删**，并明确报"无法归档 ⇒ 无法清理"；
 4. **路径只按名字找、不做编码复刻**：在 `config.sessionsRoot`（默认 `<dsh home>/sessions`）下扫 `*/<id>`，目录名必须**正好**是 session id。harness 的目录名有 slug 编码规则（`projectKey`/`encodeSegment`），复刻它就会在下一次编码变更时静默失效 —— 因此根给错或布局变了时的结果是"删不到"，而不是"删错"。
+5. **`missions` 只删"本会话 + 已关闭"的任务树**（`host.cleanFinished`，`/clean missions all` 与面板的「清理已完成」共用）：候选集 = `ownerSessionId === 调用者 && closedAt !== null`。别的会话的树连候选都不是（不是"跳过"一条，而是根本不进这个集合）；未关闭的树跳过并在输出里单列「未收尾（仍在进行或尚未 finish_mission）」。删除复用与面板单棵删除**同一条** `tree.deleteTree` 路径（它自身再拒一次非终态根作纵深防御），删完 `announceOwner` 让面板刷新。**判据刻意选 `closedAt !== null` 而不是"所有节点 terminal"**：`finish_mission`/`closedAt` 才是"这件事已被 owner 收尾"的权威信号；一个所有节点都终态、但 owner 还没收尾的任务，批量入口不动它（它就是"还在进行中"），要单独删它用面板那棵树的「删除」——单棵路径只要求根终态。这样批量入口的屏障**严格强于**单棵入口，绝不越权。
 
 **为什么必须有第三步（"幽灵 id"）**：归档标记的唯一作用是给"释放记录"授权。记录删掉后它就没有别的用途了，但它是 durable 的，`rmSync` 不会顺手清掉。于是每个被 `/clean` 删过的 worker 都会在 `workspaceRegistry.archivedSessionIds` 里留下一条**幽灵 id**：registry 里有、磁盘上没有，而**子智能体列表**（以及一切读归档集合的界面）照样把它显示出来。实测现场：`archivedSessionIds` 里 64 个 `mission-*`，`~/.dsh/sessions` 下只剩 3 个 —— 用户看到一片早已删掉的会话。因此 `unarchiveSession` 是清理的收尾步；对历史遗留的标记，插件在**挂载时**与 **`/clean archive all` 里**各跑一次对账（`reconcileArchivedGhosts` / `ghostArchiveIds`），边界刻意收窄：
 
@@ -823,7 +830,21 @@ worker 是真实会话，所以磁盘占用随派活次数线性增长（本机�
 
 `/clean archive` 的只读清单把「已完成未归档」与「已归档但记录已不在（幽灵）」分成两节：前者要删，后者只需取消归档 —— 两者在旧输出里都只写"已归档"，读起来是一回事，动作却完全不同。
 
-**为什么不把删除做进引擎的常规回收**：删的是**另一个子系统的持久数据**（会话存储），不是本插件的树记录。引擎的日常职责只到"节点解绑、活 Agent 由 harness 在结算时销毁"；删日志必须是一个人类明确的手势，所以它是一条 slash，而不是自动清理。
+### 自动保留：按数量封顶（`keepWorkers`，默认 10）
+
+把"删日志"完全交给人类手势会让磁盘随派活次数无界增长，所以插件再补一条**按数量**的自动策略：**每个属主会话保留最新 `keepWorkers`（默认 10）个已完成的 worker**，超出的、更旧的已结算记录自动释放。口径如下：
+
+- **只数已完成的**：候选 = 本属主会话的、`mission-*` 的、`!live` 的 worker；按 `header.createdAt` **降序**（越新越保留），保留前 N 个，释放其余。**live 不占名额、也永不被触碰**：13 个已完成 + 4 个在执行 → 释放 3 个；3 个已完成 + 8 个在执行 → **零释放**（已完成 3 ≤ 10）。
+- **复用同一条链路**：`cleanWorkers(..., { retain: N })` 只把候选收窄到"超出 N 的旧记录"，其余不变 —— 先 `archiveSession`、**成功之后**才删会话目录、再 `unarchiveSession`、最后清该 id 的投影缓存；任一步失败只 warn、不回滚。
+- **按属主会话各自保留**：命令路径（`/clean` 清单）用调用者会话；挂载与 sweep 路径用任务库里**已知的属主会话**（`host.ownerSessionIds()`，来自 `tree.trees()` 的 `ownerSessionId`）逐个跑，互不影响。
+- **触发点**：① 挂载时一次（链在 `host.start()` 的 `ready` 上，**不 await**——`apply` 必须能在存储还没打开时就返回，否则快速卸载会落在 `open()` 里；链尾有 `catch`，不留未处理拒绝）；② 每轮 `host.sweep()` 之后（`host.onSweep` 注册，**不新造计时器**）。
+- **`keepWorkers = 0` 关闭自动保留**（= 保留全部），**不是**"一个都不留"；配置 schema 只接受非负整数，代码把 `<= 0` 一律当关闭。
+- **best-effort**：所有释放失败只 warn，绝不影响挂载与命令结果；**绝不中断任何 live worker**。
+- **`/clean` 清单把两组分开报**：「已完成 worker：X 个（保留最新 10 → 可自动清理 Y 个）」与「正在执行：Z 个（不计入保留名额、不会被清理）」—— 让"数字为什么停在 N"可见。
+
+**自动保留 vs 手动全清**：`keepWorkers=N` 是后台按数量维持上限，**只释放超出 N 的旧记录**；`/clean archive all` 是用户的显式手势，**一次释放本会话所有已完成记录，不受 N 限制**。两者共用同一条三步（+清缓存）链路，区别只在候选集：自动 = 超出 N 的旧记录；手动 = 全部已结算。
+
+**为什么不把删除做进引擎的常规回收**：删的是**另一个子系统的持久数据**（会话存储），不是本插件的树记录。引擎的日常职责只到"节点解绑、活 Agent 由 harness 在结算时销毁"；删日志的**全量**清理仍必须是一个人类明确的手势（`/clean archive all`），自动保留只是上面那条**有界**的数量策略，不是让日常回收无条件删日志。
 
 ## 六点六、纠偏：把"停下再重派"换成一条消息
 
@@ -1352,8 +1373,8 @@ python3 -c 'json.loads(...); print(...)'  →  UnicodeEncodeError: surrogates no
 
 | 层 | 贡献 |
 |---|---|
-| 宿主 | `AvantfMissionHost` 改为 `TypertRemoteService`，加 `@Remote('snapshot')`、`@Remote('detail')`、`@Remote('result')`、`@Remote('delete')` 与 `@Remote({ mode: 'stream' }) watch` 五个方法；`wire.ts` 手写 host/client 两份 wire face，`apply` 里 `ctx.typert.register(hostContribution)` |
-| 客户端 | `src/client/`：`$mount(clientContribution)` → `ctx.get('remote.avantfMission')` → 挂载时读一次，之后**跟着 `watch` 变更流刷新**（见下）；点任务标题按需调 `detail`，在**弹窗**（设置面板形制：左侧分区栏、右侧唯一滚动区）里展示该任务的标题/内容/上下文/拆解信息/纠偏/结果/子任务；**每棵树**的标题栏带"删除"按钮（二次确认，删完立即重读；树未结束时禁用并说明原因）；节点的展开默认值跟着它自己的状态：在跑/待跑/中断的默认展开（拆出来的子任务立刻可见），`done`/`failed` 的默认折叠（跑完的树收成一行，结束的分支不再压住活着的部分），点击存为覆盖值；`slots.register('conversation.view', …, order 20)` |
+| 宿主 | `AvantfMissionHost` 改为 `TypertRemoteService`，加 `@Remote('snapshot')`、`@Remote('detail')`、`@Remote('result')`、`@Remote('delete')`、`@Remote('cleanFinished')` 与 `@Remote({ mode: 'stream' }) watch` 六个方法；`wire.ts` 手写 host/client 两份 wire face，`apply` 里 `ctx.typert.register(hostContribution)`；每加一个 `@Remote` 就 `SNAPSHOT_WIRE_VERSION` +1（客户端据此拒绝对旧宿主发送它没注册的方法，见 `wire.ts`） |
+| 客户端 | `src/client/`：`$mount(clientContribution)` → `ctx.get('remote.avantfMission')` → 挂载时读一次，之后**跟着 `watch` 变更流刷新**（见下）；点任务标题按需调 `detail`，在**弹窗**（设置面板形制：左侧分区栏、右侧唯一滚动区）里展示该任务的标题/内容/上下文/拆解信息/纠偏/结果/子任务；**每棵树**的标题栏带"删除"按钮（二次确认，删完立即重读；树未结束时禁用并说明原因）；标签顶部带**「清理已完成」**批量按钮（同样二次确认，调 `cleanFinished`，一次删掉本会话全部已关闭任务树；没有已关闭任务树时禁用并说明原因，没有任务树或宿主没有该方法时不出现）；节点的展开默认值跟着它自己的状态：在跑/待跑/中断的默认展开（拆出来的子任务立刻可见），`done`/`failed` 的默认折叠（跑完的树收成一行，结束的分支不再压住活着的部分），点击存为覆盖值；`slots.register('conversation.view', …, order 20)` |
 | 构建 | `scripts/build-client.mjs` 用 esbuild 打成 `lib/client.js`（`window.__ModuleLoader__.load` 契约；shell 提供的模块保持 external） |
 
 **为什么手写 wire face**：DSH 包通常由 Typert 生成器产出 `typert.host.js` / `typert.remote-client.js`，而生成器只在 harness 工作区内运行。手写遵循生成器的约定（一个 `args` 对象参数、`<pkg>#<ns>/<method>` 的 invocation id、`strict` codec）。
@@ -1380,9 +1401,9 @@ python3 -c 'json.loads(...); print(...)'  →  UnicodeEncodeError: surrogates no
 
 **为什么不走会话投影**：投影要求状态由 session log 折叠、且每次变化落一条 whole-value 事件。任务树的运行态由 service 持有，复制进日志成本更高，且"查看别的会话之外的树"语义也不对。
 
-**破坏性操作的屏障强度不一致（记录，A4）**：面板的 `delete` 与 `/clean` 都是不可恢复的，但门禁不同 —— `/clean` 要求"是本插件的会话 + 已结算（+ 标记归档 → 释放 → 取消归档三步）"，而 `delete({ sessionId, rootId })` 只有归属一条，且 session id 由调用方提供（Remote 不带调用方身份，见下）。本地单用户宿主下可接受，但这两条值得对齐；对齐做法尚未决定（把 `delete` 也要求归档会伤 UX，因为面板的删除正是用来清掉"已完成但未归档"的任务）。
+**破坏性操作的屏障强度不一致（记录，A4）**：面板的 `delete` 与 `/clean` 都是不可恢复的，但门禁不同 —— `/clean` 要求"是本插件的会话 + 已结算（+ 标记归档 → 释放 → 取消归档三步）"，而 `delete({ sessionId, rootId })` 只有归属一条，且 session id 由调用方提供（Remote 不带调用方身份，见下）。本地单用户宿主下可接受，但这两条值得对齐；对齐做法尚未决定（把 `delete` 也要求归档会伤 UX，因为面板的删除正是用来清掉"已完成但未归档"的任务）。**2026-10-03 补充**：批量入口不加深这个不一致 —— 面板的「清理已完成」与 `/clean missions all` 共用同一条 `cleanFinished`，门禁与命令一致（本会话 + 已关闭），而且比单棵 `delete` **更严**（单棵只要求归属 + 根终态）。批量按钮因此不提供"清掉已完成未收尾"的能力，那件事留给人一棵一棵决定。
 
-**已知限制**：Remote 调用不携带调用方身份（生成器的方法只收参数），所以 `snapshot({ sessionId })` / `detail({ sessionId, nodeId })` / `result({ sessionId, nodeId })` / `delete({ sessionId, rootId })` / `resolveExecutorSession({ sessionId, nodeId })` / `watch({ sessionId })` 的 session 由客户端给出。视图持有它正在显示的那个 id，且这运行在用户自己的宿主进程里。删除的调用形式是 `delete({ sessionId, rootId })`：**单位是整棵树**，节点 id 不是可删除的对象（传节点 id 会被当成"没有这棵树"拒掉）。未结束的树不会被删除 —— 它归引擎管，提前结束它是 `cancel_mission`；`finish_mission` 是另一种树级结束，保留记录并归档，删除则整条移出。删除不可恢复。
+**已知限制**：Remote 调用不携带调用方身份（生成器的方法只收参数），所以 `snapshot({ sessionId })` / `detail({ sessionId, nodeId })` / `result({ sessionId, nodeId })` / `delete({ sessionId, rootId })` / `cleanFinished({ sessionId })` / `resolveExecutorSession({ sessionId, nodeId })` / `watch({ sessionId })` 的 session 由客户端给出。视图持有它正在显示的那个 id，且这运行在用户自己的宿主进程里。删除的调用形式是 `delete({ sessionId, rootId })`：**单位是整棵树**，节点 id 不是可删除的对象（传节点 id 会被当成"没有这棵树"拒掉）。未结束的树不会被删除 —— 它归引擎管，提前结束它是 `cancel_mission`；`finish_mission` 是另一种树级结束，保留记录并归档，删除则整条移出。删除不可恢复。`cleanFinished({ sessionId })` 是批量形态：只认本会话**已关闭**的树，返回 `{ deleted, skipped }` 两个根 id 列表。
 
 **2026-09-23 修订：落盘结果改成"点开就能看"。** 结果超过 2 KB 就落盘，节点只留开头与一个 locator —— 而那个 locator 是**给模型的**（`mission_result` 连同检索指引一起交给它），人在面板里点不动：浏览器不会导航到文件路径，DSH 自己那条"用桌面应用打开"的路只对有**授权路由**的 deliverable 开放，而这个 spill 不是交付物。于是加 `result({ sessionId, nodeId })`：面板上的「查看完整结果」让**宿主**（唯一能读自己 spill 产物的一方）把全文读回来，在弹窗里就地展开（展开时**替换**开头那段，不叠加 —— 开头本来就是全文的第一片）。两条降级都写死了：宿主没有这个面 → 不显示按钮（不提供一个注定失败的读）；locator 不是本机路径（`SpillStore` 的契约明确 locator 是**不透明的**，测试桩给的就是 `spill://…`）→ 回一条原因，locator 照旧留在屏幕上 —— 它本来就是"知道这个存储底座的人"要的地址。
 

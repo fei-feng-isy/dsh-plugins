@@ -13,6 +13,7 @@ import {
   POLL_INTERVAL_MS,
   REFRESH_COALESCE_MS,
   STREAM_REOPEN_MS,
+  cleanFinishedWork,
   coalesce,
   deleteWork,
   fetchDetail,
@@ -345,6 +346,14 @@ export function apply(ctx: ClientContext): void {
         const remote = getRemote()
         if (remote === undefined) throw new Error('任务树 Remote 未挂载')
         await deleteWork(remote, props.sessionId, rootId)
+      },
+      // The batch entry. Gated on the host's reported `wire` INSIDE `cleanFinishedWork`: an older
+      // host never registered the method, so sending the call would only earn a gateway 404 that
+      // reads like "the missions are gone".
+      onCleanFinished: async (): Promise<{ deleted: readonly string[]; skipped: readonly string[] }> => {
+        const remote = getRemote()
+        if (remote === undefined) throw new Error('任务树 Remote 未挂载')
+        return await cleanFinishedWork(remote, props.sessionId, state.wire)
       },
       loadDetail: async (nodeId: string) => {
         const remote = getRemote()

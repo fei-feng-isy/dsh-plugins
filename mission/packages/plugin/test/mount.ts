@@ -368,6 +368,13 @@ export async function mount(
     noSessionQuery?: boolean
     /** Plugin config, so a test can point `sessionsRoot` at a throwaway directory. */
     pluginConfig?: Record<string, unknown>
+    /**
+     * Stored sessions present BEFORE the plugin opens, as `sessionQuery.listSessions()` reports them.
+     * The mount-time automatic retention pass reads the listing while it runs, so a case about that
+     * pass has to seed here; a test that exercises the commands pushes onto `mounted.listedSessions`
+     * after mount instead.
+     */
+    seedListedSessions?: readonly { header: Record<string, unknown>; live: boolean }[]
   } = {},
 ): Promise<Mounted> {
   const records: Records = new Map()
@@ -410,7 +417,7 @@ export async function mount(
   const registryCalls: string[] = []
   const seededRoots: string[] = []
   /** Sessions `listSessions()` reports; tests push entries to exercise the commands. */
-  const listedSessions: { header: Record<string, unknown>; live: boolean }[] = []
+  const listedSessions: { header: Record<string, unknown>; live: boolean }[] = [...(options.seedListedSessions ?? [])]
   /** Session logs, keyed by session id; only `resolveExecutorSession` reads them. */
   const workerSessions = new Map<string, { time: number; text: string }[]>()
   const sessionLogReads: string[] = []
