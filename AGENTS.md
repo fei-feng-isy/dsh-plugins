@@ -187,6 +187,8 @@ pnpm build:dsh mission && node mission/scripts/mount-smoke.mjs    # 或 pnpm -C 
   改动都要重新冻结并解释。`pnpm -C mem typecheck` 也检查 `test/`，且要在 `pnpm -C mem build` **之后**跑
   （包通过产出的 `lib/*.d.ts` 读依赖）；`pnpm -C mem typecheck:dsh` 覆盖插件的 src + specs，是本地门禁
   （CI 没有 harness）。读 zod 内部别猜：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })`，
-  形状断言在 `contract.spec.ts` / `tool_schema.spec.ts`。
+  形状断言在 `contract.spec.ts` / `tool_schema.spec.ts`。**工具面就是 `TOOL_SPECS` 里的 8 个**（`mem_*` 3 +
+  `kb_*` 5）；`kb_manage` 属 `KB_TOOL`（UI remote 与 CLI 用的内部引擎 API），**不在模型面**——按 `name:` 数会数成 9，
+  挂载冒烟断言的就是 8。
 - **mission**：任务树状态机在 `mission/packages/core`（**刻意不带 Node 类型**），`mission/packages/plugin` 是薄壳；
   它的领域模型与 mem 不共享任何东西。
