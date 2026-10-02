@@ -234,7 +234,9 @@ mount smoke）由**派单方在收口时统一跑**。执行者验证一遍、�
   （CI 没有 harness）。读 zod 内部别猜：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })`，
   形状断言在 `contract.spec.ts` / `tool_schema.spec.ts`。**工具面就是 `TOOL_SPECS` 里的 8 个**（`mem_*` 3 +
   `kb_*` 5）；`kb_manage` 属 `KB_TOOL`（UI remote 与 CLI 用的内部引擎 API），**不在模型面**——按 `name:` 数会数成 9，
-  挂载冒烟断言的就是 8。
+  挂载冒烟断言的就是 8。**`mem/CHANGELOG.md` 的 `[Unreleased]` 必须为空**（mem 严格门禁的 preflight 要求）：
+  新条目写进**正在准备的版本段**（当前 `[0.4.0]`），已冻结的历史段不动——这条已经咬过两次（2026-10-02 两次把条目
+  落进 `[Unreleased]` 都让 `pnpm -C mem release:check` 变红），派单时可直接把"往 `[0.4.0]` 写"写进任务。
 - **mission**：任务树状态机在 `mission/packages/core`（**刻意不带 Node 类型**），`mission/packages/plugin` 是薄壳；
   它的领域模型与 mem 不共享任何东西。**调度语义（v1）**：**容量是派发闸门，不是受理闸门** ——
   `create_mission`/`decompose_mission` 永不因容量失败，节点进 `ready` 即排队；候选不满足
