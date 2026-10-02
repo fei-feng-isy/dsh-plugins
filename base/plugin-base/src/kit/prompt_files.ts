@@ -4,7 +4,10 @@ import { dirname, join } from 'node:path'
 /**
  * User-editable prompt text: one `.md` per prompt section, in the family's shared prompt directory
  * (`<data home>/prompts`, where each plugin owns a prefix — `mem-*` in the memory plugin, `mission-*`
- * in the mission engine).
+ * in the mission engine). Since generation v3 that prefix can be declared as
+ * {@link PromptFilesOptions.namespace} and is then validated by this module, so a mistyped prefix can
+ * no longer silently read or fill another plugin's user file; omitting the field keeps the pre-v3
+ * behaviour (no prefix check) for callers built against v1/v2.
  *
  * This lived, byte-for-byte identical except for its header comment, in BOTH plugins
  * (`@avantf/dsh-mem`'s and `@avantf/dsh-mission`'s `packages/plugin/src/prompt_files.ts`) — the copy
@@ -78,10 +81,35 @@ export interface PromptFilesLogger {
 export interface PromptFilesOptions {
   /** Directory holding one `.md` per section. Created when missing. */
   readonly dir: string
+  /**
+   * The plugin's file-name prefix inside the SHARED prompt directory — `mem` for `mem-*.md`,
+   * `mission` for `mission-*.md`.
+   *
+   * `<data home>/prompts` is one directory shared by every plugin in the family, and until v3 the
+   * `mem-*` / `mission-*` prefix was a convention with NO machine check: a third plugin could declare
+   * `mem-foo.md` and silently take over (or fill) a file the memory plugin's user owns. Naming the
+   * namespace here turns that convention into a field the base validates.
+   *
+   * **Optional, and omitting it is fully backward compatible** — a caller that does not pass it gets
+   * byte-for-byte the pre-v3 behaviour (no prefix check at all). That is deliberate: the two installed
+   * plugins were built against v1/v2 and must keep working against a v3 base without a change.
+   *
+   * A namespace must be a kebab-case token (`/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/`). An ILLEGAL namespace
+   * is a caller bug, but this module's absolute property is that the prompt layer never throws: a bad
+   * namespace therefore makes every {@link PromptFiles.load} on this instance degrade to the caller's
+   * fallback with a WARNING, WITHOUT touching the disk (never a throw, never a read or write). When the
+   * namespace IS valid, every {@link PromptFileSpec.file} must be `<namespace>-…` and must be a bare
+   * file name; a spec that is not is skipped the same way (warning + fallback, no disk access), so a
+   * mistyped prefix can never read or overwrite another plugin's user file.
+   */
+  readonly namespace?: string
   readonly logger?: PromptFilesLogger
   /** Overridable for tests; defaults to the real filesystem. */
   readonly io?: PromptFilesIo
 }
+
+/** A legal namespace: lowercase kebab-case, starting with a letter. */
+const NAMESPACE_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 
 /** The temp files {@link nodeIo.write} leaves beside a prompt file, and the age past which one
  *  certainly belongs to a writer that will never rename it. Same discipline as the provisioner's
@@ -144,13 +172,39 @@ function reason(error: unknown): string {
 
 export class PromptFiles {
   readonly dir: string
+  /** The validated namespace prefix, or `undefined` (pre-v3 behaviour: no prefix check). */
+  readonly namespace: string | undefined
+  /** Set when `namespace` was supplied but illegal; every `load` then degrades without touching disk. */
+  private readonly namespaceError: string | undefined
   private readonly logger: PromptFilesLogger | undefined
   private readonly io: PromptFilesIo
 
   constructor(options: PromptFilesOptions) {
+    if (options.namespace !== undefined && !NAMESPACE_PATTERN.test(options.namespace)) {
+      // A caller bug, not an environment failure. It must not throw (this module never throws — a
+      // throwing apply can fail a host boot), but it must also not fall back to "no prefix check",
+      // which would silently re-open the takeover hole. So the instance refuses to touch the prompt
+      // directory at all and warns on every load.
+      this.namespaceError = `PromptFiles: namespace ${JSON.stringify(options.namespace)} is not a legal prefix; expected lowercase kebab-case matching ${String(NAMESPACE_PATTERN)}`
+      this.namespace = undefined
+    } else {
+      this.namespaceError = undefined
+      this.namespace = options.namespace
+    }
     this.dir = options.dir
     this.logger = options.logger
     this.io = options.io ?? nodeIo
+  }
+
+  /**
+   * Whether `file` belongs to this instance's namespace. `true` when no namespace was given (the
+   * legacy contract: the caller owns the whole directory naming convention as before).
+   */
+  private ownsFile(file: string): boolean {
+    const prefix = this.namespace
+    if (prefix === undefined) return true
+    if (!file.startsWith(`${prefix}-`)) return false
+    return !file.includes('/') && !file.includes('\\')
   }
 
   /**
@@ -165,6 +219,23 @@ export class PromptFiles {
       source: 'default',
       wrote: false,
     })
+    if (this.namespaceError !== undefined) {
+      this.logger?.warn(`${this.namespaceError}; using the built-in defaults and not touching the prompt directory`)
+      return specs.map(fallbackOf)
+    }
+    if (this.namespace !== undefined && specs.some((spec) => !this.ownsFile(spec.file))) {
+      // Never touch disk for the offending spec: the whole point of the namespace is that a mistyped
+      // prefix must not read or write a file another plugin's user owns. Warn per offending file and
+      // degrade to the caller's fallback, exactly like the unusable-directory path.
+      for (const spec of specs) {
+        if (!this.ownsFile(spec.file)) {
+          this.logger?.warn(
+            `prompt file ${spec.file} is outside the "${this.namespace}-" namespace; using the built-in default and not touching the prompt directory`,
+          )
+        }
+      }
+      return specs.map((spec) => (this.ownsFile(spec.file) ? this.loadOne(spec) : fallbackOf(spec)))
+    }
     try {
       this.io.ensureDir(this.dir)
     } catch (error) {

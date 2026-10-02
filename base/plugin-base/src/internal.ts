@@ -1,5 +1,21 @@
 /**
  * Framework building blocks shared by the core and the entry points.
+ *
+ * `./internal` is the second published subpath beside `.` and it carries everything the compatibility
+ * promise deliberately does NOT cover (root `AGENTS.md`; `docs/INTERFACE.md` §2/§5):
+ *
+ *  - the framework's own seams (fs, locks, archives, layout, lint, semver …), and
+ *  - the **composition pieces** of the pieces `.` does export: the individual probes and evidence
+ *    helpers `compat.gatherEvidence` is built from, the provisioner's policy helpers and constants,
+ *    the npm-package provider, and the Typert symbol kit whose symbols/wire helpers the two plugins
+ *    keep as LOCAL mirrors by design (they are assembled at module load, before any base can be
+ *    imported).
+ *
+ * Generation v3 moved exactly those zero-consumer names here (INTERFACE.md §9). `./internal` is NOT
+ * part of the interface surface: nothing on it is covered by the generation gate, so plugin authors
+ * must take their members off `.`. The names here are reachable for the base's own tests and for a
+ * consumer that genuinely needs a framework seam.
+ *
  * @module internal
  */
 export { defaultFs, exists, linkOrCopy } from './fs.js'
@@ -71,3 +87,26 @@ export {
   isBootstrapSpecifier,
 } from './artifact.js'
 export type { FrameworkImportKind, FrameworkImportRef } from './artifact.js'
+
+// ── generation v3: the names `.` shed ────────────────────────────────────────────────────────────
+// Each of these has zero consumers across the two plugin trees' non-test source and scripts
+// (`test/public-surface.spec.ts` re-proves that mechanically). They are composition pieces of the
+// members `.` still exports, or kit mirrors the plugins keep locally on purpose — never a plugin's
+// entry point. Their canonical home is here; INTERFACE.md §9 records why each one moved.
+export {
+  COMPAT_PROBE_TOOL,
+  checkInterval,
+  checkServices,
+  declaredSchemaKeys,
+  floorOf,
+  probeToolsRegistry,
+  probeTypertRegistry,
+  resolveRuntimeVersion,
+} from './compat.js'
+export { CAPABILITIES, DEFAULT_DEADLINE_MS, normalizeOnMissing } from './provisioner.js'
+export { NPM_PACKAGE_KIND, npmPackageProvider } from './providers/npm.js'
+export type { NpmPackageSpec } from './providers/npm.js'
+export { createPluginLogger } from './kit/logger.js'
+export type { PluginLogger, PluginLoggerHost, PluginLoggerOptions } from './kit/logger.js'
+export { endpointId, fieldSymbol, resultSymbol, strictCodec } from './kit/typert.js'
+export type { StrictCodec } from './kit/typert.js'

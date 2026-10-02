@@ -5,7 +5,7 @@
  *
  * @module @avantf/mission-core/tree
  */
-import { statusLabel } from './prompt.js'
+import { statusLabel } from './trouble.js'
 import {
   computeContinuationDelta,
   nodeFingerprint,
@@ -232,6 +232,14 @@ function asBaseline(value: unknown): DispatchBaseline | null {
  * paged), and a missing `analysisAuthor` as `null` (= author unknown, the delta's conservative
  * fallback) — never as a value that would change a decision.
  *
+ * The rest of the OPTIONAL durable fields are covered too (see the block before the identity check):
+ * `corrections`/`analysisNotes`/`analysisAttempt`/`failures`/`spawnFailures`/`parkedWorker`/
+ * `progressAt`/`stalls`/`stalledNotifiedAt`/`resultHint`. They are defaults the durable side
+ * (`domain.ts`) also encodes, and core must be able to eat a BARE record — the state machine does
+ * arithmetic on counters, and `undefined` there is `NaN`, not "nothing yet". The two encodings are
+ * held to one answer by the plugin's `test/domain_defaults_pin.spec.ts`, over every durable field
+ * the schema defaults, so a field can no longer be added on one side only.
+ *
  * Returns the SAME object when nothing changed, so opening a current document does not churn it.
  */
 function normalizeLoaded(node: NodeRecord): NodeRecord {
@@ -248,10 +256,11 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     analysisAuthor?: unknown
   }
   const lastWorkerId = legacy.lastWorkerId ?? null
-  // A record written before the display handle existed reads as "no executor to open". `?? null`
-  // rather than a check for `undefined`: the reader is a UI link, and an invented session id would
-  // be offered as a clickable address that goes nowhere.
-  const executorSessionId = legacy.executorSessionId ?? null
+  // A record written before the display handle existed reads as "no executor to open"; the durable
+  // side expresses that as `.catch(null)`, and the type check here is the same reading for a bare
+  // record: a non-string is not a session id, and an invented id would be offered as a clickable
+  // address that goes nowhere.
+  const executorSessionId = typeof legacy.executorSessionId === 'string' ? legacy.executorSessionId : null
   const correctionsDeliveredUpTo = legacy.correctionsDeliveredUpTo ?? 0
   const dispatchBaseline = asBaseline(legacy.dispatchBaseline)
   // A record written before `unit` existed, or one whose value is not a string at all, reads as "no
@@ -280,6 +289,30 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   // A record written before note authorship existed reads as `null` = "author unknown", which sends
   // the delta down its generation-comparison fallback — exactly the previous build's judgement.
   const analysisAuthor = typeof legacy.analysisAuthor === 'string' ? legacy.analysisAuthor : null
+  // The remaining durable fields whose default the DURABLE side also encodes (`domain.ts`). Each is
+  // the conservative reading of "this record predates the field", and the point of repeating them
+  // here is that core must be able to eat a BARE record — a store that never ran the zod schema
+  // (another TreeStore implementation, an old artifact) must not hand the state machine `undefined`
+  // where it expects a counter. The cross-layer pin in the plugin's
+  // `test/domain_defaults_pin.spec.ts` holds the two encodings to one answer, field by field, so a
+  // new durable field cannot be added on one side only.
+  // `undefined` is the same reading as "nothing was recorded before the field existed".
+  const corrections = legacy.corrections ?? []
+  const analysisNotes = legacy.analysisNotes ?? []
+  const analysisAttempt = legacy.analysisAttempt ?? 0
+  // Nothing has failed yet — the safe direction: a node keeps its remaining budget on load.
+  const failures = legacy.failures ?? 0
+  const spawnFailures = legacy.spawnFailures ?? 0
+  // No parked (cold-wake-pending) executor handle.
+  const parkedWorker = legacy.parkedWorker ?? null
+  // No production ever observed; the liveness readers fall back to `claimedAt` for both clocks.
+  const progressAt = storedTime(legacy.progressAt)
+  // Never reclaimed as silently stalled.
+  const stalls = legacy.stalls ?? 0
+  // Never reported as stalled, so the first genuine stall still pages the owner.
+  const stalledNotifiedAt = legacy.stalledNotifiedAt ?? null
+  // No retrieval guidance for a spilled result.
+  const resultHint = legacy.resultHint ?? null
   if (
     lastWorkerId === node.lastWorkerId
     && executorSessionId === node.executorSessionId
@@ -291,6 +324,16 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     && roundMs === node.roundMs
     && hungCount === node.hungCount
     && analysisAuthor === node.analysisAuthor
+    && corrections === node.corrections
+    && analysisNotes === node.analysisNotes
+    && analysisAttempt === node.analysisAttempt
+    && failures === node.failures
+    && spawnFailures === node.spawnFailures
+    && parkedWorker === node.parkedWorker
+    && progressAt === node.progressAt
+    && stalls === node.stalls
+    && stalledNotifiedAt === node.stalledNotifiedAt
+    && resultHint === node.resultHint
   ) {
     return node
   }
@@ -306,7 +349,40 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     roundMs,
     hungCount,
     analysisAuthor,
+    corrections,
+    analysisNotes,
+    analysisAttempt,
+    failures,
+    spawnFailures,
+    parkedWorker,
+    progressAt,
+    stalls,
+    stalledNotifiedAt,
+    resultHint,
   }
+}
+
+/**
+ * The TREE record's half of {@link normalizeLoaded}: the two durable optional fields read as the
+ * default the durable side gives them. `closedAt` matters most — every reader tests it as
+ * `closedAt !== null`, so a bare record missing it would read as `undefined`, compare equal to
+ * neither `null` nor a number, and be treated as CLOSED: its missions would silently leave the
+ * dispatch scan and the guidance. `reportedAt` the same shape: missing must read as "never
+ * reported", so a terminal tree is told once rather than never.
+ *
+ * Returns the SAME object when nothing changed, for the same reason as its node counterpart.
+ */
+function normalizeLoadedTree(tree: TreeRecord): TreeRecord {
+  const legacy = tree as TreeRecord & { closedAt?: unknown; reportedAt?: unknown }
+  const closedAt = storedTimeOrNull(legacy.closedAt)
+  const reportedAt = storedTimeOrNull(legacy.reportedAt)
+  if (closedAt === tree.closedAt && reportedAt === tree.reportedAt) return tree
+  return { ...tree, closedAt, reportedAt }
+}
+
+/** A nullable timestamp as stored: a finite number, else `null` (= "never"). */
+function storedTimeOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 export class MissionTree {
@@ -347,11 +423,12 @@ export class MissionTree {
     const loaded = await this.requireStore().loadAll()
     this.states.clear()
     for (const state of loaded) {
+      const tree = normalizeLoadedTree(state.tree)
       const reconciled = new Map<string, NodeRecord>()
       for (const [id, node] of state.nodes) {
         reconciled.set(id, this.reconcileOnOpen(normalizeLoaded(node)))
       }
-      this.states.set(state.tree.rootId, { tree: state.tree, nodes: reconciled })
+      this.states.set(tree.rootId, { tree, nodes: reconciled })
     }
     // Persist reconciliations so a crash cannot leave durable `running` records at odds with memory.
     for (const state of this.states.values()) {

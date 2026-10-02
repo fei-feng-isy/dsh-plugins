@@ -155,6 +155,107 @@ describe('PromptFiles', () => {
   })
 })
 
+describe('PromptFiles namespace (generation v3)', () => {
+  // `<data home>/prompts` is one directory shared by every plugin in the family, and the `mem-*` /
+  // `mission-*` prefix used to be an unchecked convention. v3 turns the prefix into a field the base
+  // validates. The backward-compatibility half matters as much as the check: a caller that does not
+  // pass `namespace` (every plugin built against v1/v2) must behave byte-for-byte as before.
+
+  it('is optional: without it, a file with any prefix is loaded exactly as before', () => {
+    const fake = fakeIo()
+    const [loaded] = new PromptFiles({ dir: DIR, logger, io: fake.io }).load([SPEC])
+    expect(loaded?.wrote).toBe(true)
+    expect(fake.files.has(`${DIR}/${SPEC.file}`)).toBe(true)
+    expect(warnings).toEqual([])
+  })
+
+  it('accepts a file inside the namespace, with the namespace as the prefix', () => {
+    const fake = fakeIo()
+    const spec = { file: 'mem-guide.md', fallback: '默认' }
+    const [loaded] = new PromptFiles({ dir: DIR, namespace: 'mem', logger, io: fake.io }).load([spec])
+    expect(loaded?.wrote).toBe(true)
+    expect(fake.files.get(`${DIR}/mem-guide.md`)).toBe('默认\n')
+    expect(warnings).toEqual([])
+  })
+
+  it('refuses a foreign prefix WITHOUT touching the disk, and degrades to the fallback', () => {
+    // The exact silent-takeover failure the field exists to stop: a "mem" instance declaring a
+    // `mission-*` file. The foreign file must be neither read nor written.
+    const foreign = `${DIR}/mission-tree-guide.md`
+    const fake = fakeIo({ [foreign]: '用户写的任务树提示词' })
+    const loaded = new PromptFiles({ dir: DIR, namespace: 'mem', logger, io: fake.io })
+      .load([{ file: 'mission-tree-guide.md', fallback: '默认' }])
+
+    expect(loaded[0]?.text).toBe('默认')
+    expect(loaded[0]?.source).toBe('default')
+    expect(loaded[0]?.wrote).toBe(false)
+    expect(fake.files.get(foreign)).toBe('用户写的任务树提示词')
+    expect(fake.writes).toEqual([])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('outside the "mem-" namespace')
+  })
+
+  it('handles a mixed manifest: owned files load, foreign ones only warn', () => {
+    const fake = fakeIo()
+    const loaded = new PromptFiles({ dir: DIR, namespace: 'mem', logger, io: fake.io }).load([
+      { file: 'mem-a.md', fallback: 'A' },
+      { file: 'mission-b.md', fallback: 'B' },
+    ])
+
+    expect(loaded.map((entry) => entry.file)).toEqual(['mem-a.md', 'mission-b.md'])
+    expect(loaded[0]?.wrote).toBe(true)
+    expect(loaded[1]?.wrote).toBe(false)
+    expect(loaded[1]?.text).toBe('B')
+    expect(fake.files.has(`${DIR}/mem-a.md`)).toBe(true)
+    expect(fake.files.has(`${DIR}/mission-b.md`)).toBe(false)
+    expect(warnings).toHaveLength(1)
+  })
+
+  it('rejects a file name that escapes the directory even when it carries the prefix', () => {
+    const fake = fakeIo()
+    const loaded = new PromptFiles({ dir: DIR, namespace: 'mem', logger, io: fake.io })
+      .load([{ file: 'mem-../escape.md', fallback: '默认' }])
+    expect(loaded[0]?.source).toBe('default')
+    expect(fake.writes).toEqual([])
+    expect(warnings).toHaveLength(1)
+  })
+
+  it('degrades an illegal namespace without throwing and without touching the disk', () => {
+    // A bad namespace is a caller bug, but this module never throws (a throwing apply can fail a host
+    // boot) and must not silently fall back to "no prefix check" either — it refuses to touch the
+    // directory and warns, so the mistake is visible and cannot re-open the takeover hole.
+    for (const namespace of ['Mem', '', 'mem_', '-mem', 'mem-', '2mem', 'mem space']) {
+      const fake = fakeIo()
+      expect(() => new PromptFiles({ dir: DIR, namespace, logger, io: fake.io }).load([SPEC]), JSON.stringify(namespace)).not.toThrow()
+      const loaded = new PromptFiles({ dir: DIR, namespace, logger, io: fake.io }).load([SPEC])
+      expect(loaded[0]?.source, namespace).toBe('default')
+      expect(loaded[0]?.text, namespace).toBe('默认正文')
+      expect(fake.writes, namespace).toEqual([])
+      expect(fake.files.size, namespace).toBe(0)
+    }
+    expect(warnings.some((line) => line.includes('not a legal prefix'))).toBe(true)
+    for (const namespace of ['mem', 'mission', 'my-tool', 'a1']) {
+      expect(() => new PromptFiles({ dir: DIR, namespace }), namespace).not.toThrow()
+    }
+  })
+
+  it('over the real filesystem: a foreign file is left untouched', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'prompt-namespace-'))
+    const foreign = join(dir, 'mission-keep.md')
+    writeFileSync(foreign, '用户的正文\n', 'utf8')
+    try {
+      const [loaded] = new PromptFiles({ dir, namespace: 'mem', logger }).load([
+        { file: 'mission-keep.md', fallback: '默认' },
+      ])
+      expect(loaded?.text).toBe('默认')
+      expect(readFileSync(foreign, 'utf8')).toBe('用户的正文\n')
+      expect(readdirSync(dir)).toEqual(['mission-keep.md'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 /**
  * The same flow against the REAL filesystem.
  *

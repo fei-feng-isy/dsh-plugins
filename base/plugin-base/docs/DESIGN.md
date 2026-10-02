@@ -33,7 +33,7 @@ provider 层   identify / probe / plan / targetDir / install / verify
 
 | 入口 | 用途 |
 | --- | --- |
-| `.` | base 本体：`createProvisioner`、数据模型、三个内置 provider 工厂，**加上**兼容门禁（原 `@avantf/dsh-compat`）与共用 kit（`PromptFiles` / `createPluginLogger` / `strictCodec` / `familyHome` …） |
+| `.` | base 本体：`createProvisioner`、数据模型、插件真取用/被期望调用的 provider 工厂，**加上**兼容门禁（原 `@avantf/dsh-compat`）与共用 kit（`PromptFiles` / `familyHome` / `wellFormedText` …）。v3 起是**显式列举的稳定子集**（INTERFACE.md §9）：没有运行期消费者的构件（`createPluginLogger`、Typert 符号、单个 compat 探针、`npmPackageProvider` …）在 `./internal` |
 | `./bootstrap` | 零依赖、只用 `node:` 内建；被插件**内联**，只解析并校验 base 本包 |
 | `./preset` | 构建期预设：强制内联 `./bootstrap` + 产物断言 |
 | `./conformance` | provider 一致性套件 |
@@ -291,7 +291,7 @@ revision / siblings / tarball / 模型文件与归档）；缺省是 300 000ms�
 `experimental().prune()` 是显式告警的 no-op：受管模型数据只增不减，`blobs` / `snapshots` 不回收，
 换一个 revision 就会再存一份。
 
-内置 provider：`npmPackageProvider()`、`binaryArchiveProvider()`、`modelCacheProvider()`。
+内置 provider：`npmPackageProvider()`（v3 起在 `./internal`）、`binaryArchiveProvider()`、`modelCacheProvider()`。
 `./conformance` 与 `./preset` 的用法见 [README.md](../README.md)。
 
 ## 9. 接口冻结

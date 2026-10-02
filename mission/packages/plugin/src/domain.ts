@@ -40,7 +40,12 @@ const baselineSchema = z.object({
   holder: z.string().nullable().default(null).catch(null),
 })
 
-const nodeSchema = z.object({
+/**
+ * The node and tree schemas, exported so the cross-layer default pin
+ * (`test/domain_defaults_pin.spec.ts`) can enumerate EVERY field this module defaults, instead of
+ * the pin hard-coding a list that would go stale the moment a field is added.
+ */
+export const nodeSchema = z.object({
   id: z.string(),
   rootId: z.string(),
   parentId: z.string().nullable(),
@@ -118,7 +123,7 @@ const nodeSchema = z.object({
   updatedAt: z.number(),
 })
 
-const treeSchema = z.object({
+export const treeSchema = z.object({
   rootId: z.string(),
   ownerSessionId: z.string(),
   createdAt: z.number(),

@@ -9,8 +9,6 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry'
 import {
   COMPAT_PREFIX,
-  checkInterval,
-  checkServices,
   compatReport,
   gatherEvidence,
   provision,
@@ -21,6 +19,9 @@ import {
   type CompatSpec,
   type CompatVerdict,
 } from '../src/index.js'
+// The individual compat probes are composition pieces of `gatherEvidence`; generation v3 moved them
+// off `.` to `./internal` (INTERFACE.md §9).
+import { checkInterval, checkServices } from '../src/internal.js'
 
 const PACKAGE = '@avantf/dsh-plugin-base'
 

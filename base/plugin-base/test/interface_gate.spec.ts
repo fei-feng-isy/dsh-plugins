@@ -6,8 +6,9 @@
  * than in each plugin: only the MISSING-members direction is `incompatible`, a NEWER loaded base is
  * `ok` + a WARNING (generations are additive — the added surface must not downgrade anyone), a side
  * that cannot be read is `cannot-tell` (never incompatible), the property read is guarded against a
- * hostile module, and nothing it is handed can make it throw. The additive premise the newer-is-ok
- * branch rests on is asserted against the REAL module below, not just promised in a comment.
+ * hostile module, and nothing it is handed can make it throw. The premise the newer-is-ok branch rests
+ * on — "a new generation does not take away a member an older build consumes" — is asserted against the
+ * REAL module and the frozen prune list below, not just promised in a comment.
  * `readInterfaceRequirement` is the ONE reader of a bake record, and "missing" and "malformed" both
  * mean `undefined` — the plugins' startup path turns that into a warning, so a throw here would
  * reject a mount the family forbids rejecting.
@@ -20,7 +21,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import * as api from '../src/index.js'
-import { INTERFACE_VERSION, VALUE_NAMES_V1 } from '../src/interface.js'
+import { INTERFACE_VERSION, PRUNED_VALUE_NAMES, VALUE_NAMES_V1, VALUE_NAMES_V2, VALUE_NAMES_V3 } from '../src/interface.js'
 import { checkInterface, readInterfaceRequirement } from '../src/interface_gate.js'
 
 /** A module that throws on ANY property read — the shape a loader must survive. */
@@ -90,21 +91,36 @@ describe('checkInterface decides in both directions', () => {
   })
 })
 
-describe('the `loaded > required` = ok rule rests on a MECHANICAL superset proof', () => {
-  // `checkInterface` is generic over integers, so it cannot itself know that v2 ⊇ v1 — that fact lives
-  // in the generation declarations and `public-surface.spec.ts`. These two assertions tie the gate's
-  // admission rule to that proof: if a future generation is NOT a superset of the one before it, the
-  // real module stops carrying the previous generation's members and this block fails, which is the
-  // signal that the newer-is-ok branch must not be used for it.
-  it('every v1 VALUE name is really still exported by the v2 module (the real v2 IS a v1)', () => {
+describe('the `loaded > required` = ok rule rests on a MECHANICAL safety proof', () => {
+  // `checkInterface` is generic over integers, so it cannot itself know that v3 carries every member an
+  // older build consumes — that fact lives in the generation declarations and
+  // `public-surface.spec.ts`. Through v2 the proof was a raw superset (`v2 ⊇ v1`); v3 is the first
+  // PRUNING generation, so the proof is now:
+  //
+  //   `VALUE_NAMES_V2 = VALUE_NAMES_V3 ⊎ PRUNED_VALUE_NAMES`, and every pruned name has zero consumers
+  //   in the two plugin trees (proven in `public-surface.spec.ts`).
+  //
+  // These assertions tie the gate's admission rule to that proof: if a future generation drops a name
+  // that is not on the frozen prune list, this block fails — the signal that the newer-is-ok branch
+  // must not be used for it.
+  it('v2 partitions into the v3 surface plus the frozen prune list (nothing is silently lost)', () => {
+    const restored = [...VALUE_NAMES_V3, ...PRUNED_VALUE_NAMES].sort()
+    expect(restored).toEqual([...VALUE_NAMES_V2].sort())
+    expect(VALUE_NAMES_V3.filter((name) => (PRUNED_VALUE_NAMES as readonly string[]).includes(name))).toEqual([])
+  })
+
+  it('every v1 VALUE name is either still on `.` or on the frozen prune list', () => {
     const module = api as unknown as Record<string, unknown>
-    const missing = VALUE_NAMES_V1.filter((name) => module[name] === undefined)
+    const missing = VALUE_NAMES_V1.filter(
+      (name) => module[name] === undefined && !(PRUNED_VALUE_NAMES as readonly string[]).includes(name),
+    )
     expect(missing).toEqual([])
   })
 
-  it('a v1 build meeting the REAL v2 module gets `ok` + a WARNING, not a degradation', () => {
+  it('a v1 build meeting the REAL v3 module gets `ok` + a WARNING, not a degradation', () => {
     // End to end on the real module: the case R1 turns into reality — an old plugin, an updated host
-    // base — judged usable, with the additive rule named in the warning.
+    // base — judged usable, with the additive rule named in the warning. Admissible for v3 because the
+    // only members it shed are the frozen, zero-consumer prune list.
     const verdict = checkInterface(1, api)
     expect(verdict.status).toBe('ok')
     expect(verdict.warning).toContain('pure additions')

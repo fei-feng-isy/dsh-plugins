@@ -7,11 +7,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   COMPAT_PREFIX,
-  floorOf,
   verdictOf,
   type CompatEvidence,
   type CompatVerdict,
 } from '../src/index.js'
+// `floorOf` is a compat composition piece; generation v3 moved it off `.` to `./internal`
+// (INTERFACE.md §9).
+import { floorOf } from '../src/internal.js'
 
 /** Healthy evidence: every required service present, both registries probed, versions equal. */
 function healthy(overrides: Partial<CompatEvidence> = {}): CompatEvidence {

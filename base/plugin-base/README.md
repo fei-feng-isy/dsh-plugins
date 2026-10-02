@@ -44,11 +44,13 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `PromptFiles` | "缺失或空白就写入默认、有内容则逐字读回"的用户可编辑文本文件层（含崩溃残留的死临时文件清理） |
-| `createPluginLogger` | 带统一前缀、可镜像到宿主 logger 的 logger |
+| `PromptFiles` | "缺失或空白就写入默认、有内容则逐字读回"的用户可编辑文本文件层（含崩溃残留的死临时文件清理）。可传 `namespace` 把 `<dataHome>/prompts` 里属于本插件的 `mem-*` / `mission-*` 前缀变成 base 校验的字段（不传则行为不变） |
 | `familyHome` / `familyToolsDir` / `familyModelsDir` / `resolveDataHome` / `expandHome` | 家族根与数据根解析：**⑤ 显式 → ④ 环境变量 → ② 配置值 → 默认**，一律传**具名 slot** |
-| `strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol` | 组装 Typert wire 描述符的几行约定 |
 | `wellFormedText` / `wellFormedDeep` | 出站文本的良构修复：孤立代理（lone surrogate）会被 `JSON.stringify` 原样写出、被严格解析器整篇拒收，这里统一换成 U+FFFD；引擎没有 `String.prototype.toWellFormed` 时走等价扫描。递归版只修字符串、数组与普通对象（含键），`Date` / 类实例等一律按同一性原样返回 |
+
+> 世代 v3 把没有运行期消费者的构件移到了 `./internal`（如 `createPluginLogger`、Typert 符号
+> `strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol`、compat 门禁的单个探针、`npmPackageProvider`）。
+> 它们不再是 `.` 接口的一部分；本包自己的插件各有自己的 logger 与 Typert 镜像，不需要它们。
 
 ### 4. 接口世代
 
@@ -59,7 +61,8 @@
 - `checkInterface(required, module)`：把"调用方构建时所对的世代"与"运行时加载到的本包报告的世代"
   比一比，返回 `ok` / `incompatible` / `cannot-tell`。纯函数、**非对称**、读属性有守卫（取属性就抛的
   对象读成"没报"）、**永不抛**。只有加载到的世代**更旧**（成员可能缺失）才是 `incompatible`；加载到的
-  世代**更新**是 `ok` + 一句话的 `warning`（世代是纯增量，旧调用方要用的成员都还在），相等是 `ok`；
+  世代**更新**是 `ok` + 一句话的 `warning`（新世代不拿走有消费者的成员 —— v1→v2 是名字超集，v2→v3 是
+  剪枝，剪掉的 18 个成员经证明零消费者），相等是 `ok`；
 - `readInterfaceRequirement(url)`：读调用方产物里烘着的那条记录 `{ baseVersion, interfaceVersion }`；
   缺失或畸形返回 `undefined`（"没烘"），不抛；
 - 拿到 `incompatible` 时的建议动作是**降级**（不使用本包的共享能力）而不是拒绝挂载；拿到 `ok` + `warning`
@@ -83,7 +86,6 @@ import type { Provisioner } from '@avantf/dsh-plugin-base'
 const home = join(homedir(), '.avantf', 'env')
 
 const provisioner: Provisioner = framework.createProvisioner({ home, logger })
-provisioner.register(framework.npmPackageProvider())
 provisioner.register(framework.binaryArchiveProvider())
 provisioner.register(framework.modelCacheProvider())
 provisioner.declare(manifest)
@@ -210,10 +212,10 @@ if (!verdict.load) {
 ### 取用共享工具
 
 ```ts
-import { PromptFiles, createPluginLogger } from '@avantf/dsh-plugin-base'
+import { PromptFiles } from '@avantf/dsh-plugin-base'
 
-const log = createPluginLogger({ prefix: '@scope/my-plugin' })
-const files = new PromptFiles({ dir: join(dataHome, 'prompts'), logger: log })
+// 插件自己的 logger（base 解析之前就要用）；提示词层传 `namespace` 让 base 校验前缀。
+const files = new PromptFiles({ dir: join(dataHome, 'prompts'), namespace: 'my-plugin', logger })
   .load([{ file: 'my-plugin-prompt.md', fallback: '内置默认正文\n' }])
 // files[0].text —— 用户写的正文（逐字），或刚写下的默认正文
 ```
@@ -288,12 +290,15 @@ assertProviderConformance(report)
 ## 版本承诺
 
 - 接口面是 `.` 上的导出（值 + 类型）加上 `./preset` / `./conformance` / `./bootstrap` 三个子路径；`./internal`
-  是内部件，从不承诺稳定。
-- **当前这一代把 `.` 的整个名字面都算作冻结接口**（每一代的名字面落在 `api/interface-vN.json` 快照里，只增
-  不改，该快照随源码在仓库、不进产物）。这是为了让本包自己的重构有一条明确边界而做的**阶段性**取舍，不是
-  "这个集合永远不变"：当维护整个名字面的成本超过收益时，稳定承诺会收成 `.` 的一个**稳定子集** —— 新能力
-  从明确标注为不稳定的入口引入，既有成员按弃用周期退出，而不是永远要求内部重构服从"整个 `.` 面都是接口"。
-  收窄会在本 README 与接口世代里一起体现。
+  是内部件，从不承诺稳定（v3 起落在这里的还有那些没有运行期消费者的构件：compat 的单个探针、
+  provisioner 的常量、`npmPackageProvider`、Typert 符号、`createPluginLogger`）。
+- **当前这一代（v3）把 `.` 收成了一个稳定子集**：`.` 只列"插件真取用、或插件作者被期望调用"的成员
+  （32 个值 + 66 个类型），其余进 `./internal`。名字面落在 `api/interface-vN.json` 快照里，随源码在仓库、
+  不进产物。这是为了把"内部件的改动"与"接口"解耦（v3 之前 `.` 是两句 `export *` 的副产品，加一个内部
+  helper 就算接口变更），不是"这个集合永远不变"：新能力从明确标注为不稳定的入口引入，既有成员按弃用
+  周期退出。
+- **v3 是第一次破坏性换代**：v2 的成员如果有消费者，v3 一个不少（剪掉的 18 个经跨树证明零消费者）；
+  但 v3 不再对 v2 做结构超集。旧调用方遇到更新的 base 仍判 `ok` + `warning`，遇到更旧的 base 才降级。
 - **接口与包版本是两条轴**：接口换代只升 `INTERFACE_VERSION` 并新增 `api/interface-vN.json`；包版本是
   普通 semver，只表达包自身（行为变更 minor、修复 patch）。
 - 顺序敏感的参数一律传**具名对象**（如 `resolveDataHome({ explicit, env, configured })`）；可观察的文案

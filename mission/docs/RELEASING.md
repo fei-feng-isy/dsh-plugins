@@ -3,9 +3,10 @@
 > 面向：给 `@avantf/dsh-mission` 打版本 tag、发布 npm 包的人。
 >
 > **这是差异手册，不是第二份发布手册。** 共享知识只在写一遍，本文只链不复述：家族发布顺序
-> （base → 插件）、required peer 约定、版本载体规则、`sync:rc` 投影机制、上传后 202 与
-> "staged 待批准"的区别 —— 见根 [`AGENTS.md`](../../AGENTS.md) 与
-> [`mem/docs/RELEASING.md`](../../mem/docs/RELEASING.md)；后者 §1.1 是一次完整发布的实跑记录，
+> （base → 插件）、required peer 约定、版本载体规则、发布前断言（`pnpm prepublish:assert`，替代
+> 已退役的 RC 投影）、上传后 202 与 "staged 待批准"的区别 —— 见根 [`AGENTS.md`](../../AGENTS.md)
+> 与根 [`docs/RELEASING.md`](../../docs/RELEASING.md)；mem 手册
+> [`mem/docs/RELEASING.md`](../../mem/docs/RELEASING.md) §1.1 是一次完整发布的实跑记录，
 > 本文的命令与它同构，只是产物位置与门禁入口不同。
 >
 > 相关：`mission/README.md`（包本身）、`mission/docs/plugin-internals.md`（实现）。
@@ -59,11 +60,17 @@ mount-smoke 是这里唯一证明"插件真的能在宿主里起来"的一步；
 ## 3. 发布配方（两步）
 
 ```bash
-pnpm -C mission release:check                 # §1，必须全绿
-pnpm -C mission pack:plugin --mount           # 必须 PACK OK，产物 mission/release/avantf-dsh-mission-<ver>.tgz
+pnpm prepublish:assert                         # 根断言：可发布集合 / 版本载体 / README / 不夹带发布工具
+pnpm -C mission release:check                  # §1，必须全绿
+pnpm -C mission pack:plugin --mount            # 必须 PACK OK，产物 mission/release/avantf-dsh-mission-<ver>.tgz
 npm publish "$PWD/mission/release/avantf-dsh-mission-<ver>.tgz" --access public \
   --registry https://registry.npmjs.org/
 ```
+
+**发布直接从开发仓做，不再投影 `../dsh-plugins-rc`**（该目录已废弃）。`prepublish:assert` 是
+`scripts/prepublish-assert.mjs` 的四条只读断言（可发布集合恰好三个 / 版本只盖一处 / README 首行是包名 /
+产物不夹带发布工具），`mission/packages/plugin` 的 `prepublishOnly` 也已前置同一条。注意：`npm publish
+<tarball>` 不跑生命周期脚本，所以这份配方里它是**手工**跑的；走 `pnpm publish` 时由钩子自动跑。
 
 **为什么不能 `pnpm --filter @avantf/dsh-mission publish`**：按 `AGENTS.md`「版本：每组只记在一个
 manifest 里」，私有的 `mission/package.json` / `mission/packages/core` **不带 version**，pnpm 在 publish
@@ -73,14 +80,16 @@ manifest、`finally` 还原），所以**只有它产出的 tarball** 已把 `wo
 `npm publish <tarball>` 不再跑生命周期脚本、也不需要 workspace 解析。registry / token / scope /
 链路这四条发布前提见 mem 手册 §2。
 
-## 4. 版本载体、rc 投影与 tag
+## 4. 版本载体与 tag
 
 - 版本只改一处：`pnpm version:set mission X.Y.Z` — 只写 `mission/packages/plugin/package.json`。
 - `pnpm version:check` 校验"每组版本只记在它的可发布 manifest 里，私有 manifest 不带版本"。
-- rc 投影：`pnpm sync:rc --yes --commit`；rc 树里按 `pnpm release:check:base && pnpm release:check:mem
-  && pnpm release:check:mission` 各跑一遍门禁。
-- tag 在开发仓与 rc 仓都带组前缀：`mission-vX.Y.Z`（三个包共用一个仓库，裸 `vX.Y.Z` 会互相撞）。
-- 家族发布顺序、required peer、投影机制见根 `AGENTS.md`。
+- **不再有 rc 投影**：`../dsh-plugins-rc` 已废弃、不再往里同步，发布直接从本仓做。发布前在仓库根跑
+  `pnpm prepublish:assert`（根 `scripts/prepublish-assert.mjs`）与 `pnpm release:check`；rc 原本提供的
+  三件事（排除发布工具、版本盖章、生成 README）现在是发布前在开发树里必须成立的断言。
+- tag 只在开发仓打、带组前缀：`mission-vX.Y.Z`（三个包共用一个仓库，裸 `vX.Y.Z` 会互相撞）。
+- 家族发布顺序、required peer、发布前断言见根 `AGENTS.md` 与根
+  [`docs/RELEASING.md`](../../docs/RELEASING.md)。
 
 ## 5. 上传之后
 

@@ -62,7 +62,7 @@
     "pack": "node scripts/pack.mjs",
     "release:check": "node scripts/release-check.mjs",
     "prepack": "pnpm build",
-    "prepublishOnly": "pnpm release:check"
+    "prepublishOnly": "node ../../scripts/prepublish-assert.mjs --package @avantf/dsh-plugin-base && pnpm release:check"
   },
   "devDependencies": {
     "@types/node": "catalog:",

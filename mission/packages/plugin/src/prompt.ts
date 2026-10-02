@@ -39,6 +39,20 @@ export const MISSION_TREE_GUIDANCE = [
   '执行者是一次性的：看不到本对话、不能追问，结束后也不会再收到你的消息。需要这些、或需要脚本化扇出的任务，不适合用 `create_mission`；但"我已经想清楚了、步骤很明确"不在这个名单里 —— 那正是它接得最稳的一类。',
 ].join('\n')
 
+/**
+ * This plugin's file-name prefix inside the SHARED family prompt directory — the `mission` in
+ * `mission-*.md`.
+ *
+ * It is handed to the base's `PromptFiles` as its `namespace` (interface v3), which then REFUSES to
+ * read or write any spec whose `file` is not `<namespace>-…` or is not a bare file name: the
+ * `mem-*` / `mission-*` split used to be a convention with no machine check, so a mistyped prefix
+ * could silently read or overwrite another plugin's user-edited file. The value is the SAME token
+ * {@link PROMPT_FILES} names its files with — one source for both, so the two cannot drift — and it
+ * is OPTIONAL at the base: a caller that omits it (or a base older than v3) gets the pre-v3
+ * behaviour, which is why passing it never degrades a mount.
+ */
+export const PROMPT_NAMESPACE = 'mission'
+
 /** One section and the file its text may be edited in; the file name is the loader's handle. */
 export interface PromptFileEntry {
   readonly file: string

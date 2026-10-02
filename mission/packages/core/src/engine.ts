@@ -4,7 +4,7 @@
  */
 import { MissionTree } from './tree.js'
 import { effectiveRoundMs, judgeWorker, type LivenessBound, type LivenessVerdict } from './liveness.js'
-import { isTroubledNode } from './prompt.js'
+import { isTroubledNode } from './trouble.js'
 import {
   CAPACITY_CEILING,
   DEFAULT_CAPACITY_WAIT_MS,

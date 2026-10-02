@@ -21,16 +21,23 @@
  *  - **Only MISSING members are unsafe.** The two directions are NOT symmetric. A build that needs a
  *    generation the loaded base has not reached (`loaded < required`) may ask for members that do not
  *    exist — that is `incompatible`. A build that meets a NEWER base (`loaded > required`) is the
- *    family's safe case: generations are ADDITIVE by contract, so every member the older build
- *    requires is still present. That case is `ok` + a `warning`, never a degradation — an added
- *    surface must not downgrade anyone, which is the whole point of the additive rule. "In range but
- *    another generation" is the one case `supportedRange` cannot see, so this gate must see it.
+ *    family's safe case: a generation must not take away a member an older build CONSUMES. That case
+ *    is `ok` + a `warning`, never a degradation — a new generation must not downgrade anyone, which is
+ *    the whole point of the rule. "In range but another generation" is the one case `supportedRange`
+ *    cannot see, so this gate must see it.
  *
- * The additive premise is not prose: it is asserted mechanically where the generations are declared —
- * `BaseRuntimeV2 extends BaseRuntimeV1`, `VALUE_NAMES_V2 = [...VALUE_NAMES_V1, +2]`, and
- * `test/public-surface.spec.ts` checks v1's names really survive into v2 (INTERFACE.md §5). The
- * `loaded > required` branch below is admissible ONLY while that proof holds: a generation that is not
- * a proven superset of the one before it must be judged `incompatible`, not waved through as `ok`.
+ * The "does not take away a consumed member" premise is not prose: it is asserted mechanically where
+ * the generations are declared, and the shape of the proof depends on the kind of transition:
+ *
+ *  - an ADDITIVE generation states `Vn extends Vn-1` and the snapshot gate checks the name superset
+ *    (`v1 → v2`, INTERFACE.md §5);
+ *  - a PRUNING generation (`v2 → v3`, INTERFACE.md §9) instead proves `Vn-1 = Vn ⊎ PRUNED` plus that
+ *    every `PRUNED` name has zero consumers across the two plugin trees
+ *    (`test/public-surface.spec.ts`), and `test/interface_gate.spec.ts` pins it against the real module.
+ *
+ * The `loaded > required` branch below is admissible ONLY while one of those proofs holds. A generation
+ * that drops a name WITH a consumer would fail the pruning proof, and that is the signal it must not be
+ * waved through as `ok`.
  *
  * @module @avantf/dsh-plugin-base/interface_gate
  */
@@ -53,7 +60,8 @@ export interface InterfaceRequirement {
  * What {@link checkInterface} decided.
  *
  * `ok` — both sides were readable and the loaded base can serve this build: either the generations are
- * equal, or the loaded base is NEWER and generations are additive, so every required member is present.
+ * equal, or the loaded base is NEWER and the newer generation provably keeps every member a consumer
+ * uses (the additive superset for v1 → v2; the pruning proof for v2 → v3).
  * Use the base normally; if {@link InterfaceVerdict.warning} is set, log it as one WARNING first.
  * `incompatible` — both sides were readable and the loaded base is OLDER than the build, so the members
  * this build requires may be missing; a caller must NOT use the base's shared capabilities. The family
@@ -74,7 +82,7 @@ export interface InterfaceVerdict {
   readonly reason?: string
   /**
    * One sentence to log as a WARNING although the verdict is `ok` — present only for the accepted
-   * `loaded > required` case (the additive-generation rule), absent otherwise. It is separate from
+   * `loaded > required` case (the newer-but-compatible rule), absent otherwise. It is separate from
    * {@link InterfaceVerdict.reason} because "ok but notable" and "not ok" are different outcomes: a
    * caller that logs `reason` only for a non-`ok` status stays correct, and the additive case still
    * gets its WARNING line.
@@ -88,7 +96,7 @@ export interface InterfaceVerdict {
  * Pure, total and asymmetric: it reads exactly one property, guards that read, and answers a verdict
  * for every input. Both arguments are trusted only as far as they can be read. `loaded < required` is
  * `incompatible` (the caller may need members that are gone/never existed); `loaded > required` is `ok`
- * plus a `warning`, on the additive-generation proof described in this module's header; equal is plain
+ * plus a `warning`, on the generation-safety proof described in this module's header; equal is plain
  * `ok`.
  *
  * @param required - the generation the caller was built for (its baked `interfaceVersion`).

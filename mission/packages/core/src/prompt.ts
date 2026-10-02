@@ -4,47 +4,8 @@
  */
 import { CAPACITY, TERMINAL, type DispatchView, type NodeRecord } from './types.js'
 import type { ContinuationDelta } from './continuation.js'
+import { isTroubledNode, statusLabel } from './trouble.js'
 import { LOCAL_WELL_FORMED, type WellFormedSource } from './wellformed.js'
-
-/** Node statuses in the language the model reads. */
-const STATUS_ZH: Record<string, string> = {
-  blocked: '等待子任务',
-  ready: '待执行',
-  running: '执行中',
-  interrupted: '已中断',
-  done: '已完成',
-  failed: '已失败',
-}
-
-/** One node status in the language the model and the panel read. */
-export function statusLabel(status: string | undefined): string {
-  if (status === undefined) return '?'
-  return STATUS_ZH[status] ?? status
-}
-
-/**
- * Whether ONE node carries trouble worth telling the owner about: four durable counters, each at the
- * ENGINE's own floor — silent reclaims (`stalls`), consecutive hangs (`hungCount`), failed attempts
- * (`failures`), starts that never got a worker (`spawnFailures`).
- *
- * ONE definition, because four channels ask this question: the owner-facing flag below, and the three
- * heads-ups (`escalateTrouble` for stalls and repeated hangs, and the failed-start one in the host).
- * They used to disagree — the flag counted `spawnFailures` while the stall gate did not —
- * so a mission that could not get a worker started read as 「反复出过问题」 in `list_missions` and the
- * owner was never told why. Splitting the predicate out is what makes "both channels speak one
- * vocabulary" true by construction rather than by comment.
- *
- * `hungCount` is the one member that is a STREAK rather than a history: any real output clears it, so
- * a node that hung three times and then made progress stops reading as troubled. That is deliberate —
- * the flag answers "is this happening to it NOW", and the other three counters are the ones that
- * never clear.
- */
-export function isTroubledNode(node: NodeRecord): boolean {
-  return node.stalls >= CAPACITY.maxStallsBeforeReport
-    || node.hungCount >= CAPACITY.maxHungsBeforeReport
-    || node.failures >= CAPACITY.maxAttempts - 1
-    || node.spawnFailures >= CAPACITY.maxAttempts - 1
-}
 
 /**
  * Whether a mission should read as TROUBLED to its owner: some unfinished node trips {@link isTroubledNode}.

@@ -39,35 +39,42 @@
 | **业务流程 / 可观察行为**（插件测试断言的那些） | 不变 | minor | 否 |
 | **纯修复**，无可观察变化 | 不变 | patch | 否 |
 
-`INTERFACE_VERSION` **现在是 2**。**v1 已经发布过** —— 实测（2026-10-02）：registry 上的
-`@avantf/dsh-plugin-base@0.3.1` 解包后 `dist/interface.js` 里写着 `INTERFACE_VERSION = 1`，而且 registry 上
-目前只有这一个版本。所以"v1 从未发布"是**过期结论**：v1 期间确实**就地**加过一面（运行期门禁的
-`checkInterface` / `readInterfaceRequirement`，§3），但那次精修发生在 **0.3.1 发布之前**，因此它没有破坏
-任何已发布契约 —— 这是一条**历史事实**（"当时还没发"），不是"同一代可以随便改"的长期许可；0.3.1 之后
-v1 就是公开契约，再增面只能换代。v1 → v2 就是一次**增量换代**：把共享 kit 的良构文本两个成员
-（`wellFormedText` / `wellFormedDeep`，§8）收归 base，而不是继续就地精修 v1。这样可以：① 让"新成员属于
-哪一代、旧插件在哪一代降级"在 diff 里留下一个数字（2），不必读人话；② 不必改动任何已发布的世代记录。
-v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译在 `BaseRuntimeV1` 上，而 v2 是它的**超集**（§5）。
+`INTERFACE_VERSION` **现在是 3**。三次换代的历史：**v1** 是首个冻结世代（`api/interface-v1.json`），
+**v2** 是第一次**增量**换代（v1 + `wellFormedText` / `wellFormedDeep` 两个可观察 kit 成员，§8），
+**v3** 是第一次**剪枝**换代（§9）——`.` 收成"插件真取用的稳定子集"（50 → 32 个值），18 个零消费者成员
+移进 `./internal`，两处 `export *` 改成显式列举，并与 `PromptFiles({ namespace })` 的前缀校验合并。
+v3 因此**不 `extends` v2**：它是本项目第一次对已发布世代做**破坏性**改动，代价与替代证明写在 §5、§9。
+
+v1 期间确实**就地**加过一面（运行期门禁的 `checkInterface` / `readInterfaceRequirement`，§3），但那次精修
+发生在 **0.3.1 发布之前**，因此它没有破坏任何已发布契约 —— 这是一条**历史事实**（"当时还没发"），不是
+"同一代可以随便改"的长期许可；0.3.1 之后 v1 就是公开契约。v1 → v2 是**增量换代**（把共享 kit 的良构文本两个
+成员收归 base）；v2 → v3 是**剪枝换代**，两者的证明方式不同（§5）。v1 / v2 的接口类型与快照**原样保留**，
+它们是那两个世代留档；两个插件此刻仍 `import type` `BaseRuntimeV1`（v3 剪掉的成员里有它们**编译期**会用到的
+名字，这正是"破坏性"的含义，迁移由插件树的采用任务负责）。
 
 ## 2. 接口面由三层构成，三层都要冻结
 
 1. **名字面** —— `.` 的导出（值 + 类型）。**已经**由 `test/public-surface.spec.ts` 的 equality 门禁钉住
    （`missing === []` 那种子集断言抓不到"多导出了一个"），而那份清单**只有一处**：接口类型
-   `src/interface.ts` 的 `VALUE_NAMES_V2` / `TYPE_NAMES_V2`（当前世代）与冻结的 `VALUE_NAMES_V1` /
-   `TYPE_NAMES_V1`（v1 的记录；门禁顺手断言 v2 是 v1 的超集），落盘成 `api/interface-v2.json` 与
-   `api/interface-v1.json`；`./internal` 是内部件，不在面上。
+   `src/interface.ts` 的 `VALUE_NAMES_V3` / `TYPE_NAMES_V3`（当前世代）与冻结的 v1 / v2 名单（历史记录）；
+   落盘成 `api/interface-v3.json`（当前）与 `api/interface-v1.json` / `api/interface-v2.json`（留档）。
+   **`.` 与 `./internal` 的边界判据只有一句：这个成员是不是"插件真取用的、或插件作者被期望调用的"？**
+   —— 是 ⇒ `.`；否（它是 `.` 上某个组合层成员的构件，或按设计永远没有运行期消费者）⇒ `./internal`。
+   `./internal` 不在兼容承诺内（`public-surface.spec.ts` 的门禁断言内部件不上 `.`）。v3 的剪枝名单
+   `PRUNED_VALUE_NAMES` 就是这条判据的一次执行（§9）。
 2. **形状面** —— 类型签名与参数形状。**已经**由编译保证，两半都成立：
    - **kit 半边**：插件把加载到的模块定型成接口类型 `BaseRuntimeV1`（`import type`，见
      `test/interface.spec.ts` 两条），`kit.resolveDataHome` / `kit.PromptFiles` 的签名一变就编译红
-     （`0.1.0 → 0.2.0` 那次 mission 被迫改 `promptDir` 就是它在起作用）。当前世代是 `BaseRuntimeV2`，
-     它 `extends BaseRuntimeV1`，所以"旧插件编译在 v1 上、新 base 仍满足它"是编译期保证，而不是约定。
+     （`0.1.0 → 0.2.0` 那次 mission 被迫改 `promptDir` 就是它在起作用）。当前世代是 `BaseRuntimeV3`；
+     v1 → v2 靠 `extends` 保证"旧插件编译在 v1 上、新 base 仍满足它"，**v3 不再满足这套结构保证**（剪枝），
+     它靠的是 §5 的替代证明 + 插件树的迁移任务。
    - **gate 半边曾经不成立**：mission 把真实模块用 `framework as unknown as CompatModule` 塞进它手写的
      `CompatModule`，编译器不做任何结构核对 —— 而 gate 正是语义最容易变的那半。已改成**只对测试缝做
      转换**：`const gate: CompatModule = options.compatModule ?? framework`（半成品的注入仍然转换，合理；
      真实模块直接接受结构核对）。顺带得到一个免费的一致性检查：mission 手写的 11 项与 base 实际导出的形状
      一旦对不上，立刻编译不过。
-   base 现在**拥有**接口类型：`BaseRuntimeV2`（值面，真实模块可直接结构化赋值给它 —— 少一个成员就编译
-   不过）与 `BaseTypeSurfaceV2`（类型面，`keyof` 就是类型名单），以及它们所扩展的 v1 名字。插件不再各自
+   base 现在**拥有**接口类型：`BaseRuntimeV3`（值面，真实模块可直接结构化赋值给它 —— 少一个成员就编译
+   不过）与 `BaseTypeSurfaceV3`（类型面，`keyof` 就是类型名单），以及留档的 v1 / v2 名字。插件不再各自
    手写一份子集、各自承担"写漏了没人知道"的风险（§7 第 4 步）。
 3. **语义面** —— 函数"做什么"的契约（数据根的层序、prompt 文件的 ensure/read/fallback、
    `compatReport` 的结构、provisioner 的终态与 `code`…）。这一层**机器抓不到**，所以只能靠 §4 的三条
@@ -94,11 +101,17 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
   | `loaded > required`（宿主 base **更新**） | **`ok` + `warning`** | 接口世代是**纯增量**的：新世代是旧世代的超集，旧插件要用的成员**一个不少**，它只是用不到新成员。`warning` 文案写明"宿主 base 比插件更新（世代 N > M）：按纯增量规则判定为可用"。 |
   | `loaded < required`（宿主 base **更旧**） | `incompatible` | 插件要用的成员可能**不存在** —— 这才是真正不安全的方向。 |
 
-  **`loaded > required` 只在"纯增量"被机械证明时才判 `ok`**，这不是注释里的一句承诺：
-  `BaseRuntimeV2 extends BaseRuntimeV1`、`VALUE_NAMES_V2 = [...VALUE_NAMES_V1, +2]`、以及
-  `test/public-surface.spec.ts` 断言 v1 的名字真的都还在 v2 里（§5）。`test/interface_gate.spec.ts` 把这条
-  放行规则**直接钉在真实 module 上**（"每个 v1 值名在 v2 module 上仍存在" + "v1 build 遇上真实 v2 得到
-  `ok` + WARNING"），所以一个**不是**超集的新世代一旦出现，这里会先红，而不是把旧插件悄悄放行。
+  **`loaded > required` 只在"新世代不会拿走旧插件要用的成员"被机械证明时才判 `ok`**，这不是注释里的一句
+  承诺。证明的形状随换代方式分两种：
+   - **增量世代（v1 → v2）**：`BaseRuntimeV2 extends BaseRuntimeV1`、`VALUE_NAMES_V2 = [...VALUE_NAMES_V1, +2]`，
+     以及 `test/public-surface.spec.ts` 断言 v1 的名字真的都还在 v2 里（§5）。
+   - **剪枝世代（v2 → v3，§9）**：v3 不 `extends` v2，改用**两步替代证明**（同样在
+     `public-surface.spec.ts` 里机械执行）：① `VALUE_NAMES_V2 = VALUE_NAMES_V3 ⊎ PRUNED_VALUE_NAMES`
+     （剪掉的每个名字都在冻结名单上，没有静默改名或丢失）；② 剪掉的每个名字在**两棵插件树的非测试源码 +
+     scripts** 里零消费者（跨树检查）。这两条合起来正是"旧插件要用的成员一个不少"。
+  `test/interface_gate.spec.ts` 把这条放行规则**直接钉在真实 module 上**（v1 的每个值名要么还在 `.` 上、
+  要么在冻结剪枝名单上；v1 build 遇上真实 v3 得到 `ok` + WARNING），所以一个**拿走**了有消费者成员的新世代
+  一旦出现，这里会先红，而不是把旧插件悄悄放行。
 - `readInterfaceRequirement(url)` → `{ baseVersion, interfaceVersion }`；文件缺失或畸形返回 `undefined`
   （"没 bake"），不抛。这是**插件启动路径**上的读取实现；写的那一侧是
   `scripts/lib/interface-version.mjs`，而 build 侧的 `--check` 用那份共享脚本自带的 reader（它要在所 vendor
@@ -162,12 +175,13 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
    顺序第 2 步之后的形态** —— 那次具名化是唯一的破坏性改动，而它先发生。之后 v1 又**就地**加过一面
    （运行期门禁的 `checkInterface` / `readInterfaceRequirement`，§3）：那次精修发生在 **0.3.1 发布之前**，
    所以没有破坏任何已发布契约 —— 这是**历史事实**，不是"同一代可以随意增面"的许可。0.3.1 之后 v1 已是公开
-   契约（实测其 `dist/interface.js` 报 `INTERFACE_VERSION = 1`），再要增面只能换代。**v2 就是新的一代**：
-   v1 的快照与类型原样留档，v2 = v1 + 良构文本两个成员（§8），并且门禁断言
-   v2 是 v1 的**超集**（值名多两个，类型名不增），所以"增量"是可机械检查的，不是一句承诺。**这条断言不只是
-   冻结的一部分，它还是 §3 里 `loaded > required` 判 `ok` 的放行前提** —— 没有"新世代 ⊇ 旧世代"的机械证明，
-   旧插件遇上新 base 就不能被放行。换代（新建 `interface-v(N+1).json` + 常量加一）此后只在对已发布世代做
-   **破坏性**改动时才发生。
+   契约（实测其 `dist/interface.js` 报 `INTERFACE_VERSION = 1`），再要增面只能换代。**v2 是第一次增量
+   换代**：v1 的快照与类型原样留档，v2 = v1 + 良构文本两个成员（§8），并且门禁断言 v2 是 v1 的**超集**
+   （值名多两个，类型名不增）。**v3 是第一次剪枝换代**（§9）：v2 的快照与类型原样留档，`.` 只留 32 个稳定
+   值名，剪掉的 18 个进冻结的 `PRUNED_VALUE_NAMES`，门禁断言 `v2 = v3 ⊎ PRUNED` 且 `PRUNED` 在两棵插件树
+   零消费者。**这条"换代不拿走旧插件要用的成员"的证明不只是冻结的一部分，它还是 §3 里 `loaded > required`
+   判 `ok` 的放行前提** —— 没有它，旧插件遇上新 base 就不能被放行。换代（新建 `interface-v(N+1).json` +
+   常量加一）此后只在对已发布世代做**破坏性**改动时才发生。
    **不哈希任何东西**：哈希名字没有信息量（名字就在同一个文件里逐字列着），哈希声明文本（`.d.ts` 片段）会被格式、
    注释、参数名与换行一改就翻 —— 那种门禁要么被天天重新冻结（然后没人再看），要么被加白名单绕过。
 2. 形状面交给编译（§2 第 2 层，两半都已受保护），语义面交给 §4 第 3 条的行为测试。快照只做它真正独一无二
@@ -185,9 +199,12 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
    重切快照是**显式**动作，测试自己绝不改写它：`UPDATE_INTERFACE_SNAPSHOT=1 pnpm -C base/plugin-base
    test public-surface`。它只重新落盘，**不会**替你决定要不要升 `INTERFACE_VERSION`、也不会新建
    `interface-v(N+1).json` —— 那是一次接口换代，必须由人显式做（新增文件 + 常量加一 + 版本决定）。
-   v2 的门禁在 equality 之外多断言两条：① `VALUE_NAMES_V2` / `TYPE_NAMES_V2` 是
+   增量世代（v2）的门禁在 equality 之外多断言两条：① `VALUE_NAMES_V2` / `TYPE_NAMES_V2` 是
    `VALUE_NAMES_V1` / `TYPE_NAMES_V1` 的超集，且只多了那两个良构文本成员（`TYPE_NAMES_V2` 长度不变）；
-   ② 留档的 `api/interface-v1.json` 仍与 v1 名单逐字相等。于是"增量换代"既写在注释里，也钉在测试里。
+   ② 留档的 `api/interface-v1.json` 仍与 v1 名单逐字相等。剪枝世代（v3）的门禁改成断言：v2 = v3 ⊎ PRUNED
+   （值名与类型名各一遍，类型面还要对 `ADDED_TYPE_NAMES`）、剪掉的 18 个既不在 `.` 上又在 `./internal` 上、
+   以及跨树零消费者；留档的 `api/interface-v1.json` / `interface-v2.json` 仍逐字相等。于是"换代不拿走旧插件
+   要用的成员"既写在注释里，也钉在测试里。
    两个名字名单本身也不在运行期导出（它们是门禁的数据，不是 API）：把清单放进它自己描述的面里，
    会让"接口快照"变成自指的。
 
@@ -214,24 +231,37 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
 是合并前的旧产物，peer 还指向已死的 `@avantf/dsh-envinit`）；这也正是这次一次性把具名化、快照、接口类型
 与接口编号都做完的理由。
 
-**什么时候该解开**：出现第一个**仓外**消费者之后，"内部重构要绕开 `.` 面"的代价就不再被收益覆盖 ——
-那时该做的是把 `.` 面收成一个**稳定子集**（新成员先进 `./experimental`，或按 `@deprecated` 走弃用周期），
-而不是继续要求内部重构服从"整个 `.` 面都是冻结接口"。冻结是**当下这个阶段**的取舍，不是永久状态；把这条
-写出来，是为了让后来者知道它是一笔可以重新算的账。
+**什么时候该解开：已经解开（v3，2026-10-03 裁决）。** 原文预留的触发条件是"出现第一个**仓外**消费者"，但
+第五轮架构复审（§1.4/§7.9）指出这笔账在此**之前**就已经倒挂：`. ` 面根本不是被选的 API，而是
+`src/index.ts` 两句 `export *`（`./compat.js` + `./kit/index.js`）的副产品 —— 50 个冻结值里 14 个在两棵
+插件树零引用，`createPluginLogger` 全仓零消费者，4 个 Typert 符号按设计永远没有运行期消费者。后果是
+**一个世代号覆盖 provisioner / compat / kit 三种变化速率**：compat 半边新增一个内部 helper 就是一次接口换代，
+而 compat 半边的一次删改又会把只用 `PromptFiles` 的插件判 `incompatible` 推进降级。于是决定**现在就收**，
+与 prompts namespace 校验合并成一次换代（v3，§9），而不是等第一个仓外消费者。
+
+**收面后三种变化速率是否分开了？—— 分开了，而且分开的方式是"显式列举"而不是"少写几个名字"。** 关键在
+`src/index.ts` 从 `export *` 改成显式列举：今后往 `compat.ts` / `kit/*.ts` 里加一个**内部** helper，
+`. ` 面一个字都不动，世代号不动；只有**真的**把成员列进 `. `（或从 `. ` 移除）才是一次接口变更。剪枝把
+"compat 内部件的改动"与"接口"解耦；`./internal` 承接那些构件，明确**不在兼容承诺内**（§2 的边界判据）。
+仍然存在的耦合只有一条，且是刻意的：`. ` 上**列着**的 compat 成员（`provision` / `verdictOf` / `compatReport`
+…）的删改仍是接口变更 —— 但它们正是插件真取用的组合层，删改本来就该换代。
+
+冻结是**当下这个阶段**的取舍，不是永久状态。v3 之后，`. ` 是"稳定子集 + 显式列举"；如果将来又要收，走
+`@deprecated` 弃用周期或 `./experimental`，而不是再一次静默剪枝。
 
 ## 7. 实现清单：已有 / 待做
 
 | 块 | 状态 |
 | --- | --- |
-| `.` 名字面的 equality 门禁、`./internal` 隔离 | 已有 —— 门禁是 `test/public-surface.spec.ts`，**由 `api/interface-v2.json` 驱动**（清单只有一份：接口类型 `src/interface.ts` 的 `VALUE_NAMES_V2` / `TYPE_NAMES_V2` 是载体，快照是它的落盘；`VALUE_NAMES_V1` / `TYPE_NAMES_V1` 与 `api/interface-v1.json` 作为 v1 留档，并被断言是 v2 的子集） |
+| `.` 名字面的 equality 门禁、`./internal` 隔离 | 已有 —— 门禁是 `test/public-surface.spec.ts`，**由 `api/interface-v3.json` 驱动**（清单只有一份：接口类型 `src/interface.ts` 的 `VALUE_NAMES_V3` / `TYPE_NAMES_V3` 是载体，快照是它的落盘；v1 / v2 的名单与快照作为留档，并被断言 `v2 = v3 ⊎ PRUNED`）。v3 起 `.` 是显式列举的稳定子集，`./internal` 是内部件（含 18 个被剪成员），不在兼容承诺内（§2 边界判据、§9） |
 | 插件对 base 的 `import type` 与模块定型（签名变化 ⇒ 插件 typecheck 红） | 已有 —— **两半都成立**：kit 一直是，gate 半边在 mission 改成"只对测试缝做转换"之后才成立（§2 第 2 层） |
 | `DESIGN.md` §7 的四张协议面版本表（item / layout / status / declared） | 已有 |
 | `resolveDataHome` 改具名对象（§4 第 1 条；同时是一次接口变更） | **已有** —— 三处都收成具名 slot，不再有位置参数：base kit 与 mission `promptDir`/本地兜底是 `{ explicit?, env?, configured? }`，`@avantf/mem` 引擎是 `{ common, explicit }`（`common` 承载层 ② 的配置对象，因为它读的是 `Pick<Config,'dataHome'>`；名字不同，槽位语义相同，且都在编译期挡住"配置值放进 explicit slot"）。`family_pin.spec.ts`（跨树）、`family_paths.spec.ts`、`data_home.spec.ts`、`prompt_files.spec.ts` 同步 |
-| `api/interface-v1.json` 快照（只记名字面）与"变了就必须升编号"的门禁 | **已有** —— v1 留档在 `base/plugin-base/api/interface-v1.json`；当前世代是 `api/interface-v2.json`，门禁断言快照 == 接口类型的两份名单 == 代码实际导出（两向相等），且 v2 ⊇ v1、只多两个值名；不等时只能删导出，或新增 `interface-v(N+1).json` 并升 `INTERFACE_VERSION` |
-| 接口类型 `BaseRuntimeV2`（= `BaseRuntimeV1` + 良构文本）+ 每个带语义成员的跨树行为测试 | **已有** —— `src/interface.ts` 的 `BaseRuntimeV2`（值面，可结构化赋值；`extends BaseRuntimeV1`，v1 名字继续导出）+ `BaseTypeSurfaceV2`（类型面，`keyof` 就是类型名单）；快照由它们派生。跨树行为测试在 `mem/packages/plugin/test/interface.spec.ts` 与 `mission/packages/plugin/test/interface.spec.ts`，覆盖路径解析、`PromptFiles` 的 ensure/read/fallback、`compatReport` 的结构与文案归属、provisioner 的终态与 `code` 表，以及 bake 出的编号 == 加载到的 base 报出的编号（都是真实实现，不是 mock）。**v2 新增的良构文本成员也有这条 pin**：`mem/packages/plugin/test/wellformed_pin.spec.ts`（6 条，与已链接的 base 逐输入比对）与 `mission/packages/plugin/test/wellformed.spec.ts`（§8） |
+| `api/interface-vN.json` 快照（只记名字面）与"变了就必须升编号"的门禁 | **已有** —— v1 / v2 留档在 `base/plugin-base/api/interface-v1.json` / `interface-v2.json`；当前世代是 `api/interface-v3.json`，门禁断言快照 == 接口类型的两份名单 == 代码实际导出（两向相等），且 `v2 = v3 ⊎ PRUNED` + 剪掉的名字零消费者；不等时只能删导出，或新增 `interface-v(N+1).json` 并升 `INTERFACE_VERSION`（§5、§9） |
+| 接口类型 `BaseRuntimeV3`（剪枝后的稳定子集）+ 每个带语义成员的跨树行为测试 | **已有** —— `src/interface.ts` 的 `BaseRuntimeV3`（值面，可结构化赋值；第一次**不** `extends` 前代，见 §9）+ `BaseTypeSurfaceV3`（类型面，`keyof` 就是类型名单）；快照由它们派生。跨树行为测试在 `mem/packages/plugin/test/interface.spec.ts` 与 `mission/packages/plugin/test/interface.spec.ts`，覆盖路径解析、`PromptFiles` 的 ensure/read/fallback、`compatReport` 的结构与文案归属、provisioner 的终态与 `code` 表，以及 bake 出的编号 == 加载到的 base 报出的编号（都是真实实现，不是 mock）。**v2 新增的良构文本成员也有这条 pin**：`mem/packages/plugin/test/wellformed_pin.spec.ts`（6 条，与已链接的 base 逐输入比对）与 `mission/packages/plugin/test/wellformed.spec.ts`（§8） |
 | 良构文本 kit（`wellFormedText` / `wellFormedDeep`，v2 新成员） | **已有（实现 + base 侧测试 + 跨树 pin）** —— `src/kit/wellformed.ts`，在 `.` 上、零运行期依赖；单字符串修复优先用 `String.prototype.toWellFormed`，缺失时走等价的 `charCodeAt` 扫描；递归版只碰字符串、数组与**普通对象**（含键），其它类型（含 `Date` / `Map` / 类实例 / 带 `toJSON` 的对象）按同一性原样返回。base 侧 `test/wellformed.spec.ts` 覆盖双向证据、降级路径与幂等。**跨树行为 pin 已有**：`mem/packages/plugin/test/wellformed_pin.spec.ts` 与 `mission/packages/plugin/test/wellformed.spec.ts`（§8） |
 | `INTERFACE_VERSION` 与插件的构建期 bake + 运行期门禁（由 link 步骤重烤） | **已有** —— base 导出整数 `INTERFACE_VERSION`；两个 `scripts/link-envinit.mjs` 在 vendor bootstrap 的同一步把 `{ baseVersion, interfaceVersion }` 写进 `lib/interface-version.json`（`files` 随包发布），`--check` 按字节比对；启动时插件用 base 的 `readInterfaceRequirement` 读自己的 bake、再调 base 的 `checkInterface`：`incompatible`（宿主更旧）⇒ 一条 `WARNING` + 不用 base 的共享能力（自带 prompt 正文、门禁跳过、legacy provisioning）但**照常挂载**，`ok` + `warning`（宿主更新，纯增量）⇒ 一条 `WARNING` 且**照常使用**，`cannot-tell` ⇒ 一条 `WARNING` 并照常使用（§3）。**双向**断言：①bake 的编号 == base 当时的编号（两个 `link-envinit.mjs` 的 `--check`），②声明/bake 编号 == 加载到的 base 报出的编号（插件启动路径 + 两条跨树测试） |
-| 门禁搬进 base（§3 的核心） | **已有** —— `.` 导出 `checkInterface(required, module)` 与 `readInterfaceRequirement(url)`；两者都在 `BaseRuntimeV2` / `VALUE_NAMES_V2` 与快照里（v1 期间、0.3.1 发布之前就地精修；v2 的增量把这些名字一并继承）。插件只保留**消费**与"加载到的 base 没有这个函数 ⇒ `cannot-tell`"的兜底（老 base 必须还能被装上）。base 侧测试 `test/interface_gate.spec.ts` 覆盖三种 verdict、**非对称的两个方向（宿主更新 ⇒ `ok` + `warning`；宿主更旧 ⇒ `incompatible`）、"纯增量"放行规则钉在真实 module 上**、缺常量/敌意 module、bake 记录缺失/畸形；两个插件的 `test/interface.spec.ts` 与 `test/envinit.spec.ts` 覆盖跨树消费与降级后果 |
+| 门禁搬进 base（§3 的核心） | **已有** —— `.` 导出 `checkInterface(required, module)` 与 `readInterfaceRequirement(url)`；两者都在 `BaseRuntimeV3` / `VALUE_NAMES_V3` 与快照里（v1 期间、0.3.1 发布之前就地精修；v2 的增量、v3 的剪枝都保留它们）。插件只保留**消费**与"加载到的 base 没有这个函数 ⇒ `cannot-tell`"的兜底（老 base 必须还能被装上）。base 侧测试 `test/interface_gate.spec.ts` 覆盖三种 verdict、**非对称的两个方向（宿主更新 ⇒ `ok` + `warning`；宿主更旧 ⇒ `incompatible`）、"新世代不拿走有消费者的成员"放行规则钉在真实 module 上**（v3 起是剪枝替代证明）、缺常量/敌意 module、bake 记录缺失/畸形；两个插件的 `test/interface.spec.ts` 与 `test/envinit.spec.ts` 覆盖跨树消费与降级后果 |
 | 包版本退回普通 semver + 宽 peer（§1、§6） | **已有** —— **实测（2026-10-02）**：`base/plugin-base/package.json` 已按 N18 升到 **`0.4.0`**（registry 上已发表的是 `0.3.1`；minor 依据是 v2 新增了良构文本这一可观察能力 + 门禁的"新世代不再降级"语义，见 §1），`bootstrap.ts` 的 `VERSION` = `0.4.0`、`supportedRange` = `>=0.3.0 <1.0.0`；两个插件的 peer 与 `devDependencies` 都是 **`>=0.3.0 <1.0.0`**，`pnpm version:check` 绿；接口变化不再要求插件同批改 peer，由运行期门禁按降级路径（宿主更旧）或 `ok` + `WARNING`（宿主更新）兜住 |
 
 **落地顺序**（第 1–7 步都已完成；保留下面的原始顺序说明，因为它是这几步为什么按这个次序落地的依据 ——
@@ -257,6 +287,10 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
    `ok` + `warning`（`incompatible` 不再覆盖这个方向）。放行依据是 §5 里已经就位的机械超集断言，并在
    `test/interface_gate.spec.ts` 里直接钉在真实 module 上。`INTERFACE_VERSION` **不动**（仍 2）—— 这是
    对既有"纯增量"契约的校正，不是新世代；包版本从 `0.3.2` 走到 `0.4.0` 记的是可观察行为变化（§1）。
+8. ✅ **收面：v3（第五轮复审 §1.4/§7.9 裁决"现在就收"，§9）** —— `. ` 从 50 个值名剪到 32，18 个零消费者
+   进 `./internal`，`export *` 改显式列举；剪枝的替代证明 `v2 = v3 ⊎ PRUNED` + 跨树零消费者；同批把
+   `PromptFiles({ namespace })` 的前缀校验并进来（§9.3）。这是第一次**破坏性**换代：v3 不 `extends` v2，
+   两棵插件树需要迁移（采用任务）。包版本**不动**（接口与包版本是两条轴，§1）。
 
 ## 8. v2 的新成员：良构文本（`wellFormedText` / `wellFormedDeep`）
 
@@ -307,3 +341,82 @@ base 模块取 `kit.wellFormedText` / `kit.wellFormedDeep`，取不到就用本�
 
 这条测试只能住在两棵树的门禁里（只有插件能链接 base），所以 base 自己的 `release:check` 跑不到它们；改动
 `base/**` 之后两棵树都要回归（见 `AGENTS.md`）。
+
+## 9. v3 的新变化：`.` 剪枝 + prompts namespace（第一次破坏性换代）
+
+这一节是 v2 → v3 的全部内容，也是 §6 预留的"收面"那一步的**执行记录**（触发条件提前到"复审 §1.4 判定这笔
+账已倒挂"，见 §6）。它同时是一次接口换代的两件事：**把 `.` 收成稳定子集**，和**给共享 prompts 前缀加上机器
+校验**。
+
+### 9.1 `.` 剪枝：50 → 32 个值名，18 个进 `./internal`
+
+**理由（复审 §1.4 实测）**：`.` 面是 `src/index.ts` 两句 `export *` 的副产品，于是"一整面冻结接口"里混进了
+三种东西 —— 插件真取用的组合层、`. ` 上组合层的构件、按设计永不有运行期消费者的 kit 镜像。后果是一个世代号
+覆盖三种变化速率（§6）。
+
+**判据（写进 §2）**：这个成员是不是"插件真取用的、或插件作者被期望调用的"？是 ⇒ `.`；否 ⇒ `./internal`。
+`./internal` 明确**不在兼容承诺内**。
+
+**剪掉的 18 个（逐个 + 证据）** —— 每个在**两棵插件树的非测试源码 + scripts** 里都**零消费者**；证据由
+`test/public-surface.spec.ts` 的跨树检查机械执行（断言没有 `?.NAME` 形式的成员访问、也没有从
+`@avantf/dsh-plugin-base` 的 import 提到它），不留人读结论：
+
+| 成员 | 归属 | 为什么没有消费者 |
+| --- | --- | --- |
+| `floorOf` / `checkInterval` / `checkServices` / `declaredSchemaKeys` / `probeToolsRegistry` / `probeTypertRegistry` / `resolveRuntimeVersion` / `COMPAT_PROBE_TOOL` | compat | 都是 `gatherEvidence` / `provision` 的**构件**；插件只调组合层（`provision` / `gatherEvidence` / `verdictOf` / `compatReport` / `registerMegaphone` / `verifyRegisteredFaces` / `read*` / `schemaNamesFrom` / `toolProbeDeclaration` 留在 `. `） |
+| `CAPABILITIES` / `DEFAULT_DEADLINE_MS` / `normalizeOnMissing` | provisioner | provisioner 的策略常量与内部归一化；插件用 `createProvisioner` + 三个 provider 工厂 |
+| `npmPackageProvider` / `NPM_PACKAGE_KIND` | providers | 本仓两个插件都声明 binary-archive / model-cache 项，没有 npm-package 项 |
+| `createPluginLogger` | kit/logger | 全仓零消费者；两个插件各有自己的 logger（base 解析之前就要用），AGENTS 误把它列进"从 base 取用"清单 |
+| `strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol` | kit/typert | 按设计永远没有运行期消费者：两棵树的 Remote/wire 描述符在**模块加载期**组装，各自保留两行本地镜像（`mem/packages/plugin/src/remote.ts:39-46`、`mission/packages/plugin/src/wire.ts:24-38`），不能依赖运行期 `import()` base |
+
+**`./internal` 是它们的规范归宿**（`src/internal.ts`），与框架自身的缝件同住。`./compat` 子路径仍然导出
+compat 那一批（`floorOf` 等在那里也够得到），但兼容承诺不覆盖子路径。
+
+**类型面同步剪 4 个**：`StrictCodec`、`PluginLogger`、`PluginLoggerHost`、`PluginLoggerOptions`
+（只为剪掉的值存在）。同时 v3 **点名** 13 个此前靠 `export *` 可达、却从未在接口里声明的类型
+（`ADDED_TYPE_NAMES`，其中 `ServiceContract` 是 mem 的 compat spec 今天就在 import 的）。值面 32、类型面 66。
+
+### 9.2 替代证明：`V3 ⊇ V2` 为什么改成 `V2 = V3 ⊎ PRUNED`
+
+`checkInterface` 的 `loaded > required ⇒ ok` 靠"新世代不拿走旧插件要用的成员"（§3）。v1 → v2 靠名字面超集
+（`V2 extends V1`）。v3 是**剪枝**世代，**做不到**字面超集（剪掉就是不在），所以证明改成两步，都在
+`test/public-surface.spec.ts`：
+
+1. `VALUE_NAMES_V2 === VALUE_NAMES_V3 ⊎ PRUNED_VALUE_NAMES`（类型面是 v3 = v2 − PRUNED + ADDED）——每个消失
+   的名字都在**冻结**的 `PRUNED_VALUE_NAMES` 上，没有静默改名或丢失；
+2. 每个 `PRUNED_VALUE_NAMES` 成员在两棵插件树零消费者（跨树检查，排除 `test/`、`*.spec.*`、`lib/`）。
+
+合起来即"有消费者的成员一个不少"。`test/interface_gate.spec.ts` 把这两条钉在真实 module 上：v1 的每个值名
+要么还在 `.` 上、要么在剪枝名单上；v1 build 遇上真实 v3 得到 `ok` + WARNING。
+
+**代价（认下来）**：v3 起，`loaded > required ⇒ ok` 的可靠性从"结构超集"降为"零消费者证明"——它只在
+`PRUNED` 名单确实没有消费者时成立。名单是冻结的（v4 不能再悄悄扩大），而 `.` 上任何**新增**消费者都必须
+走新成员（先 `./experimental` 或换代），因此这条证明不会被未来的收面悄悄掏空。**两棵插件树需要迁移**：
+v3 剪掉的名字里有它们 `import type BaseRuntimeV1` 结构赋值会用到的编译期名字（`src/interface.ts` 的
+`BaseRuntimeV1` 仍留档）；`test/interface.spec.ts` 的 `const runtime: BaseRuntimeV1 = base` 与
+`mem/packages/plugin/test/provision.spec.ts` 的 `import { floorOf }` 需要改成从 `./internal` 或
+`./compat` 取（`npmPackageProvider` / `NPM_PACKAGE_KIND` / `floorOf` 另有测试引用）。这是插件树采用任务的
+范围，本任务只改 `base/**`。
+
+### 9.3 prompts namespace：`mem-*` / `mission-*` 从约定变成字段
+
+**问题（复审 §1.6②）**：`<dataHome>/prompts` 由多插件共享，靠 `mem-*` / `mission-*` 前缀区分，而**没有任何
+机器检查**（`PromptFiles` 只接受 caller 给的 manifest）；加上"永不覆盖用户写过的文件"这条不变量，第三个插件
+用错前缀会**静默接管**别人的用户文件。
+
+**实现（base 侧，v3）**：`PromptFilesOptions` 新增可选 `namespace` 字段，由 base 校验：
+
+- **不传 `namespace` ⇒ 行为逐字节不变**（v1/v2 构建的插件对 v3 base 必须照常工作）。这是硬要求，测试
+  `test/prompt_files_io.spec.ts` 的 "is optional" 一条钉住。
+- 传了 ⇒ 按 `/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/` 校验；非法是**调用方 bug**，但本模块**永不抛**（抛出的
+  `apply` 能拖垮宿主启动）：该实例的每次 `load` 都打一条 WARNING、回落到 fallback、**完全不碰磁盘** ——
+  既不抛错，也不退回"不校验前缀"（那会重新打开接管口子）。
+- 传了合法值之后，每个 `PromptFileSpec.file` 必须形如 `<namespace>-…` 且是裸文件名（不含 `/`、`\`）；不符合的
+  spec **不碰磁盘**，打一条 WARNING 并回落到调用方自己的 fallback。这正是"绝不静默接管别人的文件"的落点。
+- 环境故障（目录不可用、读写失败）仍然**永不抛**，与 v3 之前一致（家庭不变量：环境故障降级挂载）。
+
+**采用**：本任务只做 base 侧实现与测试；两棵插件树把 `namespace: 'mem'` / `'mission'` 传进
+`new kit.PromptFiles({...})` 由插件树的采用任务负责（不改 `. ` 的形状，纯可选字段，因此不需要为它单独换代）。
+测试：`test/prompt_files_io.spec.ts` 的 `PromptFiles namespace (generation v3)` 一组，覆盖向后兼容、合法前缀、
+越界前缀不碰盘、混合 manifest、带前缀的路径逃逸、非法 namespace 构造期抛错、以及真实文件系统下外来文件不被
+改动。

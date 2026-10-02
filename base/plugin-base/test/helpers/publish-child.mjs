@@ -19,8 +19,8 @@ if (entryUrl === undefined || home === undefined || tarballPath === undefined ||
 }
 
 const api = await import(entryUrl)
-// The injection seams (`defaultFs`) are internal by contract, so they come from the
-// documented internal entry rather than from the public one.
+// The injection seams (`defaultFs`) AND the zero-consumer composition pieces generation v3 moved off
+// `.` (`npmPackageProvider`) come from the documented internal entry rather than the public one.
 const internalEntryUrl = entryUrl.replace(/index\.js$/, 'internal.js')
 const internal = await import(internalEntryUrl)
 const tarball = readFileSync(tarballPath)
@@ -46,7 +46,7 @@ const fetchImpl = async input =>
 
 const logger = { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined }
 const created = api.createProvisioner({ home, logger, fs, fetch: fetchImpl })
-created.register(api.npmPackageProvider())
+created.register(internal.npmPackageProvider())
 created.declare({
   plugin: 'mem',
   items: [{ id: 'mem:demo', kind: 'npm-package', spec: { name: 'demo-pkg', range: '^1.0.0' }, target: { root: 'runtime' }, schemaVersion: 1 }],

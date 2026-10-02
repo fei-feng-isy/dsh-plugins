@@ -20,6 +20,7 @@ import {
   GUIDANCE_BUDGET,
   GUIDANCE_TREE_WORDS,
   PROMPT_FILES,
+  PROMPT_NAMESPACE,
   MISSION_TREE_GUIDANCE,
   buildGuidanceText,
   guidanceTextWarnings,
@@ -33,6 +34,20 @@ describe('the editable guidance file', () => {
     expect(PROMPT_FILES.map((entry) => entry.file)).toEqual(['mission-tree-guide.md'])
     // The default a missing/blank file is filled with IS the constant — not a second copy of it.
     expect(promptFileSpecs()).toEqual([{ file: 'mission-tree-guide.md', fallback: MISSION_TREE_GUIDANCE }])
+  })
+
+  it('keeps every editable file INSIDE this plugin\'s namespace, as a bare file name', () => {
+    // The namespace is what the base validates each spec against (interface v3): a spec that is not
+    // `<namespace>-…`, or that carries a path separator, is refused with a WARNING and falls back to
+    // the built-in default. A file outside `mission-` here would therefore silently stop being
+    // editable — or, worse, name a file another plugin's user owns. The check runs over the REAL
+    // manifest, so a new prompt file must be named into the namespace or this goes red.
+    expect(PROMPT_NAMESPACE).toBe('mission')
+    for (const { file } of PROMPT_FILES) {
+      expect(file.startsWith(`${PROMPT_NAMESPACE}-`), file).toBe(true)
+      expect(file).not.toContain('/')
+      expect(file).not.toContain('\\')
+    }
   })
 
   it('resolves the shared prompt directory by the FAMILY order: $AVANTF_HOME, else the config, else ~/.avantf', () => {
@@ -81,6 +96,54 @@ describe('the editable guidance file', () => {
     }
     expect(resolveDataHome({ explicit: '/tmp/caller', configured: '/tmp/configured', env: { AVANTF_HOME: '/tmp/family' } }))
       .toBe(base.resolveDataHome({ explicit: '/tmp/caller', configured: '/tmp/configured', env: { AVANTF_HOME: '/tmp/family' } }))
+  })
+
+  it('resolves each of the FOUR layers to the same directory as the base 正本', () => {
+    // The pin above says the two implementations AGREE; this one says what they agree ON, layer by
+    // layer. Both are needed: two copies of the same mistake agree with each other, and the layer
+    // ORDER (⑤ explicit → ④ `$AVANTF_HOME` → ② the configured value → default) is the part that has
+    // actually broken before — the config value was once passed in the explicit slot, which made
+    // `$AVANTF_HOME` dead. Each row is the layer's OWN value, with every lower layer also set, so a
+    // resolver that ignored the layer would fall through to a visible wrong answer.
+    const cases: readonly {
+      readonly layer: string
+      readonly input: { readonly explicit?: string; readonly env: Record<string, string | undefined>; readonly configured?: string }
+      readonly expected: string
+    }[] = [
+      {
+        layer: '⑤ explicit',
+        input: { explicit: '/tmp/caller', env: { AVANTF_HOME: '/tmp/family' }, configured: '/tmp/configured' },
+        expected: '/tmp/caller',
+      },
+      {
+        layer: '④ $AVANTF_HOME',
+        input: { env: { AVANTF_HOME: '/tmp/family' }, configured: '/tmp/configured' },
+        expected: '/tmp/family',
+      },
+      {
+        layer: '② configured dataHome',
+        input: { env: {}, configured: '/tmp/configured' },
+        expected: '/tmp/configured',
+      },
+      {
+        layer: 'default ~/.avantf',
+        input: { env: {} },
+        expected: join(homedir(), '.avantf'),
+      },
+    ]
+
+    for (const { layer, input, expected } of cases) {
+      expect(resolveDataHome(input), `${layer}: local fallback`).toBe(expected)
+      expect(base.resolveDataHome(input), `${layer}: base 正本`).toBe(expected)
+    }
+
+    // `~/` is expanded on whichever layer won — the configured value is where a user writes it.
+    expect(resolveDataHome({ env: {}, configured: '~/mine' })).toBe(join(homedir(), 'mine'))
+    expect(base.resolveDataHome({ env: {}, configured: '~/mine' })).toBe(join(homedir(), 'mine'))
+    expect(resolveDataHome({ env: { AVANTF_HOME: '~/family' }, configured: '/tmp/configured' }))
+      .toBe(join(homedir(), 'family'))
+    expect(base.resolveDataHome({ env: { AVANTF_HOME: '~/family' }, configured: '/tmp/configured' }))
+      .toBe(join(homedir(), 'family'))
   })
 
   it('round-trips through a real directory: an edited file wins, a missing one is created', () => {

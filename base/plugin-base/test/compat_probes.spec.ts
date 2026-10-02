@@ -17,17 +17,21 @@ import { ToolRuntime, defineTool } from '@deepseek-ai/dsh-tools'
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry'
 import {
   BUILD_VERSIONS_FILE,
+  readBuildVersions,
+  readDeclaredVersions,
+  readRuntimeVersions,
+  schemaNamesFrom,
+  toolProbeDeclaration,
+} from '../src/index.js'
+// The individual probes are the composition pieces `gatherEvidence` is built from; generation v3
+// moved them off `.` to `./internal` (INTERFACE.md §9).
+import {
   COMPAT_PROBE_TOOL,
   declaredSchemaKeys,
   probeToolsRegistry,
   probeTypertRegistry,
-  readBuildVersions,
-  readDeclaredVersions,
-  readRuntimeVersions,
   resolveRuntimeVersion,
-  schemaNamesFrom,
-  toolProbeDeclaration,
-} from '../src/index.js'
+} from '../src/internal.js'
 
 const PACKAGE = '@avantf/dsh-plugin-base'
 

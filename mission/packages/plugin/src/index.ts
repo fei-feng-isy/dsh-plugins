@@ -32,6 +32,7 @@ import { defineWorkTools } from './tools.js'
 import {
   GUIDANCE_CONTEXT_ORDER,
   MISSION_TREE_GUIDANCE,
+  PROMPT_NAMESPACE,
   buildGuidanceText,
   guidanceTextWarnings,
   promptDir,
@@ -409,7 +410,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         source: 'default' as const,
         wrote: false,
       }))
-    : new kit.PromptFiles({ dir: promptDirPath, logger: log }).load(promptFileSpecs())
+    : new kit.PromptFiles({ dir: promptDirPath, logger: log, namespace: PROMPT_NAMESPACE }).load(promptFileSpecs())
   const guidanceText = buildGuidanceText(loadedPrompts)
   for (const warning of guidanceTextWarnings(guidanceText)) log.warn(`prompt text: ${warning}`)
   log.info(`prompt files: ${promptDirPath} (mission-tree-guide.md${guidanceText === MISSION_TREE_GUIDANCE ? ':default' : ':file'})`)

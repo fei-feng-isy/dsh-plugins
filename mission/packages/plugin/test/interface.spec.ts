@@ -16,12 +16,16 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import * as base from '@avantf/dsh-plugin-base'
-import type { BaseRuntimeV1 } from '@avantf/dsh-plugin-base'
+import type { BaseRuntimeV3 } from '@avantf/dsh-plugin-base'
+// Interface v3 PRUNED the npm provider and its item kind off `.` (zero consumers in plugin source);
+// the provisioner case below still drives them, so they come from the subpath that is explicitly
+// outside the compatibility promise (`./internal`). See base `docs/INTERFACE.md` §9.2.
+import { NPM_PACKAGE_KIND, npmPackageProvider } from '@avantf/dsh-plugin-base/internal'
 import { baseIsUsable, interfaceVerdict } from '../src/interface_gate.js'
 import { promptDir, resolveDataHome as workResolveDataHome } from '../src/prompt.js'
 
-/** The module AS the interface declares it: a missing or reshaped member fails to compile here. */
-const runtime: BaseRuntimeV1 = base
+/** The module AS the CURRENT interface declares it: a missing or reshaped member fails to compile here. */
+const runtime: BaseRuntimeV3 = base
 
 /** The record `scripts/link-envinit.mjs` bakes beside the built entry. */
 const BAKED_URL = new URL('../lib/interface-version.json', import.meta.url)
@@ -125,12 +129,12 @@ describe('the provisioner reaches a terminal state the caller can branch on', ()
         logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
         policy: { autoDownload: false },
       })
-      provisioner.register(runtime.npmPackageProvider())
+      provisioner.register(npmPackageProvider())
       provisioner.declare({
         plugin: 'interface-probe',
         items: [{
           id: 'interface-probe:x',
-          kind: runtime.NPM_PACKAGE_KIND,
+          kind: NPM_PACKAGE_KIND,
           spec: { name: 'left-pad', range: '^1.0.0' },
           target: { root: 'tools' },
           onMissing: { atStartup: 'degrade', atUse: 'error' },
