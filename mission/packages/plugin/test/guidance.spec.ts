@@ -63,6 +63,18 @@ describe('the mission-tree guidance section', () => {
     expect(text).not.toMatch(/不可逆|发布、推送、删除/u)
   })
 
+  it('tells the owner to put a long spec in a file, not in the description', async () => {
+    // Model-visible static text with an operational reason: an oversized tool argument is a measured
+    // failure source (`b273150`), so the section asks for a compact description that POINTS AT a file
+    // when the spec or checklist is long. Pinned so a future rewrite of the section cannot drop the
+    // only writing-hygiene instruction it carries.
+    const mounted = await mount()
+    const text = section(mounted).text({ agent: mounted.owner })
+    expect(text).toMatch(/长规格或长清单/)
+    expect(text).toMatch(/先把它写进仓库里的文件/)
+    expect(text).toMatch(/描述越短，派发越可靠/)
+  })
+
   it('says a correction reaches the executor, and what it costs when there is nothing to void', async () => {
     // The corollary of the paragraph above: for a mission that was never decomposed, `adjust_mission`
     // has nothing to void, so it is a straight message to the executor.

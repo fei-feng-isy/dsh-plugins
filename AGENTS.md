@@ -5,7 +5,7 @@
 | 目录 | 包 | 是什么 |
 | --- | --- | --- |
 | `base/plugin-base` | `@avantf/dsh-plugin-base` | DSH 插件的底座：启动期资源预装（声明式 provisioner）+ 宿主兼容门禁 + 共享 kit，运行期零依赖 |
-| `mem/packages/plugin` | `@avantf/dsh-mem` | DSH 的记忆/知识插件：可长期检索的记忆 + 文档知识库（8 个模型工具、两个设置页） |
+| `mem/packages/plugin` | `@avantf/dsh-mem` | DSH 的记忆/知识插件：可长期检索的记忆 + 文档知识库（8 个模型工具、两个主窗口标签页） |
 | `mission/packages/plugin` | `@avantf/dsh-mission` | DSH 的任务树插件：把一件能连验收标准一起交出去的事交给引擎，由它后台逐级派给一次性执行者 |
 
 其余工作区包（`@avantf/mem-*`、`@avantf/mission-core`、CLI/MCP）都是 `private: true`，会被内联进使用它的
@@ -94,7 +94,8 @@ WARNING，**照常使用全部能力、不降级**（世代是纯增量，旧插
 2. **再实现**（放 base）并补**跨树行为测试**：从**已链接的 base** 取真实实现比对，mock 里断言不算。
 3. **向前兼容是硬要求**：新成员必须**增量**——不改既有成员的形状与语义；顺序敏感的参数用具名对象
    （`resolveDataHome({ explicit, env, configured })`）；可观察文案归调用方（`compatReport` 的 `words`）。
-   旧插件遇到新世代只会降级挂载，一次增面绝不能让谁拒载；发布按正常顺序，插件方便时重建以消费新能力。
+   旧插件遇到**更新**的世代是 `ok` + 一条 WARNING、**不降级**；只有遇到**更旧**的世代才按降级表挂载。
+   一次增面绝不能让谁降级、更不能让谁拒载；发布按正常顺序，插件方便时重建以消费新能力。
 
 ## 版本：每组只记在一个 manifest 里
 
@@ -135,15 +136,17 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | --- | --- |
 | `pnpm version:check` | 每组版本只记在它的可发布 manifest 里；base 的 manifest 与 baked `VERSION` 一致 |
 | `pnpm guard` | 每棵树只够得到 base 与自己的包（不许 import 别棵树；相对路径不许出树——唯一例外是工作区共用的 `scripts/lib/`；产物里不许按值 import base；其余 `@avantf/*` 必须是本树自己的） |
-| `pnpm release:check` | 可发布集合恰好那三个、peer 是 required 且够宽、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base |
+| `pnpm release:check` | 可发布集合恰好那三个、peer 是 required 且够宽、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base，**且那个已发布 base 内置的接口世代不低于两棵插件 bake 的世代**（版本区间 ≠ 接口世代；见 R1） |
 | `pnpm proof:base-swap[:mount]` | 产物里没有静态 base import / 内联 kit；**被替换的** base 仍能提供提示词读写、根解析与接口门禁 |
 | `pnpm release:check:<base\|mem\|mission>` | 该包自己的门禁：链接 → 编译 → 类型检查 → 测试 → pack，`old-dsh` **最后**跑（要重新链接并重建）；mem 的 build 必须先于 typecheck（`typecheck` 通过产出的 `lib/*.d.ts` 读依赖） |
 | `pnpm check:old-dsh <base\|mem\|mission>` | 在该包声明的 dsh peer **下限**上重跑 LOCAL 步骤（含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
 | `pnpm check:dsh-lines` | dsh **已发布**的版本里有没有我们的 peer 覆盖不到的（同一份 semver + `includePrerelease: true`）；有新 minor 线或 dist-tag 落到未覆盖线就退出 1，并给出该补的 `\|\|` 条款 |
 
 **改动 `base/**` 之后两个插件都要回归**（base 自己的测试不会走到挂载），**并检查根 `scripts/prove-base-swap.mjs`**——
-它同样钉住接口判定语义（2026-10-02 实测：非对称化后它仍断言"不同世代必须 incompatible"，成为第三处滞后的期望，
-前两处是两棵插件树的 `interface.spec.ts`/`envinit.spec.ts`）：
+它同样钉住接口判定语义。2026-10-02 的非对称化造成过**三处**滞后的期望，全部已修：两棵插件树的
+`interface.spec.ts`/`envinit.spec.ts`（`c2d44e0`），以及本脚本（`2880a59`——此后它**双向**断言：
+更新的世代 → base 保留、runtime 交回；更旧的世代 → 判 `incompatible`、扣留并出 "shared capabilities are NOT used"
+WARNING）。**改 `checkInterface` 的判定语义时，这三处一起看：**
 
 ```bash
 pnpm build:dsh mem && node mem/scripts/mount-smoke.mjs

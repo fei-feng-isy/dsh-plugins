@@ -127,7 +127,10 @@ describe('the rules', () => {
     expect(verdict.warnings.join('\n')).toContain(
       'this build was compiled against @deepseek-ai/dsh-tools 0.1.5-rc.2, but its links now resolve to 0.1.6-alpha.2',
     )
-    expect(verdict.warnings.join('\n')).toContain('rebuild against this machine\'s dsh (`pnpm build:dsh`)')
+    // The fix is addressed to whoever installed the package, not to someone with a checkout to
+    // rebuild in: name the compatible dsh, or the package upgrade.
+    expect(verdict.warnings.join('\n')).toContain('switch to the dsh version this build declares compatible, or upgrade this package')
+    expect(verdict.warnings.join('\n')).not.toContain('pnpm build:dsh')
     expect(verdict.warnings.join('\n')).not.toContain('running dsh provides')
     expect(verdict.lines.some((line) => line.level === 'warn')).toBe(true)
   })

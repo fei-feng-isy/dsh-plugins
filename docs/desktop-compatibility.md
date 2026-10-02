@@ -131,6 +131,9 @@
   只有 npm / yarn 安装，或手工编辑 profile 包清单而没有选中组合包时，才需要自己写那行。
 - **两条都做也不会挂两次**（实测）：配置树里会出现两行同 id 的条目，但 loader 按条目 id 去重，
   插件只挂载一次（`plugin ready` 只出现一次）。仍是二选一更干净。
+  > 2026-10-02 复审补记：去重只是 **0.1.7 / 0.2.0 线** 的行为；`^0.1.5-rc.2` 线（本包 peer 仍覆盖）
+  > 上的 loader 对重复行 id 直接抛 `duplicate loader entry id`，profile 树加载失败——两条都做在那里
+  > 是**起不来**，不是挂两次。随包 README 与 `cordis.patch.yml` 注释已按此改写。
 
 ### 2.3 mission：`$DSH_HOME`
 

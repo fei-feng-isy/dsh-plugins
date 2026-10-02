@@ -5,7 +5,7 @@
 - **记忆** — 结构化事实 + SPO 三元组 + 实体；混合检索（语义嵌入 + FTS5 + 实体 Jaccard）；生命周期管理（信任衰减 / TTL / 归档 / 矛盾 / 去重）。不做用户隔离：agent 上下文共用单一存储。
 - **知识库** — 文档按 `domain（类型/领域）→ source` 分类并切分为 chunk；支持 ingest / import / 浏览 / 与记忆交叉检索；
   写入侧的 `domain` 受 `knowledge.domains` 清单约束（默认 `design/api/ops/research/notes`，显式 `[]` = 不限制；非空时还接受库里已有的领域），`source` 可留空（缺省 `default`）；
-  每篇文档在 `~/.avantf/knowledge/docs` 留一份**可编辑副本**，用编辑器改完点「重新摄入」即可回写索引；
+  每篇文档在 `~/.avantf/knowledge/docs` 留一份**可编辑副本**，用编辑器改完即由插件在其后任一工具调用结束时自动同步回索引（「重新摄入」按钮是手动兜底）；
   **支持 PDF**（抽取文本层，含中文 CID 字体；扫描件没有文本层会明确报错），可直接摄入 **pandoc 能读的全部格式**（`.docx/.docm/.odt/.epub/.html/.htm/.xhtml/.tex/.rst/.ipynb/.csv/.tsv/.org/.rtf/.fb2/.opml/.bib/.docbook/.man/.typ`）以及 `.xlsx`（先转成 Markdown 再入库：用了哪条转换器随 `converter` 回报（带版本，如 `pandoc-3.11`）、没能带过来的内容随 `warnings` 透出），其他二进制（图片、pptx、旧版 .doc/.xls/.ppt 等）会被拒绝并说明原因；GBK/GB18030 等中文旧编码会自动解码并在结果里标出 `encoding`。pandoc 由家族底座 `@avantf/dsh-plugin-base`（内含环境初始化框架）在启动时按钉死的版本装到受管族根 `~/.avantf/env/tools/pandoc/`（国内镜像优先、官方源兜底，装不了就明确报错；无底座的 CLI/MCP 与降级路径仍用 legacy 目录 `~/.avantf/tools`）。
 - **交叉检索** — 一次查询同时覆盖记忆与文档，且分数可比（联合归一化），用于 agent 上下文。
 - **内部可插拔检索** — `SemanticBackend` / `Reranker` / `VectorStore` 可在 `retrieval-core` 内部替换（注册表 + 配置 + 优雅降级 + 自动升级），无需改动业务流程。

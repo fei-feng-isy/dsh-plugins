@@ -106,6 +106,10 @@ export function byCreatedAtThenId(a: NodeRecord, b: NodeRecord): number {
  *
  * The canonical form, chosen conservatively:
  *
+ * - case: ASCII lower-cased, so `Mission/x` and `mission/x` are one lease. The tool text promises
+ *   this ("大小写、分隔符、结尾斜杠不同都算同一个范围") and Windows paths are case-insensitive; it is
+ *   deliberate that a case-SENSITIVE filesystem now serializes two spellings that would not actually
+ *   collide there — the safe direction is to keep the scope busy, not to hand it out twice.
  * - separators: `\` reads as `/` (a Windows-authored path and a POSIX one name the same scope). At
  *   most one leading `/` survives, so `//srv/x` (a UNC spelling) and `/srv/x` still differ by the
  *   leading slash and are NOT conflated.
@@ -124,7 +128,7 @@ export function byCreatedAtThenId(a: NodeRecord, b: NodeRecord): number {
  */
 export function normalizeUnit(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null
-  const slashed = raw.trim().replace(/\\/gu, '/')
+  const slashed = raw.trim().replace(/\\/gu, '/').toLowerCase()
   if (slashed.length === 0) return null
   const absolute = slashed.startsWith('/')
   const segments: string[] = []

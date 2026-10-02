@@ -28,6 +28,9 @@
     "lib/interface-version.json",
     "cordis.patch.yml"
   ],
+  "engines": {
+    "node": ">=22.15.0 <23 || >=23.11.0"
+  },
   "scripts": {
     "build": "node ../../scripts/build.mjs",
     "typecheck": "node ../../scripts/link-dsh.mjs --no-bake && tsc -p tsconfig.json --noEmit",

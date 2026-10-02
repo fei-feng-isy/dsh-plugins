@@ -12,9 +12,9 @@ DSH（DeepSeek Harness）原生 Cordis 插件：**任务树引擎**。
 
 | 贡献 | 作用 |
 |---|---|
-| 宿主服务 `avantfMission` | 拥有任务树、存储域与派活循环；Remote 面给"任务"标签读树（`snapshot`）、读单个任务详情（`detail`）、**按需读回落盘的完整结果**（`result`）、删任务（`delete`），并把每次变更推给已打开的标签（`watch`，stream 调用）|
+| 宿主服务 `avantfMission` | 拥有任务树、存储域与派活循环；Remote 面给"任务"标签读树（`snapshot`）、读单个任务详情（`detail`）、**按需读回落盘的完整结果**（`result`）、删任务（`delete`）、**点击时查找历史任务的执行者会话**（`resolveExecutorSession`），并把每次变更推给已打开的标签（`watch`，stream 调用）|
 | 9 个模型工具，分两张面孔 | `create_mission` / `adjust_mission` / `note_mission` / `decompose_mission` / `submit_mission` / `mission_result` / `list_missions` / `finish_mission` / `cancel_mission`。**owner 面孔**（顶层会话）见 6 个：`create_mission`/`adjust_mission`/`mission_result`/`list_missions`/`finish_mission`/`cancel_mission`；**executor 面孔**（任务单元）见 3 个：`note_mission`/`decompose_mission`/`submit_mission`。`note_mission` 只给执行者：它写下本轮自己的分析，而 `decompose_mission` 会拒绝一个没写过分析的拆解。回收是引擎自己的事，不给模型一个手动回收的工具 —— 见下。**owner 看不到任务内部**：`list_missions` 只说一个任务还在跑、或者反复出过问题（`troubled`，是历史而非现值），不报它被拆成了什么、各部分什么状态 —— owner 只对整棵树有动作（`adjust_mission` / `cancel_mission`），内部结构是引擎的事 |
-| 一段静态系统提示词段 | 告诉模型**什么时候**该把活交出去（判据是"能不能连验收标准一起交出去"，不是复不复杂；需要拆与不需要拆的都算）、以及"谁在等、别轮询、别替它做"。参数怎么填、任务能不能包含某类内容都**不在这段里**（前者属于工具的说明，后者由 owner 自己判断）。与 `create_mission` 的授权判据同一个判据，worker 视角返回空串。**正文可编辑**：家族共享目录 `<data home>/prompts/mission-tree-guide.md`（缺失或空白写回默认，启动时读一次；见根 README「自定义系统提示词」） |
+| 一段静态系统提示词段 | 告诉模型**什么时候**该把活交出去（判据是"能不能连验收标准一起交出去"，不是复不复杂；需要拆与不需要拆的都算）、以及"谁在等、别轮询、别替它做"，并附一句**写法提示**（要交付长规格或长清单时，先写进仓库里的文件、描述里指向它 —— 超长工具参数是实测的失败源）。参数怎么填、任务能不能包含某类内容都**不在这段里**（前者属于工具的说明，后者由 owner 自己判断）。与 `create_mission` 的授权判据同一个判据，worker 视角返回空串。**正文可编辑**：家族共享目录 `<data home>/prompts/mission-tree-guide.md`（缺失或空白写回默认，启动时读一次；见根 README「自定义系统提示词」） |
 | 一段引导上下文 | 每轮把树的状态写进 owner 的 prompt |
 | 一个 `agent/pre-step` 钩子 | 过滤 worker 结算通知、决定某一步带什么进模型；引擎的唤醒信号在没有可处理状态时被**清空**（不是 reject，reject 会截断这一轮并把队列搁置）|
 | `/archive` 命令 | 把本会话**已完成**的 mission 会话记录标记为归档（走 workspace registry 的官方接口，durable、可 unarchive）。只标记，**不释放磁盘** |
@@ -72,6 +72,14 @@ dsh plugin --profile web add @avantf/dsh-mission
   config:
     # 并发任务单元上限；省略 = CPU 核心数 - 1（给 owner 自己的回合留一个核）
     maxConcurrent: 6
+    # 容量闸门（核当量，主闸门）：候选要满足 Σ running.weight + weight ≤ capacity 才派发；
+    # 省略 = os.availableParallelism() - 1（夹取 1..64，预留 1 核给宿主/UI）。装不下只排队，绝不拒绝。
+    # capacity: 11
+    # 被容量反复推迟超过这个时长后，该任务预约整机（不再接纳新节点，等在跑的排空再派发它）。
+    # 默认 5 分钟，下限 1 分钟。
+    # capacityWaitMs: 300000
+    # 空闲内存下限（字节）：低于它只推迟派发，绝不拒绝。默认 256 MiB，0 = 关闭这道门。
+    # minFreeMemoryBytes: 268435456
     # worker 多久**没有任何产出**就视为卡死（毫秒，默认 30 分钟，下限 1 分钟）
     # 度量的是"多久没产出"，不是"多久没事件"：只有模型输出（assistant/message）、
     # 工具调用（tool/call）与工具结果（tool/result）才算产出；provider 重试
@@ -137,12 +145,12 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 | 时机 | 行 |
 |---|---|
 | `apply` 进入 | `mounting: config=… inject=…` |
-| typert 注册后 | `typert host face registered (namespace avantfMission, 5 invocations: snapshot, detail, result, delete, watch)` |
+| typert 注册后 | `typert host face registered (namespace avantfMission, 6 invocations: snapshot, detail, result, delete, resolveExecutorSession, watch)` |
 | 工具注册后 | `registered N tools: …` |
 | 挂载收尾 | `mounted: /mission command, 9 tools (/archive, /clean), guidance context, pre-step gate` |
 | 开存储域 | `start-up: opening the mission-tree storage domain` |
 | 载入完成 | `start-up: loaded N tree(s), M node(s)` / 孤儿树销毁时 WARN |
-| 引擎就绪 | `engine ready: concurrency=… depth=… failure-budget=… children<=…` |
+| 引擎就绪 | `engine ready: capacity=… (source=…, reserved=…) concurrency=… depth=… failure-budget=… children<=…` |
 | 每次变更 | `create_mission: root …` / `decompose_mission: … -> created […]` / `submit_mission: …` / `finish_mission: …` / `cancel_mission: …` |
 | 派活与回收 | `dispatched <node> as <claim>` / `dispatch of <node> failed: …` / `sweep: reclaimed N node(s)…` |
 | 唤醒 owner | `root <id> reached <status>; woke owner <session>`（owner 不在线时 WARN） |
@@ -171,7 +179,7 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 **"跑了很久"与"卡住了"是两件事。** 判据是"多久没**产出**"，不是"多久没**事件**"：只有模型输出（`assistant/message`）、工具调用（`tool/call`）与工具结果（`tool/result`）才刷新 `progressAt`；其他事件（provider 的 `assistant/attempt`、路由快照 `request/header`/`request/context`、边界与提示词事件）只刷新 `activityAt`，证明会话对象还活着。于是有三种判定，按顺序：**完全没有事件**超过 `staleMs` → `stalled`（照旧扣 `failures` 并记 `stalls`）；**一直有事件但没有产出**超过 `staleMs` → `hung`（不扣任何预算）；**这一轮超过 `roundMs`** → `hung`（同样不扣）。`roundMs` 的兜底不看 `progressAt`，所以传输层把时间戳一直刷下去也拦得住 —— 这正是 2026-10-02 卡死 7.5 小时的那条盲区（实测 `progressAt` 始终是"+0 分"）。
 记录来自旧版本时没有 `activityAt`：两个时钟都退回 `progressAt`，判定与旧版完全一致（加一条 `roundMs` 兜底）。
 
-**`hung` 与 `stalled` 的预算语义不同，也不给 owner 发消息。** `stalled` 是"这个节点反复沉默"，扣 `failures`、记 `stalls`，到阈值会标 failed —— 那是节点的问题。`hung` 是传输层故障（provider 一直重试、流卡住），不是任务失败，所以**不扣 `failures`/`spawnFailures`、不进冷却、不记 `stalls`、不触发 `isTroubled`**（那条信号只该承载 owner 能据以行动的事实）；但它**必须打日志**（`hung: worker on <node> … unproductive …`），否则"每次派发都卡在传输层"这件事不可诊断。`attempts` 照旧不回滚。
+**`hung` 与 `stalled` 的预算语义不同，但共用同一套 owner 知会。** `stalled` 是"这个节点反复沉默"，扣 `failures`、记 `stalls`，到阈值会标 failed —— 那是节点的问题。`hung` 是传输层故障（provider 一直重试、流卡住），不是任务失败，所以**不扣 `failures`/`spawnFailures`、不进冷却、不记 `stalls`**；但它**不是无上限重试**（N2 修复）：每回收一次 `hungCount + 1`（**连续**计数，任一真实产出即清零，重新派发**不**清零），**每一次 `hung` 都打一条诊断日志**（`hung: worker on <node> … unproductive …`，否则"每次派发都卡在传输层"不可诊断），累计到 `maxHungsBeforeReport`（3）时命中 `isTroubledNode`，引擎走与 stalled **完全相同**的通道通知 owner（同一个 `notifyStalled` 回调、同一个 `isTroubledNode` 门槛、同一个 `stalledNotifiedAt` 持久标记，每节点至多一条消息）。`attempts` 照旧不回滚。
 
 **回收只认"确实没了"。** 续期子会话是异步物化的：节点绑定与子 agent 注册之间有几十毫秒的窗口，这期间的 claim **算 live**（`startingClaims`）—— 否则一次落在窗口里的扫描会把正在启动的 worker 判成"消失"并重派，而第一个 worker 还活着、它的每次提交都被拒（实测：5 个节点的三级树跑了 **13 个 worker**，每个节点白烧一次 attempts）。启动结束后仍无活体，才按"消失"回收。
 
@@ -195,7 +203,7 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 
 **工具面孔：每个 agent 只带自己那一半。** 一次注册、两套可见性：owner（顶层会话）看 `create_mission`/`adjust_mission`/`mission_result`/`list_missions`/`finish_mission`/`cancel_mission`，executor（任务单元）看 `note_mission`/`decompose_mission`/`submit_mission`。不做的话每个 agent 的 schema 都带着另一半用不上的工具，而且是"可见但必然被拒"（`create_mission`→`no-authority`，`note_mission`/`decompose_mission`/`submit_mission`→`not-owner`），并且 worker 能读到别的节点 —— 与"worker 的 prompt 不含兄弟进度"的设计意图冲突。机制分两半：executor 走派活请求的 `toolFilter.deny`（harness 给任何被委派子会话施加的同一个 scoped `restrict()`）；owner 在 `agent/created` 时对该 agent 施加 scoped 限制，并用组装瀑布按 `context.agent` 过滤 `assembly.tools` 兜底（`tools.restrict()` 只在 scoped context 上合法，全局限制会被 harness 直接拒绝）。**遮蔽不是授权**：边界仍是工具体内的拒绝，面孔只管模型看不看得见；测试里有一条"每个注册工具必须恰好落在一张面孔"的不变量。
 
-**策略进系统提示词，机制留在工具描述里。** "什么时候该把活交出去"此前只写在 `create_mission` 的工具描述里 —— 工具描述讲机制，策略却要模型自己从工具清单里翻出来。现在它是一段静态 section（位次 `TOOL_JOBS`，与 `create_mission` 用同一个"能不能建树"的判据），讲三件事：**判据**（能不能连验收标准一起交出去，而不是复不复杂 —— 不需要拆的任务同样适合交给它，一次派发就做完；需要拆的就交给执行者拆出前置任务、由引擎逐级派下去）、**任务是什么**（跨会话持久化，由引擎逐级派给一次性执行者）、**边界**（任务树与"起一个子 agent 去干活"在"交出去"上重叠 —— 执行者是一次性的、跑起来联系不上、看不到对话，所以需要看见这段对话 / 需要来回追问 / 需要脚本化扇出的委派该用 `subagent` / `subagent_fork` / `workflow`；但"我已经想清楚了"不在排除之列）。**刻意不写两组东西**：参数怎么填（`title` / `description` / `analysis` 属于工具的说明，同一个请求里就读得到，静态段不重复一遍），以及任务能不能包含某类内容（master 自己决定一件任务为了什么，读回结果是 `mission_result` 的事）—— 两条都有测试盯着。同一边界也写在 `create_mission` 的工具描述里。另四类从来没写过的（节点状态词表、`note_mission`/`decompose_mission`、id/存储/面板、读结论与收尾机制）在 `prompt.ts` 的注释和设计文档 §6.0 里各列了一次，并有禁用词表的测试盯着。
+**策略进系统提示词，机制留在工具描述里。** "什么时候该把活交出去"此前只写在 `create_mission` 的工具描述里 —— 工具描述讲机制，策略却要模型自己从工具清单里翻出来。现在它是一段静态 section（位次 `TOOL_JOBS`，与 `create_mission` 用同一个"能不能建树"的判据），讲三件事：**判据**（能不能连验收标准一起交出去，而不是复不复杂 —— 不需要拆的任务同样适合交给它，一次派发就做完；需要拆的就交给执行者拆出前置任务、由引擎逐级派下去）、**任务是什么**（跨会话持久化，由引擎逐级派给一次性执行者）、**边界**（任务树与"起一个子 agent 去干活"在"交出去"上重叠 —— 执行者是一次性的、跑起来联系不上、看不到对话，所以需要看见这段对话 / 需要来回追问 / 需要脚本化扇出的委派该用 `subagent` / `subagent_fork` / `workflow`；但"我已经想清楚了"不在排除之列），外加一句**写法提示**（交付长规格或长清单时先写进仓库里的文件、描述里指向它 —— 超长工具参数是已实测的失败源，`b273150`）。**刻意不写两组东西**：参数怎么填（`title` / `description` / `analysis` 属于工具的说明，同一个请求里就读得到，静态段不重复一遍），以及任务能不能包含某类内容（master 自己决定一件任务为了什么，读回结果是 `mission_result` 的事）—— 两条都有测试盯着。同一边界也写在 `create_mission` 的工具描述里。另四类从来没写过的（节点状态词表、`note_mission`/`decompose_mission`、id/存储/面板、读结论与收尾机制）在 `prompt.ts` 的注释和设计文档 §6.0 里各列了一次，并有禁用词表的测试盯着。
 
 **对比度：文字一律用 label token，不用 opacity 调暗。** 之前用 `opacity` 做次级文字变暗，而归档树又叠了一层 `.avwf-tree-settled { opacity: .75 }` —— 两者相乘后，次级文字在亮/暗主题里只剩约 2.7:1 / 3.5:1，12px 小字实际读不了。现在：条目底色 `bg-layer-1`，正文 `label-primary`，次级文字（状态汇总、根 id、meta、上下文、详情标签）`label-secondary`；实测对比度 亮 `18.9:1` / `5.8:1`、暗 `15.0:1` / `10.4:1`，两套主题都过 4.5:1。归档不再整块变淡（`已归档` 标记已经说明了），改为虚线边框。状态是**色相**而不是文字色：`--avwf-status` 由状态类发布，只喂给圆点和徽标底色，徽标文字仍是 `label-primary`（状态色当文字在亮色主题下只有 2.3:1）。顺带修掉：样式里原来的 `--dsh-color-*` 在 DSH 设计平台里**根本不存在**（只有 `--dsw-*`），所以那几处颜色一直在用硬编码兜底值。
 
@@ -223,7 +231,8 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 | 轮级上限 | 1 小时（可配 `roundMs`，下限 10 分钟且不低于 `staleMs`，否则低于产出窗口会在 `stalled` 之前触发）；从进入 `running` 起算的墙钟硬上限，超过即回收为 `hung`，不看进度时间戳、不扣预算 |
 | 失败预算 `failures` | 5（worker 被回收才 +1，达阈值标 failed；成功的提交与拆解，含汇总轮，都不消耗） |
 | 启动失败预算 `spawnFailures` | 5（派发即失败才 +1，按 `30s × 2^(n-1)`（上限 10 分钟）退避后重试；成功启动即清零；达阈值标 failed） |
-| 卡死知会 | 同一节点第 2 次停摆，或停摆后失败预算将用尽（`failures ≥ 4`）时给 owner 一条消息，每节点至多一次 |
+| 连续卡住计数 `hungCount` | 3（每次 `hung` 回收 +1，任一真实产出即清零；累计到 3 命中 `isTroubledNode`，走与 stalled 相同的 owner 知会通道） |
+| 卡死知会 | 同一节点第 2 次停摆，或卡住计数达上限，或停摆后失败预算将用尽（`failures ≥ 4`）时给 owner 一条消息，每节点至多一次 |
 | 结果内联阈值 | 2000 字（超出走 `ctx.spillStore` 落盘并留定位符 + 取回指引） |
 
 ## 复用的宿主能力

@@ -224,7 +224,7 @@ export function registerCompatMegaphone(
       heading: '记忆插件未加载：与当前 dsh 的兼容性检查未通过，插件已拒绝加载（不注册服务、工具、prompt 段与真实 typert face）。',
       warningsLabel: '风险提示：',
       warnings: verdict.warnings,
-      fix: '修复：在本仓库重建（`pnpm build:dsh`），或把 `@deepseek-ai/dsh` 换回本构建声明的版本。',
+      fix: '修复：换到本插件声明兼容的 dsh 版本，或升级本插件到与当前 dsh 匹配的版本。',
       logPointer: (prefix) => `完整诊断见宿主日志里 ${prefix} 开头的行。`,
     }),
   })

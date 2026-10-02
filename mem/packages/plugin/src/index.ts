@@ -497,7 +497,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const run = provision(ctx, logger, compat)
     if (!run.verdict.load) {
       registerCompatMegaphone(ctx, run.verdict, logger, compat)
-      logger.warn('plugin not loaded: the host dsh API is incompatible (compat check above) — nothing was registered; rebuild with `pnpm build:dsh`')
+      logger.warn('plugin not loaded: the host dsh API is incompatible (compat check above) — nothing was registered; switch to a dsh version this package declares compatible, or upgrade this plugin')
       return
     }
     verdict = run.verdict

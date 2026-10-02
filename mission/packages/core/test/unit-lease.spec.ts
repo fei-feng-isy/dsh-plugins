@@ -265,6 +265,29 @@ describe('one executor per unit', () => {
     expect(tree.node(up)?.unit).toBe('../shared')
     expect(tree.node(plain)?.unit).toBe('shared')
   })
+
+  it('⑪ folds case, so `Mission/x` and `mission/x` are one lease (the tool text says so)', async () => {
+    // `create_mission`'s unit copy promises "大小写、分隔符、结尾斜杠不同都算同一个范围"; before this the
+    // normalizer had no `toLowerCase`, so the two spellings admitted both lanes at once. Folding is
+    // deliberately conservative: it can only ever make the scope look BUSIER (keep it serialized),
+    // never free-er, so a case-sensitive filesystem loses parallelism and never exclusivity.
+    const { tree, engine } = makeWorld({ maxConcurrent: 5 })
+    const upper = await root(tree, { title: 'upper', unit: 'Mission/x' })
+    const lower = await root(tree, { title: 'lower', unit: 'mission/x' })
+    expect(tree.node(upper)?.unit).toBe('mission/x')
+    expect(tree.node(lower)?.unit).toBe('mission/x')
+
+    expect(await engine.pump()).toBe(1)
+    expect(running(tree)).toHaveLength(1)
+    const holder = running(tree)[0]
+    const waiting = holder?.id === upper ? lower : upper
+    expect(tree.node(waiting)?.status).toBe('ready')
+
+    const submitted = await tree.submitResult(holder?.id ?? '', holder?.claimedBy ?? '', 'done')
+    expect(submitted.ok).toBe(true)
+    expect(await engine.pump()).toBe(1)
+    expect(running(tree).map((node) => node.id)).toEqual([waiting])
+  })
 })
 
 describe('durable compatibility', () => {

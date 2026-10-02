@@ -3,6 +3,10 @@
 All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
+### Fixed（良构硬化：孤立代理不再产出严格解析器拒收的 JSON）
+- **写侧归一化收口在 `packages/core/src/store/common.ts` 的 `normalizeWrite`/`normalizeWrites`**（实现是契约的 `toWellFormedText` = `toWellFormed()` + `normalize('NFC')`）：作用域是**身份 / 元数据**——知识文档的 `domain`/`source`/`title`/`source_uri`/`paths`（在**规划前**归一化，否则 NFD 标题会与等价的 NFC 行擦肩而过、冲突判断说谎）与从正文派生的标题；以及**记忆事实**的 `content`/`category`/`archive_reason` 与派生实体 / 三元组。**知识文档的正文不归一化**：正文是内容不是身份，受管副本正文与 `content_hash` 继续逐字节等于摄入的文本（实测：摄入 `e\u0301正文`，受管 `.md` 的正文码点仍是 `65,301,6b63,6587`，`content_hash` 等于该字符串的 sha256），所以 DESIGN §8 的原承诺逐字成立——"等于归一化后的文本"只对身份字段与**路径段**（`sanitizeSegment` 的文件名 NFC）成立，对正文不成立。
+- **出站唯一边界**（`packages/plugin/src/render.ts`，即 `output.render`）：递归 `toWellFormedDeep`（只修孤立代理为 `U+FFFD`、**不做 NFC**）之后才 `JSON.stringify`，所以**任何**结果（含历史坏数据）都是严格解析器可读的文本；MCP 的 JSON 边界（`packages/mcp/src/index.ts`）同规。写侧的孤立代理由 Node 的 UTF-8 编码器（`writeFileSync` 与 `node:sqlite` 绑定）替换成 `U+FFFD`，`content_hash` 用同一编码器计算，故文件正文与哈希始终一致（实测：正文 `x\uD800y` 的受管副本正文码点是 `78,fffd,79`）。
+- 唯一实现是底座 kit 的 `wellFormedText`/`wellFormedDeep`（接口 v2）；`packages/contract/src/text.ts` 是**依赖自由的镜像**（CLI / MCP 无 DSH 宿主），挂载时 `adoptWellFormed` **逐成员 `typeof`** 换用加载到的底座那份，底座缺席或只到 v1 就用镜像，绝不因此降级或拒载。跨树 pin：`packages/plugin/test/wellformed_pin.spec.ts`（拿真实链接的底座比对镜像写侧 = 底座 + NFC）。设计写进 DESIGN §8。
 
 ## [0.4.0] - 2026-10-01
 ### Fixed（复审 R1 mem 车道：宽松档底线、卸载期 reconcile 停止标志、`mem:model` 的 `timeoutMs`）

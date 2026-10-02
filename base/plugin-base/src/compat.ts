@@ -677,7 +677,7 @@ export function verdictOf(evidence: CompatEvidence): CompatVerdict {
     if (version.runtime !== version.declared) {
       versionDiffered = true
       warnings.push(
-        `this build was compiled against ${version.package} ${version.declared}, but its links now resolve to ${version.runtime} — rebuild against this machine's dsh (\`pnpm build:dsh\`)`,
+        `this build was compiled against ${version.package} ${version.declared}, but its links now resolve to ${version.runtime} — switch to the dsh version this build declares compatible, or upgrade this package`,
       )
     }
   }
@@ -711,7 +711,7 @@ export function verdictOf(evidence: CompatEvidence): CompatVerdict {
   } else {
     lines.push({
       level: 'error',
-      message: `${COMPAT_PREFIX} REFUSING to load — ${String(problems.length)} proven incompatibility(ies). Rebuild against this machine's dsh (\`pnpm build:dsh\`) or install the @deepseek-ai/dsh this build declares.`,
+      message: `${COMPAT_PREFIX} REFUSING to load — ${String(problems.length)} proven incompatibility(ies). Switch to the @deepseek-ai/dsh this build declares compatible, or upgrade this package.`,
     })
   }
   // `probe-failed` covers every PROVEN break — a service or method that is gone is the same finding
@@ -930,7 +930,7 @@ export function verifyRegisteredFaces(input: {
     input.log.warn(
       `${COMPAT_PREFIX} WARNING — ${String(missing.length)} of ${String(expectedKeys.length + input.toolNames.length)} `
       + `real registrations are not visible afterwards: ${missing.join(', ')} — the plugin is already mounted, so this is `
-      + 'reported rather than undone; rebuild against this machine\'s dsh (`pnpm build:dsh`), restart `dsh`, and check again',
+      + 'reported rather than undone; switch to the dsh version this build declares compatible (or upgrade this package), restart `dsh`, and check again',
     )
   }
   return { missing }

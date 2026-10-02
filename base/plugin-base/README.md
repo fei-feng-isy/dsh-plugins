@@ -20,6 +20,9 @@
 
 - 已经在盘上 / PATH 上的直接用，不重复下载；
 - 需要安装的由框架下载、校验完整性、**原子落盘**（同目录临时文件 + rename；跨进程一把族根锁）；
+- 锁被活体进程长期持有（锁文件 mtime 越过 `staleMs` 而 holder 的 pid 仍活着）时**不抢锁**：打一条用户可见的
+  `warn`（写明 holder 的 pid、已持有时长、本次已等待时长）后继续按预算等待；等不到就报 `lock/timeout`，
+  消息里带 holder 与 mtime 诊断。抢一个活写者的锁会让两个写者进同一目录，超时只是报告；
 - 每一项给出 `present / installed / skipped / failed`，失败带稳定 `code`；
 - 三种内置资源种类：`npm-package`、`binary-archive`、`model-cache`。新的种类 = 一个新的 provider，
   核心不动；
@@ -45,6 +48,7 @@
 | `createPluginLogger` | 带统一前缀、可镜像到宿主 logger 的 logger |
 | `familyHome` / `familyToolsDir` / `familyModelsDir` / `resolveDataHome` / `expandHome` | 家族根与数据根解析：**⑤ 显式 → ④ 环境变量 → ② 配置值 → 默认**，一律传**具名 slot** |
 | `strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol` | 组装 Typert wire 描述符的几行约定 |
+| `wellFormedText` / `wellFormedDeep` | 出站文本的良构修复：孤立代理（lone surrogate）会被 `JSON.stringify` 原样写出、被严格解析器整篇拒收，这里统一换成 U+FFFD；引擎没有 `String.prototype.toWellFormed` 时走等价扫描。递归版只修字符串、数组与普通对象（含键），`Date` / 类实例等一律按同一性原样返回 |
 
 ### 4. 接口世代
 
@@ -283,8 +287,13 @@ assertProviderConformance(report)
 
 ## 版本承诺
 
-- 承诺稳定的接口是 `.` 上的导出（值 + 类型）与 `./preset` / `./conformance` / `./bootstrap` 三个子路径；
-  `./internal` 是内部件，不承诺稳定。
+- 接口面是 `.` 上的导出（值 + 类型）加上 `./preset` / `./conformance` / `./bootstrap` 三个子路径；`./internal`
+  是内部件，从不承诺稳定。
+- **当前这一代把 `.` 的整个名字面都算作冻结接口**（每一代的名字面落在 `api/interface-vN.json` 快照里，只增
+  不改，该快照随源码在仓库、不进产物）。这是为了让本包自己的重构有一条明确边界而做的**阶段性**取舍，不是
+  "这个集合永远不变"：当维护整个名字面的成本超过收益时，稳定承诺会收成 `.` 的一个**稳定子集** —— 新能力
+  从明确标注为不稳定的入口引入，既有成员按弃用周期退出，而不是永远要求内部重构服从"整个 `.` 面都是接口"。
+  收窄会在本 README 与接口世代里一起体现。
 - **接口与包版本是两条轴**：接口换代只升 `INTERFACE_VERSION` 并新增 `api/interface-vN.json`；包版本是
   普通 semver，只表达包自身（行为变更 minor、修复 patch）。
 - 顺序敏感的参数一律传**具名对象**（如 `resolveDataHome({ explicit, env, configured })`）；可观察的文案
@@ -295,8 +304,7 @@ assertProviderConformance(report)
 ```bash
 pnpm check          # 类型检查 + 测试
 pnpm build          # tsc → dist/
-pnpm pack           # 打包到 release/ 并断言产物
-pnpm release:check  # 发布门禁：typecheck → build → test → pack
+pnpm pack           # 打包出 tarball
 ```
 
 ## 许可

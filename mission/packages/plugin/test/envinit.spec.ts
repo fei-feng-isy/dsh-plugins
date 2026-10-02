@@ -195,6 +195,9 @@ describe('envinit loader', () => {
     // The report structure comes from the base; the wording is this plugin's.
     expect(calls.compatReport[0].words.heading).toContain('任务插件未加载')
     expect(calls.compatReport[0].words.warnings).toEqual(['w1'])
+    // The fix is written for an npm user, who has no repository to rebuild in.
+    expect(calls.compatReport[0].words.fix).toContain('换到本插件声明兼容的 dsh 版本')
+    expect(calls.compatReport[0].words.fix).not.toContain('pnpm build:dsh')
     expect(calls.megaphone).toHaveLength(1)
     expect(calls.megaphone[0].command.name).toBe('mission')
     expect(calls.megaphone[0].text).toBe('REFUSAL REPORT')

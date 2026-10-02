@@ -303,7 +303,9 @@ describe('the refusal megaphone', () => {
     const text = String(outcome.text)
     expect(text).toContain('兼容性检查未通过')
     expect(text).toContain('declared schemas are missing after registration')
-    expect(text).toContain('pnpm build:dsh')
+    // The fix is written for an npm user, who has no repository to rebuild in.
+    expect(text).toContain('换到本插件声明兼容的 dsh 版本')
+    expect(text).not.toContain('pnpm build:dsh')
     expect(text).toContain(COMPAT_PREFIX)
   })
 

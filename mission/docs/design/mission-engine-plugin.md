@@ -668,7 +668,7 @@ toolFilter:
 
 **遮蔽不是授权。** 这两半只管"模型看不看得见"；真正的边界仍是工具体内的拒绝（`no-authority` / `not-owner`），所以即使某张面孔写错、模型幻觉出名字，调用照样被拒。`test/faces.spec.ts` 有一条不变量测试：**每个注册的工具必须恰好落在一张面孔里** —— 新增工具不归类就会失败。`note_mission` 只被放进 owner 的 deny 列表，不进 worker 的：owner 拿一个必然被拒的工具是噪音，worker 缺了它则拆解根本无法通过门禁（§5.3.2）。
 
-**owner 也看不见任务内部（2026-09-20）。** 面孔的另一半同样收紧了：`show_work`（逐个节点列出整棵树，带 `depth` / `parent_id` / `attempts` / `result_ref`）已删除；`list_missions` 与每轮的进度行（`buildProgressLine`）都只报"还在跑 / 反复出过问题"，不再报逐状态计数。判据是**这条信息能不能支撑 owner 的动作**：owner 只有 `adjust_mission`（只对根有效）与 `cancel_mission`（只吃根 id），没有任何对节点动手的工具，所以节点级的结构、派发次数、剩余失败预算都是"看得见却动不了"的信息 —— 引擎的重试策略不属于 owner（§6.0 已按同一理由不写进静态段）。**"出过问题"是例外，也是唯一例外**：它是 owner 唯一能据此做决定的引擎事实（改方向，或者放弃），判据是引擎的 `isTroubledNode`（`core/src/prompt.ts`）—— `stalls >= maxStallsBeforeReport`、`failures >= maxAttempts - 1`、`spawnFailures >= maxAttempts - 1` 三者之一，`isTroubled` 就是它加上"还没结束"这个过滤。**这一个判据现在真的被三个渠道共用**：`list_missions` 的标记、静默回收的 heads-up（`reportStall`）、以及**起不来执行者的 heads-up**（宿主在派发失败处投递，同一个门槛、同一个"只报一次"的持久标记）。三处此前并不一致：`isTroubled` 算 `spawnFailures` 而 `reportStall` 的门槛不算，于是一个连续起不来执行者的任务会在 `list_missions` 里读作"反复出过问题"，却永远收不到一条消息 —— 起不来的节点从不是 `running`，而静默扫描只看 `running`。`/mission` 命令与"任务"面板仍按节点渲染 —— 那是给人看的诊断面，不是模型面。
+**owner 也看不见任务内部（2026-09-20）。** 面孔的另一半同样收紧了：`show_work`（逐个节点列出整棵树，带 `depth` / `parent_id` / `attempts` / `result_ref`）已删除；`list_missions` 与每轮的进度行（`buildProgressLine`）都只报"还在跑 / 反复出过问题"，不再报逐状态计数。判据是**这条信息能不能支撑 owner 的动作**：owner 只有 `adjust_mission`（只对根有效）与 `cancel_mission`（只吃根 id），没有任何对节点动手的工具，所以节点级的结构、派发次数、剩余失败预算都是"看得见却动不了"的信息 —— 引擎的重试策略不属于 owner（§6.0 已按同一理由不写进静态段）。**"出过问题"是例外，也是唯一例外**：它是 owner 唯一能据此做决定的引擎事实（改方向，或者放弃），判据是引擎的 `isTroubledNode`（`core/src/prompt.ts`）—— `stalls >= maxStallsBeforeReport`、`hungCount >= maxHungsBeforeReport`、`failures >= maxAttempts - 1`、`spawnFailures >= maxAttempts - 1` **四者之一**（`hungCount` 是唯一会清零的那个：任一真实产出即清零，其余三个只增不减），`isTroubled` 就是它加上"还没结束"这个过滤。**这一个判据现在真的被三个渠道共用**：`list_missions` 的标记、静默回收的 heads-up（`reportStall`）、以及**起不来执行者的 heads-up**（宿主在派发失败处投递，同一个门槛、同一个"只报一次"的持久标记）。三处此前并不一致：`isTroubled` 算 `spawnFailures` 而 `reportStall` 的门槛不算，于是一个连续起不来执行者的任务会在 `list_missions` 里读作"反复出过问题"，却永远收不到一条消息 —— 起不来的节点从不是 `running`，而静默扫描只看 `running`。`/mission` 命令与"任务"面板仍按节点渲染 —— 那是给人看的诊断面，不是模型面。
 
 **2026-09-23 修订：一次独立核对修掉的四处。** 一件真实任务（"工具面完整性核对：参数 × 校验 × 拒绝码"，拆成 4 个前置任务、汇总交出报告）把四个读写边界上的不一致挖了出来，都改了：① `no-caller` 并入 `RefusalCode` —— 九个工具都会产生它而码表里没有，按 union 穷举的消费者会静默漏掉；② 纯空白文本不再能落库 —— `submit_mission` 的结果、`adjust_mission` 的纠偏、`create_mission` 的标题与内容都补上 `blank-text` 拒绝，且**分层不变**：工具层只拒真正的空串，空白由引擎判（与 `note_mission` 的 `no-analysis` 同源，否则这些码就没有可达的产生点）；③ 三个 owner 工具对同一个子任务 id 统一回 `not-root`，`finish_mission` / `cancel_mission` 原先按 ROOT 查表，把"这不是根任务"说成"任务不存在"；④ `isTroubledNode` 抽成唯一判据，并给"连续起不来执行者"补上 owner 提醒（见上）。
 
@@ -712,10 +712,10 @@ toolFilter:
 
 | | 内容 |
 |---|---|
-| 注册 | `ctx.systemPrompt.section({ name: 'avantf:mission-tree-guide', order: getSectionOrder('TOOL_WORKS') })` |
+| 注册 | `ctx.systemPrompt.section({ name: 'avantf:mission-tree-guide', order: getSectionOrder('TOOL_JOBS') })` |
 | 可见性 | 与 `create_mission` 的授权判据**同一个函数**（`host.canCreateTree` = 非子代理会话）。worker 拿不到 `create_mission`，所以 provider 对它返回空串，组装器丢弃空段 —— 不教一个调用者没有的工具 |
 | 静态而非每轮 | 它讲的是"这件事该不该变成树"和"执行者看不到这段对话"，两件事在任何树存在**之前**就成立；树一旦存在，由 §6.1 起的动态层接管 |
-| 位次 | 放在 `TOOL_WORKS`（工具指导区），因为它就是"一个工具族怎么用"；不占用 persona 位 |
+| 位次 | 放在 `TOOL_JOBS`（工具指导区），因为它就是"一个工具族怎么用"；不占用 persona 位 |
 
 **文本里刻意不出现**（知道也没用，或不该知道）：
 
@@ -728,9 +728,11 @@ toolFilter:
 
 **它会点名兄弟委派工具**（`subagent` / `subagent_fork` / `workflow`），这与上面"不写"的原则不冲突 —— 树与"起一个子 agent 去干活"在**"交出去、别人做"**这一点上重叠，而决定用哪个的差别恰好是"执行者是一次性的、跑起来就联系不上、看不到这段对话"。不写这句，owner 面对重叠只能自己猜；写了，它是一个可执行的选择。同一个边界也写在 `create_mission` 的工具描述里（决策发生的地方）。
 
+**它另带一句写法提示**：`写描述时保持紧凑：需要交付长规格或长清单时，先把它写进仓库里的文件，再在描述里指向那个文件 —— 描述越短，派发越可靠。` 理由是超长的工具参数本身是一个已实测的失败源（`b273150`）；它既不点名参数（参数怎么填属于工具说明），也不缩小任务内容，所以与上面两条"不写"的边界不冲突。守卫：`guidance.spec.ts` 的 "tells the owner to put a long spec in a file, not in the description"。
+
 测试（`test/guidance.spec.ts`）既断言它说了什么（任务的定义与建法、谁在等、**与普通委派的边界**、任务/任务树的用语），也断言它**没说什么**（一张禁用词表），worker 视角为空串。
 
-**正文是用户可编辑的**：正文放在**家族共享**的 `<data home>/prompts/mission-tree-guide.md`（`data home` = ⑤ 显式实参 → ④ `$AVANTF_HOME` → ② 插件配置 `dataHome` → `~/.avantf`；同目录下记忆插件用 `mem-*` 前缀，各插件只动自己前缀的文件）。插件在 `apply` 里**只读一次**（改完重启 `dsh` 生效）：缺失或空白会被原子写入上文的常量作为默认，有内容则**逐字注入**（去首尾空白、剥 BOM、CRLF→LF）；文件不可读写只告警并退回默认，**绝不阻断挂载**。**文件只提供正文**——段名与位次由 `index.ts`（`getSectionOrder('TOOL_WORKS')`）决定，`PROMPT_FILES` 只管"哪个文件对应哪段"，清单外的 `.md` 被忽略且不报错。因此 `guidance.spec.ts` / `wording.spec.ts` 的硬守卫（禁用词表、只说自己插件的工具、worker 视角为空串）**只守内置默认**；用户文本另由 `guidanceTextWarnings` 做一次软检查并 warn（超预算、命中「任务树/子树/节点/树」这类形状词），不截断、不拒绝。ensure/read/fallback 这套流程由底座的通用件 `PromptFiles` 提供（`base/plugin-base/src/kit/prompt_files.ts`），插件在运行时从**加载到的底座**上取（`kit?.PromptFiles`），底座缺席时退回内置正文。放在底座而非 `mission-core`，因为引擎刻意不带 Node 类型。
+**正文是用户可编辑的**：正文放在**家族共享**的 `<data home>/prompts/mission-tree-guide.md`（`data home` = ⑤ 显式实参 → ④ `$AVANTF_HOME` → ② 插件配置 `dataHome` → `~/.avantf`；同目录下记忆插件用 `mem-*` 前缀，各插件只动自己前缀的文件）。插件在 `apply` 里**只读一次**（改完重启 `dsh` 生效）：缺失或空白会被原子写入上文的常量作为默认，有内容则**逐字注入**（去首尾空白、剥 BOM、CRLF→LF）；文件不可读写只告警并退回默认，**绝不阻断挂载**。**文件只提供正文**——段名与位次由 `index.ts`（`getSectionOrder('TOOL_JOBS')`）决定，`PROMPT_FILES` 只管"哪个文件对应哪段"，清单外的 `.md` 被忽略且不报错。因此 `guidance.spec.ts` / `wording.spec.ts` 的硬守卫（禁用词表、只说自己插件的工具、worker 视角为空串）**只守内置默认**；用户文本另由 `guidanceTextWarnings` 做一次软检查并 warn（超预算、命中「任务树/子树/节点/树」这类形状词），不截断、不拒绝。ensure/read/fallback 这套流程由底座的通用件 `PromptFiles` 提供（`base/plugin-base/src/kit/prompt_files.ts`），插件在运行时从**加载到的底座**上取（`kit?.PromptFiles`），底座缺席时退回内置正文。放在底座而非 `mission-core`，因为引擎刻意不带 Node 类型。
 
 ### 6.1 目标与约束
 
@@ -876,7 +878,7 @@ master 在一轮会话里，**不能假定用户发来的就是任务** —— �
 
 **2026-09-21 修订：把"已经想清楚"从排除理由里拿掉。** 此前的资格清单全是"复杂度"特征（调研 / 多步 / 逐步分解 / 碰多文件），于是"缺陷已钉到 文件:行 + 复现命令 + 验收标准、只要照单改完"这类任务被读成"不够复杂 → 不用建任务"，master 转而手起执行者。这个推理在两层上都不成立：①**判据本来就该是"可交付性"** —— 边界清晰、验收明确的任务恰恰是交出去最稳的一类；②**代价被高估** —— 不需要拆解的任务就是一次派发（一个执行者一次做完，见 §5.4 的派发路径），与 master 自己安排一次执行同量级，而它换来跨会话持久化、结果落盘、失败自动重派。同时在 `adjust_mission` 一段补了一句"没有未完成的子任务时，它就是一条投递给执行者的消息" —— 不拆解的任务没有可作废的子任务，纠偏代价反而最低。守卫测试：`guidance.spec.ts` 的 "admits an independent mission" / "says a correction reaches the executor"，以及 `command.spec.ts` 对 `create_mission` 描述的同款断言。
 
-**同日再修订：静态段只讲"何时用"，不碰"内容"与"参数"。** 上一版顺手写进去的两句都拿掉了：①"任务的内容是实现与验证，不可逆的对外动作（发布、推送、删除）留给你自己做" —— 这是**收窄任务内容**，而 master 自己决定一件任务为了什么，读回结果是 `mission_result` 的事，静态段没有立场划这条线；②"建任务时写三样：`title` / `description` / `analysis`" —— 与 `create_mission` 的参数说明重复，而模型在**同一个请求**里就读得到那份说明。去掉后静态段从 649 字降到 525 字，且它的反引号 token 集合从 `{create_mission, adjust_mission, title, description, analysis}` 收窄到 `{create_mission, adjust_mission}` —— 这本身就是"静态段不许谈机制"的量化形式。守卫：`guidance.spec.ts` 的 "leaves the mechanics to the tool"（不得出现 `title`/`description`/`analysis`）与 "does not fence off what a mission may contain"（不得出现 `不可逆` / `发布、推送、删除`）。
+**同日再修订：静态段只讲"何时用"，不碰"内容"与"参数"。** 上一版顺手写进去的两句都拿掉了：①"任务的内容是实现与验证，不可逆的对外动作（发布、推送、删除）留给你自己做" —— 这是**收窄任务内容**，而 master 自己决定一件任务为了什么，读回结果是 `mission_result` 的事，静态段没有立场划这条线；②"建任务时写三样：`title` / `description` / `analysis`" —— 与 `create_mission` 的参数说明重复，而模型在**同一个请求**里就读得到那份说明。去掉后静态段从 649 字降到 525 字（此后 `b273150` 又加回"长规格先写文件"一句，**当前内置默认正文实测 596 字**），且它的反引号 token 集合从 `{create_mission, adjust_mission, title, description, analysis}` 收窄到 `{create_mission, adjust_mission}`（加回那句后仍是这两个）—— 这本身就是"静态段不许谈机制"的量化形式。守卫：`guidance.spec.ts` 的 "leaves the mechanics to the tool"（不得出现 `title`/`description`/`analysis`）与 "does not fence off what a mission may contain"（不得出现 `不可逆` / `发布、推送、删除`）。
 
 **用语**：模型可见文本里，交出去的那件事叫**任务**；**任务树**只指它被逐步分解之后的状态。工具名同样不带 tree（`list_missions`）—— 从 master 的视角看只有任务，"树"是分解之后的形态，不是它要去操作的对象。
 
@@ -1123,9 +1125,13 @@ Cordis 的 `ctx.effect()` 就是 install/uninstall 接线：**disposer 在 fiber
 - **独占例外**：`weight > capacity` 的节点（"要整机"）只在**无其它 running** 时派发，不会永远排不上。
 - **`maxConcurrent` 与 capacity 的主从关系**：capacity 是**主闸门**，`maxConcurrent` 退化为**槽位数上限**
   （防止 weight=1 开太多会话），两者都满足才派发。
-- **`waitingFor` 可观察**：节点投影带 `waitingFor: 'capacity' | 'unit' | 'slot' | null`（`capacity` 用
-  `resource: 'cpu' | 'memory'` 区分，能给出数字时带 `needed`/`available`），接到 `mission_result` 与面板；
-  推迟派发时打一条**限流**日志（`dispatch deferred: <node> needs N, capacity C, running R`，每节点每分钟一条，
+- **`waitingFor` 可观察**：节点投影带 `waitingFor: 'capacity' | 'unit' | 'slot' | 'aging' | null`（`capacity`
+  用 `resource: 'cpu' | 'memory'` 区分，能给出数字时带 `needed`/`available`；`aging` = 一个老化节点已预留
+  整机、把这个候选挡在后面）。这个投影**只在面板行 / 详情可见**：`mission_result` 的 payload 里虽然带着
+  `waiting_for` 字段，但 `readResult` 只在节点终态放行，而排队中的节点恰恰还没到终态，所以那条通道**实际
+  恒为 `null`**（`tools.ts` 的注释与 `capacity-host.spec.ts` 的断言都写明了这一点）—— 排队可感知性只属于
+  面板，以及被派发的执行者自己收到的排队句。推迟派发时打一条**限流**日志
+  （`dispatch deferred: <node> needs N, capacity C, running R`，每节点每分钟一条，
   预留转变不受限流吞掉）。它**不进 `isTroubled`** —— 正常排队不是"反复出过问题"。
 - **`ResourceProbe`（v1 只做接口与统一 API）**：core 定一个 Node-free 端口
   （`parallelism()` / 可选 `memoryBudget()` / `pressure()` / 可选 `workerUsage(pid)`）；宿主侧实现只用
@@ -1455,5 +1461,5 @@ wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSche
 7. **两种代际切换都正确**：热重载（agent 仍活）不重派；进程重启（agent 已死）回收后重派
 8. **三层树跑到根 `done`**：拆解 → 子节点全终态 → 汇总派活提交结论 → 根收敛 → 读结果 → 收尾（这条是本设计的核心路径，必须有测试钉住）
 9. **并发上限生效**：一批 N 个 ready 节点不会一次派出超过上限的任务单元
-10. **容量闸门生效且只排队不拒绝**：装不下的节点留在 `ready`，`attempts`/`failures`/`spawnFailures`/`stalls` 全为 0；work-conserving 用轻任务填满空闲容量；老化超阈值后预留、排空后只派发一次；`weight > capacity` 的节点在无其它 running 时被派发；空闲内存低于下限只推迟不拒绝；`waitingFor` 在 `mission_result` 与面板可见
+10. **容量闸门生效且只排队不拒绝**：装不下的节点留在 `ready`，`attempts`/`failures`/`spawnFailures`/`stalls` 全为 0；work-conserving 用轻任务填满空闲容量；老化超阈值后预留、排空后只派发一次；`weight > capacity` 的节点在无其它 running 时被派发；空闲内存低于下限只推迟不拒绝；`waitingFor` 在面板可见（`mission_result` 的 `waiting_for` 因为读结果只在终态放行而恒为 `null`，见 §9.2.1）
 11. **唤醒真的唤醒**：引擎唤醒产生的 turn 至少带一条消息（否则零模型调用，等于没唤醒）
