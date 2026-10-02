@@ -54,12 +54,12 @@ node {
   unit          : string | null     // 改动范围（一个目录或文件）—— 引擎租约键（§2.4）
   context       : string[]          // 任务背景：拆解原因等，由拆解者写入
   corrections   : string[]          // master 的纠偏，最新在后（§6.6）
-  corrections_delivered_up_to : number  // 纠偏投递水位：前 N 条已确认送达持有者那个会话（§9.2.1）
+  corrections_delivered_up_to : number  // 纠偏投递水位：前 N 条已确认送达持有者那个会话（§9.2.2）
   analysis_notes: string[]          // 执行者用 note_mission 写下的判断，最老在前（§5.3.2）
   analysis_attempt: number          // 写下最后一条时的 attempts；0 表示没人写过
   parked_worker : string | null      // 拆解后停手的会话 id —— 等待被唤醒的地址（§3.2.2）
   last_worker_id: string | null      // 被中断的会话 id —— 冷唤醒的句柄（§3.2.2）
-  dispatch_baseline: Baseline | null // 这次 prompt 给会话看过什么；冷唤醒用它算差量（§3.2.2 / §9.2.1）
+  dispatch_baseline: Baseline | null // 这次 prompt 给会话看过什么；冷唤醒用它算差量（§3.2.2 / §9.2.2）
   status        : NodeStatus
   created_at    : number            // 跨树公平排序用（最老优先）
   depth         : number            // 根为 1
@@ -278,7 +278,7 @@ interface DispatchBaseline {
 - **缺省语义是"未知"，不是"没有变化"**：旧记录、非本代宿主构造过 prompt 的记录、以及形状残缺的 baseline 都读成
   `null`（`normalizeLoaded()` + schema 的 `nullable().default(null).catch(null)`，见 §3.2.2 的同一处口径）。
   唤醒遇到它时**照样续命**，但渲染一句诚实的说明（§5.1），不渲染任何编造的"新增 N 条"。
-- **差量与阈值**（哪些变化算"大到不该续"）见 §9.2.1。
+- **差量与阈值**（哪些变化算"大到不该续"）见 §9.2.2。
 
 ---
 
@@ -414,7 +414,7 @@ loop:
 每个任务单元是一次全新的子 agent 生成。prompt 由**一个按节点状态分叉的构造器**产出（同一段模板，尾段随状态变化）：
 
 ```
-[续任说明]    第 N 次执行 / 上一次被中断 / 工作区可能留着改动（§9.2.1）
+[续任说明]    第 N 次执行 / 上一次被中断 / 工作区可能留着改动（§9.2.2）
 [变化差量]    仅冷唤醒：自你上次执行后发生了什么（无变化则整段不出现；基线未知则只有那句说明）
 [任务链]      沿 parent 链 root → 当前节点，每层只给 **title + 少量基本信息**
 [当前节点]    本节点的完整内容：id / title / description / context + attempts
@@ -424,12 +424,12 @@ loop:
 
 **「变化差量」只属于唤醒路径。** 它由 `WorkerPromptOptions.delta` 传入，只有冷唤醒（`deliverContinuation`）会传：
 全新 spawn 从未执行过这个任务，"自你上次执行后"是假话，而且它本来就会读到全部纠偏、全部笔记与全部子结果 ——
-两条路径在这里**刻意不合并**。差量逐分量怎么算、什么时候算"大到不该续"，见 §9.2.1。
+两条路径在这里**刻意不合并**。差量逐分量怎么算、什么时候算"大到不该续"，见 §9.2.2。
 
 两条设计约束：
 
 - **节点 id 必须出现在 prompt 里** —— 任务单元只看到注入的 prompt，执行完要靠这个 id 提交结果。
-- **任务链只放基本信息，不放各层的 description / context** —— 完整内容属于"当前节点"那一块。这样任务链的规模是"深度 × 一行的开销"，深度上限 8 时大约是 8 行，**结构上就不会膨胀**（因此 §9.2.1 里的 token 预算不是必需的）。
+- **任务链只放基本信息，不放各层的 description / context** —— 完整内容属于"当前节点"那一块。这样任务链的规模是"深度 × 一行的开销"，深度上限 8 时大约是 8 行，**结构上就不会膨胀**（因此 §9.2.2 里的 token 预算不是必需的）。
 
 **prompt 里绝对不包含**：
 
@@ -1054,12 +1054,13 @@ Cordis 的 `ctx.effect()` 就是 install/uninstall 接线：**disposer 在 fiber
 |---|---|---|
 | 树深度上限 | **8** | `decompose` 前校验，超限**拒绝该次拆解** —— 一次性、零副作用，不改节点状态；已到顶的执行者在**派发时**就会读到这条上限（prompt 的深度提示），不用靠被拒才发现 |
 | 单次拆解子任务数 | **至多 6** | `decompose` 的入参校验，超出即拒绝该次调用（一次性，不改节点状态）|
-| 并发任务单元上限 | **CPU 核数 - 1**（可配）| 引擎每次派活 pass 的上限，按**已绑定的节点**计数（见下）|
+| 并发任务单元上限 `maxConcurrent` | **CPU 核数 - 1**（可配）| **槽位数上限**（同时最多几个任务单元），按**已绑定的节点**计数（见下）。它是 capacity 的backstop，不是主闸门 |
+| 容量 `capacity`（2026-10-02）| **派生：`availableParallelism()` → `cpus().length` → 4，减 1 核预留，夹取 1..64**（可配）| **派发主闸门**：`Σ running.weight + candidate.weight ≤ capacity`。见 §9.2.1 |
 | 失败预算 `failures` | **5** | 每次 worker 被回收（消失 / 卡死）+1；达阈值 → 节点标 `failed` + 唤醒 master 上报。**成功的提交与拆解（含汇总轮）不消耗** |
 | 启动失败预算 `spawnFailures` | **5** | 每次「派发即失败」（runtime 拒绝 / toolFilter 无法施加）+1，并按指数退避冷却后再派；成功启动即清零；达阈值 → `failed`。**不计入 `failures`** |
 | 单树节点上限 | **200** | `decompose` 提交前校验，超限 `node-limit` 拒绝该次拆解（一次性，零副作用）。只数**本次新增**的节点：复用已有前置任务的子任务不计数 |
-| 会话续命 | **同一父子边**（`parkedWorker`）+ **重启后冷唤醒**（`lastWorkerId`）| 拆解后停手的执行者被记在该节点上；子任务全终态后由 owner 那一轮唤醒它继续判断。中断留下的句柄在打开时存进 `lastWorkerId`，下次派发**先冷唤醒、失败再新起**（失败不消耗任何预算：`wake-failed`）。冷唤醒另带**变化差量**：派发时把"这个 prompt 给会话看了什么"存成 `dispatchBaseline`，唤醒时用当前值减它，差量渲染进唤醒消息；**差量大到 material 就不续命、直接新起**（不扣预算、不触发冷却）。停手期间节点不是 `running`，不占并发配额、不触发 stale 判定；认领后如常走 stale 兜底。优先级 parked > 冷唤醒 > 新起，互不覆盖。见 §3.2.2 / §3.2.3 / §5.1 / §9.2.1 与设计提案 |
-| 任务链 token 预算 | **暂不需要**（见 §9.2.1）| —— |
+| 会话续命 | **同一父子边**（`parkedWorker`）+ **重启后冷唤醒**（`lastWorkerId`）| 拆解后停手的执行者被记在该节点上；子任务全终态后由 owner 那一轮唤醒它继续判断。中断留下的句柄在打开时存进 `lastWorkerId`，下次派发**先冷唤醒、失败再新起**（失败不消耗任何预算：`wake-failed`）。冷唤醒另带**变化差量**：派发时把"这个 prompt 给会话看了什么"存成 `dispatchBaseline`，唤醒时用当前值减它，差量渲染进唤醒消息；**差量大到 material 就不续命、直接新起**（不扣预算、不触发冷却）。停手期间节点不是 `running`，不占并发配额、不触发 stale 判定；认领后如常走 stale 兜底。优先级 parked > 冷唤醒 > 新起，互不覆盖。见 §3.2.2 / §3.2.3 / §5.1 / §9.2.2 与设计提案 |
+| 任务链 token 预算 | **暂不需要**（见 §9.2.2）| —— |
 
 **深度的计数口径**：根节点为第 1 层，深度 8 即允许最多 7 次连续下钻。实施时以根为准统一定义。
 
@@ -1087,7 +1088,43 @@ Cordis 的 `ctx.effect()` 就是 install/uninstall 接线：**disposer 在 fiber
 也会让上限取决于 spawn 多快注册。所以计数取 `status == running && claimed_by != null`，
 本轮的派活立刻计入，同一 tick 的第二次触发也不会超发。
 
-### 9.2.1 待实施项与接线入口
+### 9.2.1 capacity 派发闸门与 weight（2026-10-02）
+
+完整设计见 [`docs/design/2026-10-02-capacity.md`](./2026-10-02-capacity.md)；这里只钉住会改变行为的规则。
+
+- **capacity 的来源**：① 显式配置（`config.capacity`，按给定值夹取）→ ② `os.availableParallelism()`
+  （尊重 cgroup 配额与亲和性）→ ③ `os.cpus().length` → ④ 默认 4；派生值再减 1 核留给宿主/UI，
+  夹取 `1..64`。硬件派生只在**宿主/插件边界**做（core 刻意不带 Node 类型），算完作为
+  `EngineOptions.capacity` 注入，因此调度可被确定性测试。
+- **`weight`（节点申报的核当量）**：`create_mission.weight` / `decompose_mission.children[].weight`，
+  缺省 **1**，夹取 `1..64`，持久化在 `NodeRecord.weight`；**子任务不继承父的估值**；
+  去重复用节点保留自己的 weight。`DOMAIN_VERSION` 仍为 1（可选字段 + 默认值）。
+- **派发闸门 ≠ 受理闸门**：`create_mission` / `decompose_mission` **永不因容量失败** —— 树建好、节点进
+  `ready` 就是排队。被闸门跳过**不是拒绝**：不扣 `attempts`/`failures`/`spawnFailures`、无冷却、不记
+  `stalls`（与 unit 租约同一纪律）。每次节点完成、每次 pass/sweep 都重新评估，所以"完成后再按负载继续派发"。
+- **work-conserving**：装不下的重任务被跳过、继续扫描用轻任务填满空闲容量；队列顺序是
+  入队时间（FIFO）+ 老化提升，**不按 weight 排序**。
+- **老化 → 预留（防饿死）**：某节点被容量跳过累计超过 `capacityWaitMs`（默认 5 分钟、下限 1 分钟）后
+  进入**预留**：不再接纳新节点（已在跑的不动），等排空到它装得下再派发；多个预留按等待最久优先。
+  时钟由 `EngineOptions.now` 注入，测试可确定性地推进。
+- **独占例外**：`weight > capacity` 的节点（"要整机"）只在**无其它 running** 时派发，不会永远排不上。
+- **`maxConcurrent` 与 capacity 的主从关系**：capacity 是**主闸门**，`maxConcurrent` 退化为**槽位数上限**
+  （防止 weight=1 开太多会话），两者都满足才派发。
+- **`waitingFor` 可观察**：节点投影带 `waitingFor: 'capacity' | 'unit' | 'slot' | null`（`capacity` 用
+  `resource: 'cpu' | 'memory'` 区分，能给出数字时带 `needed`/`available`），接到 `mission_result` 与面板；
+  推迟派发时打一条**限流**日志（`dispatch deferred: <node> needs N, capacity C, running R`，每节点每分钟一条，
+  预留转变不受限流吞掉）。它**不进 `isTroubled`** —— 正常排队不是"反复出过问题"。
+- **`ResourceProbe`（v1 只做接口与统一 API）**：core 定一个 Node-free 端口
+  （`parallelism()` / 可选 `memoryBudget()` / `pressure()` / 可选 `workerUsage(pid)`）；宿主侧实现只用
+  `os.availableParallelism()`、`os.totalmem()`、`process.constrainedMemory()`（与 totalmem 夹取，
+  识别 `1.8e19` 这类"无约束"哨兵）与 `os.freemem()`（粗信号，只作下限门）。`null` 是"本平台无此信号"，
+  **"无信号" ≠ "空闲"**：`null` 只能让调度更保守，绝不能放宽并发；未实现处一律 `null`
+  （`pressure()` 在 v1 恒为 `null`）。平台适配器与实测校正留给 v2，接口位置与降级路径已写在该文档里。
+- **空闲内存下限门**：低于配置阈值（默认 256 MiB）时**推迟派发**（闸门，不是拒绝）；探针端口没有
+  `memoryBudget` 实现 = 该门不生效（v1 无平台适配器的降级路径），实现但它返回 `null` = "无法确认下限"
+  → 保守推迟。
+
+### 9.2.2 待实施项与接线入口
 
 以下两项**当前不实施**，但预留接线位置，避免将来改造时找不到入口：
 
@@ -1373,4 +1410,5 @@ wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSche
 7. **两种代际切换都正确**：热重载（agent 仍活）不重派；进程重启（agent 已死）回收后重派
 8. **三层树跑到根 `done`**：拆解 → 子节点全终态 → 汇总派活提交结论 → 根收敛 → 读结果 → 收尾（这条是本设计的核心路径，必须有测试钉住）
 9. **并发上限生效**：一批 N 个 ready 节点不会一次派出超过上限的任务单元
-10. **唤醒真的唤醒**：引擎唤醒产生的 turn 至少带一条消息（否则零模型调用，等于没唤醒）
+10. **容量闸门生效且只排队不拒绝**：装不下的节点留在 `ready`，`attempts`/`failures`/`spawnFailures`/`stalls` 全为 0；work-conserving 用轻任务填满空闲容量；老化超阈值后预留、排空后只派发一次；`weight > capacity` 的节点在无其它 running 时被派发；空闲内存低于下限只推迟不拒绝；`waitingFor` 在 `mission_result` 与面板可见
+11. **唤醒真的唤醒**：引擎唤醒产生的 turn 至少带一条消息（否则零模型调用，等于没唤醒）

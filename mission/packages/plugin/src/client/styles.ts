@@ -60,6 +60,9 @@ const CSS = `
    A status colour as TEXT does not survive both themes (light-theme green is 2.3:1). */
 .avwf-badge { flex: 0 0 auto; padding: 0 6px; border-radius: 9px; font-size: 11px; color: var(--dsw-alias-label-primary); background: color-mix(in srgb, var(--avwf-status, currentColor) 18%, transparent); }
 .avwf-meta { flex: 0 0 auto; color: var(--dsw-alias-label-secondary); font-size: 11px; }
+/* A queued mission: same bordered label as the reused/corrected tags, because being deferred by an
+   admission gate is a NORMAL queuing fact, not a status — it must not wear a status hue. */
+.avwf-waiting { border: 0.5px dashed color-mix(in srgb, currentColor 45%, transparent); border-radius: 3px; padding: 0 3px; }
 .avwf-context { color: var(--dsw-alias-label-secondary); padding-top: 1px; padding-bottom: 3px; line-height: 1.5; }
 /* A status is a HUE, published as a custom property and consumed by shapes (the dot) and as a
    background tint (the badge). The state tokens are the platform's own — the --dsh-color-*

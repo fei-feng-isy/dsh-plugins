@@ -268,6 +268,7 @@ describe('outbound: the worker prompt boundary', () => {
       title: 'Root',
       description: 'Work',
       unit: null,
+      weight: 1,
       context: [],
       corrections: [],
       correctionsDeliveredUpTo: 0,

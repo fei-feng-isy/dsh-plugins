@@ -82,6 +82,18 @@ function declare(name: string, schema: ZodType): DeclaredSchema {
 }
 
 /**
+ * Why a node is queued instead of running (see `@avantf/mission-core`'s `WaitingFor`). `.nullable()`
+ * with a `.default(null)` so an older host that omits it reads as "nothing is holding it back".
+ */
+const waitingForSchema = z.object({
+  reason: z.enum(['capacity', 'unit', 'slot']),
+  resource: z.enum(['cpu', 'memory']).optional(),
+  needed: z.number().optional(),
+  available: z.number().optional(),
+  unit: z.string().optional(),
+})
+
+/**
  * One node as the summary wire carries it — the row projection. No `description`: rows
  * do not render it and this schema is re-sent on every engine change.
  */
@@ -108,6 +120,10 @@ const nodeSchema = z.object({
   // that payload, where failing the whole snapshot read would blank a panel that is otherwise fine
   // (`corrections` is required because its absence would crash the render; this one only removes a link).
   workerSessionId: z.string().nullable().default(null),
+  /** Declared capacity weight; an older host omits it and the default 1 is the honest reading. */
+  weight: z.number().default(1),
+  /** Why the engine has not dispatched this node; `null` = nothing is holding it back. */
+  waitingFor: waitingForSchema.nullable().default(null),
 })
 
 const treeSchema = z.object({
@@ -188,6 +204,10 @@ const detailNodeSchema = z.object({
   resultPointer: z.string().nullable(),
   /** The session executing this node right now; `null` (or, from an older host, absent) means none. */
   workerSessionId: z.string().nullable().default(null),
+  /** Declared capacity weight; older host → default 1. */
+  weight: z.number().default(1),
+  /** Why this node is queued; `null` = nothing holding it back. */
+  waitingFor: waitingForSchema.nullable().default(null),
 })
 
 export const detailResultSchema = z.object({

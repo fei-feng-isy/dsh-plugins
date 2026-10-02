@@ -24,6 +24,7 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     title: 'Root mission',
     description: 'Do the whole thing',
     unit: null,
+    weight: 1,
     context: [],
     corrections: [],
     correctionsDeliveredUpTo: 0,

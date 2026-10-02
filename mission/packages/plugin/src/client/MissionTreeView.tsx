@@ -54,6 +54,39 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 /**
+ * Why a queued mission is not running yet, in the owner's words. Being skipped by an admission gate
+ * is NORMAL — the mission is queued, not refused — so the row says what it is waiting FOR, and the
+ * tooltip carries the numbers the host sent (`needed`/`available`), which are cores for `capacity`
+ * and bytes for a memory-floor deferral. `null` for a node nothing is holding back.
+ */
+function waitingLabel(
+  waiting: NonNullable<MissionNodeView['waitingFor']> | null | undefined,
+): { text: string; title: string } | undefined {
+  if (waiting === null || waiting === undefined) return undefined
+  if (waiting.reason === 'unit') {
+    return {
+      text: '排队中',
+      title: waiting.unit === undefined
+        ? '同一范围正有别的任务在跑，等它结束'
+        : `范围「${waiting.unit}」正有别的任务在跑，等它结束`,
+    }
+  }
+  if (waiting.reason === 'slot') {
+    return { text: '排队中', title: '同时执行的任务数已达上限，等一个空位' }
+  }
+  if (waiting.resource === 'memory') {
+    const numbers = waiting.needed === undefined || waiting.available === undefined
+      ? '剩余可用内存无法确认（本平台没有这个信号）'
+      : `可用约 ${String(Math.round(waiting.available / (1024 * 1024)))} MB，低于下限 ${String(Math.round(waiting.needed / (1024 * 1024)))} MB`
+    return { text: '等内存', title: `${numbers}；低于下限时先不派新任务，不是拒绝` }
+  }
+  const numbers = waiting.needed === undefined || waiting.available === undefined
+    ? ''
+    : `（需要 ${String(waiting.needed)} 核，当前空余 ${String(waiting.available)} 核）`
+  return { text: '等容量', title: `整机容量不够，等正在跑的任务结束${numbers}` }
+}
+
+/**
  * The one dialog's data, as this view tracks it (not part of the contract): which node it is
  * for, and how far that read has got. One at a time, because the dialog is modal — the
  * per-node cache the inline panel kept existed only to survive rows scrolling past.
@@ -625,6 +658,9 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
   const expandable = children.length > 0
   const indent = { paddingLeft: `${String(depth * 14 + 6)}px` }
   const detailOpen = openId === node.id
+  // Why this mission is queued (skipped by an admission gate), or `undefined` when it is not. Being
+  // skipped is normal queuing, so this renders as a marker, never as a warning.
+  const waiting = waitingLabel(node.waitingFor)
 
   return (
     <div className="avwf-node">
@@ -667,6 +703,12 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
           )
           : null}
         <span className={`avwf-badge avwf-${node.status}`}>{STATUS_LABEL[node.status] ?? node.status}</span>
+        {waiting === undefined
+          ? null
+          : <span className="avwf-meta avwf-waiting" title={waiting.title}>{waiting.text}</span>}
+        {node.weight !== undefined && node.weight > 1
+          ? <span className="avwf-meta" title={`这个任务按 ${String(node.weight)} 核参与整机容量分配`}>约占 {node.weight} 核</span>
+          : null}
         {node.attempts > 1 ? <span className="avwf-meta">第 {node.attempts} 次</span> : null}
         {node.resultRef !== null ? <span className="avwf-meta" title={node.resultRef}>结果已落盘</span> : null}
         <span className="avwf-meta avwf-detail-hint">详情</span>

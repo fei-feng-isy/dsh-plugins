@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  CAPACITY_CEILING,
   DEFAULT_ENGINE_OPTIONS,
   MissionEngine,
   MissionTree,
@@ -63,7 +64,14 @@ function makeWorld(options: { maxConcurrent?: number } = {}) {
       interruptWorker: () => Promise.resolve(),
       notifyOwner: () => undefined,
     },
-    { maxConcurrent: options.maxConcurrent ?? 4, staleMs: 60_000, roundMs: DEFAULT_ENGINE_OPTIONS.roundMs },
+    {
+      maxConcurrent: options.maxConcurrent ?? 4,
+      staleMs: 60_000,
+      roundMs: DEFAULT_ENGINE_OPTIONS.roundMs,
+      capacity: CAPACITY_CEILING,
+      capacityWaitMs: DEFAULT_ENGINE_OPTIONS.capacityWaitMs,
+      minFreeMemoryBytes: DEFAULT_ENGINE_OPTIONS.minFreeMemoryBytes,
+    },
   )
   return { tree, engine, store, live, started }
 }

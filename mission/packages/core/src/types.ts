@@ -92,6 +92,31 @@ export interface DispatchBaseline {
   readonly attempts: number
 }
 
+/**
+ * Why a `ready`/`interrupted` node has not been dispatched yet — computed live by the engine from
+ * the current admission state, never persisted. `null` (or a missing field on an older payload)
+ * means "nothing is holding it back".
+ *
+ * The three reasons are the three gates that can defer a dispatch:
+ *
+ * - `capacity` — the master gate: `Σ running.weight + weight > capacity`. `resource` distinguishes
+ *   the machine-derived compute capacity (`cpu`) from the host's free-memory floor (`memory`, whose
+ *   `needed`/`available` are BYTES, not cores). Only the `cpu` flavour can age into a reservation.
+ * - `unit` — another `running` node holds the same declared scope (the unit lease).
+ * - `slot` — the `maxConcurrent` ceiling on the NUMBER of units; capacity itself has room.
+ *
+ * `needed`/`available` are filled only where a number is meaningful; a memory deferral whose signal
+ * is `null` ("cannot tell") carries no numbers at all, because there is nothing honest to show.
+ */
+export interface WaitingFor {
+  readonly reason: 'capacity' | 'unit' | 'slot'
+  readonly resource?: 'cpu' | 'memory'
+  readonly needed?: number
+  readonly available?: number
+  /** The unit another node holds, for `reason: 'unit'`. */
+  readonly unit?: string
+}
+
 export interface NodeRecord {
   readonly id: string
   readonly rootId: string
@@ -100,6 +125,12 @@ export interface NodeRecord {
   readonly parentId: string | null
   readonly title: string
   readonly description: string
+  /** How many capacity units (cores-equivalent, the same unit as `EngineOptions.capacity`) this
+   * mission is expected to occupy while it runs. Declared by `create_mission` for a root and per
+   * child by `decompose_mission`; a child that declares nothing uses the DEFAULT 1 and deliberately
+   * does NOT inherit the parent's estimate — a parent's appetite says nothing about one child's.
+   * Persisted, and a record written before the field existed loads as 1; `DOMAIN_VERSION` stays 1. */
+  readonly weight: number
   /** The SCOPE this mission will modify — a directory or a file — and therefore the key of its
    * engine-enforced lease: no two `running` nodes may carry the same non-null `unit` (see
    * `@avantf/mission-core/dispatch`). Declared by `create_mission` for a root and per child by
@@ -230,6 +261,9 @@ export interface ChildSpec {
    * default; a non-blank string is the child's own scope; a blank string or `null` declares that
    * this child takes no lease at all. Resolved by `resolveChildUnit`. */
   readonly unit?: string | null
+  /** This child's declared capacity weight, in cores-equivalent. `undefined` reads as the default 1
+   * and is deliberately NOT inherited from the parent — the parent's estimate is not the child's. */
+  readonly weight?: number
 }
 
 /** Why a node stopped being dispatchable, for the failure report. */
@@ -294,6 +328,14 @@ export type RefusalCode =
    * `running` on its own, and the node is a candidate again then (see
    * `@avantf/mission-core/dispatch`). */
   | 'unit-busy'
+  /** The node does not fit the machine RIGHT NOW — its weight would push `Σ running.weight` past
+   * `capacity`, or the `maxConcurrent` slot ceiling is reached. Produced by the lock-held recheck
+   * (`MissionTree.capacityRefusal`), which re-runs the plan's own judgement against live state so two
+   * concurrent passes cannot both bind from one stale snapshot. Refused WITHOUT charging the node:
+   * capacity is a DISPATCH gate, so this is exactly the plan path's deferral — the node stays
+   * `ready`, with no `attempts`/`failures`/`spawnFailures`, no cooldown and no stall. A caller must
+   * never report it as a dispatch failure (see `MissionEngine.pass`). */
+  | 'capacity-busy'
 
 /** A refused mutation, with a stable code the caller can branch on. */
 export interface Refusal {

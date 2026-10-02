@@ -149,12 +149,30 @@ export function optionalUnit(args: Record<string, unknown>, key: string): string
   return trimmed.length === 0 ? null : trimmed
 }
 
+/**
+ * Read an optional capacity weight ("about how many cores will this occupy"). `undefined` means the
+ * caller said nothing — which for BOTH a root and a child is the default 1, never an inherited
+ * value (see `@avantf/mission-core`'s `normalizeWeight`). Out-of-range and dirty values are handled
+ * by the core's clamp, so an unparseable string here is the only thing dropped, and it is dropped to
+ * "said nothing" rather than to a guessed number.
+ */
+export function optionalWeight(args: Record<string, unknown>, key: string): number | undefined {
+  const value = args[key]
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}
+
 /** Read the child-mission array of `decompose_mission`, accepting the array or its JSON text. */
 export function childSpecs(args: Record<string, unknown>): {
   title: string
   description: string
   context: string[]
   unit?: string | null
+  weight?: number
 }[] {
   const value = structuredArg(args, 'children')
   if (!Array.isArray(value)) throw new Error('mission tool: parameter "children" must be an array')
@@ -173,6 +191,7 @@ export function childSpecs(args: Record<string, unknown>): {
     }
     const context = structuredArg(record, 'context')
     const unit = optionalUnit(record, 'unit')
+    const weight = optionalWeight(record, 'weight')
     return {
       title,
       description,
@@ -180,6 +199,7 @@ export function childSpecs(args: Record<string, unknown>): {
         ? context.filter((item): item is string => typeof item === 'string')
         : typeof context === 'string' ? textLines(context) : [],
       ...unit === undefined ? {} : { unit },
+      ...weight === undefined ? {} : { weight },
     }
   })
 }
@@ -201,6 +221,9 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       '',
       '`unit` 写这件事将要改动的范围（一个目录或文件）。同一个范围，同一时刻只有一个任务在跑 ——',
       '会改到同一处、又不能同时改的任务，就靠它错开；不写表示不占用任何范围，任务之间互不影响。',
+      '',
+      '`weight` 写这件事大约会占几核：整机按这个数分配同时能跑多少任务。不写就是普通任务（按 1 核算）——',
+      '吃满多核的任务（跑构建、训练、大规模测试）才需要写大一点，写小了会让它和别人挤在一起。',
     ].join('\n'),
     parameters: {
       title: { type: 'string', required: true, description: '一行命名这件事。' },
@@ -220,6 +243,10 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
         type: 'string',
         description: '这件事将要改动的范围（一个目录或文件）。同一范围同一时刻只有一个任务在跑；不写表示不占用范围。',
       },
+      weight: {
+        type: 'number',
+        description: '这件事大约会占几核（整机按它决定同时跑几个任务）。不写按 1 核算。',
+      },
     },
     presentCall: (args) => present('create_mission', args),
     async execute(args, exec): Promise<MissionToolResult> {
@@ -231,6 +258,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
         str(args, 'description'),
         strList(args, 'analysis'),
         optionalUnit(args, 'unit'),
+        optionalWeight(args, 'weight'),
       )
       if (!result.ok) return fail(result)
       return {
@@ -250,6 +278,8 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       '',
       '子任务的 `unit` 不写就继承当前任务改动的范围：同一范围同一时刻只有一个任务在跑，',
       '所以要并行改不同地方的子任务，给它们各自写清自己的 `unit`。',
+      '',
+      '子任务的 `weight` 不继承当前任务，不写就按 1 核算：父任务吃满多核，不代表它的每个前置任务都吃满。',
     ].join('\n'),
     parameters: {
       node_id: { type: 'string', required: true, description: '你正在做的任务 id。' },
@@ -275,6 +305,10 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
                 unit: {
                   type: 'string',
                   description: '这个前置任务要改动的范围（一个目录或文件）。不写就继承当前任务的范围；同一范围同一时刻只有一个任务在跑。',
+                },
+                weight: {
+                  type: 'number',
+                  description: '这个前置任务大约会占几核。不写按 1 核算，不继承当前任务的估值。',
                 },
               },
             },
@@ -391,6 +425,9 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       const corrections = node.corrections.length === 0
         ? ''
         : `\n\n纠偏（按先后顺序）：\n${node.corrections.map((entry) => `- ${entry}`).join('\n')}`
+      // Flattened into a plain JSON object on purpose: the tool result's `data` is a `JsonValue`, and
+      // the engine's `WaitingFor` interface has no index signature.
+      const waiting = host.waitingForOf(node.id)
       return {
         ok: true,
         summary: `[${node.id}] ${node.title} — ${node.status}${corrections}\n\n${body}${pointer}`,
@@ -398,6 +435,16 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
           node_id: node.id,
           title: node.title,
           status: node.status,
+          weight: node.weight,
+          // Carried even though a result read is terminal-only (so this is `null` in practice): the
+          // projection is the node's, and a consumer must not have to know which reader filled it.
+          waiting_for: waiting === null ? null : {
+            reason: waiting.reason,
+            ...waiting.resource === undefined ? {} : { resource: waiting.resource },
+            ...waiting.needed === undefined ? {} : { needed: waiting.needed },
+            ...waiting.available === undefined ? {} : { available: waiting.available },
+            ...waiting.unit === undefined ? {} : { unit: waiting.unit },
+          },
           corrections: [...node.corrections],
           result: node.result,
           result_ref: node.resultRef,

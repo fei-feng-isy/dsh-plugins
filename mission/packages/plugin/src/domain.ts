@@ -46,6 +46,10 @@ const nodeSchema = z.object({
   // string (a hand-edited number) degrades to "no scope" rather than failing the whole document
   // open, because an invented scope would serialize a mission against a resource nobody named.
   unit: z.string().nullable().default(null).catch(null),
+  // Optional-with-default: a document written before the field existed reads as the default 1 (the
+  // ordinary slot), and `.catch(1)` degrades a dirty value to it too. A dirty weight must never make
+  // a node invisible to the capacity gate, so the fallback is the conservative one — a full slot.
+  weight: z.number().default(1).catch(1),
   context: z.array(z.string()),
   // Optional-with-default: a document written before the field existed must keep loading.
   corrections: z.array(z.string()).default([]),

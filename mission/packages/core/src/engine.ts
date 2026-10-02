@@ -5,7 +5,14 @@
 import { MissionTree } from './tree.js'
 import { judgeWorker, type LivenessBound, type LivenessVerdict } from './liveness.js'
 import { isTroubledNode } from './prompt.js'
-import { CAPACITY, TERMINAL, type NodeRecord } from './types.js'
+import {
+  CAPACITY_CEILING,
+  DEFAULT_CAPACITY_WAIT_MS,
+  DEFAULT_MIN_FREE_MEMORY_BYTES,
+} from './capacity.js'
+import type { CapacityPolicy, DeferredCandidate } from './dispatch.js'
+import type { ResourceProbe } from './resources.js'
+import { CAPACITY, TERMINAL, type NodeRecord, type WaitingFor } from './types.js'
 
 /** Resume a worker for one node; the engine awaits only the reservation, not the worker. */
 export interface StartWorkerInput {
@@ -20,6 +27,14 @@ export interface ResumeWorkerInput {
   /** The session id recorded in `lastWorkerId`: the address to deliver to, and the identity the
    *  adoption binds if the delivery is accepted. */
   readonly workerId: string
+  /**
+   * The capacity policy this candidate was selected under. The host hands it straight to
+   * `adoptContinuation`, so the adoption re-runs the plan's own judgement against the live load
+   * under the tree lock exactly as `dispatch` does — a continuation is a dispatch and must not bind
+   * past a machine that filled up between the plan and the adoption. Absent means the caller opted
+   * out of the gate (the wake paths that have no plan snapshot pass nothing).
+   */
+  readonly capacity?: CapacityPolicy
 }
 
 /**
@@ -75,6 +90,12 @@ export interface EngineHooks {
    */
   notifyHung?(info: HungReport): void
   /**
+   * A dispatch was DEFERRED by the capacity gate (never refused). Rate-limited by the engine, one
+   * line per node per minute, so a queue waiting on a heavy mission does not flood the log while
+   * still remaining diagnosable. The host formats and logs it.
+   */
+  notifyDeferred?(info: DispatchDeferral): void
+  /**
    * Report nodes waiting for a parked session to be woken; the engine cannot wake anything itself, because a wake is a delivery through `ctx.subagents` that only the host owns and must be authorized by the child's live direct parent.
    * Its whole job is to say a convergence pass is due on an idle session, as a BATCH: an owner that was offline can materialize with several parked nodes at once, and one wake per node would be a wake storm.
    * The host performs the actual wake inside the owner's next turn; a host that cannot wake leaves the address on the node, and this reports again on the next pass.
@@ -114,43 +135,145 @@ export interface HungReport {
   readonly idleMs: number
 }
 
+/** Why a dispatch is waiting, for the engine's rate-limited diagnostic log. This is NOT an
+ *  `isTroubled` signal: ordinary queuing is not "keeps going wrong". */
+export interface DispatchDeferral {
+  readonly nodeId: string
+  readonly rootId: string
+  readonly title: string
+  readonly waitingFor: WaitingFor
+  /** Weight of the deferred node (`capacity` reason). */
+  readonly needed: number
+  readonly capacity: number
+  readonly running: number
+  /** How long the capacity gate has been deferring this node; `0` for a non-capacity reason. */
+  readonly waitedMs: number
+  /** True when this node has aged into a reservation (no new admissions until it fits). */
+  readonly reserved: boolean
+}
+
 export interface EngineOptions {
-  /** Dispatch ceiling. Values above this wait for the next pump. */
+  /**
+   * Backstop on the NUMBER of running units: with `capacity` it makes up the two-part admission
+   * rule. Capacity is the MASTER gate (how much work the machine can carry); this only stops a flood
+   * of weight-1 missions from opening more sessions than anyone wants. Both must admit a candidate.
+   */
   readonly maxConcurrent: number
+  /**
+   * Master gate: how many capacity units (cores-equivalent, the same unit as `NodeRecord.weight`)
+   * may run at once. Required, because the core must not guess at the hardware — the host derives it
+   * (configured → `os.availableParallelism()` → `os.cpus().length` → 4, minus one reserved core) and
+   * injects the number, which is also what makes every scheduling decision deterministic in tests.
+   */
+  readonly capacity: number
+  /**
+   * How long a node may be repeatedly deferred by the capacity gate before it RESERVES the machine
+   * (no new admissions until it fits). See `capacity.ts` for the value and its rationale.
+   */
+  readonly capacityWaitMs: number
+  /**
+   * Free-memory floor, in bytes, enforced through {@link ResourceProbe.memoryBudget}: below it the
+   * gate DEFERS dispatch (never refuses). `0` disables the gate; the probe itself is optional, and a
+   * probe that does not implement `memoryBudget` leaves this gate inactive (the v1 degradation path).
+   */
+  readonly minFreeMemoryBytes: number
+  /** Machine reader, injected by the host. Absent means "no resource signal": the memory floor is
+   *  then the only gate this could arm, and with no probe it is inactive. */
+  readonly probe?: ResourceProbe
   /** How long a worker may produce NOTHING before it is considered stuck (see `liveness.ts`). */
   readonly staleMs: number
   /** Wall-clock ceiling on one dispatch: past this the node is reclaimed as `hung` no matter how
    *  many events refreshed its timestamps. The backstop against a transport that retries forever. */
   readonly roundMs: number
-  /** Clock for the stale check, injectable so tests can move time instead of waiting for it; production leaves it at `Date.now`. */
+  /** Clock for the stale check and the capacity aging window, injectable so tests can move time
+   *  instead of waiting for it; production leaves it at `Date.now`. */
   readonly now?: () => number
 }
 
-/** Hardware parallelism, read without assuming a Node or DOM lib; the value is advisory (config can override it) and its absence is not an error. */
+/**
+ * Advisory parallelism for a core that has no Node API of its own (the core builds without Node
+ * types, so the real machine reading is the HOST's job — see `resource.ts` and the plugin's probe).
+ *
+ * The lookup order is deliberate: `navigator.hardwareConcurrency` when a DOM-shaped global is
+ * present, then the family's old fallback of 4. An earlier build tried
+ * `process.availableParallelism?.()` here and that was DEAD CODE: Node has never exposed that member
+ * on `process` — the real API is `os.availableParallelism()`, which the host now calls. Core callers
+ * that need the machine number must inject `EngineOptions.capacity`; this function only exists so
+ * `DEFAULT_ENGINE_OPTIONS` (and any non-Node embedder) has a sane advisory value.
+ */
 export function detectConcurrency(): number {
   const globals = globalThis as Record<string, unknown>
   const navigator = globals['navigator'] as { hardwareConcurrency?: number } | undefined
-  const cores = navigator?.hardwareConcurrency ?? (globals['process'] as { availableParallelism?: () => number } | undefined)?.availableParallelism?.() ?? 4
-  return Math.max(1, cores - 1)
+  const cores = navigator?.hardwareConcurrency ?? 4
+  if (!Number.isFinite(cores) || cores < 1) return 1
+  return Math.max(1, Math.floor(cores) - 1)
 }
 
 export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {
   maxConcurrent: detectConcurrency(),
+  /**
+   * Deliberately the CEILING, i.e. an effectively open gate: the capacity the engine is supposed to
+   * gate on is the MACHINE's, and only the host can read the machine. A caller that constructs an
+   * engine without injecting `capacity` therefore keeps the pre-capacity behaviour (`maxConcurrent`
+   * alone) instead of being silently capped by a guess; the plugin always injects the derived value.
+   */
+  capacity: CAPACITY_CEILING,
+  capacityWaitMs: DEFAULT_CAPACITY_WAIT_MS,
+  minFreeMemoryBytes: DEFAULT_MIN_FREE_MEMORY_BYTES,
   staleMs: 30 * 60 * 1000,
   /** One hour: deliberately generous, because it is the backstop that a worker's own timestamps
    *  cannot veto — a round that legitimately needs longer than this is not what the engine is for. */
   roundMs: 60 * 60 * 1000,
 }
 
+/**
+ * Rate limit on the deferral log: while the capacity gate holds a node back, its `dispatch deferred`
+ * line is emitted at most once per minute. The condition repeats on every pass (a completion, a
+ * sweep, a signal), so without this one queued mission would flood the log.
+ */
+const DEFER_LOG_INTERVAL_MS = 60_000
+
 export class MissionEngine {
   private pumping = false
   private pumpRequested = false
+  /** Node id → when the capacity gate first deferred it. In-memory on purpose: a restart loses the
+   *  aging clock, which re-arms it (one extra wait window) — never a correctness loss. */
+  private readonly capacityWaits = new Map<string, number>()
+  /** The live `waitingFor` projection, refreshed at the end of every pass: node id → reason, or
+   *  absent for a node nothing is holding back. */
+  private readonly waiting = new Map<string, WaitingFor>()
+  /** Last time each node's deferral was logged, for the rate limit. */
+  private readonly deferredLogged = new Map<string, number>()
+  /** Nodes whose RESERVATION transition has already been logged. A reservation overrides the rate
+   *  limit: it changes what the engine admits, so it must not be swallowed by a recent deferral line. */
+  private readonly reservedLogged = new Set<string>()
 
   constructor(
     private readonly tree: MissionTree,
     private readonly hooks: EngineHooks,
     private readonly options: EngineOptions = DEFAULT_ENGINE_OPTIONS,
   ) {}
+
+  /** Why one node has not been dispatched, or `null` when nothing is holding it back. The projection
+   *  is read by the host for `mission_result` and the panel; it is live state, never persisted. */
+  waitingFor(nodeId: string): WaitingFor | null {
+    return this.waiting.get(nodeId) ?? null
+  }
+
+  /** The capacity the engine is actually gating on, for diagnostics and tests. */
+  capacity(): { capacity: number; maxConcurrent: number; runningCount: number; runningWeight: number } {
+    const load = this.tree.runningLoad()
+    return {
+      capacity: this.options.capacity,
+      maxConcurrent: this.options.maxConcurrent,
+      runningCount: load.count,
+      runningWeight: load.weight,
+    }
+  }
+
+  private now(): number {
+    return this.options.now?.() ?? Date.now()
+  }
 
   /** Run one dispatch pass; `dispatch()` decides and marks in the same await, so a second pass cannot see the same node as available and no batch bookkeeping is needed. */
   async pump(): Promise<number> {
@@ -283,27 +406,95 @@ export class MissionEngine {
   }
 
   /**
-   * Room for more workers: `MissionTree.inFlightCount` counts BOUND nodes, the binding landing inside the dispatch call, so no separate tally is needed and a second pass in the same tick cannot over-subscribe.
+   * The machine-wide gates that do not depend on WHICH node is being considered: the free-memory
+   * floor. Returns the `waitingFor` every candidate carries while it is set, or `undefined` when the
+   * gate is open.
+   *
+   * A probe that does not implement `memoryBudget` leaves the gate inactive (v1: no platform
+   * adapter). A probe that implements it and answers `null` means "cannot confirm the floor", and
+   * that is a DEFER, not "plenty" — see `resource.ts`: no signal never relaxes scheduling.
    */
-  private hasCapacity(): boolean {
-    return this.tree.inFlightCount() < this.options.maxConcurrent
+  private memoryFloor(): WaitingFor | undefined {
+    const floor = this.options.minFreeMemoryBytes
+    const read = this.options.probe?.memoryBudget
+    if (read === undefined || floor <= 0) return undefined
+    let budget: number | null
+    try {
+      budget = read.call(this.options.probe)
+    } catch {
+      budget = null
+    }
+    if (budget === null) return { reason: 'capacity', resource: 'memory' }
+    if (budget >= floor) return undefined
+    return { reason: 'capacity', resource: 'memory', needed: floor, available: budget }
+  }
+
+  /** The capacity arithmetic for this moment, built from the tree's live load. */
+  private capacityPolicy(globalBlock: WaitingFor | undefined): CapacityPolicy {
+    const load = this.tree.runningLoad()
+    return {
+      capacity: this.options.capacity,
+      maxConcurrent: this.options.maxConcurrent,
+      runningCount: load.count,
+      runningWeight: load.weight,
+      deferredSince: this.capacityWaits,
+      agingMs: this.options.capacityWaitMs,
+      now: this.now(),
+      ...globalBlock === undefined ? {} : { globalBlock },
+    }
   }
 
   private async pass(): Promise<number> {
     let dispatched = 0
     const reserved = new Set<string>()
-    while (this.hasCapacity()) {
-      const candidate = this.tree.nextDispatchable(reserved)
-      if (candidate === undefined) break
+    let planned: readonly DeferredCandidate[] = []
+    let planReserved = false
+    for (;;) {
+      const block = this.memoryFloor()
+      // ONE policy object per iteration, used BOTH to choose the candidate and to arm the tree's
+      // lock-held recheck. Passing the same one is what makes the recheck idempotent for a node the
+      // plan already admitted: it re-runs the same judgement against live state.
+      const policy = this.capacityPolicy(block)
+      const plan = this.tree.planDispatch(reserved, policy)
+      planned = plan.deferred
+      planReserved = plan.reserved
+      // Aging bookkeeping: a node deferred FOR CAPACITY starts its clock the first time it is
+      // skipped, and keeps it across passes; anything else (a unit holder, a full slot, a memory
+      // floor) is not the node's capacity wait and must not reserve the machine on its behalf.
+      // Memory-blocked passes age nothing at all (see `DispatchPlan`), including not RESETTING a
+      // clock that a capacity wait already earned.
+      if (block === undefined) {
+        for (const entry of plan.deferred) {
+          const cpuCapacity = entry.waitingFor.reason === 'capacity' && entry.waitingFor.resource !== 'memory'
+          if (cpuCapacity) {
+            if (!this.capacityWaits.has(entry.node.id)) this.capacityWaits.set(entry.node.id, this.now())
+          } else {
+            // The node is waiting on something else, so it is not accumulating capacity wait.
+            this.capacityWaits.delete(entry.node.id)
+          }
+        }
+      }
+      const candidate = plan.selected
+      if (candidate === undefined) {
+        this.reportDeferrals(plan.deferred, plan.reserved)
+        break
+      }
+
       // Reserved before anything can start for it: a `skip`ped continuation must not be re-selected
       // in this same pass either, or the pass would spin on the same node.
       reserved.add(candidate.id)
+      // It is being dispatched, so it is no longer waiting for capacity.
+      this.capacityWaits.delete(candidate.id)
 
       // CONTINUATION FIRST (a cold wake). A node reclaimed by an ordinary sweep has no handle, so
       // this branch is reached only for a binding an interruption demoted (`reconcileOnOpen`), which
       // is the case the previous generation could only answer with a fresh session.
       if (candidate.lastWorkerId !== null && this.hooks.resumeWorker !== undefined) {
-        const outcome = await this.hooks.resumeWorker({ node: candidate, workerId: candidate.lastWorkerId })
+        const outcome = await this.hooks.resumeWorker({
+          node: candidate,
+          workerId: candidate.lastWorkerId,
+          capacity: policy,
+        })
         if (outcome === 'resumed') {
           // Bound and delivered: one dispatch, and deliberately no `startWorker`.
           dispatched += 1
@@ -321,12 +512,19 @@ export class MissionEngine {
       }
 
       const claimId = this.hooks.reserveClaimId()
-      const decision = await this.tree.dispatch(candidate.id, claimId)
+      const decision = await this.tree.dispatch(candidate.id, claimId, policy)
       if (!decision.ok) {
         // Another pass won the race, or the node hit its attempt ceiling. The reservation never
         // reached a node, so it must go back: nothing will ever start (or settle) under that id.
         this.hooks.releaseClaimId(claimId)
         this.hooks.trace?.(`dispatch refused ${candidate.id}: ${decision.code}`)
+        // A `capacity-busy` refusal is a DEFERRAL, never a dispatch failure: no budget was charged,
+        // no worker started, and the node keeps its place in the queue. Hand it back to the plan (drop
+        // this pass's reservation) so the very next iteration re-describes it through the ordinary
+        // path — publishing its `waitingFor` and starting its aging clock there — instead of leaving
+        // it "spoken for" with nothing shown. The re-plan runs against the LIVE load, which is the
+        // same load the refusal just read, so it cannot select the node again in a loop.
+        if (decision.code === 'capacity-busy') reserved.delete(candidate.id)
         continue
       }
       dispatched += 1
@@ -337,7 +535,67 @@ export class MissionEngine {
           this.hooks.reportDispatchFailure?.(decision.value.node.id, error)
         })
     }
+    this.publishWaiting(planned, planReserved)
     return dispatched
+  }
+
+  /**
+   * Publish the live `waitingFor` projection for the nodes a pass left behind, and drop entries for
+   * nodes that are no longer waiting (dispatched, terminal, or blocked by something outside
+   * admission). The map is the ONE place the host reads waiting state from, so it is rebuilt to
+   * exactly the deferred set rather than accumulated across passes.
+   */
+  private publishWaiting(deferred: readonly DeferredCandidate[], _reserved: boolean): void {
+    const block = this.memoryFloor()
+    this.waiting.clear()
+    const live = new Set<string>()
+    for (const entry of deferred) {
+      live.add(entry.node.id)
+      // A machine-wide block overrides the per-node reason: it is why NOTHING can be dispatched.
+      this.waiting.set(entry.node.id, block ?? entry.waitingFor)
+    }
+    // The aging clock describes a node that is STILL waiting; a node that left the queue (done,
+    // decomposed, cancelled) must not carry a stale start time into a later re-appearance, or it
+    // would reserve the machine instantly on a wait it never actually served.
+    for (const id of [...this.capacityWaits.keys()]) if (!live.has(id)) this.capacityWaits.delete(id)
+    for (const id of [...this.deferredLogged.keys()]) if (!live.has(id)) this.deferredLogged.delete(id)
+    for (const id of [...this.reservedLogged]) if (!live.has(id)) this.reservedLogged.delete(id)
+  }
+
+  /**
+   * The rate-limited deferral log: one line per node per minute while the capacity gate holds it
+   * back. Deliberately not an owner wake and not an `isTroubled` fact — normal queuing is not a
+   * problem the owner can act on.
+   */
+  private reportDeferrals(deferred: readonly DeferredCandidate[], reserved: boolean): void {
+    const notify = this.hooks.notifyDeferred
+    if (notify === undefined) return
+    const now = this.now()
+    const load = this.tree.runningLoad()
+    for (const entry of deferred) {
+      const waiting = entry.waitingFor
+      if (waiting.reason !== 'capacity') continue
+      const since = this.capacityWaits.get(entry.node.id)
+      const last = this.deferredLogged.get(entry.node.id)
+      const cpu = waiting.resource !== 'memory'
+      const isReserved = reserved && cpu && since !== undefined && now - since >= this.options.capacityWaitMs
+      const becomingReserved = isReserved && !this.reservedLogged.has(entry.node.id)
+      if (!becomingReserved && last !== undefined && now - last < DEFER_LOG_INTERVAL_MS) continue
+      if (isReserved) this.reservedLogged.add(entry.node.id)
+      else this.reservedLogged.delete(entry.node.id)
+      this.deferredLogged.set(entry.node.id, now)
+      notify({
+        nodeId: entry.node.id,
+        rootId: entry.node.rootId,
+        title: entry.node.title,
+        waitingFor: waiting,
+        needed: cpu ? entry.node.weight : (waiting.needed ?? 0),
+        capacity: this.options.capacity,
+        running: load.weight,
+        waitedMs: cpu && since !== undefined ? Math.max(0, now - since) : 0,
+        reserved: isReserved,
+      })
+    }
   }
 
   /** Report the parked-ready batch to the host after the dispatch loop; the wake itself is the host's job — see {@link EngineHooks.notifyParkedReady}. */

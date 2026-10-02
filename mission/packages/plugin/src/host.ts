@@ -7,6 +7,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
+import { availableParallelism, cpus, freemem, totalmem } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -18,11 +19,14 @@ import { isWorkerClaimId, newClaimId } from './claims.js'
 import {
   CAPACITY,
   DEFAULT_ENGINE_OPTIONS,
+  DEFAULT_MIN_FREE_MEMORY_BYTES,
   LOCAL_WELL_FORMED,
+  MIN_CAPACITY_WAIT_MS,
   TERMINAL,
   buildProgressLine,
   buildWorkerPrompt,
   defaultNewId,
+  deriveCapacity,
   detectConcurrency,
   isMaterialChange,
   isTroubled,
@@ -30,19 +34,23 @@ import {
   statusLabel,
   MissionEngine,
   MissionTree,
+  type CapacityReading,
   type ChildSpec,
   type ContinuationDelta,
+  type DispatchDeferral,
   type DispatchView,
   type HungReport,
   type MutationResult,
   type NodeRecord,
   type OrphanedTree,
   type OwnerProbe,
+  type ResourceProbe,
   type ResumeOutcome,
   type ResumeWorkerInput,
   type SpilledText,
   type StallReport,
   type TreeRecord,
+  type WaitingFor,
   type WellFormedSource,
 } from '@avantf/mission-core'
 import { workDomain, TREES_TABLE } from './domain.js'
@@ -72,6 +80,58 @@ const SWEEP_FAILURE_WARN_MS = 10 * 60_000
 
 /** How long a durable owner-existence answer is trusted; a deleted session's trees retire within this window. */
 const OWNER_CHECK_TTL_MS = 5 * 60_000
+
+/**
+ * `process.constrainedMemory()` returns a sentinel around `1.8e19` (the cgroup `max` value read as a
+ * number) when a cgroup sets NO memory limit. It must be recognised as "unconstrained" and clamped
+ * against `totalmem()`, never used as a budget: 1.8e19 bytes would disable the free-memory floor
+ * forever. Measured on the development host (2026-10-02): constrainedMemory = 1.8e19,
+ * totalmem = 15.6 GB, freemem = 12.8 GB.
+ */
+const NO_CONSTRAINT_SENTINEL = 1e18
+
+/**
+ * The v1 host implementation of the core's {@link ResourceProbe}. It uses ONLY the unified Node API
+ * — `os.availableParallelism()` (respects cgroup CPU quotas and affinity), `os.totalmem()` /
+ * `os.freemem()`, and `process.constrainedMemory()` — and this function is the ONE seam where a
+ * platform branch is allowed to exist. Platform adapters (POSIX/Windows pressure, per-worker process
+ * attribution) are deliberately NOT implemented here: `pressure()` answers `null` ("no signal on
+ * this platform"), which no caller may read as "idle".
+ */
+export function createHostResourceProbe(): ResourceProbe {
+  return {
+    parallelism: () => {
+      try {
+        return availableParallelism()
+      } catch {
+        // A runtime without `availableParallelism` (pre-Node 18.14) still has `cpus()`.
+        return cpus().length
+      }
+    },
+    memoryBudget: () => {
+      const total = totalmem()
+      const constrained = (process as { constrainedMemory?: () => number }).constrainedMemory
+      let limit = total
+      if (typeof constrained === 'function') {
+        try {
+          const value = constrained()
+          // 0/negative/NaN = "cannot say"; the 1.8e19 sentinel = "no constraint". Only a real
+          // cgroup cap BELOW totalmem narrows the budget.
+          if (Number.isFinite(value) && value > 0 && value < NO_CONSTRAINT_SENTINEL && value < total) {
+            limit = value
+          }
+        } catch {
+          limit = total
+        }
+      }
+      // `freemem()` is a COARSE lower bound and is only ever used as a floor gate; taking the min
+      // with the cgroup cap makes the answer the lower bound of the two.
+      return Math.max(0, Math.min(freemem(), limit))
+    },
+    // v1: no platform adapter. `null`, and explicitly NOT 0 — see `resources.ts`.
+    pressure: () => null,
+  }
+}
 
 /** Floor for the configured round ceiling (`roundMs`). Ten minutes is already far past the size of
  *  any step a mission is meant to run in one round, so a smaller value can only be a mistake; the
@@ -122,6 +182,12 @@ export interface NodeView {
   readonly resultRef: string | null
   /** The session executing this node right now, or `null` when none is bound (see `workerSessionIdOf`). */
   readonly workerSessionId: string | null
+  /** Declared capacity weight (cores-equivalent); persisted, so it survives a restart. */
+  readonly weight: number
+  /** Why the engine has not dispatched this node yet, or `null`. Carried in the ROW projection
+   *  because a queued mission that looks identical to a ready one is exactly the confusion the
+   *  `waitingFor` projection exists to remove. */
+  readonly waitingFor: WaitingFor | null
 }
 
 /** One mission's full detail, as the expanded row renders it. */
@@ -149,6 +215,10 @@ export interface NodeDetail {
   readonly resultPointer: string | null
   /** The session executing this node right now, or `null` when none is bound (see `workerSessionIdOf`). */
   readonly workerSessionId: string | null
+  /** Declared capacity weight (cores-equivalent). */
+  readonly weight: number
+  /** Why this node is queued rather than running, or `null`. */
+  readonly waitingFor: WaitingFor | null
 }
 
 /** One sub-mission of a node, with the conclusion it submitted. */
@@ -203,8 +273,20 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export interface HostOptions {
-  /** Dispatch ceiling; omitted means "CPU cores minus one". */
+  /** Slot ceiling on the NUMBER of concurrent units; omitted means "CPU cores minus one". Capacity is
+   *  the master gate — both must admit a dispatch (see `@avantf/mission-core`'s `EngineOptions`). */
   readonly maxConcurrent?: number
+  /** The capacity gate, in cores-equivalent. Omitted means "derive it from this machine"
+   *  (`availableParallelism` → `cpus().length` → 4, minus one reserved core). */
+  readonly capacity?: number
+  /** How long a node may be deferred by the capacity gate before it reserves the machine; omitted
+   *  means the core default, and a value below the floor is raised to it with a warning. */
+  readonly capacityWaitMs?: number
+  /** Free-memory floor in bytes; omitted means the core default, `0` disables the gate. */
+  readonly minFreeMemoryBytes?: number
+  /** Machine reader; omitted means the host's Node implementation ({@link createHostResourceProbe}).
+   *  Injectable so a composition or test can fix every signal deterministically. */
+  readonly probe?: ResourceProbe
   /** How long a worker may produce nothing before it counts as stuck. */
   readonly staleMs?: number
   /** Wall-clock ceiling on one dispatch round, however much it keeps reporting; omitted means one hour. */
@@ -281,6 +363,10 @@ export class AvantfMissionHost extends TypertRemoteService {
     // `TypertRemoteService` registers the service under this key AND binds it as a Remote namespace.
     super(ctx, NAMESPACE)
     this.maxConcurrent = options.maxConcurrent
+    this.capacityOption = options.capacity
+    this.capacityWaitMsOption = options.capacityWaitMs
+    this.minFreeMemoryBytesOption = options.minFreeMemoryBytes
+    this.probe = options.probe ?? createHostResourceProbe()
     this.staleMs = options.staleMs
     this.roundMs = options.roundMs
     this.wellFormed = wellFormed
@@ -291,6 +377,11 @@ export class AvantfMissionHost extends TypertRemoteService {
   readonly wellFormed: WellFormedSource
 
   private readonly maxConcurrent: number | undefined
+  private readonly capacityOption: number | undefined
+  private readonly capacityWaitMsOption: number | undefined
+  private readonly minFreeMemoryBytesOption: number | undefined
+  /** The machine reader; injectable, always present (the Node implementation is the default). */
+  readonly probe: ResourceProbe
   private readonly staleMs: number | undefined
   private readonly roundMs: number | undefined
   private ready: Promise<void> = Promise.resolve()
@@ -315,10 +406,52 @@ export class AvantfMissionHost extends TypertRemoteService {
   }
 
   /** Workers allowed at once: the configured value, or cores minus one (the owner's own turns are not
-   *  the only agent here). */
+   *  the only agent here). This is the SLOT ceiling, not the capacity gate — see {@link capacityReading}. */
   concurrency(): number {
     if (this.maxConcurrent !== undefined && this.maxConcurrent > 0) return this.maxConcurrent
     return detectConcurrency()
+  }
+
+  /**
+   * The capacity the engine gates on, plus WHERE it came from (the start-up line reports the source).
+   *
+   * The derivation chain lives in the core (`deriveCapacity`), so it is testable without a machine:
+   * ① explicit config → ② `os.availableParallelism()` (honours cgroup quotas and affinity) →
+   * ③ `os.cpus().length` → ④ a default of 4; then one core is reserved for the host/UI. An explicit
+   * config is used AS GIVEN, clamped: the operator's number already is the answer.
+   */
+  capacityReading(): CapacityReading {
+    let availableParallelism: number | undefined
+    try {
+      availableParallelism = this.probe.parallelism()
+    } catch {
+      availableParallelism = undefined
+    }
+    return deriveCapacity({
+      configured: this.capacityOption,
+      availableParallelism,
+      cores: cpus().length,
+    })
+  }
+
+  /** How long a node may be repeatedly deferred by capacity before it reserves the machine. Floored
+   *  like the other windows: below a minute a reservation is indistinguishable from jitter. */
+  capacityWaitWindowMs(): number {
+    const configured = this.capacityWaitMsOption
+    if (configured === undefined) return DEFAULT_ENGINE_OPTIONS.capacityWaitMs
+    if (configured < MIN_CAPACITY_WAIT_MS) {
+      this.log.warn(`capacityWaitMs ${String(configured)} is below the ${String(MIN_CAPACITY_WAIT_MS)} ms floor; using the floor`)
+      return MIN_CAPACITY_WAIT_MS
+    }
+    return configured
+  }
+
+  /** The free-memory floor in bytes; `0` disables the gate. The probe may still answer `null`, which
+   *  DEFERS dispatch — "cannot confirm the floor" is never read as "plenty of memory". */
+  freeMemoryFloorBytes(): number {
+    const configured = this.minFreeMemoryBytesOption
+    if (configured === undefined) return DEFAULT_MIN_FREE_MEMORY_BYTES
+    return configured > 0 ? configured : 0
   }
 
   /** Silent time before the engine calls a worker stuck. The 60 s floor exists because the check rides
@@ -401,6 +534,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     // Resolve both windows from ONE reading, so a below-floor `staleMs` warns once and the round
     // cap is derived from the value the engine will actually use.
     const staleMs = this.staleWindowMs()
+    const reading = this.capacityReading()
     this.engine = new MissionEngine(
       tree,
       {
@@ -419,13 +553,22 @@ export class AvantfMissionHost extends TypertRemoteService {
         notifyStalled: (info) => this.notifyStalled(info),
         notifyHung: (info) => this.reportHung(info),
         notifyParkedReady: (nodes) => this.notifyParkedReady(nodes),
+        notifyDeferred: (info) => this.reportDeferred(info),
         reportDispatchFailure: (nodeId, error) => {
           this.trace(`dispatch of ${nodeId} failed: ${String(error)}`)
           this.log.warn(`dispatch of ${nodeId} failed: ${String(error)}`)
         },
         trace: (message) => this.trace(message),
       },
-      { maxConcurrent: this.concurrency(), staleMs, roundMs: this.roundWindowMs(staleMs) },
+      {
+        maxConcurrent: this.concurrency(),
+        capacity: reading.capacity,
+        capacityWaitMs: this.capacityWaitWindowMs(),
+        minFreeMemoryBytes: this.freeMemoryFloorBytes(),
+        probe: this.probe,
+        staleMs,
+        roundMs: this.roundWindowMs(staleMs),
+      },
     )
 
     await tree.open()
@@ -456,7 +599,8 @@ export class AvantfMissionHost extends TypertRemoteService {
       void this.sweep().catch((error: unknown) => { this.reportSweepFailure(error) })
     }, SWEEP_INTERVAL_MS)
     this.log.info(
-      `engine ready: concurrency=${String(this.concurrency())} depth=${String(CAPACITY.maxDepth)}`
+      `engine ready: capacity=${String(reading.capacity)} (source=${reading.source}, reserved=${String(reading.reserved)})`
+      + ` concurrency=${String(this.concurrency())} depth=${String(CAPACITY.maxDepth)}`
       + ` failure-budget=${String(CAPACITY.maxAttempts)} children<=${String(CAPACITY.maxChildrenPerDecompose)}`,
     )
   }
@@ -797,6 +941,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     description: string,
     analysis: readonly string[],
     unit?: string | null,
+    weight?: number,
   ): Promise<MutationResult<NodeRecord>> {
     const tree = this.requireTree()
     // Only a top-level session roots a tree: a self-rooted mission would be an executor nobody dispatches or reclaims.
@@ -813,6 +958,7 @@ export class AvantfMissionHost extends TypertRemoteService {
       description,
       analysis,
       unit: unit ?? null,
+      weight,
     })
     if (result.ok) {
       this.log.info(`create_mission: root ${result.value.id} "${result.value.title}" owned by ${agent.id}`)
@@ -1143,9 +1289,19 @@ export class AvantfMissionHost extends TypertRemoteService {
         result: node.result,
         resultPointer: node.resultRef === null ? null : spillPointer(node),
         workerSessionId: workerSessionIdOf(node),
+        weight: node.weight,
+        waitingFor: this.waitingForOf(node.id),
       },
       children,
     }
+  }
+
+  /** The engine's live `waitingFor` for one node, or `null` when the engine is not up yet or nothing
+   *  is holding the node back. One accessor, so the row projection, the detail read and the tool
+   *  result cannot disagree about why a mission is queued. Public because the model-facing tools
+   *  render it too. */
+  waitingForOf(nodeId: string): WaitingFor | null {
+    return this.engine?.waitingFor(nodeId) ?? null
   }
 
   /** Delete one WHOLE tree — the panel's "remove this mission" (the argument is a root id; a node is not an
@@ -1255,6 +1411,8 @@ export class AvantfMissionHost extends TypertRemoteService {
           hasResult: node.hasResult,
           resultRef: node.resultRef,
           workerSessionId: workerSessionIdOf(node),
+          weight: node.weight,
+          waitingFor: this.waitingForOf(node.id),
         })),
       }))
       .reverse()
@@ -1566,10 +1724,12 @@ export class AvantfMissionHost extends TypertRemoteService {
     // Live from here on: an idle session reads as "vanished" to the sweep (see `workerLive`).
     this.wakingClaims.add(workerId)
     try {
-      const adopted = await tree.adoptContinuation(node.id, workerId)
+      const adopted = await tree.adoptContinuation(node.id, workerId, input.capacity)
       if (!adopted.ok) {
         // The handle moved, the node left the dispatchable states, or another pass bound it. None of
-        // those is a reason to spawn: whoever moved it owns the node now.
+        // those is a reason to spawn: whoever moved it owns the node now. A `capacity-busy` refusal
+        // is the same answer — the node stays ready with its handle intact and the next pass retries
+        // it — because a machine that filled up is not a failed continuation.
         this.trace(`continuation refused ${node.id}: ${adopted.code}`)
         this.wakingClaims.delete(workerId)
         return 'skip'
@@ -1880,6 +2040,25 @@ export class AvantfMissionHost extends TypertRemoteService {
       `hung: worker on ${info.nodeId} ("${info.title}") was alive but unproductive (${bound}, `
       + `attempt ${String(info.attempts)}); interrupted and re-queued without charging the failure budget`,
     )
+  }
+
+  /**
+   * Log a capacity deferral. The engine already rate-limits to one line per node per minute, so this
+   * only formats: the exact line is `dispatch deferred: <node> needs N, capacity C, running R`, with
+   * the wait and reservation appended because the whole point of the aging rule is to be observable.
+   * Deliberately NOT a wake and NOT an `isTroubled` fact — queuing is normal.
+   */
+  private reportDeferred(info: DispatchDeferral): void {
+    const memory = info.waitingFor.resource === 'memory'
+    const line = memory
+      ? `dispatch deferred: ${info.nodeId} free memory below floor`
+        + ` (available=${String(info.waitingFor.available ?? 'unknown')}, floor=${String(info.waitingFor.needed ?? 'unknown')})`
+      : `dispatch deferred: ${info.nodeId} needs ${String(info.needed)},`
+        + ` capacity ${String(info.capacity)}, running ${String(info.running)}`
+    const waited = info.waitedMs > 0 ? `, waiting ${String(Math.round(info.waitedMs / 1000))}s` : ''
+    const reserved = info.reserved ? ', reserved (no new dispatch until it fits)' : ''
+    this.trace(`${line}${waited}${reserved}`)
+    this.log.info(`${line}${waited}${reserved}`)
   }
 
   private deliverToOwner(rootId: string, text: string, why: string): boolean {

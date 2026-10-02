@@ -100,8 +100,19 @@ export const inject = [
 ]
 
 export interface Config {
-  /** Dispatch ceiling; omitted means "CPU cores minus one", leaving the host a core for its own turns. */
+  /** Slot ceiling on the NUMBER of concurrent units; omitted means "CPU cores minus one". Capacity is
+   *  the master gate: a dispatch needs BOTH room in capacity and a free slot. */
   maxConcurrent?: number
+  /** Capacity gate in cores-equivalent. Omitted means "derive from this machine"
+   *  (`os.availableParallelism()` → `os.cpus().length` → 4, minus one reserved core, clamped 1..64);
+   *  an explicit value is used as given. */
+  capacity?: number
+  /** How long a node may be repeatedly deferred by the capacity gate before it reserves the machine
+   *  (no new admissions until it fits); default 5 min, floor 1 min. */
+  capacityWaitMs?: number
+  /** Free-memory floor in bytes: below it dispatch is DEFERRED (never refused). Default 256 MiB;
+   *  `0` disables the gate. */
+  minFreeMemoryBytes?: number
   /** How long a worker may produce NOTHING before it is treated as stuck (default 30 min, floor
    * 1 min), measured from its last real output so a legitimately long step does not count as no
    * progress. Transport-layer noise (provider retries, route snapshots) does not refresh it. */
@@ -120,6 +131,9 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   maxConcurrent: z.natural(),
+  capacity: z.natural(),
+  capacityWaitMs: z.natural(),
+  minFreeMemoryBytes: z.natural(),
   staleMs: z.natural(),
   roundMs: z.natural(),
   sessionsRoot: z.string(),

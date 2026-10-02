@@ -7,15 +7,25 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  CAPACITY_CEILING,
   DEFAULT_ENGINE_OPTIONS,
   MissionEngine,
   MissionTree,
   type HungReport,
+  type ResourceProbe,
   type ResumeOutcome,
   type StallReport,
   type TreeState,
   type TreeStore,
 } from '../src/index.js'
+
+/** Engine options that inject the OPEN capacity gate (the pre-capacity behaviour), for the literal
+ *  constructions in this file that are not about the capacity gate itself. */
+const OPEN_GATE = {
+  capacity: CAPACITY_CEILING,
+  capacityWaitMs: DEFAULT_ENGINE_OPTIONS.capacityWaitMs,
+  minFreeMemoryBytes: DEFAULT_ENGINE_OPTIONS.minFreeMemoryBytes,
+} as const
 
 function memoryStore(): TreeStore & { documents: Map<string, TreeState> } {
   const documents = new Map<string, TreeState>()
@@ -57,6 +67,14 @@ function makeWorld(options: {
    * one is still holding its pre-interrupt snapshot.
    */
   beforeInterrupt?: (sessionId: string) => Promise<void>
+  /**
+   * Capacity gate. Omitted means the OPEN ceiling, so the pre-capacity cases in this file keep their
+   * meaning; the capacity tests inject a small number and, where the aging clock matters, a clock.
+   */
+  capacity?: number
+  capacityWaitMs?: number
+  probe?: ResourceProbe
+  minFreeMemoryBytes?: number
 }) {
   const store = memoryStore()
   const live = new Set<string>(['owner'])
@@ -121,6 +139,10 @@ function makeWorld(options: {
       staleMs: options.staleMs ?? 60_000,
       roundMs: options.roundMs ?? DEFAULT_ENGINE_OPTIONS.roundMs,
       now: options.clock,
+      capacity: options.capacity ?? CAPACITY_CEILING,
+      capacityWaitMs: options.capacityWaitMs ?? DEFAULT_ENGINE_OPTIONS.capacityWaitMs,
+      minFreeMemoryBytes: options.minFreeMemoryBytes ?? DEFAULT_ENGINE_OPTIONS.minFreeMemoryBytes,
+      ...options.probe === undefined ? {} : { probe: options.probe },
     },
   )
   /** Let every lazily created worker become a live agent (the next tick). */
@@ -388,7 +410,7 @@ describe('terminal reporting is durable, not per-pass', () => {
         interruptWorker: () => Promise.resolve(),
         notifyOwner: (id, reason) => world.notified.push(`${id}:${reason}`),
       },
-      { maxConcurrent: 1, staleMs: 60_000, roundMs: DEFAULT_ENGINE_OPTIONS.roundMs },
+      { ...OPEN_GATE, maxConcurrent: 1, staleMs: 60_000, roundMs: DEFAULT_ENGINE_OPTIONS.roundMs },
     )
     await restarted.pump()
     await restarted.pump()
@@ -702,7 +724,7 @@ describe('cold continuation', () => {
         interruptWorker: () => Promise.resolve(),
         notifyOwner: () => undefined,
       },
-      { maxConcurrent: 4, staleMs: 60_000, roundMs: DEFAULT_ENGINE_OPTIONS.roundMs, now: () => 1 },
+      { ...OPEN_GATE, maxConcurrent: 4, staleMs: 60_000, roundMs: DEFAULT_ENGINE_OPTIONS.roundMs, now: () => 1 },
     )
     return { engine, started, attempted }
   }

@@ -16,6 +16,7 @@ export type {
 } from './tree.js'
 export { MissionEngine, DEFAULT_ENGINE_OPTIONS, detectConcurrency } from './engine.js'
 export type {
+  DispatchDeferral,
   EngineHooks,
   EngineOptions,
   HungReport,
@@ -24,18 +25,44 @@ export type {
   StartWorkerInput,
   StallReport,
 } from './engine.js'
+export {
+  CAPACITY_CEILING,
+  CAPACITY_FALLBACK_PARALLELISM,
+  DEFAULT_CAPACITY_WAIT_MS,
+  DEFAULT_MIN_FREE_MEMORY_BYTES,
+  DEFAULT_WEIGHT,
+  MAX_WEIGHT,
+  MIN_CAPACITY_WAIT_MS,
+  MIN_WEIGHT,
+  RESERVED_CORES,
+  clampCapacity,
+  deriveCapacity,
+  normalizeWeight,
+} from './capacity.js'
+export type { CapacityInput, CapacityReading, CapacitySource } from './capacity.js'
+export type { ResourceProbe } from './resources.js'
 export { heardAt, judgeWorker, producedAt, storedTime } from './liveness.js'
 export type { LivenessBound, LivenessVerdict, LivenessWindows, ReclaimCause } from './liveness.js'
 export {
   byCreatedAtThenId,
+  capacityWaitingFor,
   heldUnits,
   normalizeUnit,
+  planDispatch,
   resolveChildUnit,
+  resolveChildWeight,
   selectNextDispatchable,
   spawnBackoffMs,
   unitHolder,
 } from './dispatch.js'
-export type { DispatchPolicy, DispatchScope } from './dispatch.js'
+export type {
+  CapacityLoad,
+  CapacityPolicy,
+  DeferredCandidate,
+  DispatchPlan,
+  DispatchPolicy,
+  DispatchScope,
+} from './dispatch.js'
 export { computeContinuationDelta, isMaterialChange, nodeFingerprint } from './continuation.js'
 export type { ContinuationDelta } from './continuation.js'
 export { buildWorkerPrompt, buildProgressLine, isTroubled, isTroubledNode, spillPointer, statusLabel } from './prompt.js'

@@ -537,6 +537,36 @@ describe('MissionTreeView', () => {
     )
   }
 
+  it('marks a queued mission with why it waits, and how heavy it is', () => {
+    // Being skipped by an admission gate is NORMAL queuing, so the row says what it waits for —
+    // and a heavy mission says its declared weight, which is what the owner wrote on it.
+    const data: MissionSnapshot = {
+      trees: [{
+        rootId: 'r1',
+        closedAt: null,
+        nodes: [{
+          id: 'r1', parentId: null, children: [], title: 'Ship it', context: [], corrections: [],
+          status: 'ready', attempts: 0, depth: 1, createdAt: 1, hasResult: false, resultRef: null,
+          workerSessionId: null, weight: 3,
+          waitingFor: { reason: 'capacity', resource: 'cpu', needed: 3, available: 1 },
+        }],
+      }],
+    }
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+      />,
+    )
+    expect(html).toContain('等容量')
+    expect(html).toContain('约占 3 核')
+    // The tile reads as a QUEUE marker, not as a status hue.
+    expect(html).toContain('avwf-waiting')
+  })
+
   it('renders every node with its title and status', () => {
     const html = view()
     expect(html).toContain('Ship it')

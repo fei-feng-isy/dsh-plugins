@@ -4,6 +4,19 @@
  * @module @avantf/dsh-mission/client/contract
  */
 
+/**
+ * Why a node is queued instead of running, as the host reports it. The browser half's own copy (it
+ * must not import the engine); `null`/absent on the node means nothing is holding it back.
+ */
+export interface WaitingForView {
+  readonly reason: 'capacity' | 'unit' | 'slot'
+  /** Which capacity signal, when `reason` is `capacity`: compute units or the free-memory floor. */
+  readonly resource?: 'cpu' | 'memory'
+  readonly needed?: number
+  readonly available?: number
+  readonly unit?: string
+}
+
 export interface MissionNodeView {
   readonly id: string
   /** Where the node was born; `children` is the dependency edge it is rendered by. */
@@ -25,6 +38,10 @@ export interface MissionNodeView {
   /** The session executing this node right now, or `null` when none is bound. Carried in the ROW
    *  projection as well as the detail so a row can offer "open the executor" without a second read. */
   readonly workerSessionId: string | null
+  /** Declared capacity weight (cores-equivalent); an older host omits it and reads as 1. */
+  readonly weight?: number
+  /** Why this node is queued; absent/`null` means nothing is holding it back. */
+  readonly waitingFor?: WaitingForView | null
 }
 
 export interface MissionTreeViewData {
@@ -77,6 +94,10 @@ export interface MissionNodeDetailView {
    *  executor — a different id from `id`, which names the mission. A node whose worker was reclaimed
    *  carries `null` on purpose: that session may no longer exist, and the panel offers no link to it. */
   readonly workerSessionId: string | null
+  /** Declared capacity weight (cores-equivalent); an older host omits it and reads as 1. */
+  readonly weight?: number
+  /** Why this node is queued; absent/`null` means nothing is holding it back. */
+  readonly waitingFor?: WaitingForView | null
 }
 
 export interface MissionNodeDetailChild {

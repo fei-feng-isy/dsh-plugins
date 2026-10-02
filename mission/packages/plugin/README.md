@@ -61,7 +61,10 @@ dsh plugin --profile <PROFILE> add @avantf/dsh-mission@<version>
     - id: avantf-mission
       name: '@avantf/dsh-mission'
       config:
-        maxConcurrent: 6      # 并发任务单元上限；省略 = CPU 核心数 - 1
+        maxConcurrent: 6      # 槽位数上限（同时最多几个任务单元）；省略 = CPU 核心数 - 1
+        # capacity: 8         # 容量闸门（核当量）；省略 = availableParallelism - 1（夹取 1..64）
+        # capacityWaitMs: 300000  # 容量排队多久后预约整机（毫秒，默认 5 分钟，下限 1 分钟）
+        # minFreeMemoryBytes: 268435456  # 空闲内存下限，低于它先不派新任务（默认 256 MiB，0 = 关闭）
         # staleMs: 1800000    # worker 多久没有任何进展算卡死（毫秒，默认 30 分钟，下限 1 分钟）
 ```
 
@@ -114,8 +117,12 @@ Desktop 会显式设置 `DSH_HOME`，所以两边指向的是同一个会话库�
 
 ## 配置与数据
 
-- **配置项**：`maxConcurrent`（并发任务单元上限）、`staleMs`（多久没有进展算卡死）、
+- **配置项**：`capacity`（容量闸门，核当量；默认由 `os.availableParallelism()` 派生并预留 1 核）、
+  `maxConcurrent`（槽位数上限）、`capacityWaitMs`（容量排队多久后预约整机）、`minFreeMemoryBytes`
+  （空闲内存下限，低于它先不派新任务）、`staleMs`（多久没有进展算卡死）、
   `sessionsRoot`（worker 会话目录根，默认 `<dsh home>/sessions`）。
+  容量是**派发闸门**：装不下只会排队，绝不拒绝；`mission_result` 与「任务」面板会显示每个排队中的
+  任务在等什么。
 - **数据**：任务树走 DSH 存储域（`avantf_mission`）；每个任务单元都是**真实会话**，日志在
   `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）下。`/archive` 只改归档标记，要真正腾磁盘用
   `/clean archive all`。

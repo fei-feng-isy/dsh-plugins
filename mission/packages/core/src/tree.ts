@@ -13,12 +13,17 @@ import {
 } from './continuation.js'
 import {
   byCreatedAtThenId,
+  capacityWaitingFor,
   normalizeUnit,
+  planDispatch,
   resolveChildUnit,
-  selectNextDispatchable,
+  resolveChildWeight,
   unitHolder,
+  type CapacityPolicy,
+  type DispatchPlan,
   type DispatchScope,
 } from './dispatch.js'
+import { normalizeWeight } from './capacity.js'
 import { storedTime } from './liveness.js'
 import { LOCAL_WELL_FORMED, type WellFormedSource } from './wellformed.js'
 import {
@@ -109,6 +114,9 @@ export interface CreateRootInput {
   /** The scope this mission will modify (a directory or file), or `undefined`/blank for none. The
    * root has no parent to inherit from, so this is the only declaration site for a tree's unit. */
   readonly unit?: string | null
+  /** This mission's declared capacity weight (cores-equivalent); `undefined` reads as the default 1.
+   * The root has no parent to inherit from. */
+  readonly weight?: number
 }
 
 export interface DispatchDecision {
@@ -221,6 +229,7 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     correctionsDeliveredUpTo?: number
     dispatchBaseline?: unknown
     unit?: unknown
+    weight?: unknown
     activityAt?: number
   }
   const lastWorkerId = legacy.lastWorkerId ?? null
@@ -232,6 +241,10 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   const unit = typeof legacy.unit === 'string' && legacy.unit.trim().length > 0
     ? legacy.unit.trim()
     : null
+  // A record written before `weight` existed — or one carrying a dirty value — reads as the default
+  // 1, the ordinary slot. A dirty value must never make the node invisible to the gate: `NaN` would
+  // compare false against every bound and let an unbounded mission through.
+  const weight = normalizeWeight(legacy.weight)
   // A record written before `activityAt` existed reads as 0 = "no event ever observed". Its
   // `progressAt` was refreshed by ANY event back then, so the liveness readers fall back to
   // `progressAt` for both clocks and judge it exactly as the previous build did (plus the round
@@ -243,11 +256,12 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     && correctionsDeliveredUpTo === node.correctionsDeliveredUpTo
     && dispatchBaseline === node.dispatchBaseline
     && unit === node.unit
+    && weight === node.weight
     && activityAt === node.activityAt
   ) {
     return node
   }
-  return { ...node, lastWorkerId, correctionsDeliveredUpTo, dispatchBaseline, unit, activityAt }
+  return { ...node, lastWorkerId, correctionsDeliveredUpTo, dispatchBaseline, unit, weight, activityAt }
 }
 
 export class MissionTree {
@@ -470,14 +484,48 @@ export class MissionTree {
    * The selection itself — ordering, parked/backoff rules and the unit-lease skip — lives in
    * `@avantf/mission-core/dispatch`; this is the state access, and the lease side of it is
    * re-checked atomically at every transition into `running` below, so a race that slips past this
-   * filter is refused rather than run. */
-  nextDispatchable(exclude: ReadonlySet<string> = new Set()): NodeRecord | undefined {
+   * filter is refused rather than run. The optional `capacity` policy arms the capacity gate; without
+   * it this is exactly the pre-capacity contract. */
+  nextDispatchable(
+    exclude: ReadonlySet<string> = new Set(),
+    capacity?: CapacityPolicy,
+  ): NodeRecord | undefined {
+    return this.planDispatch(exclude, capacity).selected
+  }
+
+  /** The full admission plan (see `@avantf/mission-core/dispatch`): the node to dispatch AND every
+   *  candidate left waiting with its reason. The engine uses the latter half for `waitingFor` and for
+   *  the aging bookkeeping; tree-level callers that only need the answer use `nextDispatchable`. */
+  planDispatch(
+    exclude: ReadonlySet<string> = new Set(),
+    capacity?: CapacityPolicy,
+  ): DispatchPlan {
     const scopes: DispatchScope[] = [...this.states.values()]
-    return selectNextDispatchable(scopes, {
+    return planDispatch(scopes, {
       exclude,
-      now: this.deps.now(),
+      now: capacity?.now ?? this.deps.now(),
       isAgentLive: (sessionId) => this.deps.isAgentLive(sessionId),
+      ...capacity === undefined ? {} : { capacity },
     })
+  }
+
+  /**
+   * What the capacity gate currently has in flight, in the SAME definition `inFlightCount` uses: a
+   * node counts once it is BOUND (`running` with a `claimedBy`), not once its worker materializes, so
+   * a pass cannot over-subscribe the pool by dispatching into a lazily-created child.
+   */
+  runningLoad(): { count: number; weight: number } {
+    let count = 0
+    let weight = 0
+    for (const state of this.states.values()) {
+      if (state.tree.closedAt !== null) continue
+      for (const node of state.nodes.values()) {
+        if (node.status !== 'running' || node.claimedBy === null) continue
+        count += 1
+        weight += normalizeWeight(node.weight)
+      }
+    }
+    return { count, weight }
   }
 
   /**
@@ -487,7 +535,9 @@ export class MissionTree {
    * interleave between "this unit looked free" and "mark it running".
    *
    * `undefined` means the unit is free (or the node declared none — the no-op case that keeps
-   * undeclared records byte-for-byte as they behaved before leases existed).
+   * undeclared records byte-for-byte as they behaved before leases existed). Reached through
+   * {@link admissionRefusal}, which pairs it with the capacity recheck; the capacity gate has the
+   * same snapshot problem and is re-made in the same breath.
    */
   private unitRefusal(node: NodeRecord): Refusal | undefined {
     if (node.unit === null) return undefined
@@ -498,6 +548,51 @@ export class MissionTree {
       `任务 ${node.id} 要改动的范围「${node.unit}」正被任务 ${holder.id}（"${holder.title}"）占用：`
       + '同一范围同一时刻只有一个任务在跑',
     )
+  }
+
+  /**
+   * The capacity counterpart of {@link unitRefusal}, re-made under the tree lock at every transition
+   * INTO `running`. `planDispatch` decides from a snapshot taken OUTSIDE the lock, so two passes can
+   * each see an empty machine and both bind; the arithmetic therefore has to be re-run here, in the
+   * same place the unit lease is, and through the SAME judgement the plan uses
+   * ({@link capacityWaitingFor}) so the two can never drift.
+   *
+   * The policy supplies the machine's capacity, the slot ceiling and (when the host set it) the
+   * machine-wide block. Its `runningCount`/`runningWeight` are the CALLER'S SNAPSHOT and are
+   * deliberately ignored: trusting them is the very TOCTOU this closes. `undefined` policy means the
+   * caller opted out of the gate entirely — the pre-capacity contract, unchanged.
+   *
+   * The refusal is a DEFERRAL in the strictest sense (`capacity-busy`): the node stays `ready` and
+   * NOTHING is charged — no `attempts`, `failures`, `spawnFailures`, no cooldown, no stall. See
+   * {@link RefusalCode}.
+   */
+  private capacityRefusal(node: NodeRecord, policy?: CapacityPolicy): Refusal | undefined {
+    if (policy === undefined) return undefined
+    const load = this.runningLoad()
+    const waiting = policy.globalBlock ?? capacityWaitingFor(node, {
+      capacity: policy.capacity,
+      maxConcurrent: policy.maxConcurrent,
+      runningCount: load.count,
+      runningWeight: load.weight,
+    })
+    if (waiting === undefined) return undefined
+    const detail = waiting.reason === 'slot'
+      ? `并发槽位已满（${load.count}/${policy.maxConcurrent}）`
+      : waiting.resource === 'memory'
+        ? '机器可用内存低于下限'
+        : `机器容量不足（需 ${normalizeWeight(node.weight)}，当前已用 ${load.weight}/${policy.capacity}）`
+    return refuse('capacity-busy', `任务 ${node.id} 暂不派发：${detail}；这是排队等待，不是失败`)
+  }
+
+  /**
+   * The two RESOURCE admissions every transition into `running` must re-make under the tree lock:
+   * the unit lease first (a scope conflict), then capacity (the machine). Kept in ONE call site per
+   * transition so "what has to be rechecked before binding" is named once and the two checks cannot
+   * drift or be reordered by accident. Budgets are deliberately NOT here: a spent budget is a
+   * FAILURE (`failExhausted`), while both of these are "not yet" and must charge nothing.
+   */
+  private admissionRefusal(node: NodeRecord, capacity?: CapacityPolicy): Refusal | undefined {
+    return this.unitRefusal(node) ?? this.capacityRefusal(node, capacity)
   }
 
   /** Nodes waiting for their parked session to be woken: `ready` with a recorded address, i.e. all
@@ -522,7 +617,11 @@ export class MissionTree {
    * it. The claim must land BEFORE the wake is delivered, because a woken session may submit or
    * decompose immediately and both authorize on `claimedBy`; a failed delivery is undone by a
    * `reclaim(..., 'wake-failed')`. */
-  async adoptParked(nodeId: string, workerId: string): Promise<MutationResult<DispatchView>> {
+  async adoptParked(
+    nodeId: string,
+    workerId: string,
+    capacity?: CapacityPolicy,
+  ): Promise<MutationResult<DispatchView>> {
     return this.withLock(async () => {
       const found = this.locate(nodeId)
       if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
@@ -533,15 +632,17 @@ export class MissionTree {
         return refuse('not-dispatchable', `任务 ${nodeId} 没有停在 ${workerId}`)
       }
       // Must honour exactly the `parkedReadyNodes` condition, or the gate admits a step this refuses.
-      // Deliberately asymmetric with `dispatch`: the ceilings are NOT consulted, because the parked
-      // session already knows what the children were for; the next `dispatch` still sees them.
+      // Deliberately asymmetric with `dispatch`: the failure BUDGETS are NOT consulted, because the
+      // parked session already knows what the children were for; the next `dispatch` still sees them.
+      // The resource gate below is optional and only a caller that supplies its policy gets the
+      // capacity recheck — the wake path has no plan snapshot, so it passes none.
       if (node.status !== 'ready') {
         return refuse('not-dispatchable', `任务 ${nodeId} 处于 ${statusLabel(node.status)}，不能唤醒`)
       }
       if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
         return refuse('not-dispatchable', `任务 ${nodeId} 仍被一个在运行的执行者持有`)
       }
-      const busy = this.unitRefusal(node)
+      const busy = this.admissionRefusal(node, capacity)
       if (busy !== undefined) return busy
       const at = this.deps.now()
       const updated = this.replace(state, node, {
@@ -577,7 +678,11 @@ export class MissionTree {
    * outcome may try the same address again. A runtime that refused the resume once will refuse it
    * again; the fallback is the complete answer (`note_mission` is the cross-session hand-off).
    */
-  async adoptContinuation(nodeId: string, workerId: string): Promise<MutationResult<DispatchView>> {
+  async adoptContinuation(
+    nodeId: string,
+    workerId: string,
+    capacity?: CapacityPolicy,
+  ): Promise<MutationResult<DispatchView>> {
     return this.withLock(async () => {
       const found = this.locate(nodeId)
       if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
@@ -603,9 +708,11 @@ export class MissionTree {
       if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
         return refuse('not-dispatchable', `任务 ${nodeId} 仍被一个在运行的执行者持有`)
       }
-      // The lease is checked BEFORE the budgets: a unit held by somebody else is a "not yet", not a
-      // failure, and must not spend the node's budget or fail it.
-      const busy = this.unitRefusal(node)
+      // The resource gate is checked BEFORE the budgets: a unit held by somebody else, or a machine
+      // that cannot fit this weight, is a "not yet" — not a failure — and must not spend the node's
+      // budget or fail it. Capacity joins the lease here for the same reason the lease is here at
+      // all: the plan that selected this candidate ran outside the lock.
+      const busy = this.admissionRefusal(node, capacity)
       if (busy !== undefined) return busy
       // Same budgets as `dispatch`, and the same refusal shape: a continuation that cannot be
       // attempted must not silently skip the ceiling.
@@ -703,17 +810,11 @@ export class MissionTree {
 
   /** Nodes bound to a worker and not yet resolved, deliberately NOT filtered by worker liveness:
    * a reserved claim id is not an agent until the child materializes, so counting only live
-   * holders would let a second dispatch pass in the same tick over-subscribe the pool. */
+   * holders would let a second dispatch pass in the same tick over-subscribe the pool. Derived from
+   * {@link runningLoad} so the slot count and the capacity weight can never disagree about who is
+   * in flight. */
   inFlightCount(): number {
-    let count = 0
-    for (const state of this.states.values()) {
-      // A closed tree is archived, so its nodes must not hold a concurrency slot (as in nextDispatchable).
-      if (state.tree.closedAt !== null) continue
-      for (const node of state.nodes.values()) {
-        if (node.status === 'running' && node.claimedBy !== null) count += 1
-      }
-    }
-    return count
+    return this.runningLoad().count
   }
 
   /** Roll up every OPEN tree into the counts the guidance layer renders; closed trees are archived
@@ -777,6 +878,7 @@ export class MissionTree {
         description: safe.description,
         context: safe.analysis,
         unit: normalizeUnit(safe.unit),
+        weight: safe.weight,
         depth: 1,
         now,
       })
@@ -814,6 +916,8 @@ export class MissionTree {
     readonly context: readonly string[]
     /** Already resolved (root: declared-or-none; child: inherited-or-overridden). */
     readonly unit: string | null
+    /** Declared capacity weight; `undefined` reads as the default 1. */
+    readonly weight?: number
     readonly depth: number
     readonly now: number
   }): NodeRecord {
@@ -824,6 +928,7 @@ export class MissionTree {
       title: input.title,
       description: input.description,
       unit: input.unit,
+      weight: normalizeWeight(input.weight),
       context: [...input.context],
       corrections: [],
       correctionsDeliveredUpTo: 0,
@@ -860,7 +965,11 @@ export class MissionTree {
    * on every dispatch (the aggregate pass counts as one) and is the generation marker the
    * `note_mission` gate reads; the failed ceiling rides `failures` instead, so a successful aggregate
    * round is never charged against it. */
-  async dispatch(nodeId: string, claimId: string): Promise<MutationResult<DispatchView>> {
+  async dispatch(
+    nodeId: string,
+    claimId: string,
+    capacity?: CapacityPolicy,
+  ): Promise<MutationResult<DispatchView>> {
     return this.withLock(async () => {
       const found = this.locate(nodeId)
       if (found === undefined) return refuse('not-found', `任务 ${nodeId} 不存在`)
@@ -874,9 +983,12 @@ export class MissionTree {
       if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
         return refuse('not-dispatchable', `任务 ${nodeId} 仍被一个在运行的执行者持有`)
       }
-      // The lease is checked BEFORE the budgets, and this is the ACQUISITION point: from here the
-      // node holds its unit until it leaves `running`, which is the whole mutual-exclusion rule.
-      const busy = this.unitRefusal(node)
+      // The resource gate is checked BEFORE the budgets, and the lease half of it is the
+      // ACQUISITION point: from here the node holds its unit until it leaves `running`, which is the
+      // whole mutual-exclusion rule. The capacity half re-runs the plan's own judgement against the
+      // LIVE load, because the plan that selected this node read a snapshot taken outside this lock
+      // — two passes can otherwise both see an empty machine and both bind.
+      const busy = this.admissionRefusal(node, capacity)
       if (busy !== undefined) return busy
       // Budget is `failures` (reclaims without a result), NOT `attempts`: a successful
       // aggregate/convergence round dispatches again without failing.
@@ -1209,6 +1321,8 @@ export class MissionTree {
             // Declared, or inherited from the parent — the safe default (same-scope siblings then
             // serialize). An explicit blank on the spec is the deliberate opt-OUT.
             unit: resolveChildUnit(node.unit, spec.unit),
+            // Weight is deliberately NOT inherited: `undefined` on the spec means the default 1.
+            weight: resolveChildWeight(spec.weight),
             depth: node.depth + 1,
             now,
           }),

@@ -161,3 +161,54 @@ describe('the unit field', () => {
     expect(parsed.nodes['n0001']?.unit).toBeNull()
   })
 })
+
+describe('the weight field', () => {
+  it('reads a record written before `weight` existed as the default 1, with DOMAIN_VERSION still 1', () => {
+    const parsed = treeDocumentSchema.parse(legacyDocument())
+    expect(parsed.nodes['n0001']?.weight).toBe(1)
+    expect(DOMAIN_VERSION).toBe(1)
+  })
+
+  it('degrades a dirty weight to the default instead of making a node invisible to the gate', () => {
+    // `NaN` would compare false against every capacity bound and let an unbounded mission through;
+    // a string would poison the arithmetic. Both read as one ordinary slot.
+    expect(treeDocumentSchema.parse(legacyDocument(legacyNode({ weight: 'heavy' }))).nodes['n0001']?.weight).toBe(1)
+    expect(treeDocumentSchema.parse(legacyDocument(legacyNode({ weight: 2 }))).nodes['n0001']?.weight).toBe(2)
+  })
+
+  it('round-trips a clamped weight through the durable document', async () => {
+    let latest: TreeState | undefined
+    let tick = 0
+    const tree = new MissionTree(
+      {
+        loadAll: () => Promise.resolve([]),
+        put: (state) => {
+          latest = state
+          return Promise.resolve()
+        },
+        remove: () => Promise.resolve(),
+      },
+      {
+        isAgentLive: () => false,
+        probeOwner: () => Promise.resolve({ kind: 'exists' }),
+        spill: () => Promise.resolve(null),
+        now: () => (tick += 1),
+        newId: () => 'root0002',
+      },
+    )
+    const created = await tree.createRoot({
+      ownerSessionId: 'owner',
+      title: 'Ship it',
+      description: 'd',
+      analysis: [],
+      weight: 3.9,
+    })
+    if (!created.ok) throw new Error(created.message)
+    if (latest === undefined) throw new Error('the fixture persisted nothing')
+    const reloaded = treeDocumentSchema.parse(JSON.parse(JSON.stringify(toDocument(latest))) as unknown)
+    // 3.9 floors to 3 on the way in, and the persisted value is that number.
+    expect(reloaded.nodes[created.value.id]?.weight).toBe(3)
+    expect(toState(reloaded).nodes.get(created.value.id)?.weight).toBe(3)
+    expect(DOMAIN_VERSION).toBe(1)
+  })
+})
