@@ -12,6 +12,14 @@ import {
   type ContinuationDelta,
 } from './continuation.js'
 import {
+  byCreatedAtThenId,
+  normalizeUnit,
+  resolveChildUnit,
+  selectNextDispatchable,
+  unitHolder,
+  type DispatchScope,
+} from './dispatch.js'
+import {
   CAPACITY,
   DISPATCHABLE,
   TERMINAL,
@@ -24,6 +32,7 @@ import {
   type MutationResult,
   type NodeRecord,
   type NodeStatus,
+  type Refusal,
   type TreeRecord,
 } from './types.js'
 
@@ -88,6 +97,9 @@ export interface CreateRootInput {
   readonly description: string
   /** The owner's initial analysis; stored as the root's background facts. */
   readonly analysis: readonly string[]
+  /** The scope this mission will modify (a directory or file), or `undefined`/blank for none. The
+   * root has no parent to inherit from, so this is the only declaration site for a tree's unit. */
+  readonly unit?: string | null
 }
 
 export interface DispatchDecision {
@@ -97,17 +109,6 @@ export interface DispatchDecision {
 }
 
 const MAX_ID_ATTEMPTS = 8
-
-/** Cooldown after a dispatch fails to START a worker, so a transient runtime outage cannot burn a
- * node's whole budget in a few pump cycles: exponential in the consecutive spawn failures, capped
- * so a node still retries within minutes. */
-const SPAWN_BACKOFF_BASE_MS = 30_000
-const SPAWN_BACKOFF_MAX_MS = 10 * 60_000
-
-function spawnBackoffMs(n: number): number {
-  if (n <= 0) return 0
-  return Math.min(SPAWN_BACKOFF_BASE_MS * 2 ** (n - 1), SPAWN_BACKOFF_MAX_MS)
-}
 
 /**
  * Whether text carries nothing but whitespace. The tool layer refuses only the truly EMPTY string, so
@@ -129,12 +130,6 @@ export function defaultNewId(): string {
   if (crypto === undefined) throw new Error('avantf-mission: no crypto.getRandomValues available')
   crypto.getRandomValues(bytes)
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-/** Order candidates: oldest first (cross-tree fairness), then by id for stability. */
-function byCreatedAtThenId(a: NodeRecord, b: NodeRecord): number {
-  if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
 /** Normalize for equivalence comparison during decomposition dedup. */
@@ -206,7 +201,8 @@ function asBaseline(value: unknown): DispatchBaseline | null {
  * `!== null` and be treated as "there is a resumable handle"; a missing watermark must read as `0`
  * (= nothing delivered yet), the conservative direction, because a correction silently skipped is a
  * direction the owner gave that nobody ever reads; a missing `dispatchBaseline` must read as `null`
- * (= UNKNOWN drift), never as "nothing changed".
+ * (= UNKNOWN drift), never as "nothing changed"; a missing `unit` must read as `null` (= no lease),
+ * never as an invented scope that would serialize the mission against a resource it never named.
  *
  * Returns the SAME object when nothing changed, so opening a current document does not churn it.
  */
@@ -215,18 +211,26 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     lastWorkerId?: string | null
     correctionsDeliveredUpTo?: number
     dispatchBaseline?: unknown
+    unit?: unknown
   }
   const lastWorkerId = legacy.lastWorkerId ?? null
   const correctionsDeliveredUpTo = legacy.correctionsDeliveredUpTo ?? 0
   const dispatchBaseline = asBaseline(legacy.dispatchBaseline)
+  // A record written before `unit` existed, or one whose value is not a string at all, reads as "no
+  // scope declared" — the only safe direction: an invented scope would either serialize the mission
+  // against strangers or hand it a lease nobody wrote.
+  const unit = typeof legacy.unit === 'string' && legacy.unit.trim().length > 0
+    ? legacy.unit.trim()
+    : null
   if (
     lastWorkerId === node.lastWorkerId
     && correctionsDeliveredUpTo === node.correctionsDeliveredUpTo
     && dispatchBaseline === node.dispatchBaseline
+    && unit === node.unit
   ) {
     return node
   }
-  return { ...node, lastWorkerId, correctionsDeliveredUpTo, dispatchBaseline }
+  return { ...node, lastWorkerId, correctionsDeliveredUpTo, dispatchBaseline, unit }
 }
 
 export class MissionTree {
@@ -434,32 +438,39 @@ export class MissionTree {
 
   /** The next node to dispatch: `ready`/`interrupted`, oldest first across trees, excluding ones
    * whose binding still resolves to a live agent. A vanished worker's node is reclaimed by the
-   * engine's sweep before it becomes a candidate again. */
+   * engine's sweep before it becomes a candidate again.
+   *
+   * The selection itself — ordering, parked/backoff rules and the unit-lease skip — lives in
+   * `@avantf/mission-core/dispatch`; this is the state access, and the lease side of it is
+   * re-checked atomically at every transition into `running` below, so a race that slips past this
+   * filter is refused rather than run. */
   nextDispatchable(exclude: ReadonlySet<string> = new Set()): NodeRecord | undefined {
-    const now = this.deps.now()
-    const candidates: NodeRecord[] = []
-    for (const state of this.states.values()) {
-      // A closed tree is archived: it is never dispatched again.
-      if (state.tree.closedAt !== null) continue
-      // No live owner means no parent for a worker, so dispatching would only burn attempts on
-      // spawns that cannot happen; the tree waits for its owner to come back.
-      if (!this.deps.isAgentLive(state.tree.ownerSessionId)) continue
-      for (const node of state.nodes.values()) {
-        if (exclude.has(node.id)) continue
-        if (!DISPATCHABLE.has(node.status)) continue
-        if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) continue
-        // A parked node has a session waiting to be woken, and `decompose_mission` is followed by a
-        // synchronous `pump()`, so offering it here would consume the address before the owner's
-        // turn could wake it — the wake path would be unreachable.
-        if (node.parkedWorker !== null) continue
-        // Cooling down after a failed START: `claimedAt` is that dispatch's time, so the backoff
-        // is waited out rather than re-failing on every pump until the budget burns.
-        if (node.spawnFailures > 0 && now - node.claimedAt < spawnBackoffMs(node.spawnFailures)) continue
-        candidates.push(node)
-      }
-    }
-    candidates.sort(byCreatedAtThenId)
-    return candidates[0]
+    const scopes: DispatchScope[] = [...this.states.values()]
+    return selectNextDispatchable(scopes, {
+      exclude,
+      now: this.deps.now(),
+      isAgentLive: (sessionId) => this.deps.isAgentLive(sessionId),
+    })
+  }
+
+  /**
+   * The lease check shared by all three transitions INTO `running` (`dispatch`, `adoptParked`,
+   * `adoptContinuation`). It has to be re-made here, under the tree lock, and not only in
+   * `nextDispatchable`: the wake paths bind from a snapshot taken outside it, and two passes can
+   * interleave between "this unit looked free" and "mark it running".
+   *
+   * `undefined` means the unit is free (or the node declared none — the no-op case that keeps
+   * undeclared records byte-for-byte as they behaved before leases existed).
+   */
+  private unitRefusal(node: NodeRecord): Refusal | undefined {
+    if (node.unit === null) return undefined
+    const holder = unitHolder(this.states.values(), node.unit, node.id)
+    if (holder === undefined) return undefined
+    return refuse(
+      'unit-busy',
+      `任务 ${node.id} 要改动的范围「${node.unit}」正被任务 ${holder.id}（"${holder.title}"）占用：`
+      + '同一范围同一时刻只有一个任务在跑',
+    )
   }
 
   /** Nodes waiting for their parked session to be woken: `ready` with a recorded address, i.e. all
@@ -503,6 +514,8 @@ export class MissionTree {
       if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
         return refuse('not-dispatchable', `任务 ${nodeId} 仍被一个在运行的执行者持有`)
       }
+      const busy = this.unitRefusal(node)
+      if (busy !== undefined) return busy
       const updated = this.replace(state, node, {
         status: 'running',
         claimedBy: workerId,
@@ -561,6 +574,10 @@ export class MissionTree {
       if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
         return refuse('not-dispatchable', `任务 ${nodeId} 仍被一个在运行的执行者持有`)
       }
+      // The lease is checked BEFORE the budgets: a unit held by somebody else is a "not yet", not a
+      // failure, and must not spend the node's budget or fail it.
+      const busy = this.unitRefusal(node)
+      if (busy !== undefined) return busy
       // Same budgets as `dispatch`, and the same refusal shape: a continuation that cannot be
       // attempted must not silently skip the ceiling.
       if (node.failures >= CAPACITY.maxAttempts) {
@@ -723,6 +740,7 @@ export class MissionTree {
         title: input.title,
         description: input.description,
         context: input.analysis,
+        unit: normalizeUnit(input.unit),
         depth: 1,
         now,
       })
@@ -758,6 +776,8 @@ export class MissionTree {
     readonly title: string
     readonly description: string
     readonly context: readonly string[]
+    /** Already resolved (root: declared-or-none; child: inherited-or-overridden). */
+    readonly unit: string | null
     readonly depth: number
     readonly now: number
   }): NodeRecord {
@@ -767,6 +787,7 @@ export class MissionTree {
       parentId: input.parentId,
       title: input.title,
       description: input.description,
+      unit: input.unit,
       context: [...input.context],
       corrections: [],
       correctionsDeliveredUpTo: 0,
@@ -816,6 +837,10 @@ export class MissionTree {
       if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
         return refuse('not-dispatchable', `任务 ${nodeId} 仍被一个在运行的执行者持有`)
       }
+      // The lease is checked BEFORE the budgets, and this is the ACQUISITION point: from here the
+      // node holds its unit until it leaves `running`, which is the whole mutual-exclusion rule.
+      const busy = this.unitRefusal(node)
+      if (busy !== undefined) return busy
       // Budget is `failures` (reclaims without a result), NOT `attempts`: a successful
       // aggregate/convergence round dispatches again without failing.
       if (node.failures >= CAPACITY.maxAttempts) {
@@ -871,6 +896,9 @@ export class MissionTree {
    * that could not be delivered — back to `ready`, charging neither budget, so the caller's fresh
    * dispatch proceeds. `attempts` is never rolled back: it is the `note_mission` generation marker,
    * not a budget.
+   *
+   * Every arm leaves `running`, so this is one of the paths that RELEASES the node's unit lease
+   * (the lease is the set of `running` nodes' units, never a separate table — see `dispatch.ts`).
    *
    * `expectedHolder` is a compare-and-swap for a caller that judged the node from a snapshot taken
    * OUTSIDE this lock — `MissionEngine.reclaimStale` takes one, then awaits `interruptWorker` per
@@ -1016,7 +1044,11 @@ export class MissionTree {
    * children are all terminal — the pass that read their conclusions and judged the objective
    * unmet. A node with UNFINISHED children is refused. `submitResult` and `decompose` stay mutually
    * exclusive through node state, never prompt discipline. The analysis is written earlier by
-   * `recordAnalysis`; this only checks the splitting dispatch wrote its own. */
+   * `recordAnalysis`; this only checks the splitting dispatch wrote its own.
+   *
+   * Leaving `running` here is also what RELEASES this node's unit lease, and the children created
+   * below inherit that unit unless they declare their own — so the same-scope siblings the split
+   * just created are serialized against each other by the same state rule (see `dispatch.ts`). */
   async decompose(
     nodeId: string,
     callerSessionId: string,
@@ -1081,6 +1113,9 @@ export class MissionTree {
         if (existing !== undefined) {
           reused.push(existing.id)
           // A shared prerequisite gains a second reason to exist; the "why" is all a child inherits.
+          // Its `unit` is deliberately left alone too: it is the scope that node declared when it was
+          // created, it may already be running under that lease elsewhere, and rewriting it would
+          // change a resource the node is holding.
           const merged = withAddedContext(existing, spec.context)
           if (merged !== undefined) next.set(existing.id, merged)
           continue
@@ -1101,6 +1136,9 @@ export class MissionTree {
             title: spec.title,
             description: spec.description,
             context: spec.context,
+            // Declared, or inherited from the parent — the safe default (same-scope siblings then
+            // serialize). An explicit blank on the spec is the deliberate opt-OUT.
+            unit: resolveChildUnit(node.unit, spec.unit),
             depth: node.depth + 1,
             now,
           }),

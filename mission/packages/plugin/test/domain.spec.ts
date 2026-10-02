@@ -9,7 +9,9 @@
  * recorded for any dispatch".
  */
 import { describe, expect, it } from 'vitest'
+import { MissionTree, type TreeState } from '@avantf/mission-core'
 import { DOMAIN_VERSION, treeDocumentSchema } from '../src/domain.js'
+import { toDocument, toState } from '../src/store.js'
 
 /** A node as the FIRST build wrote it: none of the later optional fields. */
 function legacyNode(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -95,5 +97,62 @@ describe('a document written before the analysis fields existed', () => {
   it('rejects a record whose analysis fields have the wrong shape', () => {
     expect(() => treeDocumentSchema.parse(legacyDocument(legacyNode({ analysisNotes: 'nope' })))).toThrow()
     expect(() => treeDocumentSchema.parse(legacyDocument(legacyNode({ analysisAttempt: 'nope' })))).toThrow()
+  })
+})
+
+describe('the unit field', () => {
+  it('⑧ round-trips a declared scope through the durable document, with DOMAIN_VERSION still 1', async () => {
+    // Written by the REAL tree code, read back by the REAL schema, through a JSON round trip as the
+    // store would do it: a declared scope must survive, trimmed, and the layout must not have moved.
+    let latest: TreeState | undefined
+    let tick = 0
+    const tree = new MissionTree(
+      {
+        loadAll: () => Promise.resolve([]),
+        put: (state) => {
+          latest = state
+          return Promise.resolve()
+        },
+        remove: () => Promise.resolve(),
+      },
+      {
+        isAgentLive: () => false,
+        probeOwner: () => Promise.resolve({ kind: 'exists' }),
+        spill: () => Promise.resolve(null),
+        now: () => (tick += 1),
+        newId: () => 'root0001',
+      },
+    )
+    const created = await tree.createRoot({
+      ownerSessionId: 'owner',
+      title: 'Ship it',
+      description: 'd',
+      analysis: [],
+      unit: '  mission/packages/plugin/src/host.ts  ',
+    })
+    if (!created.ok) throw new Error(created.message)
+    if (latest === undefined) throw new Error('the fixture persisted nothing')
+
+    const reloaded = treeDocumentSchema.parse(JSON.parse(JSON.stringify(toDocument(latest))) as unknown)
+    expect(reloaded.nodes[created.value.id]?.unit).toBe('mission/packages/plugin/src/host.ts')
+    expect(toState(reloaded).nodes.get(created.value.id)?.unit).toBe('mission/packages/plugin/src/host.ts')
+    expect(DOMAIN_VERSION).toBe(1)
+  })
+
+  it('reads a record written before `unit` existed as no lease, without failing to parse', () => {
+    const parsed = treeDocumentSchema.parse(legacyDocument())
+    expect(parsed.nodes['n0001']?.unit).toBeNull()
+  })
+
+  it('carries a declared unit when the record has one', () => {
+    const parsed = treeDocumentSchema.parse(legacyDocument(legacyNode({ unit: 'pkg/x.ts' })))
+    expect(parsed.nodes['n0001']?.unit).toBe('pkg/x.ts')
+  })
+
+  it('degrades a non-string unit to null instead of failing the whole document open', () => {
+    // A hand-edited number must not brick the installation: `null` is "no lease", and the safe
+    // direction is to leave the mission unserialized rather than invent a scope nobody declared.
+    const parsed = treeDocumentSchema.parse(legacyDocument(legacyNode({ unit: 7 })))
+    expect(parsed.nodes['n0001']?.unit).toBeNull()
   })
 })

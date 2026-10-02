@@ -23,6 +23,16 @@ export type {
   StartWorkerInput,
   StallReport,
 } from './engine.js'
+export {
+  byCreatedAtThenId,
+  heldUnits,
+  normalizeUnit,
+  resolveChildUnit,
+  selectNextDispatchable,
+  spawnBackoffMs,
+  unitHolder,
+} from './dispatch.js'
+export type { DispatchPolicy, DispatchScope } from './dispatch.js'
 export { computeContinuationDelta, isMaterialChange, nodeFingerprint } from './continuation.js'
 export type { ContinuationDelta } from './continuation.js'
 export { buildWorkerPrompt, buildProgressLine, isTroubled, isTroubledNode, spillPointer, statusLabel } from './prompt.js'

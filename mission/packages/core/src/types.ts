@@ -100,6 +100,16 @@ export interface NodeRecord {
   readonly parentId: string | null
   readonly title: string
   readonly description: string
+  /** The SCOPE this mission will modify — a directory or a file — and therefore the key of its
+   * engine-enforced lease: no two `running` nodes may carry the same non-null `unit` (see
+   * `@avantf/mission-core/dispatch`). Declared by `create_mission` for a root and per child by
+   * `decompose_mission`; a child that declares nothing INHERITS its parent's unit, so same-scope
+   * siblings cannot run at the same time.
+   *
+   * `null` means "no scope declared", which is also what a record written before this field existed
+   * loads as: such a node takes no part in the lease and behaves exactly as it did before the field
+   * existed. Persisted, `DOMAIN_VERSION` stays 1. */
+  readonly unit: string | null
   /** Background facts: why this mission exists (written by the decomposer), or the owner's initial
    * analysis for a root — the only channel carrying the vertical "why" down the mission chain. */
   readonly context: readonly string[]
@@ -204,6 +214,10 @@ export interface ChildSpec {
   readonly title: string
   readonly description: string
   readonly context: readonly string[]
+  /** This child's scope. `undefined` (the spec said nothing) inherits the parent's unit — the safe
+   * default; a non-blank string is the child's own scope; a blank string or `null` declares that
+   * this child takes no lease at all. Resolved by `resolveChildUnit`. */
+  readonly unit?: string | null
 }
 
 /** Why a node stopped being dispatchable, for the failure report. */
@@ -263,6 +277,11 @@ export type RefusalCode =
   /** `decompose_mission` was called by a dispatch that has not written its own analysis: a split
    * must be argued for by the round performing it, not inherited from an earlier one. */
   | 'analysis-missing'
+  /** The node's declared `unit` is held by another `running` node, so dispatching it would put two
+   * executors on the same scope. Refused WITHOUT charging the node: the holder always leaves
+   * `running` on its own, and the node is a candidate again then (see
+   * `@avantf/mission-core/dispatch`). */
+  | 'unit-busy'
 
 /** A refused mutation, with a stable code the caller can branch on. */
 export interface Refusal {

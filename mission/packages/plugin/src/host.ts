@@ -76,6 +76,19 @@ export interface AdmitDecision {
   readonly reason: string
 }
 
+/**
+ * The worker session CURRENTLY bound to a node, as an address a reader may open — the one field the
+ * panel's "jump to the executor" link needs.
+ *
+ * Only a real binding counts: `null` when the node is not bound (never dispatched, reclaimed,
+ * failed), and `null` for a blank string too. It is never the node id dressed up as a session id.
+ * A reclaimed node's PREVIOUS session (`lastWorkerId`) is deliberately NOT exposed here: it may no
+ * longer exist, and a link a reader can press that answers "no such session" is worse than no link.
+ */
+function workerSessionIdOf(node: NodeRecord): string | null {
+  return node.claimedBy === null || node.claimedBy === '' ? null : node.claimedBy
+}
+
 /** One node as the browser half renders it — the ROW projection. Deliberately without `description`
  *  or the submitted result: both are re-sent on every engine change and a row renders neither. */
 export interface NodeView {
@@ -98,6 +111,8 @@ export interface NodeView {
   readonly createdAt: number
   readonly hasResult: boolean
   readonly resultRef: string | null
+  /** The session executing this node right now, or `null` when none is bound (see `workerSessionIdOf`). */
+  readonly workerSessionId: string | null
 }
 
 /** One mission's full detail, as the expanded row renders it. */
@@ -123,6 +138,8 @@ export interface NodeDetail {
   readonly result: string | null
   /** Where a spilled full result lives, joined with its retrieval hint. */
   readonly resultPointer: string | null
+  /** The session executing this node right now, or `null` when none is bound (see `workerSessionIdOf`). */
+  readonly workerSessionId: string | null
 }
 
 /** One sub-mission of a node, with the conclusion it submitted. */
@@ -708,11 +725,15 @@ export class AvantfMissionHost extends TypertRemoteService {
 
   // ── tool-facing API ──────────────────────────────────────────────────────
 
+  /** Root a new mission. `unit` is the scope the mission will modify (a directory or file), or
+   *  `undefined`/blank for none: a tree whose root declares a scope serializes every one of its
+   *  executors against any other `running` mission declaring the same scope, across trees. */
   async createWork(
     agent: Agent,
     title: string,
     description: string,
     analysis: readonly string[],
+    unit?: string | null,
   ): Promise<MutationResult<NodeRecord>> {
     const tree = this.requireTree()
     // Only a top-level session roots a tree: a self-rooted mission would be an executor nobody dispatches or reclaims.
@@ -728,6 +749,7 @@ export class AvantfMissionHost extends TypertRemoteService {
       title,
       description,
       analysis,
+      unit: unit ?? null,
     })
     if (result.ok) {
       this.log.info(`create_mission: root ${result.value.id} "${result.value.title}" owned by ${agent.id}`)
@@ -1057,6 +1079,7 @@ export class AvantfMissionHost extends TypertRemoteService {
         depth: node.depth,
         result: node.result,
         resultPointer: node.resultRef === null ? null : spillPointer(node),
+        workerSessionId: workerSessionIdOf(node),
       },
       children,
     }
@@ -1168,6 +1191,7 @@ export class AvantfMissionHost extends TypertRemoteService {
           createdAt: node.createdAt,
           hasResult: node.hasResult,
           resultRef: node.resultRef,
+          workerSessionId: workerSessionIdOf(node),
         })),
       }))
       .reverse()

@@ -109,8 +109,29 @@ export function strList(args: Record<string, unknown>, key: string): string[] {
   throw new Error(`mission tool: parameter "${key}" must be an array of strings`)
 }
 
+/**
+ * Read an optional scope argument (`unit`). Three outcomes, and the difference is load-bearing:
+ *
+ * - absent (or not a string) → `undefined`: "nothing declared", which for a root means no lease and
+ *   for a decomposed child means INHERIT the parent's scope (the safe default);
+ * - a blank string → `null`: an explicit opt-OUT, so a child of a scoped mission can still say "this
+ *   one touches nothing shared";
+ * - anything else → the trimmed scope, the lease key itself.
+ */
+export function optionalUnit(args: Record<string, unknown>, key: string): string | null | undefined {
+  const value = args[key]
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed.length === 0 ? null : trimmed
+}
+
 /** Read the child-mission array of `decompose_mission`, accepting the array or its JSON text. */
-export function childSpecs(args: Record<string, unknown>): { title: string; description: string; context: string[] }[] {
+export function childSpecs(args: Record<string, unknown>): {
+  title: string
+  description: string
+  context: string[]
+  unit?: string | null
+}[] {
   const value = structuredArg(args, 'children')
   if (!Array.isArray(value)) throw new Error('mission tool: parameter "children" must be an array')
   return value.map((entry, index) => {
@@ -127,12 +148,14 @@ export function childSpecs(args: Record<string, unknown>): { title: string; desc
       throw new Error(`mission tool: children[${String(index)}].description must be a non-empty string`)
     }
     const context = structuredArg(record, 'context')
+    const unit = optionalUnit(record, 'unit')
     return {
       title,
       description,
       context: Array.isArray(context)
         ? context.filter((item): item is string => typeof item === 'string')
         : typeof context === 'string' ? textLines(context) : [],
+      ...unit === undefined ? {} : { unit },
     }
   })
 }
@@ -151,6 +174,9 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       '任务跨会话持久化，由引擎逐级派给一次性执行者：看不到本对话、不能追问，结束后也不会',
       '再收到你的消息。需要这些、或需要脚本化扇出的任务，不适合用它；但"我已经想清楚了、',
       '步骤很明确"不在这个名单里 —— 那正是它接得最稳的一类。',
+      '',
+      '`unit` 写这件事将要改动的范围（一个目录或文件）。同一个范围，同一时刻只有一个任务在跑 ——',
+      '会改到同一处、又不能同时改的任务，就靠它错开；不写表示不占用任何范围，任务之间互不影响。',
     ].join('\n'),
     parameters: {
       title: { type: 'string', required: true, description: '一行命名这件事。' },
@@ -166,6 +192,10 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
           { type: 'string' },
         ],
       },
+      unit: {
+        type: 'string',
+        description: '这件事将要改动的范围（一个目录或文件）。同一范围同一时刻只有一个任务在跑；不写表示不占用范围。',
+      },
     },
     presentCall: (args) => present('create_mission', args),
     async execute(args, exec): Promise<MissionToolResult> {
@@ -176,6 +206,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
         str(args, 'title'),
         str(args, 'description'),
         strList(args, 'analysis'),
+        optionalUnit(args, 'unit'),
       )
       if (!result.ok) return fail(result)
       return {
@@ -192,6 +223,9 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       '把当前任务拆成它依赖的前置任务。每个子任务的 `context` 写清它为什么需要。',
       '',
       '拆解之前必须先用 `note_mission` 写下这次为什么拆；没写会被拒。',
+      '',
+      '子任务的 `unit` 不写就继承当前任务改动的范围：同一范围同一时刻只有一个任务在跑，',
+      '所以要并行改不同地方的子任务，给它们各自写清自己的 `unit`。',
     ].join('\n'),
     parameters: {
       node_id: { type: 'string', required: true, description: '你正在做的任务 id。' },
@@ -213,6 +247,10 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
                     { type: 'string' },
                   ],
                   description: '为什么需要这个前置任务，至少一条。可给数组或一行一条的文本。',
+                },
+                unit: {
+                  type: 'string',
+                  description: '这个前置任务要改动的范围（一个目录或文件）。不写就继承当前任务的范围；同一范围同一时刻只有一个任务在跑。',
                 },
               },
             },

@@ -9,7 +9,7 @@
  * not a schema one.
  */
 import { describe, expect, it } from 'vitest'
-import { childSpecs, strList, structuredArg, textLines } from '../src/tools.js'
+import { childSpecs, optionalUnit, strList, structuredArg, textLines } from '../src/tools.js'
 
 describe('structuredArg', () => {
   it('decodes the JSON text of a structure', () => {
@@ -84,5 +84,28 @@ describe('childSpecs', () => {
     expect(() => childSpecs({ children: [{ title: 'A' }] })).toThrow('children[0].description')
     expect(() => childSpecs({ children: ['A'] })).toThrow('children[0] must be an object')
     expect(() => childSpecs({ children: [body[0], 'B'] })).toThrow('children[1] must be an object')
+  })
+
+  it('leaves `unit` absent when the child declares none, and carries it trimmed when it does', () => {
+    // Absent means INHERIT the parent's scope, which is a different fact from "declared no scope":
+    // the key must not appear as `undefined`, or `resolveChildUnit` could not tell the two apart.
+    expect(childSpecs({ children: [{ title: 'A', description: 'a' }] })[0]).not.toHaveProperty('unit')
+    expect(childSpecs({ children: [{ title: 'A', description: 'a', unit: '  pkg/x.ts  ' }] })[0]?.unit)
+      .toBe('pkg/x.ts')
+    // A blank scope is the explicit opt-OUT and reads as `null`, never as "".
+    expect(childSpecs({ children: [{ title: 'A', description: 'a', unit: '   ' }] })[0]?.unit).toBeNull()
+  })
+})
+
+describe('optionalUnit', () => {
+  it('distinguishes "not declared" from "declared as none" from a declared scope', () => {
+    expect(optionalUnit({}, 'unit')).toBeUndefined()
+    expect(optionalUnit({ unit: '   ' }, 'unit')).toBeNull()
+    expect(optionalUnit({ unit: ' pkg/x.ts ' }, 'unit')).toBe('pkg/x.ts')
+  })
+
+  it('treats a non-string as not declared, the schema having already refused it upstream', () => {
+    expect(optionalUnit({ unit: 7 }, 'unit')).toBeUndefined()
+    expect(optionalUnit({ unit: null }, 'unit')).toBeUndefined()
   })
 })

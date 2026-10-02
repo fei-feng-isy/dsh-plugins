@@ -14,8 +14,24 @@
 import { readFileSync } from 'node:fs'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MissionDetailDialog, MissionTreeView, ResultPane, detailTabs } from '../src/client/MissionTreeView.js'
-import type { MissionNodeDetail, MissionNodeView, MissionSnapshot, MissionSnapshotState } from '../src/client/contract.js'
+import {
+  MissionDetailDialog,
+  MissionTreeView,
+  ResultPane,
+  WorkerSessionHint,
+  WorkerSessionLink,
+  detailTabs,
+  workerSessionClick,
+  workerSessionTarget,
+} from '../src/client/MissionTreeView.js'
+import { apply } from '../src/client/index.js'
+import type {
+  MissionNodeDetail,
+  MissionNodeView,
+  MissionSnapshot,
+  MissionSnapshotState,
+  WorkerSessionTarget,
+} from '../src/client/contract.js'
 import { statusLabel } from '@avantf/mission-core'
 
 // The view injects its stylesheet on render, which is the one browser API in its path.
@@ -42,7 +58,7 @@ function snapshot(
     children: readonly string[] = [], ownCorrections: readonly string[] = [],
   ): MissionNodeView => ({
     id, parentId, children, title, context: [], corrections: ownCorrections, status, attempts, depth,
-    createdAt: depth, hasResult: status === 'done', resultRef: null,
+    createdAt: depth, hasResult: status === 'done', resultRef: null, workerSessionId: null,
   })
   return {
     trees: [{
@@ -63,7 +79,7 @@ function detail(overrides: Partial<MissionNodeDetail['node']> = {}, children: Mi
     node: {
       id: 'r1', rootId: 'r1', title: 'Ship it', description: '把迁移发出去', context: ['prod 已冻结', '回滚脚本在这'],
       analysisNotes: [], analysisAttempt: 0, corrections: [], status: 'running', attempts: 1, depth: 1,
-      result: null, resultPointer: null,
+      result: null, resultPointer: null, workerSessionId: null,
       ...overrides,
     },
     children,
@@ -71,8 +87,19 @@ function detail(overrides: Partial<MissionNodeDetail['node']> = {}, children: Mi
 }
 
 /** Render the detail dialog with its state, the way the view holds it. */
-function dialog(state: Parameters<typeof MissionDetailDialog>[0]['state']): string {
-  return renderToStaticMarkup(<MissionDetailDialog nodeId="r1" state={state} onClose={() => undefined} />)
+function dialog(
+  state: Parameters<typeof MissionDetailDialog>[0]['state'],
+  options: { readonly sessionId?: string; readonly openWorkerSession?: (target: WorkerSessionTarget) => void } = {},
+): string {
+  return renderToStaticMarkup(
+    <MissionDetailDialog
+      nodeId="r1"
+      state={state}
+      onClose={() => undefined}
+      sessionId={options.sessionId ?? 'owner-1'}
+      {...options.openWorkerSession === undefined ? {} : { openWorkerSession: options.openWorkerSession }}
+    />,
+  )
 }
 
 /** Render the result pane in one read state — the pure half of the click-to-read feature. */
@@ -314,6 +341,165 @@ describe('reading a spilled result back', () => {
   })
 })
 
+/**
+ * The "jump to the executor" link. This suite has no DOM, so the click is exercised on the seam the
+ * button is wired to (`WorkerSessionLink`'s root element, whose `onClick` is what the panel renders)
+ * rather than by dispatching a browser event — the same reason `ResultPane` is a pure function here.
+ */
+describe('opening the session that ran a mission', () => {
+  const WORKER = 'mission-aaaa1111'
+
+  /** The seat's session hook, structurally: `seat.ts` reads every field defensively. */
+  const stubSession = <T,>(select: (session: { queue?: readonly unknown[]; running?: boolean }) => T): T =>
+    select({ queue: [], running: false })
+  const stubChat = <T,>(select: (chat: { order?: readonly string[] }) => T): T => select({ order: [] })
+
+  /**
+   * A structural client Context: only what `apply` touches, with `get` answering per call so a test
+   * can make the optional service appear between two renders. `view` reaches the props the seat
+   * would pass the registered component by CALLING it — safe because `View` itself is hook-free
+   * (its state lives in `MissionTreeView`), which is what keeps this suite DOM-less.
+   */
+  function fakeClientContext(workspace: () => unknown): {
+    ctx: Parameters<typeof apply>[0]
+    view: (props: Record<string, unknown>) => { props: Record<string, unknown> }
+  } {
+    type Registered = (props: Record<string, unknown>) => { props: Record<string, unknown> }
+    let component: Registered | undefined
+    const ctx = {
+      effect: (callback: () => (() => void) | void): void => { callback() },
+      logger: { error: (): void => undefined },
+      locale: {
+        register: (): (() => void) => () => undefined,
+        bind: (): ((key: string) => string) => (key: string) => key,
+      },
+      remote: { $mount: (): Promise<() => Promise<void>> => Promise.resolve(() => Promise.resolve()) },
+      get: (name: string): unknown => {
+        if (name === 'uiWorkspace') return workspace()
+        // A namespace, so the mount's `.then` does not report a broken contribution.
+        if (name === 'remote.avantfMission') return {}
+        return undefined
+      },
+      slots: {
+        inject: (_name: string, register: () => void): void => { register() },
+        register: (_options: unknown, registered: unknown): void => { component = registered as Registered },
+      },
+    }
+    return {
+      ctx: ctx as unknown as Parameters<typeof apply>[0],
+      view: (props) => {
+        if (component === undefined) throw new Error('apply did not register the conversation.view seat')
+        return component(props)
+      },
+    }
+  }
+
+  it('sends the exact continuable-child address when the link is clicked', () => {
+    const sent: WorkerSessionTarget[] = []
+    const element = WorkerSessionLink({
+      workerSessionId: WORKER,
+      sessionId: 'owner-1',
+      open: (target) => { sent.push(target) },
+      onFailure: () => undefined,
+    }) as unknown as { props: { onClick: () => void } }
+
+    element.props.onClick()
+    // The REAL object, field for field: parent = the panel's own session, child = the worker, and
+    // `continuable` so the host opens the durable subagent address rather than a bare id.
+    expect(sent).toEqual([{ parentSessionId: 'owner-1', childSessionId: WORKER, mode: 'continuable' }])
+    // ...and that object is the builder's own output, not two shapes kept in step by hand.
+    expect(workerSessionTarget('owner-1', WORKER))
+      .toEqual({ parentSessionId: 'owner-1', childSessionId: WORKER, mode: 'continuable' })
+  })
+
+  it('renders a real clickable element for a bound mission', () => {
+    const html = dialog(
+      { nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: WORKER }) },
+      { sessionId: 'owner-1', openWorkerSession: () => undefined },
+    )
+    expect(html).toContain('avwf-worker-link')
+    expect(html).toContain(`<button type="button"`)
+    expect(html).toContain(WORKER)
+    // Labelled for assistive tech, and it says what the click does.
+    expect(html).toContain('aria-label="打开执行这个任务的会话')
+  })
+
+  it('renders NO clickable element for an unbound mission, and says nothing about one', () => {
+    // `workerSessionId: null` is the engine's "no executor bound": there is nothing to open, so the
+    // header shows neither a link nor a placeholder.
+    const html = dialog({ nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: null }) }, {
+      openWorkerSession: () => undefined,
+    })
+    expect(html).not.toContain('avwf-worker-link')
+    expect(html).not.toContain('avwf-worker-id')
+    // The panel itself is intact — this is a missing link, not a broken dialog.
+    expect(html).toContain('Ship it')
+    expect(html).toContain('>内容<')
+  })
+
+  it('renders the id as plain text when the host has no uiWorkspace, with no dead link', () => {
+    // `openWorkerSession` is absent exactly when `ctx.get('uiWorkspace')` found no service. The id is
+    // still the useful half of the feature, so it stays on screen — as text, never as a button.
+    const html = dialog({ nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: WORKER }) })
+    expect(html).toContain('avwf-worker-id')
+    expect(html).toContain(WORKER)
+    expect(html).not.toContain('avwf-worker-link')
+    expect(html).toContain('当前宿主没有 uiWorkspace 服务')
+    // And nothing else changed: the dialog is fully rendered.
+    expect(html).toContain('Ship it')
+    expect(html).toContain('第 1 次派发')
+  })
+
+  it('turns a refused or failed open into an inline message, never a throw', async () => {
+    const failures: string[] = []
+    const base = { parentSessionId: 'owner-1', workerSessionId: WORKER, onFailure: (message: string) => { failures.push(message) } }
+
+    // A host may refuse a cleaned-up session by THROWING...
+    const threw = workerSessionClick({ ...base, open: () => { throw new Error('会话已被清理') } })
+    expect(() => { threw() }).not.toThrow()
+    expect(failures).toEqual(['会话已被清理'])
+
+    // ...or by answering with a rejected promise.
+    const rejected = workerSessionClick({ ...base, open: () => Promise.reject(new Error('会话不存在')) })
+    rejected()
+    await Promise.resolve()
+    expect(failures).toEqual(['会话已被清理', '会话不存在'])
+
+    // The message the dialog renders in place is a line of text with `role="alert"`, not a blank pane.
+    const html = renderToStaticMarkup(<WorkerSessionHint message="会话已被清理" />)
+    expect(html).toContain('打开执行者会话失败')
+    expect(html).toContain('会话已被清理')
+    expect(html).toContain('role="alert"')
+  })
+
+  it('asks the host for uiWorkspace on EVERY render, and never injects it', () => {
+    // The client half's own wiring. `uiWorkspace` is fetched with `ctx.get` (never `inject`: a host
+    // without it must still mount this half), and the view only receives an opener when the service is
+    // really there. The lookup is per render because cordis reports a service as absent until its own
+    // fiber is active — caching "no service" at apply time would lose a late-mounted one forever.
+    const sent: WorkerSessionTarget[] = []
+    const workspace = { openSession: (target: WorkerSessionTarget): void => { sent.push(target) } }
+    let available: unknown
+    const { ctx, view } = fakeClientContext(() => available)
+
+    apply(ctx)
+    // 1) No service: the seat's view gets NO opener, so the id can only render as plain text.
+    const absent = view({ sessionId: 'owner-1', useChat: stubChat, useSession: stubSession })
+    expect(absent.props['openWorkerSession']).toBeUndefined()
+    expect(absent.props['sessionId']).toBe('owner-1')
+
+    // 2) The service appears afterwards: the NEXT render sees it, and the opener it hands over still
+    //    forwards the target unchanged.
+    available = workspace
+    const present = view({ sessionId: 'owner-2', useChat: stubChat, useSession: stubSession })
+    expect(present.props['sessionId']).toBe('owner-2')
+    const open = present.props['openWorkerSession'] as ((target: WorkerSessionTarget) => void) | undefined
+    expect(typeof open).toBe('function')
+    open?.({ parentSessionId: 'owner-2', childSessionId: WORKER, mode: 'continuable' })
+    expect(sent).toEqual([{ parentSessionId: 'owner-2', childSessionId: WORKER, mode: 'continuable' }])
+  })
+})
+
 /** A session that has been busy: `count` finished trees, each with one node. */
 function history(count: number): MissionSnapshot {
   return {
@@ -322,7 +508,7 @@ function history(count: number): MissionSnapshot {
       closedAt: 1,
       nodes: [{
         id: `t${String(index)}`, parentId: null, children: [], title: `mission ${String(index)}`,
-        context: [], corrections: [], status: 'done', attempts: 1, depth: 1, createdAt: index, hasResult: true, resultRef: null,
+        context: [], corrections: [], status: 'done', attempts: 1, depth: 1, createdAt: index, hasResult: true, resultRef: null, workerSessionId: null,
       }],
     })),
   }
@@ -346,6 +532,7 @@ describe('MissionTreeView', () => {
         onDeleteTree={() => Promise.resolve()}
         loadDetail={() => Promise.reject(new Error('not clicked'))}
         loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
       />,
     )
   }
@@ -390,6 +577,7 @@ describe('MissionTreeView', () => {
         onDeleteTree={() => Promise.resolve()}
         loadDetail={() => Promise.reject(new Error('not clicked'))}
         loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
       />,
     )
     expect(html).toContain('avwf-root')
@@ -437,7 +625,7 @@ describe('MissionTreeView', () => {
     // renders each node once and refuses to descend into a child already on the path.
     const row = (id: string, parentId: string | null, children: readonly string[]): MissionNodeView => ({
       id, parentId, children, depth: 1, title: id, context: [], corrections: [],
-      status: 'running', attempts: 1, createdAt: 0, hasResult: false, resultRef: null,
+      status: 'running', attempts: 1, createdAt: 0, hasResult: false, resultRef: null, workerSessionId: null,
     })
     const state: MissionSnapshotState = {
       data: { trees: [{ rootId: 'r1', closedAt: null, nodes: [row('r1', null, ['c1']), row('c1', 'r1', ['r1'])] }] },
@@ -451,6 +639,7 @@ describe('MissionTreeView', () => {
         onDeleteTree={() => Promise.resolve()}
         loadDetail={() => Promise.reject(new Error('not clicked'))}
         loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
       />,
     )
     // Both rows render, and the back-edge does not add a second copy of the root.
@@ -482,6 +671,7 @@ describe('MissionTreeView', () => {
         onDeleteTree={() => Promise.resolve()}
         loadDetail={() => Promise.reject(new Error('not clicked'))}
         loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
       />,
     )
     const rendered = html.match(/avwf-tree-header/g) ?? []
@@ -508,6 +698,7 @@ describe('MissionTreeView', () => {
         onDeleteTree={() => Promise.resolve()}
         loadDetail={() => Promise.reject(new Error('not clicked'))}
         loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
       />,
     )
     expect(html.match(/avwf-tree-header/g) ?? []).toHaveLength(5)
@@ -595,10 +786,10 @@ describe('MissionTreeView', () => {
         rootId: 'r1',
         closedAt: null,
         nodes: [
-          { id: 'r1', parentId: null, children: ['a', 'b'], title: 'root mission', context: [], corrections: [], status: 'blocked', attempts: 1, depth: 1, createdAt: 1, hasResult: false, resultRef: null },
-          { id: 'a', parentId: 'r1', children: ['s'], title: 'branch A', context: [], corrections: [], status: 'blocked', attempts: 1, depth: 2, createdAt: 2, hasResult: false, resultRef: null },
-          { id: 'b', parentId: 'r1', children: ['s'], title: 'branch B', context: [], corrections: [], status: 'blocked', attempts: 1, depth: 2, createdAt: 3, hasResult: false, resultRef: null },
-          { id: 's', parentId: 'a', children: [], title: 'shared premise', context: [], corrections: [], status: 'done', attempts: 1, depth: 3, createdAt: 4, hasResult: true, resultRef: null },
+          { id: 'r1', parentId: null, children: ['a', 'b'], title: 'root mission', context: [], corrections: [], status: 'blocked', attempts: 1, depth: 1, createdAt: 1, hasResult: false, resultRef: null, workerSessionId: null },
+          { id: 'a', parentId: 'r1', children: ['s'], title: 'branch A', context: [], corrections: [], status: 'blocked', attempts: 1, depth: 2, createdAt: 2, hasResult: false, resultRef: null, workerSessionId: null },
+          { id: 'b', parentId: 'r1', children: ['s'], title: 'branch B', context: [], corrections: [], status: 'blocked', attempts: 1, depth: 2, createdAt: 3, hasResult: false, resultRef: null, workerSessionId: null },
+          { id: 's', parentId: 'a', children: [], title: 'shared premise', context: [], corrections: [], status: 'done', attempts: 1, depth: 3, createdAt: 4, hasResult: true, resultRef: null, workerSessionId: null },
         ],
       }],
     }
@@ -608,6 +799,7 @@ describe('MissionTreeView', () => {
         onDeleteTree={() => Promise.resolve()}
         loadDetail={() => Promise.reject(new Error('not clicked'))}
         loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
       />,
     )
     // Drawn under BOTH parents (A is its birth parent, B reused it). Four occurrences = two

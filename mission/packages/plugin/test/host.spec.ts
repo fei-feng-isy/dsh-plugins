@@ -759,6 +759,45 @@ describe('the snapshot the 任务 view reads', () => {
   })
 })
 
+describe('the worker session the panel can open', () => {
+  it('names the executor while a node is bound, in the snapshot and the detail alike', async () => {
+    const mounted = await mount()
+    const root = await createTree(mounted, 'Ship it')
+    await mounted.flush()
+    const claim = String(mounted.dispatched[0]?.childId ?? '')
+    expect(claim).not.toBe('')
+
+    const node = (await mounted.host.snapshot({ sessionId: mounted.owner.id })).trees[0]?.nodes[0]
+    expect(node?.workerSessionId).toBe(claim)
+    // The field names the EXECUTOR — never the mission id dressed up as one.
+    expect(node?.workerSessionId).not.toBe(node?.id)
+
+    const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
+    expect(detail.node?.workerSessionId).toBe(claim)
+  })
+
+  it('reads null once the node is not bound, never an empty string or the node id', async () => {
+    const mounted = await mount()
+    const root = await createTree(mounted, 'Cancelled')
+    await mounted.flush()
+    // The binding was real before the cancel — otherwise "null afterwards" would prove nothing.
+    const claim = String(mounted.dispatched[0]?.childId ?? '')
+    expect(mounted.nodeFor(root)?.claimedBy).toBe(claim)
+
+    await callTool(mounted, 'cancel_mission', { root_id: root }, mounted.owner)
+    expect(mounted.nodeFor(root)?.claimedBy ?? null).toBeNull()
+
+    const node = (await mounted.host.snapshot({ sessionId: mounted.owner.id })).trees[0]?.nodes[0]
+    expect(node?.status).toBe('failed')
+    expect(node?.workerSessionId).toBeNull()
+    expect(node?.workerSessionId).not.toBe(root)
+    expect(node?.workerSessionId).not.toBe('')
+
+    const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
+    expect(detail.node?.workerSessionId).toBeNull()
+  })
+})
+
 describe('a reused prerequisite stays visible as a dependency', () => {
   it('lists it among the depending node children, and in the snapshot', async () => {
     // The bug this pins: a node that reuses a prerequisite was born under ANOTHER parent, so

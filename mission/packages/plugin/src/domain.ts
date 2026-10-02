@@ -40,6 +40,12 @@ const nodeSchema = z.object({
   parentId: z.string().nullable(),
   title: z.string(),
   description: z.string(),
+  // Optional-with-default: a document written before the field existed must keep loading, and it
+  // reads as "no scope declared" — the value that takes no part in the engine's unit leases, i.e.
+  // exactly today's behaviour. `.catch(null)` covers the other direction: a value that is not a
+  // string (a hand-edited number) degrades to "no scope" rather than failing the whole document
+  // open, because an invented scope would serialize a mission against a resource nobody named.
+  unit: z.string().nullable().default(null).catch(null),
   context: z.array(z.string()),
   // Optional-with-default: a document written before the field existed must keep loading.
   corrections: z.array(z.string()).default([]),

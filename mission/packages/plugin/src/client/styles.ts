@@ -96,6 +96,13 @@ const CSS = `
 .avwf-link { align-self: flex-start; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-link, var(--dsw-alias-label-primary)); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .avwf-link:hover { text-decoration-thickness: 2px; }
 .avwf-link:disabled { color: var(--dsw-alias-label-secondary); cursor: default; text-decoration: none; }
+/* The executor's session id, next to the mission's own id in the dialog header. A link (the same
+   LINK token the result pane uses) when the host can open it, plain monospace text when it cannot —
+   an id is an id, so both wear the monospace face, and the difference is the affordance, not a hue. */
+.avwf-worker-link { padding: 0; border: 0; background: transparent; font: inherit; font-family: ui-monospace, monospace; font-size: 12px; color: var(--dsw-alias-link, var(--dsw-alias-label-primary)); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.avwf-worker-link:hover { text-decoration-thickness: 2px; }
+.avwf-worker-id { font-family: ui-monospace, monospace; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.avwf-worker-error { color: var(--dsw-alias-state-error-primary, #d9534f); }
 .avwf-detail-child-head { display: flex; align-items: center; gap: 6px; }
 .avwf-detail-child-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The detail dialog, built to the shell's 设置 panel: full-viewport mask + a centered card split

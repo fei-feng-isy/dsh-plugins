@@ -10,7 +10,13 @@
  */
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { MissionNodeDetail, MissionNodeView, MissionTreeViewData, MissionViewProps } from './contract.js'
+import type {
+  MissionNodeDetail,
+  MissionNodeView,
+  MissionTreeViewData,
+  MissionViewProps,
+  WorkerSessionTarget,
+} from './contract.js'
 import { INSTALL_STYLES } from './styles.js'
 
 /** Statuses that mean "this mission is over" — a tree whose root reached one is deletable. */
@@ -363,6 +369,77 @@ export function inertBackground(overlay: HTMLElement): () => void {
 }
 
 /**
+ * The address of one worker session, exactly as the host's `uiWorkspace.openSession` takes it: the
+ * durable parent/child address of a *continuable* subagent — what the main UI sends when a child is
+ * picked from the "N 个子智能" dropdown. The PARENT is the owner session this panel belongs to.
+ *
+ * Exported, with `workerSessionClick`/`WorkerSessionLink`, because this suite has no DOM: a spec
+ * cannot press a rendered button, so it asks these functions (the very ones the button is wired to)
+ * what a click sends. That keeps "点击发出的 target 形状" pinned without adding a browser environment.
+ */
+export function workerSessionTarget(parentSessionId: string, workerSessionId: string): WorkerSessionTarget {
+  return { parentSessionId, childSessionId: workerSessionId, mode: 'continuable' }
+}
+
+/**
+ * The panel's one click handler. A host can refuse a session that has already been cleaned up, and
+ * `openSession` may throw outright or answer with a rejected promise; BOTH are turned into the
+ * inline message the caller renders. The panel must never blank — or lose its place — because a
+ * link went stale, which is the one failure a link invited by us can cause.
+ */
+export function workerSessionClick(input: {
+  readonly parentSessionId: string
+  readonly workerSessionId: string
+  readonly open: (target: WorkerSessionTarget) => unknown
+  readonly onFailure: (message: string) => void
+}): () => void {
+  return () => {
+    const fail = (cause: unknown): void => {
+      input.onFailure(cause instanceof Error ? cause.message : String(cause))
+    }
+    try {
+      Promise.resolve(input.open(workerSessionTarget(input.parentSessionId, input.workerSessionId))).catch(fail)
+    } catch (cause) {
+      fail(cause)
+    }
+  }
+}
+
+/**
+ * The worker session id as a LINK. Its ROOT element is the button, so a DOM-less spec can render the
+ * component and invoke exactly the handler the panel wires up; the failure message is the dialog's
+ * (a sibling), because the button is the whole of this component.
+ */
+export function WorkerSessionLink({ workerSessionId, sessionId, open, onFailure }: {
+  workerSessionId: string
+  /** The owner session the worker hangs under — the parent half of the address. */
+  sessionId: string
+  open: (target: WorkerSessionTarget) => void
+  onFailure: (message: string) => void
+}): ReactNode {
+  const label = `打开执行这个任务的会话（${workerSessionId}）`
+  return (
+    <button
+      type="button"
+      className="avwf-worker-link"
+      title={`执行者会话 ${workerSessionId}\n${label}`}
+      aria-label={label}
+      onClick={workerSessionClick({ parentSessionId: sessionId, workerSessionId, open, onFailure })}
+    >
+      {workerSessionId}
+    </button>
+  )
+}
+
+/**
+ * The inline message a refused open leaves behind. Split out as a pure component, like `ResultPane`,
+ * so its markup is testable without a DOM to click in; the dialog owns the state that shows it.
+ */
+export function WorkerSessionHint({ message }: { message: string }): ReactNode {
+  return <span className="avwf-worker-error" role="alert">打开执行者会话失败：{message}</span>
+}
+
+/**
  * One mission's detail as a MODAL panel: a section rail on the left, the chosen section in a
  * scrollable column on the right — the shell's 设置 dialog, sized for reading (1040×880, capped
  * by the viewport) rather than the settings' 800×800.
@@ -375,7 +452,7 @@ export function inertBackground(overlay: HTMLElement): () => void {
  * by however much the text happened to be, so comparing two missions meant scrolling one of
  * them out of sight. A fixed panel with its own scroll keeps the tree where it was.
  */
-export function MissionDetailDialog({ nodeId, state, onClose, loadResult }: {
+export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessionId, openWorkerSession }: {
   nodeId: string
   /** `undefined` until this node's first read lands; a loading state once it has been asked for. */
   state: DialogState | undefined
@@ -383,6 +460,11 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult }: {
   /** Read a spilled result back in full. Absent in a host that has no `result` face, and then the
    *  pane shows the locator without offering a read it cannot perform. */
   loadResult?: (nodeId: string) => Promise<string>
+  /** The owner session the shown mission's worker hangs under — the parent half of the address. */
+  sessionId: string
+  /** Open the executor's session; absent on a host with no `uiWorkspace` service, and then the id
+   *  is rendered as plain text instead of a dead link (see `MissionViewProps.openWorkerSession`). */
+  openWorkerSession?: (target: WorkerSessionTarget) => void
 }): ReactNode {
   // Escape closes, as in every other dialog in the shell. The listener lives exactly as long
   // as the dialog is mounted, so it cannot outlive the thing it closes.
@@ -413,6 +495,9 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult }: {
   }, [])
 
   const [selected, setSelected] = useState<string | undefined>(undefined)
+  // The one thing the dialog itself cannot render away: a host that refused to open a worker's
+  // session. Kept here, so it resets when the dialog moves to another mission (`key={openId}`).
+  const [workerFailure, setWorkerFailure] = useState<string | undefined>(undefined)
   const ready = state?.status === 'ready' ? state.detail : undefined
   const tabs = ready === undefined ? [] : detailTabs(ready, { loadResult })
   // A section can vanish under the selected id (a re-read that drops a now-empty list), so the
@@ -457,6 +542,30 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult }: {
               </h2>
               <div className="avwf-dialog-head-meta">
                 <span className="avwf-dialog-head-id" title={ready?.node.id ?? nodeId}>{ready?.node.id ?? nodeId}</span>
+                {/* The id above is the MISSION's; the session that actually ran it is a different
+                    address, and the one a reader may want to open. Shown beside it so "which mission"
+                    and "who is running it" are answered together. A node with no binding shows
+                    nothing here — a placeholder on every queued row would be noise, and there is
+                    nothing to open. */}
+                {ready === undefined || ready.node.workerSessionId === null
+                  ? null
+                  : openWorkerSession === undefined
+                    // The id is still the useful half — this host just cannot navigate to it. The
+                    // tooltip says why, so plain text does not read as a link that is broken.
+                    ? (
+                      <span className="avwf-worker-id" title="当前宿主没有 uiWorkspace 服务，无法跳转到执行者会话">
+                        {ready.node.workerSessionId}
+                      </span>
+                    )
+                    : (
+                      <WorkerSessionLink
+                        workerSessionId={ready.node.workerSessionId}
+                        sessionId={sessionId}
+                        open={openWorkerSession}
+                        onFailure={setWorkerFailure}
+                      />
+                    )}
+                {workerFailure === undefined ? null : <WorkerSessionHint message={workerFailure} />}
                 {ready === undefined
                   ? null
                   : (
@@ -646,7 +755,9 @@ function Tree({ tree, actions, busy, onDeleteTree }: {
 }
 
 /** Render the session's mission trees. */
-export function MissionTreeView({ useSnapshot, onDeleteTree, loadDetail, loadResult }: MissionViewProps): ReactNode {
+export function MissionTreeView({
+  useSnapshot, onDeleteTree, loadDetail, loadResult, sessionId, openWorkerSession,
+}: MissionViewProps): ReactNode {
   INSTALL_STYLES()
   const state = useSnapshot()
   const [busy, setBusy] = useState<string | undefined>(undefined)
@@ -771,6 +882,8 @@ export function MissionTreeView({ useSnapshot, onDeleteTree, loadDetail, loadRes
             state={dialog?.nodeId === openId ? dialog : undefined}
             onClose={() => { setOpenId(undefined) }}
             loadResult={loadResult}
+            sessionId={sessionId}
+            {...openWorkerSession === undefined ? {} : { openWorkerSession }}
           />
         )}
     </div>

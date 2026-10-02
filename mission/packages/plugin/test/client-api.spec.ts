@@ -6,7 +6,7 @@
  * costs the most and is hardest to see in a browser.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { SNAPSHOT_WIRE_VERSION, snapshotResultSchema } from '../src/wire.js'
+import { SNAPSHOT_WIRE_VERSION, detailResultSchema, snapshotResultSchema } from '../src/wire.js'
 import {
   POLL_INTERVAL_MS,
   REFRESH_COALESCE_MS,
@@ -152,6 +152,56 @@ describe('the payload boundary', () => {
       value: { node: { id: 'n2', rootId: 'r1', title: 't', description: 'd', context: [] }, children: [] },
     })
     await expect(fetchDetail(remote, 'session-1', 'n2')).rejects.toThrow('无法识别的数据')
+  })
+})
+
+describe('the worker session id, through the strict codec', () => {
+  // A `strict` codec DROPS every key it does not name, so a host field this schema forgot would
+  // vanish between the halves — the failure this plugin has already paid for once. These assertions
+  // are the client side of `host.spec.ts`'s "bound ⇒ id / unbound ⇒ null": the field must arrive.
+  const row = (workerSessionId: string | null): Record<string, unknown> => ({
+    id: 'n1', parentId: null, children: [], depth: 1, title: 'Ship it', context: [], corrections: [],
+    status: 'running', attempts: 1, createdAt: 1, hasResult: false, resultRef: null, workerSessionId,
+  })
+  /** The same row as an OLDER host sends it: the field this release added is ABSENT. */
+  const { workerSessionId: _newer, ...legacyRow } = row(null)
+
+  it('NAMES the field in both schemas, so a strict codec cannot silently drop it', () => {
+    expect(
+      Object.keys(snapshotResultSchema.shape.trees.element.shape.nodes.element.shape),
+    ).toContain('workerSessionId')
+    expect(Object.keys(detailResultSchema.shape.node.unwrap().shape)).toContain('workerSessionId')
+  })
+
+  it('keeps the bound id on a snapshot row instead of treating it as unknown', () => {
+    const parsed = snapshotResultSchema.parse({
+      wire: SNAPSHOT_WIRE_VERSION,
+      trees: [{ rootId: 'r1', closedAt: null, nodes: [row('mission-aaaa1111')] }],
+    })
+    expect(parsed.trees[0]?.nodes[0]?.workerSessionId).toBe('mission-aaaa1111')
+  })
+
+  it('keeps null on an unbound row, and reads an older host\'s absent field as null', () => {
+    const unbound = snapshotResultSchema.parse({
+      trees: [{ rootId: 'r1', closedAt: null, nodes: [row(null)] }],
+    })
+    expect(unbound.trees[0]?.nodes[0]?.workerSessionId).toBeNull()
+    // An older host does not send the key at all: the LINK is what is missing, not the snapshot.
+    const legacy = snapshotResultSchema.parse({
+      trees: [{ rootId: 'r1', closedAt: null, nodes: [legacyRow] }],
+    })
+    expect(legacy.trees[0]?.nodes[0]?.workerSessionId).toBeNull()
+  })
+
+  it('keeps the field on the detail node, bound and unbound alike', () => {
+    const node = (workerSessionId: string | null): Record<string, unknown> => ({
+      id: 'n1', rootId: 'r1', title: 't', description: 'd', context: [], corrections: [],
+      analysisNotes: [], analysisAttempt: 0, status: 'running', attempts: 1, depth: 1,
+      result: null, resultPointer: null, workerSessionId,
+    })
+    expect(detailResultSchema.parse({ node: node('mission-aaaa1111'), children: [] }).node?.workerSessionId)
+      .toBe('mission-aaaa1111')
+    expect(detailResultSchema.parse({ node: node(null), children: [] }).node?.workerSessionId).toBeNull()
   })
 })
 

@@ -22,6 +22,9 @@ export interface MissionNodeView {
   readonly createdAt: number
   readonly hasResult: boolean
   readonly resultRef: string | null
+  /** The session executing this node right now, or `null` when none is bound. Carried in the ROW
+   *  projection as well as the detail so a row can offer "open the executor" without a second read. */
+  readonly workerSessionId: string | null
 }
 
 export interface MissionTreeViewData {
@@ -70,6 +73,10 @@ export interface MissionNodeDetailView {
   readonly result: string | null
   /** Where an oversized result was spilled, so the reader can still open it. */
   readonly resultPointer: string | null
+  /** The session executing this node right now, or `null` when none is bound. This is the NODE's
+   *  executor — a different id from `id`, which names the mission. A node whose worker was reclaimed
+   *  carries `null` on purpose: that session may no longer exist, and the panel offers no link to it. */
+  readonly workerSessionId: string | null
 }
 
 export interface MissionNodeDetailChild {
@@ -86,6 +93,19 @@ export interface MissionNodeDetail {
   readonly children: readonly MissionNodeDetailChild[]
 }
 
+/**
+ * One worker session as the host's optional `uiWorkspace.openSession` takes it: the durable
+ * parent/child address of a *continuable* subagent — the same target the main UI sends when a child
+ * is picked from the "N 个子智能" dropdown. Declared structurally rather than imported from the
+ * host's `dsh-api-session-controller` types, like the rest of this file: the browser bundle must not
+ * take a dependency on a host package's client types.
+ */
+export interface WorkerSessionTarget {
+  readonly parentSessionId: string
+  readonly childSessionId: string
+  readonly mode: 'continuable'
+}
+
 export interface MissionViewProps {
   /** Read the current snapshot and keep it updated. */
   readonly useSnapshot: () => MissionSnapshotState
@@ -94,4 +114,13 @@ export interface MissionViewProps {
   readonly loadDetail: (nodeId: string) => Promise<MissionNodeDetail>
   /** Read the FULL text behind a spilled result; rejects with the host's reason, which the pane shows. */
   readonly loadResult: (nodeId: string) => Promise<string>
+  /** The owner session these trees belong to — the PARENT half of a worker-session address. */
+  readonly sessionId: string
+  /**
+   * Ask the host to open the session that ran a mission. ABSENT when this host has no `uiWorkspace`
+   * service — the id then renders as plain text, never as a dead link, and everything else in the
+   * panel keeps working. `uiWorkspace` is fetched optionally for exactly this reason: a host without
+   * it must still mount this plugin (see `client/index.ts`, and `inject` there deliberately omits it).
+   */
+  readonly openWorkerSession?: (target: WorkerSessionTarget) => void
 }

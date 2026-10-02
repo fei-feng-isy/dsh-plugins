@@ -101,6 +101,13 @@ const nodeSchema = z.object({
   createdAt: z.number(),
   hasResult: z.boolean(),
   resultRef: z.string().nullable(),
+  // The worker session the panel links to. DECLARED here on purpose: a `strict` codec DROPS keys it
+  // does not name, so a field the host added and this schema forgot would vanish between the two
+  // halves — the failure this plugin has already paid for once. `.default(null)` rather than a plain
+  // required field: an OLDER host simply omits it, and "no executor to open" is the right reading of
+  // that payload, where failing the whole snapshot read would blank a panel that is otherwise fine
+  // (`corrections` is required because its absence would crash the render; this one only removes a link).
+  workerSessionId: z.string().nullable().default(null),
 })
 
 const treeSchema = z.object({
@@ -179,6 +186,8 @@ const detailNodeSchema = z.object({
   result: z.string().nullable(),
   /** Where a spilled full result lives, already joined with its retrieval hint. */
   resultPointer: z.string().nullable(),
+  /** The session executing this node right now; `null` (or, from an older host, absent) means none. */
+  workerSessionId: z.string().nullable().default(null),
 })
 
 export const detailResultSchema = z.object({

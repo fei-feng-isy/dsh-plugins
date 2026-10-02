@@ -24,7 +24,7 @@ import {
   type IntervalTimer,
   type MissionRemote,
 } from './api.js'
-import type { MissionSnapshot, MissionSnapshotState } from './contract.js'
+import type { MissionSnapshot, MissionSnapshotState, WorkerSessionTarget } from './contract.js'
 import { chatNodeCount, isRunning, queuedCount, type SeatChatView, type SeatSessionView } from './seat.js'
 
 /** Cordis plugin name; matches the host half. */
@@ -70,6 +70,20 @@ interface SeatProps {
   readonly sessionId: SessionId
   readonly useChat: <T>(select: (chat: SeatChatView) => T) => T
   readonly useSession: <T>(select: (session: SeatSessionView) => T) => T
+}
+
+/**
+ * The host's OPTIONAL workspace-navigation service, read structurally for the same reason as
+ * {@link ClientContext} — and deliberately NOT in `inject`.
+ *
+ * Injecting `uiWorkspace` would make a host without it refuse to load this half at all; the panel is
+ * perfectly usable without the jump (the engine pushes its changes, it does not need navigation), so
+ * the service is fetched with `ctx.get` and merely removes a link when absent. Only the one method
+ * this half uses is declared, and the target is the STRUCTURAL {@link WorkerSessionTarget} rather
+ * than the host's `SessionTarget`: the browser bundle must not depend on a host client-types package.
+ */
+interface UiWorkspaceLike {
+  openSession(target: WorkerSessionTarget): void
 }
 
 /**
@@ -271,6 +285,20 @@ export function apply(ctx: ClientContext): void {
 
   const getRemote = (): MissionRemote | undefined => state.remote
 
+  /**
+   * The optional navigation service, resolved on EVERY render rather than cached at apply time:
+   * cordis reports a service as absent until its own fiber is active, and this half deliberately
+   * does not declare `uiWorkspace` in `inject` (a host without it must still mount the panel), so a
+   * late-mounted service would otherwise be missed forever. Absent at render time ⇒ the view renders
+   * the worker id as plain text; the miss costs a link, never the panel.
+   */
+  const uiWorkspace = (): UiWorkspaceLike | undefined => {
+    const service = ctx.get('uiWorkspace') as Partial<UiWorkspaceLike> | undefined
+    return service !== undefined && typeof service.openSession === 'function'
+      ? service as UiWorkspaceLike
+      : undefined
+  }
+
   // The seat's session hooks are the refresh trigger (see `sessionRevision`). `useChat` is
   // in the installed runtime's catalog but not the checkout's composed type, so it is read
   // structurally and guarded; whether the seat hands it over cannot change during a mount,
@@ -291,6 +319,8 @@ export function apply(ctx: ClientContext): void {
   const View = (props: { sessionId: SessionId }): ReactNode => {
     const seat = props as unknown as SeatProps
     const revision = useSeatRevision(seat)
+    // Read per render: the service may appear after this plugin applies (see `uiWorkspace`).
+    const workspace = uiWorkspace()
 
     return h(MissionTreeView, {
       useSnapshot: () => useSnapshotFor({
@@ -316,6 +346,11 @@ export function apply(ctx: ClientContext): void {
         if (remote === undefined) throw new Error('任务树 Remote 未挂载')
         return await fetchFullResult(remote, props.sessionId, nodeId)
       },
+      // The owner session is the PARENT of every worker session the panel links to.
+      sessionId: props.sessionId,
+      ...workspace === undefined
+        ? {}
+        : { openWorkerSession: (target: WorkerSessionTarget): void => { workspace.openSession(target) } },
     })
   }
 

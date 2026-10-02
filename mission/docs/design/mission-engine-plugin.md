@@ -51,6 +51,7 @@ node {
   parent_id     : string | null     // 创建它的父节点（见下）
   title         : string            // 一句话
   description   : string            // 任务内容
+  unit          : string | null     // 改动范围（一个目录或文件）—— 引擎租约键（§2.4）
   context       : string[]          // 任务背景：拆解原因等，由拆解者写入
   corrections   : string[]          // master 的纠偏，最新在后（§6.6）
   corrections_delivered_up_to : number  // 纠偏投递水位：前 N 条已确认送达持有者那个会话（§9.2.1）
@@ -121,6 +122,30 @@ node {
 - `attempts` 随每次派活递增，重复失败可以据此升级策略（换方法 / 标 failed / 上报）
 
 这条替代了原设计里"释放但保留上下文交给别人接着跑"的需求 —— 在无状态任务单元的模型下，**需要交接的只有节点上的尝试记录，不是上下文**。
+
+### 2.4 `unit` 与租约：同一范围只有一个执行者（2026-10-02）
+
+引擎只按节点状态派发，因此两条并行线改同一个文件时会被同时派出去（实测 W7/W8 都改
+`host.ts`）。修法是给节点一个**改动范围**并把它变成引擎状态：
+
+> **一个 unit 的持有者 = 该 unit 上唯一那个 `running` 节点。**
+
+- `unit` 是持久化字段，**缺省 `null` = 不声明范围 = 不参与租约 = 今天的行为**；
+  旧记录经 `normalizeLoaded()` 读成 `null`，`DOMAIN_VERSION` 仍为 1。
+- 根由 `create_mission` 声明；子任务由 `decompose_mission` 的每个 child 声明，**不写就继承父的
+  unit**（安全默认：同范围的兄弟不会同时跑）。空白是显式的"不占范围"。
+- 租约**跨根任务**：`heldUnits` / `unitHolder` 扫描所有树，因为撞车本来就是跨树发生的。
+- 获取在**进入 `running` 的三个路径**上、在树锁内：`dispatch` / `adoptParked` /
+  `adoptContinuation`；`nextDispatchable` 先跳过被持有的候选（优化，正确性在锁内那次检查）。
+  被拒返回 `unit-busy`，不消耗预算。
+- 释放是**状态的投影**：节点离开 `running` 即释放（submit / decompose / reclaim / cancel /
+  终态 / 打开时降级 / 删树）。刻意**不做可变租约表**：那样每条释放路径都要记得清，漏一条就是
+  永久卡死；投影让释放不可能被忘记。
+- **无死锁**：只有 `running` 节点持租约，而 `running` 节点从不等待别的节点（要么 submit，要么
+  decompose 后立刻 `blocked` 并释放），节点也至多持一个 unit，所以没有"持有并等待"的边。
+- parked / 冷唤醒**不改变归属**：被唤醒的节点仍是同一 unit 的持有者，只是复用同一次租约检查。
+
+完整设计、生命周期点与 8 条验收性质见 [`2026-10-02-unit-lease.md`](./2026-10-02-unit-lease.md)。
 
 ---
 
@@ -355,7 +380,7 @@ loop 的默认 decision 是 `[...claimed, runtimeContext]`，其中 `runtimeCont
 
 ```
 loop:
-  ready = dispatchable()                   // ready + interrupted
+  ready = dispatchable()                   // ready + interrupted，且其 unit 未被别的 running 节点持有（§2.4）
   if ready is empty: return                // 退出，等下一次触发
   dispatched = {}                          // 本批次已派集合（内存）
   for node in ready (至多 N 个并发):
@@ -1235,6 +1260,16 @@ decompose(node, children):
 **已知限制**：Remote 调用不携带调用方身份（生成器的方法只收参数），所以 `snapshot({ sessionId })` / `detail({ sessionId, nodeId })` / `result({ sessionId, nodeId })` / `delete({ sessionId, rootId })` / `watch({ sessionId })` 的 session 由客户端给出。视图持有它正在显示的那个 id，且这运行在用户自己的宿主进程里。删除的调用形式是 `delete({ sessionId, rootId })`：**单位是整棵树**，节点 id 不是可删除的对象（传节点 id 会被当成"没有这棵树"拒掉）。未结束的树不会被删除 —— 它归引擎管，提前结束它是 `cancel_mission`；`finish_mission` 是另一种树级结束，保留记录并归档，删除则整条移出。删除不可恢复。
 
 **2026-09-23 修订：落盘结果改成"点开就能看"。** 结果超过 2 KB 就落盘，节点只留开头与一个 locator —— 而那个 locator 是**给模型的**（`mission_result` 连同检索指引一起交给它），人在面板里点不动：浏览器不会导航到文件路径，DSH 自己那条"用桌面应用打开"的路只对有**授权路由**的 deliverable 开放，而这个 spill 不是交付物。于是加 `result({ sessionId, nodeId })`：面板上的「查看完整结果」让**宿主**（唯一能读自己 spill 产物的一方）把全文读回来，在弹窗里就地展开（展开时**替换**开头那段，不叠加 —— 开头本来就是全文的第一片）。两条降级都写死了：宿主没有这个面 → 不显示按钮（不提供一个注定失败的读）；locator 不是本机路径（`SpillStore` 的契约明确 locator 是**不透明的**，测试桩给的就是 `spill://…`）→ 回一条原因，locator 照旧留在屏幕上 —— 它本来就是"知道这个存储底座的人"要的地址。
+
+**2026-10-02 修订：面板可以跳到执行该任务的会话。** 弹窗标题栏原本只显示**节点 id**（那是任务的身份），而真正跑它的 subagent 会话是另一个地址，读者想去看那一段执行过程时只能自己从"N 个子智能"下拉里找。现在两个投影（行的 `NodeView` 与详情的 `NodeDetail`）都多一个 `workerSessionId`，值为该节点**当前绑定**的 worker 会话 id（即 `claimedBy`），客户端把它渲染在弹窗标题栏节点 id 的旁边。
+
+字段语义**只认"当前绑定"**：未绑定（从未派发、已回收、已失败）一律 `null`，不会是空串，更不会拿节点 id 冒充会话 id；被中断但仍可接续的节点携带的是 `lastWorkerId`（上一任执行者），**刻意不暴露**成一个可点字段 —— 那个会话可能已经被清理，一个我们主动提供的、点下去只会报"没有这个会话"的链接，比没有链接更糟。因此"上一任"与"当前绑定"在面板上是两件事：前者不显示，后者可点。
+
+点击时发给宿主的 target 是 `{ parentSessionId: props.sessionId, childSessionId: workerSessionId, mode: 'continuable' }` —— 与主界面从子智能下拉进入子会话时同一个形状（父会话是面板所属的 owner 会话，`continuable` 表示打开的是可接续的直接子会话地址），等价于在下拉里选中进入；面板**只做跳转**，不内嵌会话视图。
+
+依赖是**宿主可选服务** `uiWorkspace`，用 `ctx.get('uiWorkspace')` 取、**绝不进 `inject`**（进了 inject 会让没有这个服务的宿主直接加载失败，违反"绝不拒载"）。三条降级路径都写死：① 服务缺席（或本插件应用之后才挂上，所以**每次渲染重新取**，不缓存 apply 时的结果）→ id 仍以纯文本显示并带一句"当前宿主没有 uiWorkspace 服务，无法跳转"，面板其余部分不变；② 节点没有绑定（`workerSessionId === null`）→ 什么都不渲染，不给占位符（大多数节点本来就没执行者，占位只会变成噪声）；③ `openSession` 抛错或返回被拒的 Promise（会话已被清理）→ 就地捕获成 `role="alert"` 的一行提示，弹窗照常可用。`openWorkerSession` 是可选 prop，缺席路径与"渲染成纯文本"是同一条分支。
+
+wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSchema` 都加了该字段（**strict codec 会静默丢掉没声明的键**），并写成 `.nullable().default(null)` 而不是必填 —— 老宿主根本不发这个键，缺省的语义恰好是"没有可打开的执行者"，而 `corrections` 那种必填会让整份快照读失败；对一个只影响链接的增面字段，掉一条链接远好过掉整块面板。守卫：`host.spec.ts` 的"绑定 ⇒ id / 未绑定 ⇒ null（且不是空串、不是节点 id）"、`client-api.spec.ts` 的 schema 键名与解析（含老宿主缺键 ⇒ `null`）、`client-view.spec.tsx` 的"可点元素与点击 target 形状 / null 不给链接 / 服务缺席 ⇒ 纯文本 / 抛错 ⇒ 行内提示且不崩 / `apply` 每次渲染重新取服务"。
 
 ## 十、插件构成
 
