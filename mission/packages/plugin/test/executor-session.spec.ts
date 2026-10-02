@@ -5,8 +5,16 @@
  * feature is that the expensive half (reading session logs) touches only the few sessions that can
  * possibly be the node's executor. They also pin the three "no answer" outcomes, since the panel
  * turns each into its own sentence.
+ *
+ * W20: the service fake used to mirror a TUPLE filter (`['time', from, to]`) that the real contract
+ * does not have, so a total outage ("no historical executor was ever found") passed a green suite.
+ * Every fake here now checks the real `{kind:'time'|'text'}` object union, and the last block pins
+ * that shape against the real `@deepseek-ai/dsh-session-query` package itself.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { SessionEventResultFilter, SessionEventSearchDocument } from '@deepseek-ai/dsh-session-query'
+import { filterSessionEventDocuments, materializeSessionEventResultFilters } from '@deepseek-ai/dsh-session-query'
+import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import {
   RESOLVE_READ_BUDGET,
   WINDOW_AFTER_MS,
@@ -15,6 +23,7 @@ import {
   type ListedSession,
   type SessionQueryLike,
 } from '../src/executorSession.js'
+import { checkEventFilters, type SentEventFilter } from './sessionQueryContract.js'
 
 const OWNER = 'owner-session'
 const NODE = 'a1b2c3d4'
@@ -31,7 +40,21 @@ interface FakeQuery extends SessionQueryLike {
   /** Session ids whose log was READ, in order — the spy the filtering cases assert on. */
   readonly read: string[]
   readonly listCalls: number
+  /** Every filter array the resolver sent, as received — the contract-shape assertion's subject. */
+  readonly sent: readonly (readonly SentEventFilter[])[]
+  /** Clauses that were not real `SessionEventResultFilter` objects; a tuple lands here. */
+  readonly violations: readonly string[]
 }
+
+/** Every fake built in this file, so one `afterEach` can fail any case that sent a wrong shape. */
+const fakes: FakeQuery[] = []
+
+afterEach(() => {
+  // The guard the W20 suite lacked: a resolver that sends tuples fails HERE, whatever the case
+  // happened to assert about its answer.
+  for (const fake of fakes) expect(fake.violations).toEqual([])
+  fakes.length = 0
+})
 
 /** A `sessionQuery` fake whose logs are given per session id. `undefined` = no matching event. */
 function fakeQuery(
@@ -40,10 +63,14 @@ function fakeQuery(
   options: { readonly failing?: readonly string[]; readonly eventAt?: number } = {},
 ): FakeQuery {
   const read: string[] = []
+  const sent: (readonly SentEventFilter[])[] = []
+  const violations: string[] = []
   const failing = new Set(options.failing ?? [])
   let listCalls = 0
-  return {
+  const fake: FakeQuery = {
     read,
+    sent,
+    violations,
     get listCalls() {
       return listCalls
     },
@@ -51,14 +78,20 @@ function fakeQuery(
       listCalls += 1
       return Promise.resolve(listed)
     },
-    filterEvents: (sessionId: string, filters: readonly (readonly [string, ...unknown[]])[]) => {
+    // Typed as the REAL object union: a tuple call would not compile here, and the runtime check
+    // below catches one that arrived through a cast anyway.
+    filterEvents: (sessionId: string, filters: readonly SentEventFilter[]) => {
       read.push(sessionId)
+      const clauses = checkEventFilters(filters, (detail) => violations.push(detail))
+      sent.push(clauses)
       if (failing.has(sessionId)) return Promise.reject(new Error(`stubbed: cannot read ${sessionId}`))
       // The harness's real filter is applied by the backend; this fake mirrors the two clauses the
       // resolver sends, so a case can place an event outside the window or with different text.
-      const [time, text] = filters as unknown as readonly [readonly [string, number, number], readonly [string, string]]
-      const [from, to] = time.slice(1) as unknown as readonly [number, number]
-      const wanted = text[1]
+      const time = clauses.find((clause) => clause.kind === 'time')
+      const text = clauses.find((clause) => clause.kind === 'text')
+      const from = time?.kind === 'time' ? time.from ?? Number.NEGATIVE_INFINITY : Number.NEGATIVE_INFINITY
+      const to = time?.kind === 'time' ? time.to ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY
+      const wanted = text?.kind === 'text' ? text.text : undefined
       const body = logs[sessionId]
       if (body === undefined) return Promise.resolve([])
       if (body !== wanted) return Promise.resolve([])
@@ -67,10 +100,37 @@ function fakeQuery(
       }
       return Promise.resolve([{ text: `本任务：\nid: ${NODE}\n标题: x` }])
     },
-  } as FakeQuery
+  }
+  fakes.push(fake)
+  return fake
 }
 
 describe('resolving a historical executor session', () => {
+  it('asks the query engine with the REAL object filters, not tuples (the W20 bug)', async () => {
+    const query = fakeQuery([worker('mission-1234abcd', 12_000)], { 'mission-1234abcd': `id: ${NODE}` })
+    await resolveExecutorSession(NODE, {
+      node: NODE_RECORD,
+      ownerSessionId: OWNER,
+      query,
+      now: 30_000,
+    })
+    // Exactly the two clauses the real contract declares and the resolver sends in this order:
+    // `{kind:'time'}` narrowed to the node's window, then `{kind:'text'}` with the prompt's id line.
+    // W20's suite asserted nothing about this, which is how the tuple guess stayed invisible.
+    expect(query.sent).toEqual([[
+      { kind: 'time', from: NODE_RECORD.createdAt - WINDOW_BEFORE_MS, to: NODE_RECORD.updatedAt + WINDOW_AFTER_MS },
+      { kind: 'text', text: `id: ${NODE}` },
+    ]])
+    expect(query.violations).toEqual([])
+  })
+
+  it('the contract check itself fails on a tuple (so the guard above is not vacuous)', () => {
+    const violations: string[] = []
+    checkEventFilters([['time', 1, 2], ['text', 'id: x']], (detail) => violations.push(detail))
+    expect(violations).toHaveLength(2)
+    expect(violations[0]).toContain('TUPLE')
+  })
+
   it('returns the newest matching session and reads only the candidates that pass the filters', async () => {
     const listed = [
       worker('mission-11111111', 12_000), // matches, older
@@ -189,6 +249,31 @@ describe('resolving a historical executor session', () => {
     expect(resolved).toMatchObject({ status: 'resolved', sessionId: 'mission-ddddddd2' })
   })
 
+  it('reports a failed log read ONCE per lookup, with the session and the reason, then keeps going', async () => {
+    const listed = [
+      worker('mission-99999999', 19_000),
+      worker('mission-88888888', 18_900),
+      worker('mission-77777777', 18_000),
+    ]
+    // Two unreadable logs: the failure must be VISIBLE (a swallowed shape error is what hid W20),
+    // but once per lookup — not once per candidate — and the remaining candidate is still asked.
+    const query = fakeQuery(listed, {}, { failing: ['mission-99999999', 'mission-88888888'] })
+    const warnings: string[] = []
+    const resolved = await resolveExecutorSession(NODE, {
+      node: NODE_RECORD,
+      ownerSessionId: OWNER,
+      query,
+      now: 30_000,
+      warn: (message) => warnings.push(message),
+    })
+    expect(resolved).toEqual({ status: 'not-found' })
+    expect(query.read).toEqual(['mission-99999999', 'mission-88888888', 'mission-77777777'])
+    expect(warnings).toHaveLength(1)
+    // The one line names the session it was about AND carries the error's own summary.
+    expect(warnings[0]).toContain('mission-99999999')
+    expect(warnings[0]).toContain('stubbed: cannot read mission-99999999')
+  })
+
   it('ignores a text filter that only came CLOSE to the node line', async () => {
     // The regex after the backend's text filter is what makes the answer exact: another node's id
     // shares the prefix, and a session that merely mentions the id in prose must not match.
@@ -219,5 +304,49 @@ describe('resolving a historical executor session', () => {
       now: 30_000,
     })
     expect(resolved).toEqual({ status: 'not-found' })
+  })
+})
+
+/**
+ * The cross-package pin: `@deepseek-ai/dsh-session-query` is this plugin's declared (optional) peer
+ * and is linked for the local gate, so the shape the resolver sends is checked by the package that
+ * OWNS the contract, not by another local restatement of it. The real `filterEvents` runs every
+ * clause through `materializeSessionEventResultFilters` before it reads a log — the exact call the
+ * W20 tuples died in (`session unknown filter kind (missing)`) — so materializing our clauses here
+ * reproduces the failure line instead of imitating it.
+ */
+describe('the executor lookup filters against the real session-query package', () => {
+  /** Exactly what `sessionRanNode` sends, captured through the validating fake above. */
+  async function sentClauses(): Promise<readonly SessionEventResultFilter[]> {
+    const query = fakeQuery([worker('mission-1234abcd', 12_000)], { 'mission-1234abcd': `id: ${NODE}` })
+    await resolveExecutorSession(NODE, { node: NODE_RECORD, ownerSessionId: OWNER, query, now: 30_000 })
+    return query.sent[0] ?? []
+  }
+
+  it('accepts our clauses and selects the right event through the real package', async () => {
+    // Compile-time pin: what we emit is assignable to the contract's own type. A tuple is not.
+    const clauses: readonly SessionEventResultFilter[] = await sentClauses()
+    const materialized = materializeSessionEventResultFilters(clauses)
+    expect(materialized).toEqual(clauses)
+
+    const document: SessionEventSearchDocument = {
+      sessionId: 'mission-1234abcd' as SessionId,
+      seq: 1 as SessionSeq,
+      type: 'user/message',
+      time: 15_000,
+      surface: 'current',
+      text: `本任务：\nid: ${NODE}\n标题: x`,
+    }
+    // In the window AND carrying the id line: the real predicate engine selects it.
+    expect(filterSessionEventDocuments([document], materialized)).toHaveLength(1)
+    // Outside the node's window, and a near-miss text: the real engine rejects each — so the pin
+    // covers the clause SEMANTICS, not merely "it did not throw".
+    expect(filterSessionEventDocuments([{ ...document, time: 1_000_000 }], materialized)).toHaveLength(0)
+    expect(filterSessionEventDocuments([{ ...document, text: 'id: something-else' }], materialized)).toHaveLength(0)
+  })
+
+  it('rejects the tuple shape in the real validator (the W20 failure line)', () => {
+    const tuple = [['time', 1, 2]] as unknown as readonly SessionEventResultFilter[]
+    expect(() => materializeSessionEventResultFilters(tuple)).toThrow(/unknown filter kind/u)
   })
 })

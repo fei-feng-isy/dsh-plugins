@@ -59,6 +59,12 @@ export interface MissionTreeViewData {
 export interface MissionSnapshot {
   readonly trees: readonly MissionTreeViewData[]
   /**
+   * The host's reported wire revision (`wire.ts`'s `SNAPSHOT_WIRE_VERSION`), carried forward so a
+   * later click can refuse to call a method this host never registered. `undefined` means the host
+   * predates the marker, which is the same vintage as the oldest revision.
+   */
+  readonly wire?: number
+  /**
    * A version-skew note from the host half — set when the payload's `wire` marker is absent (older
    * host) or unknown (newer host). The trees are still rendered: the marker is a note, not a failure.
    */

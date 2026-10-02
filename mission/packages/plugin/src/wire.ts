@@ -160,12 +160,37 @@ export const descriptors: readonly InvocationDescriptor[] = [
  * click), so the version marker lives here and nowhere else: one number that tells the browser half
  * which host it is talking to, without adding a field to every method's arguments.
  *
- * `wire` is a plain optional number, NOT `z.literal(1)`: an unrecognized revision has to reach the
+ * `wire` is a plain optional number, NOT `z.literal(...)`: an unrecognized revision has to reach the
  * client as a HINT (`client/api.ts` compares it against `SNAPSHOT_WIRE_VERSION`), and a literal would
  * make `safeParse` fail and blank the whole panel — exactly the degradation the marker exists to
  * avoid. Absent means "an older host that predates the marker": still readable, with a hint.
+ *
+ * WHY ADDING A REMOTE **MUST** BUMP THIS. The marker only pays for itself if it tracks the SET OF
+ * METHODS the host publishes, not the shape of one payload. The two halves of this plugin do not
+ * update together — the browser bundle is re-read on every page load, the host half only when `dsh
+ * web` starts — so a rebuilt client routinely talks to a host process loaded before the new method
+ * existed. The gateway answers a method that host never published with an HTTP 404, which reads
+ * exactly like "the mission or the file is gone" (measured: clicking the historical node `059f56ed`).
+ * A bumped revision is what lets the client refuse to make that call at all (`client/api.ts` gates
+ * the click-time lookup on {@link EXECUTOR_LOOKUP_WIRE_VERSION}). Bump on every added/removed
+ * `@Remote` method; do NOT bump for a new optional FIELD, which a `.default(...)`-carrying schema
+ * already absorbs across the gap.
+ *
+ * Revision history:
+ * - 1: `snapshot` / `detail` / `result` / `delete` / `watch`.
+ * - 2: `resolveExecutorSession` added (W18) — it shipped WITHOUT this bump, which is the defect the
+ *   revision repairs.
  */
-export const SNAPSHOT_WIRE_VERSION = 1
+export const SNAPSHOT_WIRE_VERSION = 2
+
+/**
+ * The wire revision that FIRST carried `resolveExecutorSession`. A host reporting less than this — or
+ * reporting no `wire` at all, i.e. one older than the marker — has never registered the method, so
+ * `fetchExecutorSession` refuses to SEND the call and says that restarting dsh fixes it. Kept here
+ * beside {@link SNAPSHOT_WIRE_VERSION} so the two revisions are read together; the current client
+ * advertises the newer one.
+ */
+export const EXECUTOR_LOOKUP_WIRE_VERSION = 2
 
 export const snapshotResultSchema = z.object({
   wire: z.number().optional(),

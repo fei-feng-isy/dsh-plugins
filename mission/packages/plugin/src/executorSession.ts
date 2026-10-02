@@ -26,13 +26,25 @@ export interface ListedSession {
   }
 }
 
+/**
+ * The two `SessionEventResultFilter` members this resolver sends, transcribed from the REAL contract
+ * (`@deepseek-ai/dsh-session-query`): a filter array is ANDed, and every clause is an OBJECT
+ * discriminated by `kind`. It is NOT a tuple array — W20 shipped `[['time', from, to], ['text', …]]`,
+ * which the real `materializeSessionEventResultFilters` rejects with `unknown filter kind (missing)`
+ * before it reads anything. The local union stays structural (this module imports no optional
+ * service), but it must mirror that shape, and only the two members actually used are declared.
+ */
+export type SessionEventFilter =
+  | { readonly kind: 'time'; readonly from?: number; readonly to?: number }
+  | { readonly kind: 'text'; readonly text: string }
+
 /** The slice of `sessionQuery` this resolver uses. Structural, like every optional service here. */
 export interface SessionQueryLike {
   listSessions(): Promise<readonly ListedSession[]>
-  /** Events of one session, AND-filtered. Only the `time` / `text` clauses are used. */
+  /** Events of one session, AND-filtered by the real `SessionEventResultFilter` object union. */
   filterEvents(
     sessionId: string,
-    filters: readonly (readonly [string, ...unknown[]])[],
+    filters: readonly SessionEventFilter[],
   ): Promise<readonly { readonly text: string }[]>
 }
 
@@ -54,6 +66,13 @@ export interface ResolveExecutorSessionOptions {
   readonly query: SessionQueryLike | undefined
   /** Wall clock, injected so a test fixes the window. */
   readonly now: number
+  /**
+   * Where a failed per-candidate log read goes. The failure must not VANISH: a filter whose SHAPE
+   * the service rejects fails on every candidate and, from the outside, looks exactly like "the
+   * session is gone" — which is how W20's total outage stayed green. At most one message per
+   * lookup; absent means no sink (tests that do not care).
+   */
+  readonly warn?: (message: string) => void
 }
 
 /** Why no session could be named. The panel turns each into its own sentence. */
@@ -161,26 +180,40 @@ function candidatesFor(
  * text from each event type, and it can scan without materializing a whole log in this plugin); the
  * regex after it is this module's own `id: <nodeId>` check, so a text filter that merely came CLOSE
  * cannot make the answer wrong.
+ *
+ * The clauses are the REAL object union (`{kind:'time',from,to}` / `{kind:'text',text}`); see
+ * {@link SessionEventFilter}.
  */
 async function sessionRanNode(
   query: SessionQueryLike,
   sessionId: string,
   nodeId: string,
   window: { from: number; to: number },
+  warn: (message: string) => void,
 ): Promise<boolean> {
   if (typeof query.filterEvents !== 'function') return false
   const pattern = new RegExp(`(?:^|\\n)id: ${nodeId}(?:\\n|$)`, 'u')
   try {
     const hits = await query.filterEvents(sessionId, [
-      ['time', window.from, window.to],
-      ['text', `id: ${nodeId}`],
+      { kind: 'time', from: window.from, to: window.to },
+      { kind: 'text', text: `id: ${nodeId}` },
     ])
     return hits.some((hit) => pattern.test(hit.text))
-  } catch {
+  } catch (cause) {
     // One unreadable log (a session-store migration refusing an old file, a race with a cleanup)
-    // must not fail the whole lookup — the other candidates are still worth asking.
+    // must not fail the whole lookup — the other candidates are still worth asking. It must not
+    // vanish either: a rejected filter SHAPE fails on every candidate and reads as "not found", so
+    // the first failure is reported once per lookup (the caller bounds it), session id included.
+    warn(`executor session lookup: filtering ${sessionId} failed — ${oneLine(cause)}; trying the rest`)
     return false
   }
+}
+
+/** A one-line, length-capped reason for a failed log read: a host error must not become a paragraph. */
+function oneLine(cause: unknown): string {
+  const raw = cause instanceof Error ? cause.message : String(cause)
+  const text = raw.replace(/\s+/gu, ' ').trim()
+  return text.length > 160 ? `${text.slice(0, 159)}…` : text
 }
 
 /**
@@ -216,11 +249,19 @@ export async function resolveExecutorSession(
   }
 
   const candidates = candidatesFor(listed, options.ownerSessionId, window)
+  // At most ONE warn per lookup: a shape error fails on every candidate, and one line per candidate
+  // would turn a single defect into a wall of noise (the read budget bounds it, but still).
+  let warned = false
+  const warnOnce = (message: string): void => {
+    if (warned) return
+    warned = true
+    options.warn?.(message)
+  }
   let read = 0
   for (const candidate of candidates) {
     if (read >= RESOLVE_READ_BUDGET) break
     read += 1
-    if (await sessionRanNode(query, candidate.id, nodeId, window)) {
+    if (await sessionRanNode(query, candidate.id, nodeId, window, warnOnce)) {
       return { status: 'resolved', sessionId: candidate.id, candidatesRead: read }
     }
   }

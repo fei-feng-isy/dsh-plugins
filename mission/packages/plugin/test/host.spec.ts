@@ -965,6 +965,9 @@ describe('resolving a historical executor on click', () => {
     expect(again).toEqual({ sessionId: 'mission-1234abcd', status: 'resolved' })
     expect(mounted.sessionListCalls()).toBe(1)
     expect(mounted.sessionLogReads).toEqual(['mission-1234abcd'])
+    // The filter shape the fake received was the real `{kind:'time'|'text'}` union (W20): a tuple
+    // would be recorded here and fail this case instead of answering `not-found` quietly.
+    expect(mounted.sessionFilterViolations).toEqual([])
   })
 
   it('reads ONLY the candidates that pass the parent / id-shape / time filters', async () => {
@@ -977,6 +980,7 @@ describe('resolving a historical executor on click', () => {
     const resolved = await mounted.host.resolveExecutorSession({ sessionId: 'owner', nodeId: 'bbbb2222' })
     expect(resolved).toMatchObject({ status: 'resolved', sessionId: 'mission-cccccccc' })
     expect(mounted.sessionLogReads).toEqual(['mission-cccccccc'])
+    expect(mounted.sessionFilterViolations).toEqual([])
   })
 
   it('separates "找不到" from "never dispatched"', async () => {
@@ -1023,6 +1027,7 @@ describe('resolving a historical executor on click', () => {
     expect(await mounted.host.resolveExecutorSession({ sessionId: 'owner', nodeId: 'ffff6666' }))
       .toMatchObject({ status: 'resolved', sessionId: 'mission-feedfeed' })
     expect(mounted.sessionLogReads).toEqual(['mission-feedfeed'])
+    expect(mounted.sessionFilterViolations).toEqual([])
   })
 
   it('refuses another session\'s node without reading anything', async () => {

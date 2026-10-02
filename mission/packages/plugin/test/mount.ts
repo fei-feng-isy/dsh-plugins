@@ -16,6 +16,7 @@ import { AvantfMissionHost } from '../src/host.js'
 import { createTreeStore, type TreesTable } from '../src/store.js'
 import type { TreeDocument } from '../src/domain.js'
 import { apply as applyPlugin, inject, name } from '../src/index.js'
+import { checkEventFilters, type SentEventFilter } from './sessionQueryContract.js'
 
 // The plugin's environment initialisation loads the family base `@avantf/dsh-plugin-base` through the
 // inlined bootstrap and keeps the family root under `$AVANTF_HOME`. A test must not touch the real
@@ -153,6 +154,12 @@ export interface Mounted {
   workerSessions: Map<string, { time: number; text: string }[]>
   /** Session ids whose `filterEvents` was called, in order — the spy the loading cases assert on. */
   sessionLogReads: string[]
+  /**
+   * Clauses `filterEvents` received that are NOT real `SessionEventResultFilter` objects. A tuple
+   * here is the W20 defect; every spec that resolves an executor asserts this stays empty, so a
+   * wrong shape fails the case that sent it instead of returning `[]` and looking like a miss.
+   */
+  sessionFilterViolations: string[]
   /** How many times `sessionQuery.listSessions()` was called — the metadata half of the same spy. */
   sessionListCalls: () => number
   /** Messages the host steered to a worker, in order. */
@@ -382,6 +389,7 @@ export async function mount(
   /** Session logs, keyed by session id; only `resolveExecutorSession` reads them. */
   const workerSessions = new Map<string, { time: number; text: string }[]>()
   const sessionLogReads: string[] = []
+  const sessionFilterViolations: string[] = []
   let sessionListCalls = 0
   const live = new Map<string, StubAgent>()
   const spill = { saved: [] as string[], locator: 'spill://mission-result', hint: 'read it with the read tool' }
@@ -604,14 +612,18 @@ export async function mount(
       sessionListCalls += 1
       return Promise.resolve(listedSessions)
     },
-    // W18: the event scan the click-time executor lookup runs. Only the `time` and `text` clauses
-    // are honoured, which is all `executorSession.ts` sends.
-    filterEvents: (sessionId: string, filters: readonly (readonly [string, ...unknown[]])[]) => {
+    // W18: the event scan the click-time executor lookup runs. The clauses are the REAL
+    // `{kind:'time'|'text'}` objects (`executorSession.ts` sends those two), and `checkEventFilters`
+    // records a tuple as the contract violation it is — the fake no longer restates the guess that
+    // made the W20 outage pass a green suite.
+    filterEvents: (sessionId: string, filters: readonly SentEventFilter[]) => {
       sessionLogReads.push(sessionId)
-      const range = filters.find((filter) => filter[0] === 'time') as readonly [string, number, number] | undefined
-      const wanted = filters.find((filter) => filter[0] === 'text')?.[1]
-      const from = range?.[1] ?? Number.NEGATIVE_INFINITY
-      const to = range?.[2] ?? Number.POSITIVE_INFINITY
+      const clauses = checkEventFilters(filters, (detail) => sessionFilterViolations.push(detail))
+      const time = clauses.find((clause) => clause.kind === 'time')
+      const text = clauses.find((clause) => clause.kind === 'text')
+      const from = time?.kind === 'time' ? time.from ?? Number.NEGATIVE_INFINITY : Number.NEGATIVE_INFINITY
+      const to = time?.kind === 'time' ? time.to ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY
+      const wanted = text?.kind === 'text' ? text.text : undefined
       const events = workerSessions.get(sessionId) ?? []
       return Promise.resolve(
         events
@@ -708,6 +720,7 @@ export async function mount(
     listedSessions,
     workerSessions,
     sessionLogReads,
+    sessionFilterViolations,
     sessionListCalls: () => sessionListCalls,
     contexts,
     sections,

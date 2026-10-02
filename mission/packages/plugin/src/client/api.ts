@@ -1,7 +1,12 @@
 /** The client half's data path, kept away from React so the transport edge stays testable.
  * @module @avantf/dsh-mission/client/api
  */
-import { SNAPSHOT_WIRE_VERSION, detailResultSchema, snapshotResultSchema } from '../wire.js'
+import {
+  EXECUTOR_LOOKUP_WIRE_VERSION,
+  SNAPSHOT_WIRE_VERSION,
+  detailResultSchema,
+  snapshotResultSchema,
+} from '../wire.js'
 import type { ExecutorSessionLookup, MissionNodeDetail, MissionSnapshot } from './contract.js'
 
 /** Safety-net re-read interval; slow on purpose, since the session itself is the primary trigger. */
@@ -160,8 +165,12 @@ export async function fetchSnapshot(remote: MissionRemote, sessionId: string): P
   if (!parsed.success) throw new Error(skewHint('任务树', issueText(parsed.error)))
   // A version skew is a NOTE on a usable snapshot, not a failure: see `snapshotSkew`.
   const skew = snapshotSkew(value)
+  // The revision travels with the snapshot so a later click can gate on it (see
+  // `fetchExecutorSession`): the host half is loaded once, so this cannot change under a session.
+  const wire = parsed.data.wire
   return {
     trees: parsed.data.trees as MissionSnapshot['trees'],
+    ...wire === undefined ? {} : { wire },
     ...skew === undefined ? {} : { skew },
   }
 }
@@ -207,13 +216,29 @@ export async function fetchDetail(remote: MissionRemote, sessionId: string, node
  * The two halves of this plugin do not update together: the browser bundle is re-read on every page
  * load, the host half is loaded once when `dsh web` starts. So a rebuilt plugin routinely talks to an
  * older host, and the gateway answers a method that host never published with an HTTP 404 — which
- * reads exactly like "the mission or the file is gone", the two things it does NOT mean.
+ * reads exactly like "the mission or the file is gone", the two things it does NOT mean. The sentence
+ * therefore names the missing REGISTRATION (an older host, or one that was never restarted) rather
+ * than only repeating the transport text.
  */
 export function transportHint(cause: unknown): string {
   const text = cause instanceof Error ? cause.message : String(cause)
   if (!/404|not found/iu.test(text)) return text
-  return '宿主进程里没有这条调用：客户端会随页面刷新，宿主只在启动时加载一次，所以 dsh web 很可能还在跑'
-    + `旧的宿主代码。重启 dsh web 后再试。（原始错误：${text}）`
+  return '宿主可能没有注册这个接口（旧版本 / 未重启）：客户端会随页面刷新，宿主只在 dsh web 启动时加载一次，'
+    + `所以 dsh web 很可能还在跑旧的宿主代码。重启 dsh web 后再试。（原始错误：${text}）`
+}
+
+/**
+ * The sentence for a host older than a click-time remote call. The call is NEVER sent, so this must
+ * not read as a transport failure: the host's own revision says the method does not exist, and the
+ * remedy (restart dsh) is specific. `undefined` is the host that predates the `wire` marker at all —
+ * the same vintage, said differently.
+ */
+function staleHostLookupText(hostWire: number | undefined): string {
+  const state = hostWire === undefined
+    ? `宿主没有回报 wire 版本（本客户端需要 ${String(EXECUTOR_LOOKUP_WIRE_VERSION)}）`
+    : `宿主仍在运行旧版本（wire ${String(hostWire)} < ${String(EXECUTOR_LOOKUP_WIRE_VERSION)}）`
+  return `${state}：它还没有注册 resolveExecutorSession 这条调用，所以这次查找没有发出去。`
+    + '重启 dsh 后即可点击历史任务。'
 }
 
 /**
@@ -253,22 +278,32 @@ export async function fetchFullResult(remote: MissionRemote, sessionId: string, 
  * pay while rendering.
  *
  * Three failure shapes, kept apart on purpose:
- * - the host has no such method at all (an older host) → a version-skew sentence, since restarting
- *   `dsh web` really does fix it;
+ * - the host reports a `wire` older than the method (an older host, or one never restarted) → the call
+ *   is NOT SENT at all, and the sentence names the remedy (restart dsh);
+ * - the host has no such method despite a current `wire` → the same version-skew sentence;
  * - the call itself failed (transport) → `transportHint`'s reading of it;
  * - the host ANSWERED "never dispatched" / "not found" / "cannot look up" → returned as an answer,
  *   because those are outcomes a reader must be told about, not failures of the panel.
+ *
+ * `hostWire` is the revision the host reported on its last `snapshot` (carried on the snapshot the
+ * panel renders from). Checked FIRST and before the remote is even touched: against a host that never
+ * registered the method, sending the call can only produce a gateway 404 that reads like a deleted
+ * mission (see `transportHint`).
  */
 export async function fetchExecutorSession(
   remote: MissionRemote,
   sessionId: string,
   nodeId: string,
+  hostWire?: number,
 ): Promise<ExecutorSessionLookup> {
+  if (hostWire === undefined || hostWire < EXECUTOR_LOOKUP_WIRE_VERSION) {
+    throw new Error(staleHostLookupText(hostWire))
+  }
   const resolve = remote.resolveExecutorSession
   if (typeof resolve !== 'function') {
     throw new Error(
-      '这个宿主还不能查找执行者会话（Remote 面没有 resolveExecutorSession 调用）：宿主只在 dsh web 启动时加载一次，'
-      + '重启 dsh web 后再试。',
+      '宿主可能没有注册这个接口（旧版本 / 未重启）：Remote 面没有 resolveExecutorSession 调用，'
+      + '宿主只在 dsh web 启动时加载一次，重启 dsh web 后再试。',
     )
   }
   let response: unknown

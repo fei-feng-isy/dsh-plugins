@@ -46,7 +46,7 @@ import {
   type ArchiveRegistry,
   type WorkerSession,
 } from './workerSessions.js'
-import { hostContribution } from './wire.js'
+import { descriptors, hostContribution, SNAPSHOT_WIRE_VERSION } from './wire.js'
 import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createLogger } from './log.js'
 import { resolveWellFormed } from './wellformed.js'
@@ -276,6 +276,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         `typert host face registered (namespace avantfMission, ${
           String((hostContribution as unknown as { invocations?: readonly unknown[] }).invocations?.length ?? 0)
         } invocations: snapshot, detail, result, delete, resolveExecutorSession, watch)`,
+      )
+      // One line that settles "which half is stale?" without a debugger: the two halves of this plugin
+      // update on different schedules (the browser bundle per page load, this face only when `dsh web`
+      // starts), and a client that asks for a method this process never published gets an HTTP 404 that
+      // reads like a missing mission. Log the revision, the METHOD SET actually published, and the
+      // module the host loaded — so a mismatch is answered by the terminal, not by a bisect.
+      log.info(
+        `typert host face: wire ${String(SNAPSHOT_WIRE_VERSION)}, `
+        + `${String(descriptors.length)} methods (${descriptors.map(descriptor => descriptor.method).join(', ')}); `
+        + `module ${import.meta.url}`,
       )
     } catch (error: unknown) {
       log.error(

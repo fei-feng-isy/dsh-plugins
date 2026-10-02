@@ -102,6 +102,9 @@ interface SnapshotDeps {
   readonly schedule: (refresh: () => void) => () => void
   readonly revision: string
   readonly log: (level: 'log' | 'error', message: string) => void
+  /** Record the host's reported `wire` revision (see `wire.ts`), so a later click can refuse to call
+   *  a method that host never registered. Must be stable across renders — it is a `refresh` dep. */
+  readonly noteWire: (wire: number | undefined) => void
 }
 
 /** Which mechanism is currently keeping the view fresh. */
@@ -115,7 +118,7 @@ type RefreshLink = 'pending' | 'stream' | 'timer'
  * like "the refresh feature was never built".
  */
 function useSnapshotFor(deps: SnapshotDeps): MissionSnapshotState {
-  const { sessionId, getRemote, mounted, schedule, revision, log } = deps
+  const { sessionId, getRemote, mounted, schedule, revision, log, noteWire } = deps
   const [data, setData] = useState<MissionSnapshot | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(false)
@@ -140,6 +143,9 @@ function useSnapshotFor(deps: SnapshotDeps): MissionSnapshotState {
     try {
       const next = await fetchSnapshot(remote, sessionId)
       if (seq !== readSeq.current) return
+      // Remember WHICH host this is before rendering its trees: a click on a node from this snapshot
+      // may need a remote the host is too old to have, and the revision is how that is known.
+      noteWire(next.wire)
       setData(next)
       setError(undefined)
     } catch (cause) {
@@ -148,7 +154,7 @@ function useSnapshotFor(deps: SnapshotDeps): MissionSnapshotState {
     } finally {
       if (seq === readSeq.current) setLoading(false)
     }
-  }, [mounted, getRemote, sessionId])
+  }, [mounted, getRemote, sessionId, noteWire])
 
   // ONE coalescer for every trigger (session revision, stream frames, stream reopen). It used to be
   // wired to the revision path only, while the change stream called `refresh()` per frame — and the
@@ -242,7 +248,9 @@ export function apply(ctx: ClientContext): void {
 
   // Mounted asynchronously, so the tab is registered regardless: a failed mount must show
   // an explanatory view, not a missing tab, and must never fail the web boot.
-  const state: { remote?: MissionRemote } = {}
+  const state: { remote?: MissionRemote; wire?: number } = {}
+  /** Stable across renders on purpose: it is a dependency of the snapshot hook's memoized `refresh`. */
+  const noteWire = (wire: number | undefined): void => { state.wire = wire }
   // The view waits on this instead of racing the mount; settled on failure too, so a broken
   // mount surfaces as the view's error rather than as a panel that loads forever.
   const mounted = ((): { promise: Promise<void>; settle: () => void } => {
@@ -331,6 +339,7 @@ export function apply(ctx: ClientContext): void {
         schedule,
         revision,
         log,
+        noteWire,
       }),
       onDeleteTree: async (rootId: string): Promise<void> => {
         const remote = getRemote()
@@ -351,11 +360,13 @@ export function apply(ctx: ClientContext): void {
       sessionId: props.sessionId,
       // W18: the lazy lookup behind a click on a node whose record has no handle yet. It is a
       // Remote call (the host lists sessions and reads a few logs), so it is handed over as a
-      // function and NEVER invoked here — the view calls it from the click only.
+      // function and NEVER invoked here — the view calls it from the click only. The `wire` the last
+      // snapshot reported goes WITH it: a host too old to have registered the method must not be
+      // called at all (the gateway's 404 for it reads like a missing mission).
       resolveWorkerSession: async (nodeId: string) => {
         const remote = getRemote()
         if (remote === undefined) throw new Error('任务树 Remote 未挂载')
-        return await fetchExecutorSession(remote, props.sessionId, nodeId)
+        return await fetchExecutorSession(remote, props.sessionId, nodeId, state.wire)
       },
       ...workspace === undefined
         ? {}

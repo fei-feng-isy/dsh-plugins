@@ -6,7 +6,12 @@
  * costs the most and is hardest to see in a browser.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { SNAPSHOT_WIRE_VERSION, detailResultSchema, snapshotResultSchema } from '../src/wire.js'
+import {
+  EXECUTOR_LOOKUP_WIRE_VERSION,
+  SNAPSHOT_WIRE_VERSION,
+  detailResultSchema,
+  snapshotResultSchema,
+} from '../src/wire.js'
 import {
   POLL_INTERVAL_MS,
   REFRESH_COALESCE_MS,
@@ -81,6 +86,27 @@ describe('the snapshot wire version', () => {
     expect(snapshot.trees[0]?.rootId).toBe('r1')
     expect(snapshot.skew).toBeUndefined()
     expect(snapshotSkew({ wire: SNAPSHOT_WIRE_VERSION, trees: [] })).toBeUndefined()
+  })
+
+  it('carries the reported revision onto the snapshot, so a later click can gate on it', async () => {
+    // The click-time lookup needs to know whether this host ever registered its remote (see
+    // `fetchExecutorSession`), and `snapshot` is the only call that reports it.
+    const snapshot = await fetchSnapshot(
+      remoteReturning({ ok: true, value: { wire: SNAPSHOT_WIRE_VERSION, trees: [tree] } }),
+      'session-1',
+    )
+    expect(snapshot.wire).toBe(SNAPSHOT_WIRE_VERSION)
+    // A host older than the marker leaves it absent — the same vintage, said differently.
+    const older = await fetchSnapshot(remoteReturning({ ok: true, value: { trees: [tree] } }), 'session-1')
+    expect(older.wire).toBeUndefined()
+  })
+
+  it('the client\'s own revision is at least the one the lookup needs', () => {
+    // Otherwise the gate would refuse the call against a host that DOES have the method.
+    expect(SNAPSHOT_WIRE_VERSION).toBeGreaterThanOrEqual(EXECUTOR_LOOKUP_WIRE_VERSION)
+    // The revision that first carried the method is exactly 2 — the number the user-facing sentence
+    // names, and the one this release's client claims.
+    expect(EXECUTOR_LOOKUP_WIRE_VERSION).toBe(2)
   })
 
   it('only the HOST carries it (the client is older): the payload still parses, the key is dropped', () => {
@@ -369,7 +395,44 @@ describe('fetchExecutorSession', () => {
         return Promise.resolve({ ok: true, value: { status: 'resolved', sessionId: 'mission-1' } })
       },
     }
-    await expect(fetchExecutorSession(remote, 'session-1', 'r1'))
+    await expect(fetchExecutorSession(remote, 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
+      .resolves.toEqual({ status: 'resolved', sessionId: 'mission-1' })
+    expect(calls).toEqual([{ method: 'resolveExecutorSession', args: { sessionId: 'session-1', nodeId: 'r1' } }])
+  })
+
+  it('does NOT SEND the call against a host whose wire predates the method', async () => {
+    // The measured defect: a rebuilt client clicked the historical node `059f56ed`, the host process
+    // was still the old one, and the gateway answered the unregistered remote with an HTTP 404 that
+    // read like "the mission is gone". The `wire` marker already says the host is older, so the call
+    // must not be made at all — and the sentence must name the remedy.
+    const calls: string[] = []
+    const stale: MissionRemote = {
+      ...remoteReturning({ ok: true, value: { trees: [] } }),
+      resolveExecutorSession: (args) => {
+        calls.push(args.nodeId)
+        return Promise.resolve({ ok: true, value: { status: 'resolved', sessionId: 'mission-1' } })
+      },
+    }
+    await expect(fetchExecutorSession(stale, 'session-1', 'r1', 1)).rejects.toThrow('宿主仍在运行旧版本')
+    await expect(fetchExecutorSession(stale, 'session-1', 'r1', 1)).rejects.toThrow('wire 1 < 2')
+    await expect(fetchExecutorSession(stale, 'session-1', 'r1', 1))
+      .rejects.toThrow('重启 dsh 后即可点击历史任务')
+    // No revision at all is the same vintage: the host predates the marker, so the method cannot exist.
+    await expect(fetchExecutorSession(stale, 'session-1', 'r1')).rejects.toThrow('没有回报 wire 版本')
+    expect(calls).toEqual([])
+  })
+
+  it('goes ahead with the lazy lookup when the host reports the current wire', async () => {
+    // The other half of the gate: a CURRENT host must be called exactly as before.
+    const calls: { method: string; args: unknown }[] = []
+    const remote = {
+      ...remoteReturning({ ok: true, value: { trees: [] } }, calls),
+      resolveExecutorSession: (args: { sessionId: string; nodeId: string }) => {
+        calls.push({ method: 'resolveExecutorSession', args })
+        return Promise.resolve({ ok: true, value: { status: 'resolved', sessionId: 'mission-1' } })
+      },
+    }
+    await expect(fetchExecutorSession(remote, 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
       .resolves.toEqual({ status: 'resolved', sessionId: 'mission-1' })
     expect(calls).toEqual([{ method: 'resolveExecutorSession', args: { sessionId: 'session-1', nodeId: 'r1' } }])
   })
@@ -380,18 +443,26 @@ describe('fetchExecutorSession', () => {
       ...remoteReturning({ ok: true, value: { trees: [] } }),
       resolveExecutorSession: () => Promise.resolve({ ok: true, value }),
     })
-    await expect(fetchExecutorSession(withAnswer({ status: 'not-found' }), 'session-1', 'r1'))
+    await expect(fetchExecutorSession(withAnswer({ status: 'not-found' }), 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
       .resolves.toEqual({ status: 'not-found' })
-    await expect(fetchExecutorSession(withAnswer({ status: 'never-dispatched' }), 'session-1', 'r1'))
+    await expect(fetchExecutorSession(withAnswer({ status: 'never-dispatched' }), 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
       .resolves.toEqual({ status: 'never-dispatched' })
-    await expect(fetchExecutorSession(withAnswer({ status: 'unsupported', error: 'sessionQuery is not mounted' }), 'session-1', 'r1'))
-      .resolves.toEqual({ status: 'unsupported', error: 'sessionQuery is not mounted' })
+    await expect(fetchExecutorSession(
+      withAnswer({ status: 'unsupported', error: 'sessionQuery is not mounted' }),
+      'session-1',
+      'r1',
+      SNAPSHOT_WIRE_VERSION,
+    )).resolves.toEqual({ status: 'unsupported', error: 'sessionQuery is not mounted' })
   })
 
   it('names a host that predates the method, and a 404, as a STALE HOST process', async () => {
     // Older host: the Remote face has no such call at all. Restarting `dsh web` is the fix, so say so.
     const { resolveExecutorSession: _omitted, ...withoutCall } = remoteReturning({ ok: true, value: { trees: [] } })
-    await expect(fetchExecutorSession(withoutCall, 'session-1', 'r1')).rejects.toThrow('重启 dsh web')
+    await expect(fetchExecutorSession(withoutCall, 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
+      .rejects.toThrow('重启 dsh web')
+    // ...and the sentence names the likely reason: an interface that is not registered.
+    await expect(fetchExecutorSession(withoutCall, 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
+      .rejects.toThrow('宿主可能没有注册这个接口')
 
     const stale: MissionRemote = {
       ...remoteReturning({ ok: true, value: { trees: [] } }),
@@ -399,7 +470,11 @@ describe('fetchExecutorSession', () => {
         'client api: avantfMission/resolveExecutorSession failed: HTTP 404',
       )),
     }
-    await expect(fetchExecutorSession(stale, 'session-1', 'r1')).rejects.toThrow('重启 dsh web')
+    await expect(fetchExecutorSession(stale, 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
+      .rejects.toThrow('重启 dsh web')
+    // The fallback names the likely reason instead of only repeating "transport failure".
+    await expect(fetchExecutorSession(stale, 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
+      .rejects.toThrow('宿主可能没有注册这个接口（旧版本 / 未重启）')
   })
 
   it('rejects an envelope error and a payload it cannot recognise', async () => {
@@ -407,13 +482,15 @@ describe('fetchExecutorSession', () => {
       ...remoteReturning({ ok: true, value: { trees: [] } }),
       resolveExecutorSession: () => Promise.resolve({ ok: false, error: 'namespace missing' }),
     }
-    await expect(fetchExecutorSession(failed, 'session-1', 'r1')).rejects.toThrow('namespace missing')
+    await expect(fetchExecutorSession(failed, 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
+      .rejects.toThrow('namespace missing')
 
     const unrecognised: MissionRemote = {
       ...remoteReturning({ ok: true, value: { trees: [] } }),
       resolveExecutorSession: () => Promise.resolve({ ok: true, value: { status: 'maybe' } }),
     }
-    await expect(fetchExecutorSession(unrecognised, 'session-1', 'r1')).rejects.toThrow('无法识别的数据')
+    await expect(fetchExecutorSession(unrecognised, 'session-1', 'r1', SNAPSHOT_WIRE_VERSION))
+      .rejects.toThrow('无法识别的数据')
   })
 })
 

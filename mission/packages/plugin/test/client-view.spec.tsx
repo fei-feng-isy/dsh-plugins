@@ -435,6 +435,22 @@ describe('opening the session that ran a mission', () => {
     expect(again).toEqual([])
   })
 
+  it('opens a node that already has a handle directly, without any wire or lookup', async () => {
+    // W19: only the LAZY path is gated on the host's wire revision. A record that already names its
+    // executor needs neither the remote nor the marker, so a stale host costs an ordinary jump
+    // nothing. `resolveSession` is a spy that throws if it is ever consulted.
+    const sent: WorkerSessionTarget[] = []
+    const outcome = await workerSessionOpen({
+      nodeId: 'r1',
+      parentSessionId: 'owner-1',
+      workerSessionId: WORKER,
+      open: (target) => { sent.push(target) },
+      resolveSession: () => { throw new Error('the handle path must not look anything up') },
+    })
+    expect(outcome).toEqual({ opened: true, workerSessionId: WORKER })
+    expect(sent).toEqual([{ parentSessionId: 'owner-1', childSessionId: WORKER, mode: 'continuable' }])
+  })
+
   it('renders the mission id itself as the clickable element, labelled with the destination and its state', () => {
     const html = dialog(
       { nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: WORKER, workerLive: true }) },

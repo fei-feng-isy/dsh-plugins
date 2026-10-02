@@ -1357,6 +1357,7 @@ export class AvantfMissionHost extends TypertRemoteService {
       ownerSessionId: owner.ownerSessionId,
       query: this.sessionLogQuery(),
       now: Date.now(),
+      warn: (message) => this.log.warn(message),
     })
     if (resolved.status === 'resolved') {
       // Write-once, inside the tree's own lock: a handle that arrived while the lookup was in flight
