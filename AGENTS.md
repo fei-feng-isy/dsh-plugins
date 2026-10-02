@@ -73,9 +73,11 @@
 - **不能 → 留在插件里**，但要在本文写明，并接受"改它需要一次**插件**发版"。已记录的本地知识：Typert
   `strict` codec 与端点 / 字段 / 结果符号那几行；插件自己的 logger（base 解析之前就要用）；各插件的 compat
   SPEC 与 envinit item 清单；各插件内置的默认提示词正文与 client 半边。
-- **一处刻意的镜像**：家族 / 数据路径解析有两份——`base/plugin-base/src/kit/family.ts` 是正本，
-  `@avantf/mem-contract` 留一份**无依赖**副本（CLI / MCP 没有 DSH 宿主、从不加载 base），跨树测试钉住两份；
-  改它 = 一次 base 发版**加**一次 mem 引擎改动。
+- **刻意的镜像（实测三份）**：家族 / 数据路径解析有三份——`base/plugin-base/src/kit/family.ts` 是正本；
+  `@avantf/mem-contract`（`src/env.ts`）留一份**无依赖**副本（CLI / MCP 没有 DSH 宿主、从不加载 base）；
+  `mem/packages/provision`（`src/config.ts`）还有一份**依赖自由**副本（provision 跑在 base 之前/之外）。
+  跨树 pin 钉住正本 ↔ contract；provision 那份的 `~/` 分支由 `family_paths.spec.ts` 直接覆盖。
+  改它 = 一次 base 发版**加**一次 mem 引擎改动（三份都要跟）。
 - **两个插件绝不互相 import**（连相对路径也不行），共享一律走 `base/`。刻意不复用：两个内核
   （`@avantf/mem` / `@avantf/mission-core` 不共享领域模型）、两个 client 半边、各插件的 item 清单与 SPEC。
 
