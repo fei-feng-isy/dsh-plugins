@@ -138,6 +138,21 @@ export function stripComments(source) {
 }
 
 /**
+ * The package names a `VERSION_PACKAGES` array body declares.
+ *
+ * Comments are stripped FIRST, and that is the whole point of this function: the body is prose-heavy
+ * (each entry may carry a note explaining why it is or is not listed), and an apostrophe in that prose
+ * — "part of this plugin's compile surface" — pairs with the next quote anywhere below and swallows
+ * every real entry in between. Measured 2026-10-02: mission's list was read as 8 junk fragments plus
+ * 8 missing packages, and the gate reported ten problems against a list that was in fact complete.
+ * @param arrayBody - the text between `[` and `]` of the declaration.
+ * @returns the declared specifiers, in source order.
+ */
+export function versionPackageNames(arrayBody) {
+  return [...stripComments(arrayBody).matchAll(/'([^']+)'/gu)].map((match) => match[1])
+}
+
+/**
  * Every module specifier a source imports or requires, in all forms; comments are stripped first so
  * documentation examples cannot trip a `from`-only pattern.
  */
@@ -458,7 +473,7 @@ export function assertCheckout(config) {
     if (declaredList === undefined) {
       fail(`src/${config.versionPackagesFile.replace(/^src\//u, '')} no longer declares VERSION_PACKAGES — the gate's version list cannot be verified against the bake`)
     } else {
-      const listed = new Set([...declaredList.matchAll(/'([^']+)'/gu)].map((match) => match[1]))
+      const listed = new Set(versionPackageNames(declaredList))
       for (const pkg of listed) {
         if (baked[pkg] === undefined) {
           fail(`VERSION_PACKAGES names ${pkg} but dsh-build.json does not bake it — the gate would fall back to the peer range's lower bound instead of this build's version`)

@@ -37,6 +37,7 @@ import {
   readTarballEntry,
 } from './lib/published-base.mjs'
 import { execToolSync } from './lib/win-spawn.mjs'
+import { versionPackageNames } from './lib/pack-plugin.mjs'
 import { groupWorkspaceTargets, workspaceTargets, withWorkspaceVersions } from './lib/versions.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -574,3 +575,36 @@ function loadSemver() {
   }
   throw new Error('gates.test: no semver found to judge the dsh lines with (run `pnpm install`)')
 }
+
+// ── VERSION_PACKAGES parsing · prose comments must not eat the list ───────────────────────────────
+//
+// Measured 2026-10-02: mission's `VERSION_PACKAGES` carries a note per unusual entry, and the
+// apostrophe in "part of this plugin's compile surface" paired with the next quote — the gate then
+// read 8 junk fragments and missed 8 real packages, failing a list that was in fact complete.
+
+test('VERSION_PACKAGES: names survive prose comments, apostrophes included', () => {
+  const body = `
+  '@deepseek-ai/dsh-a',
+  // Not listed: \`dsh-storage\`. It is a transitive dependency of the declared peer, not part of this
+  // plugin's compile surface, and \`link-dsh.mjs\` no longer links it (see the note there).
+  '@deepseek-ai/dsh-b',
+  /* block note: don't parse this one either */
+  '@deepseek-ai/dsh-c',
+`
+  assert.deepEqual(versionPackageNames(body), [
+    '@deepseek-ai/dsh-a',
+    '@deepseek-ai/dsh-b',
+    '@deepseek-ai/dsh-c',
+  ])
+})
+
+test('VERSION_PACKAGES: a real mission-style list parses to its declared entries only', () => {
+  const source = readFileSync(join(workspace, 'mission/packages/plugin/src/envinit.ts'), 'utf8')
+  const body = /const VERSION_PACKAGES: readonly string\[\] = \[([\s\S]*?)\]/u.exec(source)?.[1]
+  assert.ok(body !== undefined, 'mission must still declare VERSION_PACKAGES')
+  const names = versionPackageNames(body)
+  assert.ok(names.length > 8, `expected a real list, got ${String(names.length)} names`)
+  for (const name of names) {
+    assert.match(name, /^@deepseek-ai\/[a-z-]+$/u, `${name} is not a package specifier — the parse drifted`)
+  }
+})

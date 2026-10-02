@@ -110,6 +110,7 @@
   "devDependencies": {
     "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",
     "@avantf/mission-core": "workspace:*",
+    "@deepseek-ai/dsh-typert-registry": "^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2",
     "@tanstack/react-virtual": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
