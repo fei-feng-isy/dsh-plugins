@@ -25,8 +25,7 @@
     "version:check": "node scripts/version.mjs check",
     "version:prune": "node scripts/version.mjs prune",
     "version:set": "node scripts/version.mjs set",
-    "release:tree": "node scripts/make-release-tree.mjs",
-    "sync:rc": "bash scripts/sync-release-repo.sh",
+    "prepublish:assert": "node scripts/prepublish-assert.mjs",
     "clean": "node scripts/clean.mjs",
     "check:old-dsh": "node scripts/check-old-dsh.mjs",
     "check:dsh-lines": "node scripts/check-dsh-lines.mjs"

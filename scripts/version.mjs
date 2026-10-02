@@ -124,7 +124,7 @@ if (command === 'set') {
   console.log(`  ${file}: ${String(was)} → ${version}`)
   const baked = writeBakedVersion(root, group, version)
   if (baked !== undefined) console.log(`  ${baked.file}: ${String(baked.was)} → ${version} (baked constant)`)
-  console.log('next: cut mem/CHANGELOG.md if this is a mem release, then `pnpm sync:rc`')
+  console.log('next: cut mem/CHANGELOG.md if this is a mem release, then run `pnpm release:check` and publish from this checkout (see docs/RELEASING.md)')
   process.exit(0)
 }
 

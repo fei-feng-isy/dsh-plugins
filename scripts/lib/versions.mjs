@@ -22,7 +22,7 @@
  *
  * `pnpm version:set <group> <version>` therefore edits ONE file, and there is nothing to propagate.
  * `scripts/version.mjs` (the CLI), `scripts/release-check.mjs` (the gate) and
- * `scripts/make-release-tree.mjs` (the release projection) all read the mapping from here.
+ * `scripts/prepublish-assert.mjs` (the publish-time assertions) all read the mapping from here.
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'

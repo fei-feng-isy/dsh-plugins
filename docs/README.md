@@ -3,6 +3,9 @@
 The merged repository keeps each subtree's documentation next to its code; this directory is the
 place for anything that is about the WORKSPACE as a whole.
 
+- `RELEASING.md` — how the three packages are released from THIS checkout (base → plugins), why the
+  `../dsh-plugins-rc` projection was retired, and the publish-time assertions
+  (`scripts/prepublish-assert.mjs`) that replaced its three differences.
 - `review/` — the code-review records, one file per review, oldest first (`YYYY-MM-DD-<topic>.md`).
   They cover the workspace (or a subtree of it), quote internals freely and are **deliberately not
   committed** (see the rule in `../.gitignore`): they are kept in the working tree for reference and

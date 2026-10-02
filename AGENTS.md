@@ -180,7 +180,9 @@ mount smoke）由**派单方在收口时统一跑**。执行者验证一遍、�
 懒查把 `filterEvents` 的过滤器传成元组（真实契约是 `{kind:'time'|'text'}` 对象；假实现照抄了错形状，于是"所有历史
 任务都查不到"而测试全绿）；排队等待用例依赖真实经过的毫秒（必须推进时钟才可信）。
 
-**RC 投影只在发版时做**（`../dsh-plugins-rc`，整仓投影 + 产物级门禁）：日常开发不投影，不发版不投影。
+**发布直接从 dev 仓做，不再投影 RC**（2026-10-03 裁决，见文末「架构裁决记录」）：旧的 `../dsh-plugins-rc`
+停在 work/ 时代、已废弃；RC 原本提供的三件事（排除发布工具、版本盖章、生成 README）改为**发布前断言**，
+在 dev 树里必须成立才允许 `publish`。
 
 ## 体量与枢纽文件（hub）
 
@@ -247,3 +249,39 @@ mount smoke）由**派单方在收口时统一跑**。执行者验证一遍、�
   `weight > capacity` 者独占整机），顺序按**入队时间**而非 weight；等容量的节点在投影里显示 `waitingFor`。
   平台探针（`ResourceProbe`）：**`null` = 本平台无此信号，绝不等于"空闲"**，只能让调度更保守；压力信号与
   子进程归属的适配器留给 v2。
+
+## 架构裁决记录（第五轮架构审查，2026-10-03）
+
+复审原文（不入库）：`docs/review/2026-10-03-architecture-review.md`。裁决与落地：
+
+| 复审项 | 裁决 |
+|---|---|
+| §1.4/§7.9 base 的 `.` 是 `export *` 的副产品（50 个冻结值里 **14 个零消费者**、`createPluginLogger` 全仓零引用、4 个 typert 符号按设计无运行期消费者；一个世代号盖三种变化速率） | **收窄**：`.` 只留插件真取用的稳定子集、零消费者移进 `./internal`、`export *` 改**显式列举**，并与 prompts namespace 校验**合并成一次接口换代（v3）** |
+| §1.5/§7.11 RC 投影停在 work/ 时代（"保留但不用"是最差一档） | **废除 RC，直接从 dev 仓发布**；RC 原本的三件事（排除发布工具、版本盖章、生成 README）降为**发布前断言**；`../dsh-plugins-rc` 已废弃 |
+| §1.7/§7.6 CI 不跑 `build:dsh`，而"插件能挂载"是家族最核心的承诺 | **提进强制层**：CI 独立 job `mount-smoke`（两树 `build:dsh` + 断言 `MOUNT SMOKE OK`，先打印 dsh 版本便于分诊漂移）→ 已落地 `f67ff72` |
+| §1.2/§2 `@avantf/mem-core` 名字与角色相反 | **改名 `@avantf/mem-retrieval`**（private、机械替换、不发版；跑一次含 eval 复核的全量门禁） |
+| §1.3② mem 的 Remote 方法**无 wire 版本标记**（mission 已付过 404 学费） | **补**：照抄 mission 的版本标记 + skew 门禁模式 |
+| §1.7 `remote_wire.spec` 的 vacuity 名单漏 `classifySource`/`browseDir`（守卫把缺口写成期望） | **补**，并尽量改成**从描述符表派生**，消除名单漂移这一类问题 |
+| §1.6② `<dataHome>/prompts` 靠 `mem-*`/`mission-*` 前缀区分却**零机器检查** | **并入 v3 换代**：前缀成为 `PromptFiles({namespace})` 的字段、由 base 校验（不传 namespace 的旧调用方必须行为不变） |
+| §3/§7.3 mission 的 zod `default().catch()` 与 core `normalizeLoaded` 各编码一遍默认值，**无跨层 pin** | **补**跨层 pin（同一份脏记录过两条路径，逐字段断言同答案） |
+| §3/§7.5 core `prompt.ts` 被 `tree.ts` 反向 import（层次倒置，非循环） | **拆出 `trouble.ts`**（`statusLabel`/`isTroubledNode`），消倒置 |
+| §1.6/§7.7 mission 本地 `resolveDataHome` 兜底（第四份实现）注释承诺同答案但**无 pin** | **补 pin**（显式实参 / `AVANTF_HOME` / 配置层 / 默认四种输入） |
+| §2/§7.13 `registerSemanticBackend`/`registerVectorStore` 只有测试调用、无 `registerReranker`、发布面不 re-export | **补齐**（兑现 DESIGN §5"三者皆可注册"）：补 `registerReranker` + 注册面 re-export 到插件公开面 |
+| §2/§7.12 cli/mcp 是 README 标 ✅ 的交付物却无安装路径 | **只修披露**：里程碑表如实标"需 repo checkout（private）"；不发布、不进可发布集合 |
+| §1.1/§7.10 provision 与 base envinit 两套栈并存、加固不同步 | **冻结 + 文档化弱保证边界**（sha256 + 双 rename < base 的族根锁/pid 权威/慢持有告警）；不半拆（半拆会让 CLI 失去自动装 pandoc） |
+
+**裁决为"不做"**（复审同意或本仓纪律，**不要重开**）：
+
+- §1.3④ client 信封拆解进 base `./client` 子路径 → 复审"不推荐轻动"（会打破"改共用代码只发一版 base"这条唯一判据）。
+- §1.3① mem UI 打包管线是否向 mission 的 esbuild+CSS-in-TS 收敛 → **第三块面板出现前定论**。
+- §7.8「顺手做」那一组（host 抽 Remote 投影、mem client 按面板拆、`tree.ts` 两刀、`gateway.ts`/`store/legs.ts`、`db/vectors.ts` 搬家、`plugin/src/provision.ts` 改名）→ 复审自己写"**不专门开工**"，与本文「不为变小做整体重构」一致：**触及即抽**。
+- §1.4 `Manifest.requires.providers` 的第四方装载故事（`loadProvider`）→ **等第一个真实的仓外 provider**。
+- 复审的「明确不做」：`facts.ts` 按查询形状拆、`provisioner.ts` 拆闭包、`compat.ts` 拆五段、两棵树持久化统一、kit 成员清退 —— 都有"**不变量必须同住 / 编排不变量最密**"的理由，拆分的收益为负。
+
+**本轮由实际故障确立的两条家族规则**（背景见 U1–U5）：
+
+1. **worker 清理是四步生命周期**：标记归档 → 释放会话记录 → **取消归档** → **清投影缓存残留**。
+   宿主会替已 dispose 的会话保留投影缓存（无驱逐 API），不清就会在"子代理"列表里留下幽灵条目
+   （实测：磁盘会话记录 0、归档登记 0，而投影缓存 70 → 界面显示 70 个）。
+2. **worker 计数保留策略**：每个属主会话保留**最新 10 个已完成的** worker（配置 `keepWorkers`，默认 **10**）；
+   **正在执行的不占名额、永不被清理**；`keepWorkers = 0` 关闭自动保留；`/clean archive all` 仍是显式"手动全清"。
