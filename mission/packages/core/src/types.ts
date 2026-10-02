@@ -186,12 +186,24 @@ export interface NodeRecord {
    * as; that direction is the safe one, because "unknown" renders an honest caveat and never a
    * fabricated "nothing changed". */
   readonly dispatchBaseline: DispatchBaseline | null
-  /** When this node's worker was last seen doing something. Bumped by durable activity in the
-   * worker's own session, which keeps a long but ACTIVE run safe from the stale check (it compares
-   * its window against this, not `claimedAt`); `0` means never observed and falls back to `claimedAt`. */
+  /** When this node's worker last PRODUCED something: the model's committed output, a tool it asked
+   * for, or a tool that finished. This is what the stale check compares against — `progressAt` is
+   * about output, deliberately NOT about "an event arrived" (see {@link activityAt}); a long but
+   * productive run stays safe, while a provider that only retries stops refreshing it. `0` means
+   * "nothing produced yet" and falls back to `claimedAt`. */
   readonly progressAt: number
+  /** When this node's worker was last HEARD FROM at all — any durable session event, output or
+   * transport-layer noise (retry attempts, per-request route snapshots). Kept apart from
+   * `progressAt` so the engine can tell the two ways a live worker stops being useful: nothing at
+   * all (both go stale → `stalled`, which charges the failure budget) versus events with no output
+   * (this stays fresh while `progressAt` goes stale → `hung`, which charges nothing). `0` means
+   * never observed; the readers fall back to `claimedAt`, and a record written before this field
+   * existed loads as `0` — "cannot tell output from noise", the conservative direction that leaves
+   * the round cap to reclaim it rather than inventing a stall. Persisted, `DOMAIN_VERSION` stays 1. */
+  readonly activityAt: number
   /** Times this node was reclaimed because its worker went silent past the stale window; a worker
-   * that merely vanished is not the node's fault and does not count here. */
+   * that merely vanished is not the node's fault and does not count here. A `hung` reclaim is not
+   * counted either — see `MissionTree.reclaim`. */
   readonly stalls: number
   /** When the owner was told this node keeps stalling; `null` until then. Durable for the same
    * reason as `TreeRecord.reportedAt`: an in-memory memo is empty after a restart. */

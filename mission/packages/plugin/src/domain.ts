@@ -74,6 +74,11 @@ const nodeSchema = z.object({
   dispatchBaseline: baselineSchema.nullable().default(null).catch(null),
   // Optional-with-default: reads as "no activity observed, never stalled, never reported".
   progressAt: z.number().default(0),
+  // Optional-with-default: a document written before the field existed reads as "no event was ever
+  // observed", which the liveness readers treat as "cannot tell output from noise" and fall back to
+  // `progressAt` — i.e. the previous build's judgement, plus the new round cap. 0 is the only safe
+  // default: an invented timestamp could make a hung node look productive.
+  activityAt: z.number().default(0),
   stalls: z.number().default(0),
   stalledNotifiedAt: z.number().nullable().default(null),
   result: z.string().nullable(),

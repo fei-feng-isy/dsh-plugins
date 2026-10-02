@@ -417,9 +417,9 @@ describe('worker lifecycle', () => {
     expect(mounted.dispatched[1]?.prompt).not.toContain('前几次没有完成')
   })
 
-  it('keeps refreshing progress for a claim issued before a restart', async () => {
+  it('keeps refreshing progress for a claim issued before a restart, and separates output from noise', async () => {
     // Hot reload: the durable tree still binds this worker (`reconcileOnOpen` keeps a live survivor
-    // `running` and resets `progressAt`), but `issuedClaims` is in-memory and start-up never refills
+    // `running` and resets its clocks), but `issuedClaims` is in-memory and start-up never refills
     // it. Filtering the progress feed on that set dropped every later event, so past `staleMs` a
     // worker that had been working the whole time was interrupted and reclaimed as stalled — one
     // burnt attempt and one `failures` slot. The claim id's own shape is the fallback provenance.
@@ -435,8 +435,54 @@ describe('worker lifecycle', () => {
 
     const before = mounted.nodeFor(rootId)?.progressAt ?? 0
     // Through the feed the plugin actually registers, not by calling the host method directly.
-    mounted.ctx.emit('session/event', { id: claim } as never, { time: before + 1 } as never)
-    expect(mounted.nodeFor(rootId)?.progressAt).toBe(before + 1)
+    // Transport-layer noise (a retried provider attempt) is heard — it moves the activity clock —
+    // but is NOT output, so the stale check's own clock must not move.
+    const noiseAt = before + 100
+    mounted.ctx.emit('session/event', { id: claim } as never, { time: noiseAt, type: 'assistant/attempt' } as never)
+    expect(mounted.nodeFor(rootId)?.progressAt).toBe(before)
+    expect(mounted.nodeFor(rootId)?.activityAt).toBe(noiseAt)
+
+    // Real output (the model's committed message) refreshes both clocks.
+    mounted.ctx.emit('session/event', { id: claim } as never, { time: noiseAt + 1, type: 'assistant/message' } as never)
+    expect(mounted.nodeFor(rootId)?.progressAt).toBe(noiseAt + 1)
+    expect(mounted.nodeFor(rootId)?.activityAt).toBe(noiseAt + 1)
+  })
+
+  it('⑦ configures the round ceiling with a floor and a warning, exactly like staleMs', async () => {
+    // The round cap is the backstop a refreshed timestamp cannot veto, so it is configured at the
+    // SAME layer as `staleMs` (plugin config -> host option -> engine option) and floored the same
+    // way. Its floor is `max(10 min, staleMs)`: a cap below the output window would fire before
+    // `stalled` ever can, so the floor moves with the configured window instead of being a constant
+    // that a large `staleMs` would contradict.
+    const lines: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '))
+    })
+    try {
+      // Below the 10-minute constant, and below the default 30-minute window: raised to the window.
+      const below = await mount({ pluginConfig: { roundMs: 1_000 } })
+      expect(below.host.roundWindowMs()).toBe(30 * 60_000)
+      expect(lines.some((line) => line.includes('roundMs') && line.includes('floor'))).toBe(true)
+
+      // The constant floor once the window is small: raised to 10 minutes, not to `staleMs`.
+      const smallWindow = await mount({ pluginConfig: { roundMs: 1_000, staleMs: 60_000 } })
+      expect(smallWindow.host.roundWindowMs()).toBe(10 * 60_000)
+
+      // Above the floor nothing is raised and nothing is said; only NEW lines count, since the host
+      // may have evaluated the window more than once while opening the earlier mounts.
+      const before = lines.length
+      const accepted = await mount({ pluginConfig: { roundMs: 20 * 60_000, staleMs: 60_000 } })
+      expect(accepted.host.roundWindowMs()).toBe(20 * 60_000)
+      expect(lines.slice(before).filter((line) => line.includes('roundMs') && line.includes('floor'))).toHaveLength(0)
+
+      // Unconfigured: one hour, or the output window when the owner widened that past an hour.
+      const unset = await mount()
+      expect(unset.host.roundWindowMs()).toBe(60 * 60_000)
+      const widened = await mount({ pluginConfig: { staleMs: 2 * 60 * 60_000 } })
+      expect(widened.host.roundWindowMs()).toBe(2 * 60 * 60_000)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('warns — rate-limited — when a background sweep fails, instead of swallowing it', async () => {

@@ -74,6 +74,11 @@ describe('a document written before the analysis fields existed', () => {
     // watermark must read as "nothing delivered yet" so a wake still carries every correction.
     expect(node?.lastWorkerId).toBeNull()
     expect(node?.correctionsDeliveredUpTo).toBe(0)
+    // The output clock arrived the same way, and its default is the CONSERVATIVE one: a record
+    // written before `activityAt` existed reads as "no event was ever observed", so the liveness
+    // readers fall back to `progressAt` for both clocks and judge the node exactly as the previous
+    // build did. An invented timestamp could make a hung node look productive.
+    expect(node?.activityAt).toBe(0)
   })
 
   it('also accepts a record that already carries them', () => {

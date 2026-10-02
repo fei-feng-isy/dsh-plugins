@@ -3,6 +3,7 @@
  * @module @avantf/mission-core/engine
  */
 import { MissionTree } from './tree.js'
+import { judgeWorker, type LivenessBound, type LivenessVerdict } from './liveness.js'
 import { isTroubledNode } from './prompt.js'
 import { CAPACITY, TERMINAL, type NodeRecord } from './types.js'
 
@@ -67,6 +68,13 @@ export interface EngineHooks {
   /** Heads-up that one node keeps going silent, so the owner can decide whether to intervene — deliberately separate from {@link notifyOwner}, which means "a tree reached a terminal state". */
   notifyStalled?(info: StallReport): void
   /**
+   * Diagnostic sink for a `hung` reclaim: the worker was still alive but had produced nothing for a
+   * whole window (or exceeded the round cap), so the engine interrupted it and re-queued the node
+   * WITHOUT charging any budget. Nothing here is a decision for the owner — an apparatus outage is
+   * not a mission failure — so this exists to be LOGGED, not to wake anybody.
+   */
+  notifyHung?(info: HungReport): void
+  /**
    * Report nodes waiting for a parked session to be woken; the engine cannot wake anything itself, because a wake is a delivery through `ctx.subagents` that only the host owns and must be authorized by the child's live direct parent.
    * Its whole job is to say a convergence pass is due on an idle session, as a BATCH: an owner that was offline can materialize with several parked nodes at once, and one wake per node would be a wake storm.
    * The host performs the actual wake inside the owner's next turn; a host that cannot wake leaves the address on the node, and this reports again on the next pass.
@@ -89,11 +97,31 @@ export interface StallReport {
   readonly silentMs: number
 }
 
+/** What a `hung` reclaim looked like, for the engine's diagnostic log. It carries no owner-facing
+ *  message: `hung` is deliberately NOT an `isTroubled` signal (see {@link isTroubledNode}). */
+export interface HungReport {
+  readonly rootId: string
+  readonly nodeId: string
+  readonly title: string
+  readonly attempts: number
+  readonly failures: number
+  readonly stalls: number
+  /** Which bound fired: the `staleMs` output window, or the `roundMs` ceiling. */
+  readonly bound: Extract<LivenessBound, 'output' | 'round'>
+  /** ms since the dispatch that opened this round. */
+  readonly ranMs: number
+  /** ms since the worker last produced anything. */
+  readonly idleMs: number
+}
+
 export interface EngineOptions {
   /** Dispatch ceiling. Values above this wait for the next pump. */
   readonly maxConcurrent: number
-  /** A dispatched node with no progress for this long is considered stuck. */
+  /** How long a worker may produce NOTHING before it is considered stuck (see `liveness.ts`). */
   readonly staleMs: number
+  /** Wall-clock ceiling on one dispatch: past this the node is reclaimed as `hung` no matter how
+   *  many events refreshed its timestamps. The backstop against a transport that retries forever. */
+  readonly roundMs: number
   /** Clock for the stale check, injectable so tests can move time instead of waiting for it; production leaves it at `Date.now`. */
   readonly now?: () => number
 }
@@ -109,11 +137,9 @@ export function detectConcurrency(): number {
 export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {
   maxConcurrent: detectConcurrency(),
   staleMs: 30 * 60 * 1000,
-}
-
-/** When a node's worker was last heard from: observed activity if there is any, otherwise the dispatch that opened this attempt. */
-function silenceSince(node: NodeRecord): number {
-  return node.progressAt > 0 ? node.progressAt : node.claimedAt
+  /** One hour: deliberately generous, because it is the backstop that a worker's own timestamps
+   *  cannot veto — a round that legitimately needs longer than this is not what the engine is for. */
+  roundMs: 60 * 60 * 1000,
 }
 
 export class MissionEngine {
@@ -155,11 +181,19 @@ export class MissionEngine {
   }
 
   /**
-   * Reclaim nodes whose worker is gone or stuck; liveness is the primary signal, and the timeout only covers "alive but silent".
-   * Silence is measured from the worker's last observed activity, not the dispatch, so a long execution that keeps appending is progress rather than grounds to throw the mission away; a live binding is interrupted before it is reclaimed.
+   * Reclaim nodes whose worker is gone or stuck; liveness is the primary signal, and the windows
+   * only cover "alive but not useful".
+   *
+   * The judgement is `judgeWorker` (see `liveness.ts`): silence measured from the last event at all
+   * is `stalled` and charges the failure budget exactly as before; a worker that keeps being heard
+   * from while producing NOTHING for `staleMs`, or that exceeds the round cap, is `hung` and charges
+   * nothing. Both interrupt the live binding before reclaiming, and both go through the same
+   * compare-and-swap `MissionTree.reclaim`, so a verdict judged against a snapshot taken outside
+   * the tree lock cannot strip a fresh binding or charge one attempt twice.
    */
   async reclaimStale(): Promise<number> {
     const now = this.options.now?.() ?? Date.now()
+    const windows = { staleMs: this.options.staleMs, roundMs: this.options.roundMs }
     let reclaimed = 0
     for (const root of this.tree.trees()) {
       // Resolve the tree's live holders once: one scan per tree, not one per node.
@@ -167,19 +201,24 @@ export class MissionEngine {
       for (const node of this.tree.nodesOf(root.rootId)) {
         if (node.status !== 'running') continue
         const holder = node.claimedBy
-        const silentMs = now - silenceSince(node)
-        const stalled = holder !== null && held.has(node.id) && silentMs > this.options.staleMs
         if (holder !== null && held.has(node.id)) {
-          if (!stalled) continue
+          const verdict = judgeWorker(node, now, windows)
+          if (verdict === undefined) continue
           await this.hooks.interruptWorker(holder)
+          // The holder from THIS pass's snapshot, checked under the tree lock: an `interruptWorker`
+          // wait can span a whole second sweep that reclaimed and re-dispatched the node, and acting
+          // on the stale verdict would strip the fresh binding and charge `failures` twice.
+          const result = await this.tree.reclaim(node.id, verdict.cause, holder)
+          if (!result.ok) continue
+          reclaimed += 1
+          if (verdict.cause === 'stalled') await this.reportStall(result.value, verdict.silentMs)
+          else this.reportHung(result.value, verdict)
+          continue
         }
-        // The holder from THIS pass's snapshot, checked under the tree lock: an `interruptWorker`
-        // wait can span a whole second sweep that reclaimed and re-dispatched the node, and acting
-        // on the stale verdict would strip the fresh binding and charge `failures` twice.
-        const result = await this.tree.reclaim(node.id, stalled ? 'stalled' : 'vanished', holder)
-        if (!result.ok) continue
-        reclaimed += 1
-        if (stalled) await this.reportStall(result.value, silentMs)
+        // No live holder: the worker vanished. Same CAS as above, with the snapshot's holder
+        // (`null` included) as the expectation.
+        const result = await this.tree.reclaim(node.id, 'vanished', holder)
+        if (result.ok) reclaimed += 1
       }
     }
     return reclaimed
@@ -205,6 +244,26 @@ export class MissionEngine {
       failures: node.failures,
       stalls: node.stalls,
       silentMs,
+    })
+  }
+
+  /** Tell the host a node was reclaimed as `hung`, so the event is diagnosable. Deliberately no
+   *  owner wake and no durable marker: this is apparatus trouble, the engine recovered on its own,
+   *  and the `isTroubled` flag is reserved for facts the owner can act on. */
+  private reportHung(node: NodeRecord, verdict: LivenessVerdict): void {
+    const notify = this.hooks.notifyHung
+    if (notify === undefined) return
+    notify({
+      rootId: node.rootId,
+      nodeId: node.id,
+      title: node.title,
+      attempts: node.attempts,
+      failures: node.failures,
+      stalls: node.stalls,
+      // `stalled` is handled above, so only the two hung bounds reach here.
+      bound: verdict.bound === 'round' ? 'round' : 'output',
+      ranMs: verdict.ranMs,
+      idleMs: verdict.idleMs,
     })
   }
 

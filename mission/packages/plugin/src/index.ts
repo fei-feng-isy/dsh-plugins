@@ -27,6 +27,7 @@ import type {} from '@deepseek-ai/cordis-plugin-timer'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
 import { AvantfMissionHost, type OrphanTreeReport, type OwnerProbe } from './host.js'
+import { isOutputEvent } from './workerEvents.js'
 import { defineWorkTools } from './tools.js'
 import {
   GUIDANCE_CONTEXT_ORDER,
@@ -100,9 +101,14 @@ export const inject = [
 export interface Config {
   /** Dispatch ceiling; omitted means "CPU cores minus one", leaving the host a core for its own turns. */
   maxConcurrent?: number
-  /** Silence before a worker is treated as stuck (default 30 min, floor 1 min), measured from its
-   * last durable activity so a legitimately long step does not count as no progress. */
+  /** How long a worker may produce NOTHING before it is treated as stuck (default 30 min, floor
+   * 1 min), measured from its last real output so a legitimately long step does not count as no
+   * progress. Transport-layer noise (provider retries, route snapshots) does not refresh it. */
   staleMs?: number
+  /** Wall-clock ceiling on one dispatch round (default 1 hour, floor 10 min or `staleMs`, whichever
+   * is larger). Past it the node is reclaimed as `hung` — alive but unproductive — no matter how many
+   * events refreshed its timestamps; a smaller value is raised to the floor with a warning. */
+  roundMs?: number
   /** Root of the session store `/archive` and `/clean` act on (default `<dsh home>/sessions`); only a
    * directory directly under it named exactly a session id is ever touched, so a wrong value removes nothing. */
   sessionsRoot?: string
@@ -114,6 +120,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   maxConcurrent: z.natural(),
   staleMs: z.natural(),
+  roundMs: z.natural(),
   sessionsRoot: z.string(),
   dataHome: z.string(),
 })
@@ -377,10 +384,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   })
 
   // ── worker progress: what separates "slow" from "stuck" ─────────────────
-  // Every durable append refreshes that node's silence window, so a long execution that keeps
-  // working is never mistaken for stalled; the feed carries every session, so the host filters by claim.
+  // Every durable append records that the worker was HEARD FROM, but only real output (model
+  // output, a tool call, a tool result — see `workerEvents.ts`) refreshes the silence window, so a
+  // provider that only retries can no longer keep a stuck worker looking alive. The feed carries
+  // every session, so the host filters by claim.
   ctx.on('session/event', (session, event) => {
-    host.touchWorkerProgress(session.id, event.time)
+    host.touchWorkerProgress(session.id, event.time, isOutputEvent(event))
   })
 
   // ── the pre-step gate ───────────────────────────────────────────────────

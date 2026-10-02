@@ -6,7 +6,16 @@
  * whom it wakes — with no harness and no model.
  */
 import { describe, expect, it } from 'vitest'
-import { MissionEngine, MissionTree, type ResumeOutcome, type StallReport, type TreeState, type TreeStore } from '../src/index.js'
+import {
+  DEFAULT_ENGINE_OPTIONS,
+  MissionEngine,
+  MissionTree,
+  type HungReport,
+  type ResumeOutcome,
+  type StallReport,
+  type TreeState,
+  type TreeStore,
+} from '../src/index.js'
 
 function memoryStore(): TreeStore & { documents: Map<string, TreeState> } {
   const documents = new Map<string, TreeState>()
@@ -35,6 +44,8 @@ function memoryStore(): TreeStore & { documents: Map<string, TreeState> } {
 function makeWorld(options: {
   maxConcurrent: number
   staleMs?: number
+  /** Round ceiling; defaults to the production one, so only a test that means to hit it configures it. */
+  roundMs?: number
   clock?: () => number
   sessions?: Set<string>
   /** Owner sessions the host cannot answer for at all: orphaned, but never destroyed. */
@@ -60,6 +71,7 @@ function makeWorld(options: {
   const interrupted: string[] = []
   const notified: string[] = []
   const stalled: StallReport[] = []
+  const hung: HungReport[] = []
   let sequence = 0
   let tick = 0
   const tree = new MissionTree(store, {
@@ -102,15 +114,21 @@ function makeWorld(options: {
       },
       notifyOwner: (rootId, reason) => notified.push(`${rootId}:${reason}`),
       notifyStalled: (info) => stalled.push(info),
+      notifyHung: (info) => hung.push(info),
     },
-    { maxConcurrent: options.maxConcurrent, staleMs: options.staleMs ?? 60_000, now: options.clock },
+    {
+      maxConcurrent: options.maxConcurrent,
+      staleMs: options.staleMs ?? 60_000,
+      roundMs: options.roundMs ?? DEFAULT_ENGINE_OPTIONS.roundMs,
+      now: options.clock,
+    },
   )
   /** Let every lazily created worker become a live agent (the next tick). */
   const materialize = (): void => {
     for (const claimId of pending) live.add(claimId)
     pending.clear()
   }
-  return { tree, engine, live, started, reserved, released, interrupted, notified, stalled, store, materialize }
+  return { tree, engine, live, started, reserved, released, interrupted, notified, stalled, hung, store, materialize }
 }
 
 async function roots(tree: MissionTree, count: number, owner = 'owner'): Promise<string[]> {
@@ -370,7 +388,7 @@ describe('terminal reporting is durable, not per-pass', () => {
         interruptWorker: () => Promise.resolve(),
         notifyOwner: (id, reason) => world.notified.push(`${id}:${reason}`),
       },
-      { maxConcurrent: 1, staleMs: 60_000 },
+      { maxConcurrent: 1, staleMs: 60_000, roundMs: DEFAULT_ENGINE_OPTIONS.roundMs },
     )
     await restarted.pump()
     await restarted.pump()
@@ -499,6 +517,133 @@ describe('stalls', () => {
 })
 
 /**
+ * The W8 blind spot (2026-10-02): a worker that stayed `running` for 7.5 hours while provider
+ * retries refreshed its timestamp every minute, so the old "no events" criterion never fired.
+ * These cases pin the replacement — output is the criterion, with a round cap as the backstop —
+ * and, just as important, that nothing the old criterion caught was lost.
+ */
+describe('hung workers: alive but producing nothing', () => {
+  /**
+   * A world with a hand-moved clock and BOTH windows explicit, so which bound fires is never an
+   * accident. `noise`/`output` move the clock and the node together, exactly as a session event does.
+   */
+  async function hungWorld(options: { staleMs?: number; roundMs?: number } = {}) {
+    let value = 1_000_000
+    const world = makeWorld({
+      maxConcurrent: 1,
+      staleMs: options.staleMs ?? 1_000,
+      roundMs: options.roundMs ?? 1_000_000,
+      clock: () => value,
+    })
+    const [id] = await roots(world.tree, 1)
+    if (id === undefined) throw new Error('no root')
+    await world.engine.pump()
+    const claim = world.tree.node(id)?.claimedBy ?? ''
+    if (claim === '') throw new Error('the root was not dispatched')
+    return {
+      world,
+      id,
+      claim,
+      advance: (ms: number) => { value += ms },
+      /** Transport-layer noise: the worker is heard from, but produced nothing. */
+      noise: (ms: number) => { value += ms; world.tree.touchActivity(id, value) },
+      /** Real output. */
+      output: (ms: number) => { value += ms; world.tree.touchProgress(id, value) },
+    }
+  }
+
+  it('① reclaims an alive-but-unproductive worker as `hung`, without charging the failure budget', async () => {
+    const h = await hungWorld({ staleMs: 1_000 })
+    // Past the stale window in steps, each carrying a noise event: activity is always fresh, output
+    // never. This is the W8 shape — a provider retrying for hours.
+    for (let step = 0; step < 4; step += 1) h.noise(400)
+    const node = h.world.tree.node(h.id)
+    expect(node?.activityAt).toBeGreaterThan(node?.progressAt ?? 0)
+
+    expect(await h.world.engine.reclaimStale()).toBe(1)
+    expect(h.world.interrupted).toEqual([h.claim])
+    expect(h.world.tree.node(h.id)?.status).toBe('interrupted')
+    // The new cause is named, carries WHICH bound fired, and reports how long the worker was idle.
+    expect(h.world.hung).toHaveLength(1)
+    expect(h.world.hung[0]).toMatchObject({ nodeId: h.id, title: 'root 0', bound: 'output', idleMs: 1_600 })
+    // The failure/silence budgets and the owner-facing stall signal are all untouched.
+    expect(h.world.tree.node(h.id)?.failures).toBe(0)
+    expect(h.world.tree.node(h.id)?.spawnFailures).toBe(0)
+    expect(h.world.tree.node(h.id)?.stalls).toBe(0)
+    expect(h.world.stalled).toEqual([])
+  })
+
+  it('② never reclaims a worker that keeps producing output, across many windows', async () => {
+    const h = await hungWorld({ staleMs: 1_000 })
+    for (let round = 0; round < 5; round += 1) {
+      h.output(900)
+      expect(await h.world.engine.sweep()).toEqual({ reclaimed: 0, dispatched: 0 })
+    }
+    // Four and a half windows of wall clock, and the worker is still the same live binding.
+    expect(h.world.tree.node(h.id)?.status).toBe('running')
+    expect(h.world.tree.node(h.id)?.claimedBy).toBe(h.claim)
+    expect(h.world.interrupted).toEqual([])
+    expect(h.world.hung).toEqual([])
+    expect(h.world.stalled).toEqual([])
+  })
+
+  it('③ still reclaims a TRULY silent worker as `stalled`, charging failures (regression)', async () => {
+    const h = await hungWorld({ staleMs: 1_000 })
+    // No events of any kind: the original criterion, and the original verdict.
+    h.advance(1_001)
+    expect(await h.world.engine.sweep()).toEqual({ reclaimed: 1, dispatched: 1 })
+    expect(h.world.interrupted).toEqual([h.claim])
+    expect(h.world.hung).toEqual([])
+    expect(h.world.tree.node(h.id)?.stalls).toBe(1)
+    expect(h.world.tree.node(h.id)?.failures).toBe(1)
+  })
+
+  it('④ re-dispatches a `hung` node once, and refuses the interrupted worker’s late result', async () => {
+    const h = await hungWorld({ staleMs: 1_000 })
+    for (let step = 0; step < 4; step += 1) h.noise(400)
+    expect(await h.world.engine.sweep()).toEqual({ reclaimed: 1, dispatched: 1 })
+
+    const next = h.world.tree.node(h.id)?.claimedBy ?? ''
+    expect(next).not.toBe('')
+    expect(next).not.toBe(h.claim)
+    // One start per dispatch: the reclaim did not leave the old worker running behind the new one.
+    expect(h.world.started).toEqual([h.claim, next])
+    // The interrupted worker can no longer settle the node it lost...
+    const late = await h.world.tree.submitResult(h.id, h.claim, 'too late')
+    expect(late.ok).toBe(false)
+    expect(late.ok ? '' : late.code).toBe('not-owner')
+    // ...and the live binding was not disturbed by its attempt.
+    expect(h.world.tree.node(h.id)?.claimedBy).toBe(next)
+    expect(h.world.tree.node(h.id)?.attempts).toBe(2)
+  })
+
+  it('⑤ leaves a `hung` node immediately dispatchable: no budget charge, no cooldown', async () => {
+    const h = await hungWorld({ staleMs: 1_000 })
+    for (let step = 0; step < 4; step += 1) h.noise(400)
+    await h.world.engine.reclaimStale()
+    expect(h.world.tree.node(h.id)).toMatchObject({ failures: 0, spawnFailures: 0, stalls: 0 })
+    // The cooldown belongs to failed STARTS alone; a hung round must not inherit one.
+    expect(h.world.tree.nextDispatchable()?.id).toBe(h.id)
+    expect(await h.world.engine.pump()).toBe(1)
+    expect(h.world.started).toHaveLength(2)
+  })
+
+  it('reclaims as `hung` once the round cap is exceeded, even while output keeps arriving', async () => {
+    // The cap is the backstop no timestamp can veto: a round that runs past it is taken back
+    // whatever the worker reports. Here the stale window is nowhere near — only the cap fires.
+    const h = await hungWorld({ staleMs: 1_000_000, roundMs: 5_000 })
+    for (let round = 0; round < 6; round += 1) h.output(1_000)
+    expect(h.world.tree.node(h.id)?.progressAt).toBe(h.world.tree.node(h.id)?.activityAt)
+    expect(await h.world.engine.reclaimStale()).toBe(1)
+    expect(h.world.interrupted).toEqual([h.claim])
+    expect(h.world.hung).toHaveLength(1)
+    expect(h.world.hung[0]).toMatchObject({ bound: 'round', ranMs: 6_000 })
+    // Still budget-free: hitting the cap is an apparatus event, not a failed mission.
+    expect(h.world.tree.node(h.id)).toMatchObject({ failures: 0, spawnFailures: 0, stalls: 0 })
+  })
+})
+
+/**
  * The dispatch pass must prefer CONTINUING a demoted worker session over starting a fresh one, and
  * the three host answers must lead to three different actions. The host itself (adoption, guard,
  * delivery) is exercised in the plugin's `cold-resume` cases; what is pinned HERE is the engine's
@@ -557,7 +702,7 @@ describe('cold continuation', () => {
         interruptWorker: () => Promise.resolve(),
         notifyOwner: () => undefined,
       },
-      { maxConcurrent: 4, staleMs: 60_000, now: () => 1 },
+      { maxConcurrent: 4, staleMs: 60_000, roundMs: DEFAULT_ENGINE_OPTIONS.roundMs, now: () => 1 },
     )
     return { engine, started, attempted }
   }

@@ -18,11 +18,14 @@ export { MissionEngine, DEFAULT_ENGINE_OPTIONS, detectConcurrency } from './engi
 export type {
   EngineHooks,
   EngineOptions,
+  HungReport,
   ResumeOutcome,
   ResumeWorkerInput,
   StartWorkerInput,
   StallReport,
 } from './engine.js'
+export { heardAt, judgeWorker, producedAt, storedTime } from './liveness.js'
+export type { LivenessBound, LivenessVerdict, LivenessWindows, ReclaimCause } from './liveness.js'
 export {
   byCreatedAtThenId,
   heldUnits,

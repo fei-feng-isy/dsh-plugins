@@ -19,6 +19,7 @@ import {
   unitHolder,
   type DispatchScope,
 } from './dispatch.js'
+import { storedTime } from './liveness.js'
 import {
   CAPACITY,
   DISPATCHABLE,
@@ -212,6 +213,7 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     correctionsDeliveredUpTo?: number
     dispatchBaseline?: unknown
     unit?: unknown
+    activityAt?: number
   }
   const lastWorkerId = legacy.lastWorkerId ?? null
   const correctionsDeliveredUpTo = legacy.correctionsDeliveredUpTo ?? 0
@@ -222,15 +224,22 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   const unit = typeof legacy.unit === 'string' && legacy.unit.trim().length > 0
     ? legacy.unit.trim()
     : null
+  // A record written before `activityAt` existed reads as 0 = "no event ever observed". Its
+  // `progressAt` was refreshed by ANY event back then, so the liveness readers fall back to
+  // `progressAt` for both clocks and judge it exactly as the previous build did (plus the round
+  // cap). A missing value must never read as `undefined`: `Math.max(undefined, …)` is `NaN`, which
+  // keeps a node running forever.
+  const activityAt = storedTime(legacy.activityAt)
   if (
     lastWorkerId === node.lastWorkerId
     && correctionsDeliveredUpTo === node.correctionsDeliveredUpTo
     && dispatchBaseline === node.dispatchBaseline
     && unit === node.unit
+    && activityAt === node.activityAt
   ) {
     return node
   }
-  return { ...node, lastWorkerId, correctionsDeliveredUpTo, dispatchBaseline, unit }
+  return { ...node, lastWorkerId, correctionsDeliveredUpTo, dispatchBaseline, unit, activityAt }
 }
 
 export class MissionTree {
@@ -300,8 +309,9 @@ export class MissionTree {
   private reconcileOnOpen(node: NodeRecord): NodeRecord {
     if (node.status !== 'running') return node
     if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
-      // Hot-reload survivor: reset progressAt, or a long run looks silent from the moment we open.
-      return { ...node, progressAt: this.deps.now() }
+      // Hot-reload survivor: reset the clocks, or a long run looks silent from the moment we open.
+      const at = this.deps.now()
+      return { ...node, progressAt: at, activityAt: at }
     }
     return {
       ...node,
@@ -516,12 +526,14 @@ export class MissionTree {
       }
       const busy = this.unitRefusal(node)
       if (busy !== undefined) return busy
+      const at = this.deps.now()
       const updated = this.replace(state, node, {
         status: 'running',
         claimedBy: workerId,
-        claimedAt: this.deps.now(),
+        claimedAt: at,
         attempts: node.attempts + 1,
-        progressAt: this.deps.now(),
+        progressAt: at,
+        activityAt: at,
         parkedWorker: null,
       })
       await this.flush(state.tree.rootId)
@@ -586,13 +598,15 @@ export class MissionTree {
       if (node.spawnFailures >= CAPACITY.maxAttempts) {
         return this.failExhausted(state, node, `连续 ${CAPACITY.maxAttempts} 次无法启动执行者`)
       }
+      const at = this.deps.now()
       const updated = this.replace(state, node, {
         status: 'running',
         claimedBy: workerId,
-        claimedAt: this.deps.now(),
+        claimedAt: at,
         attempts: node.attempts + 1,
-        // Fresh silence window: the previous attempt's activity says nothing about this one.
-        progressAt: this.deps.now(),
+        // Fresh windows: the previous attempt's activity says nothing about this one.
+        progressAt: at,
+        activityAt: at,
         lastWorkerId: null,
       })
       await this.flush(state.tree.rootId)
@@ -806,6 +820,7 @@ export class MissionTree {
       // No prompt has been built for this node yet, so there is nothing to subtract later.
       dispatchBaseline: null,
       progressAt: 0,
+      activityAt: 0,
       stalls: 0,
       stalledNotifiedAt: null,
       result: null,
@@ -851,13 +866,16 @@ export class MissionTree {
       if (node.spawnFailures >= CAPACITY.maxAttempts) {
         return this.failExhausted(state, node, `连续 ${CAPACITY.maxAttempts} 次无法启动执行者`)
       }
+      const at = this.deps.now()
       const updated = this.replace(state, node, {
         status: 'running',
         claimedBy: claimId,
-        claimedAt: this.deps.now(),
+        claimedAt: at,
         attempts: node.attempts + 1,
-        // Fresh silence window: the previous attempt's activity says nothing about this one.
-        progressAt: this.deps.now(),
+        // Fresh windows: the previous attempt's activity says nothing about this one. Both clocks
+        // start together, so a just-dispatched node is neither silent nor unproductive.
+        progressAt: at,
+        activityAt: at,
         // This dispatch did not adopt the parked session, so its address is spent.
         parkedWorker: null,
       })
@@ -894,8 +912,11 @@ export class MissionTree {
    * and only `stalled` also increments `stalls`. `spawn-failed`: no worker ever started — charges
    * `spawnFailures` and pushes the next dispatch back by a cooldown. `wake-failed`: an adoption
    * that could not be delivered — back to `ready`, charging neither budget, so the caller's fresh
-   * dispatch proceeds. `attempts` is never rolled back: it is the `note_mission` generation marker,
-   * not a budget.
+   * dispatch proceeds. `hung`: the worker was still alive but produced nothing for a whole window
+   * (or exceeded the round cap) — like `wake-failed` it charges NEITHER budget and adds no cooldown,
+   * because an apparatus outage is not a failed mission and must not spend the budget that ends the
+   * node; unlike `wake-failed` it lands in `interrupted`, the ordinary re-queue. `attempts` is never
+   * rolled back: it is the `note_mission` generation marker, not a budget.
    *
    * Every arm leaves `running`, so this is one of the paths that RELEASES the node's unit lease
    * (the lease is the set of `running` nodes' units, never a separate table — see `dispatch.ts`).
@@ -908,7 +929,7 @@ export class MissionTree {
    * `undefined` means "no expectation" — the callers that act on a value they just read use that. */
   async reclaim(
     nodeId: string,
-    cause: 'vanished' | 'stalled' | 'spawn-failed' | 'wake-failed' = 'vanished',
+    cause: 'vanished' | 'stalled' | 'hung' | 'spawn-failed' | 'wake-failed' = 'vanished',
     expectedHolder?: string | null,
   ): Promise<MutationResult<NodeRecord>> {
     return this.withLock(async () => {
@@ -939,9 +960,15 @@ export class MissionTree {
         status: 'interrupted',
         claimedBy: null,
         ...(cause === 'stalled' ? { stalls: node.stalls + 1 } : {}),
+        // `hung` charges NEITHER budget and no cooldown: the worker was alive, so this is an
+        // apparatus outage, and retries must not eat the budget that ends the node (`wake-failed`
+        // set the same precedent). `failures` stays for missions that actually failed; a worker
+        // merely vanishing is already not the node's fault.
         ...(cause === 'spawn-failed'
           ? { spawnFailures: node.spawnFailures + 1 }
-          : { failures: node.failures + 1 }),
+          : cause === 'hung'
+            ? {}
+            : { failures: node.failures + 1 }),
       })
       await this.flush(state.tree.rootId)
       return accept(updated)
@@ -959,15 +986,30 @@ export class MissionTree {
     this.progressDirty.add(state.tree.rootId)
   }
 
-  /** Record worker activity for one node, on a hot path from the worker's durable append feed, so
-   * it updates memory only. A timestamp not newer than what we have is ignored, which makes racing
-   * a dispatch safe. */
+  /** Record that one worker PRODUCED something — model output, a tool call, a tool result — on a
+   * hot path from the worker's durable append feed, so it updates memory only. This is the clock the
+   * stale check reads: output is also evidence of life, so one write moves `activityAt` too. A
+   * timestamp not newer than what we have is ignored, which makes racing a dispatch safe. */
   touchProgress(nodeId: string, at: number): void {
     const found = this.locate(nodeId)
     if (found === undefined) return
     const { state, node } = found
     if (node.status !== 'running' || at <= node.progressAt) return
-    this.replace(state, node, { progressAt: at })
+    this.replace(state, node, { progressAt: at, activityAt: Math.max(at, storedTime(node.activityAt)) })
+    this.progressDirty.add(state.tree.rootId)
+  }
+
+  /** Record that a worker's session emitted SOME event without claiming it produced anything: the
+   *  transport-layer half of liveness. It moves only `activityAt`, so a worker whose events are all
+   *  retries and route snapshots is still heard from (never `stalled`) while `progressAt` stays
+   *  where its last real output left it — exactly the "alive but unproductive" state that
+   *  `judgeWorker` reclaims as `hung`. */
+  touchActivity(nodeId: string, at: number): void {
+    const found = this.locate(nodeId)
+    if (found === undefined) return
+    const { state, node } = found
+    if (node.status !== 'running' || at <= storedTime(node.activityAt)) return
+    this.replace(state, node, { activityAt: at })
     this.progressDirty.add(state.tree.rootId)
   }
 

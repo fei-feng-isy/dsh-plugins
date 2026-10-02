@@ -34,6 +34,7 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     lastWorkerId: null,
     dispatchBaseline: null,
     progressAt: 0,
+    activityAt: 0,
     stalls: 0,
     stalledNotifiedAt: null,
     result: null,

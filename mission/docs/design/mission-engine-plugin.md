@@ -232,7 +232,7 @@ dispatch(node):
 
 | 情形 | 判据 | 处置 |
 |---|---|---|
-| **幸存者** | `isAgentLive(claimedBy)` 为真（热重载，agent 还在） | 绑定不动，只把 `progressAt` 刷成当下（否则一段长跑从打开那一刻起就显得沉默） |
+| **幸存者** | `isAgentLive(claimedBy)` 为真（热重载，agent 还在） | 绑定不动，只把 `progressAt`/`activityAt` 刷成当下（否则一段长跑从打开那一刻起就显得沉默） |
 | **可接续** | 判活为假，但记录里有一个 `claimedBy` | **先把 `claimedBy` 存进 `lastWorkerId`**，再置 `interrupted`、清 `claimedBy` |
 | **无句柄** | 本来就不是 `running`，或 `claimedBy` 就是 `null` | 不动（`lastWorkerId` 若有也早已花掉） |
 
@@ -295,16 +295,20 @@ interface DispatchBaseline {
 ```
 对每个 running 节点：
   if ctx.agents.get(node.claimed_by) === undefined
-       → 持有者已不存在 → interrupted
-  else if now - max(progress_at, claimed_at) > STALE_MS
-       → 存活但沉默 → interrupt_agent(claimed_by) → interrupted（记一次 stall）
+       → 持有者已不存在 → interrupted（vanished，扣 failures）
+  else if now - max(activity_at, progress_at, claimed_at) > STALE_MS
+       → 存活但完全没有事件 → interrupt_agent(claimed_by) → interrupted（stalled，扣 failures、记 stalls）
+  else if now - claimed_at > ROUND_MS
+       → 这一轮超过硬上限 → interrupt_agent(claimed_by) → interrupted（hung，不扣预算）
+  else if now - produced_at > STALE_MS
+       → 一直有事件但零产出 → interrupt_agent(claimed_by) → interrupted（hung，不扣预算）
   else
        → 还在做，不动
 ```
 
 活性是**主判据**（廉价、确定），超时只兜"活着但卡死"（需要一个阈值，是启发式）。两者都需要，但顺序不能反 —— 先看活性可以避免绝大多数无谓等待。
 
-超时按 `progress_at` 起算：worker 每次往自己的会话里追加事件都会刷新它，所以判据是"沉默多久"而不是"跑了多久"，多步慢活不会被误判。首次停摆只有引擎自己恢复（记 `stalls`），**同一节点第二次停摆**或停摆后失败预算将用尽（`failures ≥ 4`）时才给 owner 一条消息，靠 `stalled_notified_at` 保证每节点至多一次。知会文案引用的也是失败预算而不是派发次数 —— 后者会被成功的汇总轮推高，写出来是"第 7 次派发（上限 5）"。
+超时按**产出**起算而不是按事件起算：worker 追加的模型输出（`assistant/message`）、工具调用（`tool/call`）与工具结果（`tool/result`）刷新 `progress_at`，其余事件（provider 重试 `assistant/attempt`、路由快照 `request/header`/`request/context`）只刷新 `activity_at`。于是判据是"多久没产出"而不是"多久没事件"，多步慢活不会被误判，而"一直有事件但零产出"（传输层一直重试）判 `hung` —— 不扣任何预算，只打日志；完全无事件仍是 `stalled`（扣 `failures`、记 `stalls`）。再加一条不看时间戳的轮级硬上限 `round_ms`（默认 1 小时）作兜底。首次停摆只有引擎自己恢复（记 `stalls`），**同一节点第二次停摆**或停摆后失败预算将用尽（`failures ≥ 4`）时才给 owner 一条消息，靠 `stalled_notified_at` 保证每节点至多一次。知会文案引用的也是失败预算而不是派发次数 —— 后者会被成功的汇总轮推高，写出来是"第 7 次派发（上限 5）"。
 
 **"活性"必须包含"正在启动"。** 续期子会话是异步物化的：节点在子 agent 存在之前就已绑定，这段几十毫秒的窗口里 `ctx.agents.get(claim)` 还没有答案。若把这种绑定读作"worker 消失"，一次落在窗口里的扫描（每个 worker 结算都会触发扫描）就会回收它、重派一次 —— 第一个 worker 还活着，它的 `submit_mission` 因为不再持有节点而全部被拒。实测代价：5 个节点的三级树跑了 **13 个 worker**（每个节点多跑一次，attempts 白烧一次）。所以 claim 从**预留起**就算 live（`startingClaims`，直到子会话接受 prompt 为止），真正的"从未出现"仍由同一条扫描在启动结束后回收。
 

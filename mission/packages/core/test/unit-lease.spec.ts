@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_ENGINE_OPTIONS,
   MissionEngine,
   MissionTree,
   type ChildSpec,
@@ -62,7 +63,7 @@ function makeWorld(options: { maxConcurrent?: number } = {}) {
       interruptWorker: () => Promise.resolve(),
       notifyOwner: () => undefined,
     },
-    { maxConcurrent: options.maxConcurrent ?? 4, staleMs: 60_000 },
+    { maxConcurrent: options.maxConcurrent ?? 4, staleMs: 60_000, roundMs: DEFAULT_ENGINE_OPTIONS.roundMs },
   )
   return { tree, engine, store, live, started }
 }

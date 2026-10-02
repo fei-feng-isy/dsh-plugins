@@ -32,6 +32,7 @@ import {
   type ChildSpec,
   type ContinuationDelta,
   type DispatchView,
+  type HungReport,
   type MutationResult,
   type NodeRecord,
   type OrphanedTree,
@@ -69,6 +70,12 @@ const SWEEP_FAILURE_WARN_MS = 10 * 60_000
 
 /** How long a durable owner-existence answer is trusted; a deleted session's trees retire within this window. */
 const OWNER_CHECK_TTL_MS = 5 * 60_000
+
+/** Floor for the configured round ceiling (`roundMs`). Ten minutes is already far past the size of
+ *  any step a mission is meant to run in one round, so a smaller value can only be a mistake; the
+ *  floor and the warning are what turn that mistake into a bounded one, exactly as `staleWindowMs`
+ *  does for `staleMs`. */
+const ROUND_FLOOR_MS = 10 * 60_000
 
 /** Whether the tree owner should be allowed into a proposed step. */
 export interface AdmitDecision {
@@ -196,8 +203,10 @@ declare module '@deepseek-ai/cordis' {
 export interface HostOptions {
   /** Dispatch ceiling; omitted means "CPU cores minus one". */
   readonly maxConcurrent?: number
-  /** How long a worker may be silent before it counts as stuck. */
+  /** How long a worker may produce nothing before it counts as stuck. */
   readonly staleMs?: number
+  /** Wall-clock ceiling on one dispatch round, however much it keeps reporting; omitted means one hour. */
+  readonly roundMs?: number
 }
 
 export class AvantfMissionHost extends TypertRemoteService {
@@ -259,11 +268,13 @@ export class AvantfMissionHost extends TypertRemoteService {
     super(ctx, NAMESPACE)
     this.maxConcurrent = options.maxConcurrent
     this.staleMs = options.staleMs
+    this.roundMs = options.roundMs
     this.log = log ?? createLogger(ctx.logger)
   }
 
   private readonly maxConcurrent: number | undefined
   private readonly staleMs: number | undefined
+  private readonly roundMs: number | undefined
   private ready: Promise<void> = Promise.resolve()
 
   /** Record the start-up promise for a caller that wants a fully opened tree; the tools never need it,
@@ -300,6 +311,26 @@ export class AvantfMissionHost extends TypertRemoteService {
     const floor = 60_000
     if (configured < floor) {
       this.log.warn(`staleMs ${String(configured)} is below the ${String(floor)} ms floor; using the floor`)
+      return floor
+    }
+    return configured
+  }
+
+  /** Wall-clock ceiling on one dispatch round. Deliberately generous, and floored like `staleMs`:
+   *  it is the backstop for a worker that keeps being HEARD FROM (retries, route snapshots) while
+   *  producing nothing, so a small configured value must not interrupt a round that is merely slow.
+   *
+   *  The floor is `max(10 min, staleMs)`, not a bare constant: a round cap BELOW the output window
+   *  would fire before `stalled` ever can, which would quietly retire the rule that a repeatedly
+   *  silent node runs out of failure budget. Tying it to the window the caller actually configured
+   *  keeps that rule true for every configuration, not just the defaults. `staleMs` is passed in so
+   *  the two windows are resolved from ONE reading (and one warning) during open. */
+  roundWindowMs(staleMs: number = this.staleWindowMs()): number {
+    const floor = Math.max(ROUND_FLOOR_MS, staleMs)
+    const configured = this.roundMs
+    if (configured === undefined) return Math.max(DEFAULT_ENGINE_OPTIONS.roundMs, floor)
+    if (configured < floor) {
+      this.log.warn(`roundMs ${String(configured)} is below the ${String(floor)} ms floor; using the floor`)
       return floor
     }
     return configured
@@ -346,6 +377,9 @@ export class AvantfMissionHost extends TypertRemoteService {
     })
     this.tree = tree
 
+    // Resolve both windows from ONE reading, so a below-floor `staleMs` warns once and the round
+    // cap is derived from the value the engine will actually use.
+    const staleMs = this.staleWindowMs()
     this.engine = new MissionEngine(
       tree,
       {
@@ -362,6 +396,7 @@ export class AvantfMissionHost extends TypertRemoteService {
         interruptWorker: (sessionId) => this.interruptWorker(sessionId),
         notifyOwner: (rootId, reason) => this.notifyOwner(rootId, reason),
         notifyStalled: (info) => this.notifyStalled(info),
+        notifyHung: (info) => this.reportHung(info),
         notifyParkedReady: (nodes) => this.notifyParkedReady(nodes),
         reportDispatchFailure: (nodeId, error) => {
           this.trace(`dispatch of ${nodeId} failed: ${String(error)}`)
@@ -369,7 +404,7 @@ export class AvantfMissionHost extends TypertRemoteService {
         },
         trace: (message) => this.trace(message),
       },
-      { maxConcurrent: this.concurrency(), staleMs: this.staleWindowMs() },
+      { maxConcurrent: this.concurrency(), staleMs, roundMs: this.roundWindowMs(staleMs) },
     )
 
     await tree.open()
@@ -586,16 +621,23 @@ export class AvantfMissionHost extends TypertRemoteService {
    *
    *  The check is `isWorkerClaim`, NOT membership in `issuedClaims`: that set is in-memory and is
    *  never refilled from the durable tree at start-up, while `MissionTree.reconcileOnOpen` explicitly
-   *  keeps a hot-reload survivor `running` and resets its `progressAt`. A worker that survived the
+   *  keeps a hot-reload survivor `running` and resets its clocks. A worker that survived the
    *  reload therefore had every later progress event dropped, and after `staleMs` was interrupted and
    *  reclaimed as stalled — burning one attempt and a `failures` slot on a worker that was working.
-   *  `nodeHeldBy` below still requires an actual binding, so the shape check cannot touch a stranger. */
-  touchWorkerProgress(sessionId: string, at: number): void {
+   *  `nodeHeldBy` below still requires an actual binding, so the shape check cannot touch a stranger.
+   *
+   *  `output` is the CLASSIFICATION the caller made (see `workerEvents.ts`): every event is recorded
+   *  as life (`touchActivity`), but only real output moves the clock the stale check reads. That
+   *  split is what turns "the worker is still answering retries" from evidence of progress into what
+   *  it is — a worker the engine should reclaim as `hung`. */
+  touchWorkerProgress(sessionId: string, at: number, output: boolean): void {
     if (!this.isWorkerClaim(sessionId)) return
     const tree = this.tree
     if (tree === undefined) return
     const node = tree.nodeHeldBy(sessionId)
-    if (node !== undefined) tree.touchProgress(node.id, at)
+    if (node === undefined) return
+    if (output) tree.touchProgress(node.id, at)
+    else tree.touchActivity(node.id, at)
   }
 
   /** A subagent run ended. For one of our workers this is the earliest moment its node can be judged —
@@ -1799,6 +1841,23 @@ export class AvantfMissionHost extends TypertRemoteService {
       `任务 ${info.nodeId}（"${info.title}"）已有 ${String(minutes)} 分钟没有进展，执行者已被中断、`
       + `任务已重新入队（第 ${String(info.attempts + 1)} 次派发）—— ${budget}。`,
       `stall on ${info.nodeId} reported to the owner`,
+    )
+  }
+
+  /** Log a `hung` reclaim. The engine recovered on its own and charged nothing, so there is nothing
+   *  for the owner to decide and no wake is sent — but the line MUST be there, or a provider that
+   *  hangs (or only retries) every dispatch is invisible, which is exactly how W8 stayed unnoticed
+   *  for 7.5 hours. */
+  private reportHung(info: HungReport): void {
+    const ranMin = Math.max(1, Math.round(info.ranMs / 60_000))
+    const idleMin = Math.max(1, Math.round(info.idleMs / 60_000))
+    const bound = info.bound === 'round'
+      ? `round cap ${String(ranMin)} min`
+      : `no output for ${String(idleMin)} min`
+    this.trace(`hung: ${info.nodeId} reclaimed (${bound})`)
+    this.log.warn(
+      `hung: worker on ${info.nodeId} ("${info.title}") was alive but unproductive (${bound}, `
+      + `attempt ${String(info.attempts)}); interrupted and re-queued without charging the failure budget`,
     )
   }
 
