@@ -1889,8 +1889,53 @@ describe('the executor display handle', () => {
   })
 })
 
-describe('the correction delivery watermark', () => {
-  it('is monotone and clamped to the corrections actually recorded', async () => {
+/**
+ * W18: the handle the panel's click resolves LAZILY for a historical record. The write has to be
+ * one-shot (an attempt that started meanwhile is never overwritten by an older resolved session),
+ * durable (the second click opens with no I/O), and harmless for an unknown node.
+ */
+describe('remembering a lazily resolved executor', () => {
+  it('persists the resolved handle, and the second read finds it with no write', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    expect(tree.node(id)?.executorSessionId).toBeNull()
+
+    expect(await tree.rememberExecutor(id, 'mission-lookedup')).toBe(true)
+    expect(tree.node(id)?.executorSessionId).toBe('mission-lookedup')
+    // DURABLE: the reopened tree answers the next click from the record itself.
+    const restored = reopen(store)
+    await restored.open()
+    expect(restored.node(id)?.executorSessionId).toBe('mission-lookedup')
+    // ...and nothing else about the node moved.
+    expect(restored.node(id)?.status).toBe('ready')
+  })
+
+  it('never overwrites a handle that is already there, whichever writer left it', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-newer')
+    // `dispatch` wrote the current attempt; a lookup that raced it resolved an OLDER session and
+    // must lose.
+    expect(await tree.rememberExecutor(id, 'mission-older')).toBe(false)
+    expect(tree.node(id)?.executorSessionId).toBe('mission-newer')
+  })
+
+  it('treats an empty stored handle as absent, and reports an unknown node without throwing', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    const state = store.documents.get(id)
+    if (state === undefined) throw new Error('nothing was persisted')
+    store.documents.set(id, withField(state, id, 'executorSessionId', ''))
+    const reopened = reopen(store)
+    await reopened.open()
+
+    expect(await reopened.rememberExecutor(id, 'mission-filled')).toBe(true)
+    expect(reopened.node(id)?.executorSessionId).toBe('mission-filled')
+    expect(await reopened.rememberExecutor('n9999', 'mission-ghost')).toBe(false)
+  })
+})
+
+describe('the correction delivery watermark', () => {  it('is monotone and clamped to the corrections actually recorded', async () => {
     const { tree } = makeTree()
     const id = await rootOf(tree)
     await tree.correct(id, 'owner', 'A')

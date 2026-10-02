@@ -15,6 +15,7 @@ import {
   deleteWork,
   errorText,
   fetchDetail,
+  fetchExecutorSession,
   fetchFullResult,
   fetchSnapshot,
   snapshotSkew,
@@ -355,6 +356,64 @@ describe('fetchFullResult', () => {
       result: () => Promise.reject(new Error('socket closed while reading')),
     }
     await expect(fetchFullResult(broken, 'session-1', 'n2')).rejects.toThrow('socket closed while reading')
+  })
+})
+
+describe('fetchExecutorSession', () => {
+  it('passes the session and node through, and returns the host\'s answer as data', async () => {
+    const calls: { method: string; args: unknown }[] = []
+    const remote = {
+      ...remoteReturning({ ok: true, value: { trees: [] } }, calls),
+      resolveExecutorSession: (args: { sessionId: string; nodeId: string }) => {
+        calls.push({ method: 'resolveExecutorSession', args })
+        return Promise.resolve({ ok: true, value: { status: 'resolved', sessionId: 'mission-1' } })
+      },
+    }
+    await expect(fetchExecutorSession(remote, 'session-1', 'r1'))
+      .resolves.toEqual({ status: 'resolved', sessionId: 'mission-1' })
+    expect(calls).toEqual([{ method: 'resolveExecutorSession', args: { sessionId: 'session-1', nodeId: 'r1' } }])
+  })
+
+  it('returns "找不到" and "从未派发" as ANSWERS, not as thrown failures', async () => {
+    // A miss is an ordinary outcome the panel has to phrase; only a broken call is an exception.
+    const withAnswer = (value: unknown): MissionRemote => ({
+      ...remoteReturning({ ok: true, value: { trees: [] } }),
+      resolveExecutorSession: () => Promise.resolve({ ok: true, value }),
+    })
+    await expect(fetchExecutorSession(withAnswer({ status: 'not-found' }), 'session-1', 'r1'))
+      .resolves.toEqual({ status: 'not-found' })
+    await expect(fetchExecutorSession(withAnswer({ status: 'never-dispatched' }), 'session-1', 'r1'))
+      .resolves.toEqual({ status: 'never-dispatched' })
+    await expect(fetchExecutorSession(withAnswer({ status: 'unsupported', error: 'sessionQuery is not mounted' }), 'session-1', 'r1'))
+      .resolves.toEqual({ status: 'unsupported', error: 'sessionQuery is not mounted' })
+  })
+
+  it('names a host that predates the method, and a 404, as a STALE HOST process', async () => {
+    // Older host: the Remote face has no such call at all. Restarting `dsh web` is the fix, so say so.
+    const { resolveExecutorSession: _omitted, ...withoutCall } = remoteReturning({ ok: true, value: { trees: [] } })
+    await expect(fetchExecutorSession(withoutCall, 'session-1', 'r1')).rejects.toThrow('重启 dsh web')
+
+    const stale: MissionRemote = {
+      ...remoteReturning({ ok: true, value: { trees: [] } }),
+      resolveExecutorSession: () => Promise.reject(new Error(
+        'client api: avantfMission/resolveExecutorSession failed: HTTP 404',
+      )),
+    }
+    await expect(fetchExecutorSession(stale, 'session-1', 'r1')).rejects.toThrow('重启 dsh web')
+  })
+
+  it('rejects an envelope error and a payload it cannot recognise', async () => {
+    const failed: MissionRemote = {
+      ...remoteReturning({ ok: true, value: { trees: [] } }),
+      resolveExecutorSession: () => Promise.resolve({ ok: false, error: 'namespace missing' }),
+    }
+    await expect(fetchExecutorSession(failed, 'session-1', 'r1')).rejects.toThrow('namespace missing')
+
+    const unrecognised: MissionRemote = {
+      ...remoteReturning({ ok: true, value: { trees: [] } }),
+      resolveExecutorSession: () => Promise.resolve({ ok: true, value: { status: 'maybe' } }),
+    }
+    await expect(fetchExecutorSession(unrecognised, 'session-1', 'r1')).rejects.toThrow('无法识别的数据')
   })
 })
 

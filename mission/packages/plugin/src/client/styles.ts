@@ -99,14 +99,20 @@ const CSS = `
 .avwf-link { align-self: flex-start; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-link, var(--dsw-alias-label-primary)); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .avwf-link:hover { text-decoration-thickness: 2px; }
 .avwf-link:disabled { color: var(--dsw-alias-label-secondary); cursor: default; text-decoration: none; }
-/* The node id as an ENTRY (the tree header's root id, the dialog's heading id). Plain monospace text
-   when the node has no executor session or the host cannot open one; the clickable form adds the
-   avwf-worker-link class — the same LINK token the result pane uses — so an id is an id and the
-   difference is the affordance, not a hue. */
+/* The node id as an ENTRY (the tree header's root id, the dialog's heading id). It is ALWAYS the
+   entry (W18) — a handle opens the session directly, a record without one is looked up on click, and
+   a host that cannot do either explains itself on click — so this is the clickable form and the link
+   token is what makes it read as one affordance, not a hue. */
 .avwf-node-id { font-family: ui-monospace, monospace; }
 .avwf-worker-link { padding: 0; border: 0; background: transparent; font: inherit; font-family: ui-monospace, monospace; font-size: 12px; color: var(--dsw-alias-link, var(--dsw-alias-label-primary)); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .avwf-worker-link:hover { text-decoration-thickness: 2px; }
-.avwf-worker-id { font-family: ui-monospace, monospace; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+/* W18: an id with no handle LOOKS like the entry it is (a dashed underline says "this will go and
+   find something"), and 查找中… replaces the id while the click is being answered — a click that
+   silently did nothing for a second reads as a broken button. The retry glyph marks an id whose
+   last lookup missed; it is a hint, not a second control (the id itself is the only entry). */
+.avwf-worker-lookup { text-decoration-style: dashed; }
+.avwf-worker-busy { color: var(--dsw-alias-label-secondary); }
+.avwf-worker-retry { color: var(--dsw-alias-label-secondary); }
 .avwf-worker-error { color: var(--dsw-alias-state-error-primary, #d9534f); }
 .avwf-detail-child-head { display: flex; align-items: center; gap: 6px; }
 .avwf-detail-child-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

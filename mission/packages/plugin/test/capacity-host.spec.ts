@@ -3,7 +3,7 @@
  * implementation with a conservative memory signal, and that `weight`/`waitingFor` reach the panel
  * and `mission_result`.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { totalmem } from 'node:os'
 import { CAPACITY_CEILING } from '@avantf/mission-core'
 import { createHostResourceProbe } from '../src/host.js'
@@ -116,26 +116,38 @@ describe('the capacity wait reaches the dispatch prompt', () => {
   it('⑦ tells an executor that was queued how long it waited, from the engine\'s own aging clock', async () => {
     // The report this answers: a run that had queued behind a full machine told its owner "I did not
     // wait", because nothing in its prompt said otherwise. The queued node gets the fact on dispatch.
-    const mounted = await mount({ pluginConfig: { capacity: 1 } })
-    const first = await callTool(mounted, 'create_mission', { title: 'first', description: 'd', analysis: [] }, mounted.owner)
-    const firstId = String(first.data?.['root_id'] ?? '')
-    const second = await callTool(mounted, 'create_mission', { title: 'second', description: 'd', analysis: [] }, mounted.owner)
-    const secondId = String(second.data?.['root_id'] ?? '')
+    //
+    // The wait is a REAL interval on the engine's aging clock, and the prompt deliberately says nothing
+    // when it is 0 — so the clock has to be advanced the way a queue advances it. Without this the
+    // deferral and the dispatch land in the same millisecond and the sentence never appears (only
+    // `Date` is faked, so the fixture's own timers still work; see `host.spec.ts` for the same idiom).
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const mounted = await mount({ pluginConfig: { capacity: 1 } })
+      const first = await callTool(mounted, 'create_mission', { title: 'first', description: 'd', analysis: [] }, mounted.owner)
+      const firstId = String(first.data?.['root_id'] ?? '')
+      const second = await callTool(mounted, 'create_mission', { title: 'second', description: 'd', analysis: [] }, mounted.owner)
+      const secondId = String(second.data?.['root_id'] ?? '')
 
-    // The first holds the whole machine; the second is queued, not dispatched.
-    expect(promptFor(mounted, secondId)).toBe('')
-    await callTool(
-      mounted,
-      'submit_mission',
-      { node_id: firstId, result: 'done' },
-      mounted.makeLive(String(mounted.dispatched[0]?.childId ?? '')),
-    )
-    await mounted.flush()
+      // The first holds the whole machine; the second is queued, not dispatched.
+      expect(promptFor(mounted, secondId)).toBe('')
+      // Half a minute behind a full machine, then the machine frees up.
+      vi.setSystemTime(Date.now() + 30_000)
+      await callTool(
+        mounted,
+        'submit_mission',
+        { node_id: firstId, result: 'done' },
+        mounted.makeLive(String(mounted.dispatched[0]?.childId ?? '')),
+      )
+      await mounted.flush()
 
-    const prompt = promptFor(mounted, secondId)
-    expect(prompt).toContain('本任务在容量队列里等了')
-    expect(prompt).toContain('原因：机器容量已被占用')
-    // And the FIRST mission, which never waited, must not be told it did.
-    expect(promptFor(mounted, firstId)).not.toContain('容量队列')
+      const prompt = promptFor(mounted, secondId)
+      expect(prompt).toContain('本任务在容量队列里等了')
+      expect(prompt).toContain('原因：机器容量已被占用')
+      // And the FIRST mission, which never waited, must not be told it did.
+      expect(promptFor(mounted, firstId)).not.toContain('容量队列')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

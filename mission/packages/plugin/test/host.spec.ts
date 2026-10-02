@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RefusalCode } from '@avantf/mission-core'
 import { agent, callTool, executorFor, mount, noteAndSplit } from './mount.js'
+import type { TreeDocument } from '../src/domain.js'
 import { clientContribution, SNAPSHOT_WIRE_VERSION } from '../src/wire.js'
 import { WORKER_TOOL_DENY } from '../src/faces.js'
 
@@ -725,6 +726,7 @@ describe('the browser half\'s wire face', () => {
       'detail',
       'result',
       'delete',
+      'resolveExecutorSession',
       'watch',
     ])
     expect(contribution.schemas.map((entry) => entry.name)).toEqual([
@@ -736,6 +738,8 @@ describe('the browser half\'s wire face', () => {
       'detailResult',
       'resultargs',
       'resultText',
+      'resolveExecutorSessionargs',
+      'executorSessionResult',
       'watchargs',
       'watchFrame',
     ])
@@ -887,8 +891,150 @@ describe('the worker session the panel can open', () => {
   })
 })
 
-describe('a reused prerequisite stays visible as a dependency', () => {
-  it('lists it among the depending node children, and in the snapshot', async () => {
+/**
+ * W18: `resolveExecutorSession` — the click-time lookup for a node whose record has no display
+ * handle (everything dispatched before that field existed). These cases pin what it answers, what it
+ * WRITES BACK, and — the invariant the whole feature rests on — that it reads session logs only when
+ * a click asks it to.
+ */
+describe('resolving a historical executor on click', () => {
+  /** A tree record as a build BEFORE `executorSessionId` existed wrote it: finished, no handle. */
+  function historicalDocument(rootId: string, ownerSessionId: string, at = 1_000): TreeDocument {
+    const document: TreeDocument = {
+      tree: { rootId, ownerSessionId, createdAt: at, closedAt: null, reportedAt: null },
+      nodes: {
+        [rootId]: {
+          id: rootId, rootId, parentId: null, title: 'Historical', description: 'd',
+          unit: null, weight: 1, executorSessionId: null,
+          context: [], corrections: [], correctionsDeliveredUpTo: 0, analysisNotes: [], analysisAttempt: 0,
+          status: 'done', createdAt: at, depth: 1, claimedBy: null, claimedAt: at, attempts: 1,
+          failures: 0, spawnFailures: 0, parkedWorker: null, lastWorkerId: null, dispatchBaseline: null,
+          progressAt: at, activityAt: at + 500, stalls: 0, stalledNotifiedAt: null,
+          result: 'done', hasResult: true, resultReadAt: null, resultRef: null, resultHint: null,
+          children: [], updatedAt: at + 500,
+        },
+      },
+    }
+    // ABSENT, not merely null: `seedDocuments` bypasses the domain schema on purpose, so this is the
+    // one place a record an earlier build wrote can be modelled exactly (the schema's
+    // `nullable().default(null)` is what `domain.spec.ts` pins).
+    delete (document.nodes[rootId] as unknown as Record<string, unknown>)['executorSessionId']
+    return document
+  }
+
+  /** List one stored session as the query engine would, and give it a log that ran `nodeId`. */
+  function storeWorker(
+    mounted: Awaited<ReturnType<typeof mount>>,
+    id: string,
+    options: { parent?: string; createdAt?: number; nodeId?: string; text?: string } = {},
+  ): void {
+    const createdAt = options.createdAt ?? 1_200
+    mounted.listedSessions.push({
+      header: { id, origin: 'subagent', delegationDepth: 1, parentSession: options.parent ?? mounted.owner.id, createdAt },
+      live: false,
+    })
+    const body = options.text ?? (options.nodeId === undefined ? '本任务：\nid: 00000000\n' : `本任务：\nid: ${options.nodeId}\n标题: x`)
+    mounted.workerSessions.set(id, [{ time: createdAt + 10, text: body }])
+  }
+
+  it('answers from a record that already has a handle without reading a single session', async () => {
+    const mounted = await mount()
+    const root = await createTree(mounted, 'Live')
+    await mounted.flush()
+    const claim = String(mounted.dispatched[0]?.childId ?? '')
+
+    const resolved = await mounted.host.resolveExecutorSession({ sessionId: mounted.owner.id, nodeId: root })
+    expect(resolved).toEqual({ sessionId: claim, status: 'resolved' })
+    // Zero I/O: neither the corpus listing nor any event scan was touched.
+    expect(mounted.sessionListCalls()).toBe(0)
+    expect(mounted.sessionLogReads).toEqual([])
+  })
+
+  it('finds a historical executor from the stored logs and WRITES the handle back', async () => {
+    const mounted = await mount({ seedDocuments: [historicalDocument('aaaa1111', 'owner')] })
+    storeWorker(mounted, 'mission-1234abcd', { nodeId: 'aaaa1111' })
+
+    const resolved = await mounted.host.resolveExecutorSession({ sessionId: 'owner', nodeId: 'aaaa1111' })
+    expect(resolved).toEqual({ sessionId: 'mission-1234abcd', status: 'resolved' })
+    // Persisted, not just in memory: the panel would otherwise pay for the lookup on every open.
+    expect(mounted.nodeFor('aaaa1111')?.executorSessionId).toBe('mission-1234abcd')
+    expect(mounted.stored('aaaa1111')?.nodes['aaaa1111']?.executorSessionId).toBe('mission-1234abcd')
+
+    // The second click answers from the record: no listing, no log read.
+    const again = await mounted.host.resolveExecutorSession({ sessionId: 'owner', nodeId: 'aaaa1111' })
+    expect(again).toEqual({ sessionId: 'mission-1234abcd', status: 'resolved' })
+    expect(mounted.sessionListCalls()).toBe(1)
+    expect(mounted.sessionLogReads).toEqual(['mission-1234abcd'])
+  })
+
+  it('reads ONLY the candidates that pass the parent / id-shape / time filters', async () => {
+    const mounted = await mount({ seedDocuments: [historicalDocument('bbbb2222', 'owner', 1_000)] })
+    storeWorker(mounted, 'mission-aaaaaaaa', { parent: 'someone-else', createdAt: 1_100, nodeId: 'bbbb2222' })
+    storeWorker(mounted, 'subagent-not-ours', { createdAt: 1_100, nodeId: 'bbbb2222' })
+    storeWorker(mounted, 'mission-bbbbbbbb', { createdAt: 9_999_999, nodeId: 'bbbb2222' })
+    storeWorker(mounted, 'mission-cccccccc', { createdAt: 1_100, nodeId: 'bbbb2222' })
+
+    const resolved = await mounted.host.resolveExecutorSession({ sessionId: 'owner', nodeId: 'bbbb2222' })
+    expect(resolved).toMatchObject({ status: 'resolved', sessionId: 'mission-cccccccc' })
+    expect(mounted.sessionLogReads).toEqual(['mission-cccccccc'])
+  })
+
+  it('separates "找不到" from "never dispatched"', async () => {
+    // ① Dispatched once (attempts 1) but its session is gone: the panel must say it looked and failed.
+    const historical = await mount({ seedDocuments: [historicalDocument('cccc3333', 'owner')] })
+    expect(await historical.host.resolveExecutorSession({ sessionId: 'owner', nodeId: 'cccc3333' }))
+      .toEqual({ status: 'not-found' })
+
+    // ② Never dispatched at all (a queued node): nothing was ever run, so nothing is looked up.
+    const queued = await mount({ pluginConfig: { capacity: 1 } })
+    const first = await callTool(queued, 'create_mission', { title: 'first', description: 'd', analysis: [] }, queued.owner)
+    expect(first.ok).toBe(true)
+    const second = await callTool(queued, 'create_mission', { title: 'queued', description: 'd', analysis: [] }, queued.owner)
+    const queuedId = String(second.data?.['root_id'] ?? '')
+    expect(await queued.host.resolveExecutorSession({ sessionId: queued.owner.id, nodeId: queuedId }))
+      .toEqual({ status: 'never-dispatched' })
+    expect(queued.sessionListCalls()).toBe(0)
+  })
+
+  it('says the host cannot look a session up when sessionQuery is absent, and never throws', async () => {
+    const mounted = await mount({ noSessionQuery: true, seedDocuments: [historicalDocument('dddd4444', 'owner')] })
+    const resolved = await mounted.host.resolveExecutorSession({ sessionId: 'owner', nodeId: 'dddd4444' })
+    expect(resolved.status).toBe('unsupported')
+    expect(resolved.error ?? '').toContain('无法查找')
+    // The panel is untouched by the absence: the tree still renders.
+    expect(mounted.host.treesForSession('owner')).toHaveLength(1)
+  })
+
+  it('is loading ZERO cost: mount, snapshot, detail, list_missions and mission_result read no session', async () => {
+    // W18's central invariant. The lookup is only ever invited by a click, so every path a page load
+    // or a model call takes must touch no session log — and no corpus listing either (the listing is
+    // the cheaper half, and it is still I/O the panel must not pay per render).
+    const mounted = await mount({ seedDocuments: [historicalDocument('ffff6666', 'owner')] })
+    storeWorker(mounted, 'mission-feedfeed', { nodeId: 'ffff6666' })
+
+    expect(await mounted.host.snapshot({ sessionId: 'owner' })).toBeDefined()
+    expect(await mounted.host.detail({ sessionId: 'owner', nodeId: 'ffff6666' })).toBeDefined()
+    await callTool(mounted, 'list_missions', {}, mounted.owner)
+    await callTool(mounted, 'mission_result', { node_id: 'ffff6666' }, mounted.owner)
+
+    expect(mounted.sessionListCalls()).toBe(0)
+    expect(mounted.sessionLogReads).toEqual([])
+    // Non-vacuity: the fixtures WOULD have been found, so the count above is not zero by accident.
+    expect(await mounted.host.resolveExecutorSession({ sessionId: 'owner', nodeId: 'ffff6666' }))
+      .toMatchObject({ status: 'resolved', sessionId: 'mission-feedfeed' })
+    expect(mounted.sessionLogReads).toEqual(['mission-feedfeed'])
+  })
+
+  it('refuses another session\'s node without reading anything', async () => {
+    const mounted = await mount({ seedDocuments: [historicalDocument('eeee5555', 'owner')] })
+    const resolved = await mounted.host.resolveExecutorSession({ sessionId: 'somebody-else', nodeId: 'eeee5555' })
+    expect(resolved.status).toBe('not-found')
+    expect(mounted.sessionListCalls()).toBe(0)
+    expect(mounted.nodeFor('eeee5555')?.executorSessionId).toBeNull()
+  })
+})
+
+describe('a reused prerequisite stays visible as a dependency', () => {  it('lists it among the depending node children, and in the snapshot', async () => {
     // The bug this pins: a node that reuses a prerequisite was born under ANOTHER parent, so
     // rendering or reading by `parentId` showed an aggregate as a leaf — waiting on nothing.
     const mounted = await mount()

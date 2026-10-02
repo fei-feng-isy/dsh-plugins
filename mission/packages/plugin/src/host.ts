@@ -54,6 +54,7 @@ import {
   type WellFormedSource,
 } from '@avantf/mission-core'
 import { workDomain, TREES_TABLE } from './domain.js'
+import { resolveExecutorSession, type SessionQueryLike } from './executorSession.js'
 import { createLogger, type MissionLogger } from './log.js'
 import { NAMESPACE, SNAPSHOT_WIRE_VERSION } from './wire.js'
 import { OWN_WAKE_SOURCE_KIND } from './source.js'
@@ -1318,6 +1319,75 @@ export class AvantfMissionHost extends TypertRemoteService {
    *  render it too. */
   waitingForOf(nodeId: string): WaitingFor | null {
     return this.engine?.waitingFor(nodeId) ?? null
+  }
+
+  /**
+   * W18: resolve the executor session of a node whose record has no `executorSessionId` — the
+   * historical nodes dispatched before that field existed. Called ONLY from a click; the panel's
+   * mount/render path never reaches it, which is the invariant that keeps a page load free of
+   * session-log reads.
+   *
+   * Resolution is `executorSession.ts`'s (three metadata filters, then a few log reads), and a hit
+   * is written back once so the next click costs nothing. The reply carries a REASON rather than an
+   * exception for every way it can fail: a miss is an ordinary outcome, and the panel has to be able
+   * to say which one it was ("never dispatched" and "the session is gone" are different sentences).
+   */
+  @Remote('resolveExecutorSession')
+  async resolveExecutorSession(args: { sessionId?: string; nodeId: string }): Promise<{
+    sessionId?: string
+    status?: 'resolved' | 'never-dispatched' | 'not-found' | 'unsupported'
+    error?: string
+  }> {
+    const tree = this.tree
+    if (tree === undefined) return { status: 'unsupported', error: '任务引擎尚未启动' }
+    const node = tree.node(args.nodeId)
+    if (node === undefined) return { status: 'not-found', error: `任务 ${args.nodeId} 不存在` }
+    const owner = tree.treeOf(node.rootId)
+    if (args.sessionId === undefined || owner === undefined || owner.ownerSessionId !== args.sessionId) {
+      return { status: 'not-found', error: '这个任务属于别的会话' }
+    }
+    // ① The record already names its executor: answer from it and read NOTHING. The client opens
+    // this case without calling here at all; the short circuit keeps a stale client from turning a
+    // zero-cost click into a session-log scan.
+    if (node.executorSessionId !== null && node.executorSessionId !== '') {
+      return { sessionId: node.executorSessionId, status: 'resolved' }
+    }
+    const resolved = await resolveExecutorSession(args.nodeId, {
+      node,
+      ownerSessionId: owner.ownerSessionId,
+      query: this.sessionLogQuery(),
+      now: Date.now(),
+    })
+    if (resolved.status === 'resolved') {
+      // Write-once, inside the tree's own lock: a handle that arrived while the lookup was in flight
+      // belongs to a NEWER attempt, and `rememberExecutor` refuses to overwrite it with the older
+      // session this lookup resolved (`false` = nothing changed, so nothing to announce).
+      const wrote = await tree.rememberExecutor(args.nodeId, resolved.sessionId)
+      this.log.info(
+        `resolveExecutorSession ${args.nodeId} -> ${resolved.sessionId}`
+        + ` (read ${String(resolved.candidatesRead)} candidate log(s); ${wrote ? 'remembered' : 'a handle was already there'})`,
+      )
+      if (wrote) this.announceNode(args.nodeId)
+      return { sessionId: resolved.sessionId, status: 'resolved' }
+    }
+    if (resolved.status === 'unsupported') {
+      this.log.warn(`resolveExecutorSession ${args.nodeId}: ${resolved.error}`)
+      return { status: 'unsupported', error: resolved.error }
+    }
+    // Both remaining outcomes are "no session to open", and they stay distinct so the panel can say
+    // whether anything was ever dispatched for this node.
+    return resolved.status === 'never-dispatched'
+      ? { status: 'never-dispatched' }
+      : { status: 'not-found' }
+  }
+
+  /** The optional session-log reader, read at USE time (a headless deployment has none). Structural
+   *  typing, like every other optional service here: the plugin must not require it to mount. */
+  private sessionLogQuery(): SessionQueryLike | undefined {
+    const query = this.ctx.get('sessionQuery') as Partial<SessionQueryLike> | undefined
+    return query !== undefined && typeof query.listSessions === 'function'
+      ? query as SessionQueryLike
+      : undefined
   }
 
   /** Delete one WHOLE tree — the panel's "remove this mission" (the argument is a root id; a node is not an

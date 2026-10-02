@@ -139,7 +139,9 @@ const treeSchema = z.object({
 /**
  * The wire surface: `snapshot` the summary, `detail` one node's full record, `result` the FULL text
  * behind a spilled one (on demand — a reader asks for it, the panel never prefetches it), `delete`
- * one finished tree, `watch` a revision on every change (the engine pushing, not polling).
+ * one finished tree, `watch` a revision on every change (the engine pushing, not polling), and
+ * `resolveExecutorSession` the CLICK-TIME lookup of a historical node's executor session (W18 — it
+ * reads session logs, so it is deliberately NOT part of any render path).
  * Every method carries a session id because a Remote invocation has no caller identity.
  */
 export const descriptors: readonly InvocationDescriptor[] = [
@@ -147,6 +149,7 @@ export const descriptors: readonly InvocationDescriptor[] = [
   direct('detail', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('result', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('delete', z.object({ sessionId: z.string().optional(), rootId: z.string() })),
+  direct('resolveExecutorSession', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('watch', z.object({ sessionId: z.string().optional() }), [], { stream: true }),
 ]
 
@@ -231,6 +234,19 @@ export const detailResultSchema = z.object({
   error: z.string().optional(),
 })
 
+/**
+ * What a click-time executor lookup answered. `sessionId` is present only when the lookup RESOLVED
+ * one; `status` names the three ways it did not, and `error` carries the host's own words when they
+ * vary ("sessionQuery is not mounted", "reading the session list failed"). Absent `status` is the
+ * one backward-compatible reading: an OLDER host (one that predates this method) has no such reply
+ * at all, so the client says "the two halves are out of step" rather than guessing a reason.
+ */
+export const executorSessionResultSchema = z.object({
+  sessionId: z.string().optional(),
+  status: z.enum(['resolved', 'never-dispatched', 'not-found', 'unsupported']).optional(),
+  error: z.string().optional(),
+})
+
 /** One `watch` frame: only a revision, never the tree. */
 export const watchFrameSchema = z.object({ revision: z.number() })
 
@@ -243,6 +259,8 @@ declaredSchemas.push(
   declare('detailResult', detailResultSchema),
   declare('resultargs', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   declare('resultText', resultTextSchema),
+  declare('resolveExecutorSessionargs', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
+  declare('executorSessionResult', executorSessionResultSchema),
   declare('watchargs', z.object({ sessionId: z.string().optional() })),
   declare('watchFrame', watchFrameSchema),
 )

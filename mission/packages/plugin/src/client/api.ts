@@ -2,7 +2,7 @@
  * @module @avantf/dsh-mission/client/api
  */
 import { SNAPSHOT_WIRE_VERSION, detailResultSchema, snapshotResultSchema } from '../wire.js'
-import type { MissionNodeDetail, MissionSnapshot } from './contract.js'
+import type { ExecutorSessionLookup, MissionNodeDetail, MissionSnapshot } from './contract.js'
 
 /** Safety-net re-read interval; slow on purpose, since the session itself is the primary trigger. */
 export const POLL_INTERVAL_MS = 5_000
@@ -30,6 +30,9 @@ export interface MissionRemote {
   /** The FULL text behind a spilled result. Optional for the same reason `watch` is: an older host
    *  simply does not have it, and the pane falls back to showing the locator. */
   result?: (args: { sessionId: string; nodeId: string }) => Promise<unknown>
+  /** The click-time executor lookup (W18). Optional for the same reason as `result`: an older host
+   *  has no such method, and the panel says "the two halves are out of step" instead of guessing. */
+  resolveExecutorSession?: (args: { sessionId: string; nodeId: string }) => Promise<unknown>
   /** The engine's change stream, called with the transport's cancellation signal.
    *  Optional: an older host may not expose it, so the caller keeps its timer fallback. */
   watch?: (args: { sessionId: string }, signal: AbortSignal) => AsyncIterable<unknown>
@@ -245,10 +248,54 @@ export async function fetchFullResult(remote: MissionRemote, sessionId: string, 
 }
 
 /**
+ * Ask the host to find the session that ran one node (W18). CALLED ONLY FROM A CLICK: the server
+ * side lists the session corpus and reads a few logs, which is exactly the cost the panel must not
+ * pay while rendering.
+ *
+ * Three failure shapes, kept apart on purpose:
+ * - the host has no such method at all (an older host) → a version-skew sentence, since restarting
+ *   `dsh web` really does fix it;
+ * - the call itself failed (transport) → `transportHint`'s reading of it;
+ * - the host ANSWERED "never dispatched" / "not found" / "cannot look up" → returned as an answer,
+ *   because those are outcomes a reader must be told about, not failures of the panel.
+ */
+export async function fetchExecutorSession(
+  remote: MissionRemote,
+  sessionId: string,
+  nodeId: string,
+): Promise<ExecutorSessionLookup> {
+  const resolve = remote.resolveExecutorSession
+  if (typeof resolve !== 'function') {
+    throw new Error(
+      '这个宿主还不能查找执行者会话（Remote 面没有 resolveExecutorSession 调用）：宿主只在 dsh web 启动时加载一次，'
+      + '重启 dsh web 后再试。',
+    )
+  }
+  let response: unknown
+  try {
+    response = await resolve({ sessionId, nodeId })
+  } catch (cause: unknown) {
+    throw new Error(transportHint(cause))
+  }
+  const { value, error } = unwrap(response)
+  if (error !== undefined) throw new Error(error)
+  const payload = value as { sessionId?: unknown; status?: unknown; error?: unknown } | null | undefined
+  if (payload === null || typeof payload !== 'object') throw new Error('查找执行者会话返回了无法识别的数据')
+  const status = payload.status
+  if (status !== 'resolved' && status !== 'never-dispatched' && status !== 'not-found' && status !== 'unsupported') {
+    throw new Error('查找执行者会话返回了无法识别的数据')
+  }
+  return {
+    status,
+    ...typeof payload.sessionId === 'string' ? { sessionId: payload.sessionId } : {},
+    ...typeof payload.error === 'string' ? { error: payload.error } : {},
+  }
+}
+
+/**
  * Follow the engine's change stream, calling `onChange` per frame; the frame carries a
  * revision and nothing else. The CALLER decides what a normal end means.
- */
-export async function watchChanges(
+ */export async function watchChanges(
   remote: MissionRemote,
   sessionId: string,
   signal: AbortSignal,

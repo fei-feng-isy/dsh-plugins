@@ -1,0 +1,228 @@
+/**
+ * Finding the session that executed ONE historical mission, lazily.
+ *
+ * W17 made a node id clickable only when the record already carried `executorSessionId`. Nodes
+ * dispatched before that field existed have none, so their id was plain text and the session that
+ * ran them was unreachable from the panel. The fix cannot be "backfill at mount": resolving a
+ * historical executor means LISTING sessions and READING session logs, and doing that while the
+ * panel mounts would put the cost of every unlinkable node on every page load.
+ *
+ * So this module is the click-time half: it is called only from the Remote method that a click
+ * invokes, and it answers with a reason rather than an exception, because a miss is an ordinary
+ * outcome (the session may have been cleaned up) that the panel has to be able to explain.
+ *
+ * It is deliberately separated from `host.ts`: the host owns the tree and the write-back, this owns
+ * "which stored session is the one that ran node X", and a test can pin the filtering rules and the
+ * read budget with no tree and no engine.
+ * @module @avantf/dsh-mission/executorSession
+ */
+
+/** One stored session, as `sessionQuery.listSessions()` reports it (the fields the filter reads). */
+export interface ListedSession {
+  readonly header: {
+    readonly id: string
+    readonly createdAt?: number
+    readonly parentSession?: string
+  }
+}
+
+/** The slice of `sessionQuery` this resolver uses. Structural, like every optional service here. */
+export interface SessionQueryLike {
+  listSessions(): Promise<readonly ListedSession[]>
+  /** Events of one session, AND-filtered. Only the `time` / `text` clauses are used. */
+  filterEvents(
+    sessionId: string,
+    filters: readonly (readonly [string, ...unknown[]])[],
+  ): Promise<readonly { readonly text: string }[]>
+}
+
+export interface ResolveExecutorSessionOptions {
+  readonly node: {
+    readonly createdAt?: number
+    readonly activityAt?: number
+    readonly updatedAt?: number
+    /**
+     * How many times this node has been dispatched. `0` is the DURABLE proof that no session ever
+     * ran it (and what the panel's "从未派发" sentence is about); `undefined` means the record cannot
+     * say, and the lookup proceeds rather than asserting something it does not know.
+     */
+    readonly attempts?: number
+  }
+  /** The owner session every worker hangs under — the panel's own session. */
+  readonly ownerSessionId: string
+  /** The optional `sessionQuery` service; omitted means the host cannot look anything up. */
+  readonly query: SessionQueryLike | undefined
+  /** Wall clock, injected so a test fixes the window. */
+  readonly now: number
+}
+
+/** Why no session could be named. The panel turns each into its own sentence. */
+export type ExecutorSessionResolution =
+  | { readonly status: 'resolved'; readonly sessionId: string; readonly candidatesRead: number }
+  | { readonly status: 'never-dispatched' }
+  | { readonly status: 'not-found' }
+  | { readonly status: 'unsupported'; readonly error: string }
+
+/**
+ * Worst-case number of session LOGS one click may read.
+ *
+ * The three candidate filters (parent, id shape, time window) are metadata and free; this bounds the
+ * part that opens stored logs. A miss over more than this many candidates inside one node's own time
+ * window is not a lookup problem — the owner simply ran many sessions while this node was alive —
+ * and the bound is what keeps a click from turning into a scan of the whole corpus.
+ */
+export const RESOLVE_READ_BUDGET = 8
+
+/**
+ * Slack around a node's own time window, in ms. Both ends exist for the same reason: the node
+ * record and the session header are written by different code, so clocks a second or two apart
+ * would otherwise hide the very session being looked for.
+ *
+ * Both margins are small BECAUSE of what they bound. The START is the node's creation, and the
+ * session that ran it is created at (or within seconds of) the dispatch that stamped the record.
+ * The END is the node's last movement, and the last attempt was dispatched BEFORE it — a wide
+ * trailing margin would only re-admit the owner's later, unrelated work, which is exactly what the
+ * time clause exists to keep out of the read budget.
+ */
+export const WINDOW_BEFORE_MS = 120_000
+export const WINDOW_AFTER_MS = 120_000
+
+/** The worker session id shape (`claims.ts`), re-stated here so this module imports no sibling. */
+const WORKER_ID = /^mission-[0-9a-f]{8}$/u
+
+/**
+ * Where one node's execution can have happened: from its creation through the last moment its
+ * record moved, plus the margins.
+ *
+ * The END is the node's own last movement (`activityAt` / `updatedAt`) and deliberately NOT the
+ * current wall clock. A session created long after a node stopped moving cannot have run it — and
+ * "now" as the end would let the very sessions the third clause exists to exclude (the owner's
+ * LATER work, which really is `mission-*` and really does hang under this owner) back in, spending
+ * the read budget on them. `now` is only the fallback for a record with no end at all.
+ *
+ * A record with no usable timestamps gets the widest window instead of a wrong narrow one: the read
+ * budget still bounds the work, and whether the node was ever dispatched is answered separately
+ * (`attempts`), never inferred from a missing clock.
+ */
+function searchWindow(node: ResolveExecutorSessionOptions['node'], now: number): { from: number; to: number } {
+  const created = Number.isFinite(node.createdAt) ? (node.createdAt as number) : 0
+  const activity = Number.isFinite(node.activityAt) ? (node.activityAt as number) : 0
+  const updated = Number.isFinite(node.updatedAt) ? (node.updatedAt as number) : 0
+  const ended = Math.max(activity, updated, created)
+  const fallback = Number.isFinite(now) ? now : ended
+  return {
+    from: created > 0 ? created - WINDOW_BEFORE_MS : 0,
+    to: (ended > 0 ? ended : fallback) + WINDOW_AFTER_MS,
+  }
+}
+
+/**
+ * The sessions that COULD be one node's executor, newest first.
+ *
+ * Three clauses, all metadata, all required:
+ * ① `parentSession === ownerSessionId` — a worker is a child of the panel's own session, so a
+ *    session another owner ran can never be this node's executor even if it looks like one;
+ * ② the id is the `mission-xxxxxxxx` claim shape — the plugin's own workers are ids it minted, and
+ *    an ordinary subagent of the same owner must not be read (or opened) as an executor;
+ * ③ `createdAt` inside the node's window — the session has to have been created while this node
+ *    could have been running.
+ *
+ * A malformed/absent `createdAt` on a record makes it fail clause ③ rather than pass it: the id
+ * would otherwise be a guess.
+ */
+function candidatesFor(
+  listed: readonly ListedSession[],
+  ownerSessionId: string,
+  window: { from: number; to: number },
+): readonly { id: string; createdAt: number }[] {
+  const candidates: { id: string; createdAt: number }[] = []
+  for (const record of listed) {
+    const header = record.header
+    if (header === null || typeof header !== 'object') continue
+    const id = typeof header.id === 'string' ? header.id : ''
+    if (!WORKER_ID.test(id)) continue
+    if (header.parentSession !== ownerSessionId) continue
+    const createdAt = header.createdAt
+    if (typeof createdAt !== 'number' || !Number.isFinite(createdAt)) continue
+    if (createdAt < window.from || createdAt > window.to) continue
+    candidates.push({ id, createdAt })
+  }
+  // Newest first, so the read budget is spent on the most recent attempts — the same "only the last
+  // one counts" rule the persisted handle follows.
+  return candidates.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+/**
+ * Does this session's log say it ran `nodeId`?
+ *
+ * The worker prompt's `本任务` block always opens with `id: <nodeId>` (`core/src/prompt.ts`'s
+ * `currentNodeBlock`), and it reaches the session as its first user message, so the question is
+ * asked of the session's own semantic text. The filter is the harness's (it knows how to extract
+ * text from each event type, and it can scan without materializing a whole log in this plugin); the
+ * regex after it is this module's own `id: <nodeId>` check, so a text filter that merely came CLOSE
+ * cannot make the answer wrong.
+ */
+async function sessionRanNode(
+  query: SessionQueryLike,
+  sessionId: string,
+  nodeId: string,
+  window: { from: number; to: number },
+): Promise<boolean> {
+  if (typeof query.filterEvents !== 'function') return false
+  const pattern = new RegExp(`(?:^|\\n)id: ${nodeId}(?:\\n|$)`, 'u')
+  try {
+    const hits = await query.filterEvents(sessionId, [
+      ['time', window.from, window.to],
+      ['text', `id: ${nodeId}`],
+    ])
+    return hits.some((hit) => pattern.test(hit.text))
+  } catch {
+    // One unreadable log (a session-store migration refusing an old file, a race with a cleanup)
+    // must not fail the whole lookup — the other candidates are still worth asking.
+    return false
+  }
+}
+
+/**
+ * Resolve one node's executor session from stored sessions, or say why not.
+ *
+ * Order of the answer: a node whose `attempts` is 0 is `never-dispatched` (nothing ever ran it, so
+ * there is nothing to look for — and the panel must be able to say that instead of "it may have
+ * been cleaned up"); a host without `sessionQuery` is `unsupported` (a real deployment can be
+ * headless, and the panel must say so instead of crashing); otherwise the filtered candidates are
+ * read newest-first until one matches or the budget is spent, and no match is `not-found` — the
+ * honest reading of "it was dispatched once, and the session is gone now".
+ */
+export async function resolveExecutorSession(
+  nodeId: string,
+  options: ResolveExecutorSessionOptions,
+): Promise<ExecutorSessionResolution> {
+  if (nodeId === '') return { status: 'not-found' }
+  if (options.node.attempts === 0) return { status: 'never-dispatched' }
+  const window = searchWindow(options.node, options.now)
+  const query = options.query
+  if (query === undefined || typeof query.listSessions !== 'function') {
+    return { status: 'unsupported', error: '宿主没有挂载会话查询服务（sessionQuery），无法查找执行者会话' }
+  }
+
+  let listed: readonly ListedSession[]
+  try {
+    listed = await query.listSessions()
+  } catch (cause) {
+    return {
+      status: 'unsupported',
+      error: `读取会话列表失败：${cause instanceof Error ? cause.message : String(cause)}`,
+    }
+  }
+
+  const candidates = candidatesFor(listed, options.ownerSessionId, window)
+  let read = 0
+  for (const candidate of candidates) {
+    if (read >= RESOLVE_READ_BUDGET) break
+    read += 1
+    if (await sessionRanNode(query, candidate.id, nodeId, window)) {
+      return { status: 'resolved', sessionId: candidate.id, candidatesRead: read }
+    }
+  }
+  return { status: 'not-found' }
+}

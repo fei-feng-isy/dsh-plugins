@@ -135,6 +135,24 @@ export interface WorkerSessionTarget {
   readonly mode: 'continuable'
 }
 
+/**
+ * What a CLICK-TIME executor lookup answered (W18), as the view consumes it. `resolved` carries the
+ * session to open; the other three are the distinguishable ways there is nothing to open, which the
+ * view renders as different sentences:
+ *
+ * - `never-dispatched` — the record proves no session ever ran this node;
+ * - `not-found` — it ran once, and the session is gone (cleaned up, or its log is not on this host);
+ * - `unsupported` — this host cannot look anything up at all (no session service, or an older host
+ *   whose Remote face predates the method).
+ */
+export interface ExecutorSessionLookup {
+  readonly status: 'resolved' | 'never-dispatched' | 'not-found' | 'unsupported'
+  /** Present when `status` is `resolved`. */
+  readonly sessionId?: string
+  /** The host's own words when it has any (a missing service, a failed listing). */
+  readonly error?: string
+}
+
 export interface MissionViewProps {
   /** Read the current snapshot and keep it updated. */
   readonly useSnapshot: () => MissionSnapshotState
@@ -152,4 +170,11 @@ export interface MissionViewProps {
    * it must still mount this plugin (see `client/index.ts`, and `inject` there deliberately omits it).
    */
   readonly openWorkerSession?: (target: WorkerSessionTarget) => void
+  /**
+   * Find the session that ran a node whose record has no handle (W18). Called ONLY from a click —
+   * it is a Remote call whose server side lists sessions and reads a few logs, so nothing on the
+   * render path may touch it. Rejecting means "the lookup itself failed"; a `not-found`/`unsupported`
+   * ANSWER is a result, not an error.
+   */
+  readonly resolveWorkerSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
 }

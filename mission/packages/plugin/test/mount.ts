@@ -145,6 +145,16 @@ export interface Mounted {
   restrictions: { agentId: string; filter: { deny?: readonly string[]; allow?: readonly string[] } }[]
   /** What `sessionQuery.listSessions()` reports, for `/archive` and `/clean` tests. */
   listedSessions: { header: Record<string, unknown>; live: boolean }[]
+  /**
+   * W18: the session LOG behind each stored session id, as `sessionQuery.filterEvents()` answers it.
+   * A test adds one to make a historical node's executor resolvable; the server side reads these
+   * only from the `resolveExecutorSession` Remote method, which only a click invokes.
+   */
+  workerSessions: Map<string, { time: number; text: string }[]>
+  /** Session ids whose `filterEvents` was called, in order — the spy the loading cases assert on. */
+  sessionLogReads: string[]
+  /** How many times `sessionQuery.listSessions()` was called — the metadata half of the same spy. */
+  sessionListCalls: () => number
   /** Messages the host steered to a worker, in order. */
   sent: { from: string; targetId: string; text: string }[]
   registered: {
@@ -320,6 +330,12 @@ export async function mount(
     seedDocuments?: readonly TreeDocument[]
     /** Mount a workspace registry whose archive set is `mounted.archivedSessions`. */
     workspaceRegistry?: boolean
+    /**
+     * Mount WITHOUT the optional `sessionQuery` service, as a headless deployment (or a host whose
+     * session store is not composed) does. The click-time executor lookup must degrade to "cannot
+     * look up" rather than throw, and nothing else in the plugin may notice.
+     */
+    noSessionQuery?: boolean
     /** Plugin config, so a test can point `sessionsRoot` at a throwaway directory. */
     pluginConfig?: Record<string, unknown>
   } = {},
@@ -363,6 +379,10 @@ export async function mount(
   const seededRoots: string[] = []
   /** Sessions `listSessions()` reports; tests push entries to exercise the commands. */
   const listedSessions: { header: Record<string, unknown>; live: boolean }[] = []
+  /** Session logs, keyed by session id; only `resolveExecutorSession` reads them. */
+  const workerSessions = new Map<string, { time: number; text: string }[]>()
+  const sessionLogReads: string[] = []
+  let sessionListCalls = 0
   const live = new Map<string, StubAgent>()
   const spill = { saved: [] as string[], locator: 'spill://mission-result', hint: 'read it with the read tool' }
   /** Real spill files written by `saveText` when `spillToDisk` is on; removed by `dispose`. */
@@ -575,10 +595,31 @@ export async function mount(
     },
   })
   ctx.mixin('timer', ['interval'])
-  ctx.provide('sessionQuery', {
+  // The optional session-history service. `noSessionQuery` models a deployment without it (the
+  // mount must still work, and the click-time lookup must say "cannot look up" rather than throw).
+  if (options.noSessionQuery !== true) ctx.provide('sessionQuery', {
     // Stored sessions, as `/archive` and `/clean` enumerate them. Empty unless a test
     // wants otherwise; the mount harness has no session store behind it.
-    listSessions: () => Promise.resolve(listedSessions),
+    listSessions: () => {
+      sessionListCalls += 1
+      return Promise.resolve(listedSessions)
+    },
+    // W18: the event scan the click-time executor lookup runs. Only the `time` and `text` clauses
+    // are honoured, which is all `executorSession.ts` sends.
+    filterEvents: (sessionId: string, filters: readonly (readonly [string, ...unknown[]])[]) => {
+      sessionLogReads.push(sessionId)
+      const range = filters.find((filter) => filter[0] === 'time') as readonly [string, number, number] | undefined
+      const wanted = filters.find((filter) => filter[0] === 'text')?.[1]
+      const from = range?.[1] ?? Number.NEGATIVE_INFINITY
+      const to = range?.[2] ?? Number.POSITIVE_INFINITY
+      const events = workerSessions.get(sessionId) ?? []
+      return Promise.resolve(
+        events
+          .filter((event) => event.time >= from && event.time <= to)
+          .filter((event) => typeof wanted !== 'string' || event.text.includes(wanted))
+          .map((event) => ({ sessionId, seq: 0, type: 'user/message', time: event.time, surface: 'current', text: event.text })),
+      )
+    },
     observeSession: (sessionId: string) => {
       if (unobservableSessions.has(sessionId)) {
         // The shape of a host-side failure that is NOT "not found" (a session-store migration
@@ -665,6 +706,9 @@ export async function mount(
     restrictions,
     sent,
     listedSessions,
+    workerSessions,
+    sessionLogReads,
+    sessionListCalls: () => sessionListCalls,
     contexts,
     sections,
     commands,

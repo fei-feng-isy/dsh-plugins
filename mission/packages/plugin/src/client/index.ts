@@ -16,6 +16,7 @@ import {
   coalesce,
   deleteWork,
   fetchDetail,
+  fetchExecutorSession,
   fetchFullResult,
   fetchSnapshot,
   sessionRevision,
@@ -348,6 +349,14 @@ export function apply(ctx: ClientContext): void {
       },
       // The owner session is the PARENT of every worker session the panel links to.
       sessionId: props.sessionId,
+      // W18: the lazy lookup behind a click on a node whose record has no handle yet. It is a
+      // Remote call (the host lists sessions and reads a few logs), so it is handed over as a
+      // function and NEVER invoked here — the view calls it from the click only.
+      resolveWorkerSession: async (nodeId: string) => {
+        const remote = getRemote()
+        if (remote === undefined) throw new Error('任务树 Remote 未挂载')
+        return await fetchExecutorSession(remote, props.sessionId, nodeId)
+      },
       ...workspace === undefined
         ? {}
         : { openWorkerSession: (target: WorkerSessionTarget): void => { workspace.openSession(target) } },

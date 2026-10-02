@@ -17,16 +17,19 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import {
   MissionDetailDialog,
   MissionTreeView,
-  NodeIdEntry,
   ResultPane,
   WorkerSessionHint,
   detailTabs,
+  createWorkerSessionClick,
   nodeIdLinkLabel,
-  workerSessionClick,
+  workerFailureText,
+  workerSessionBusyText,
+  workerSessionOpen,
   workerSessionTarget,
 } from '../src/client/MissionTreeView.js'
 import { apply } from '../src/client/index.js'
 import type {
+  ExecutorSessionLookup,
   MissionNodeDetail,
   MissionNodeView,
   MissionSnapshot,
@@ -344,9 +347,9 @@ describe('reading a spilled result back', () => {
 
 /**
  * The node-id entry that opens the session which ran a mission. This suite has no DOM, so the click
- * is exercised on the seam the entry is wired to (`NodeIdEntry`'s root element, whose `onClick` is
- * what the panel renders, plus `workerSessionClick` itself) rather than by dispatching a browser
- * event — the same reason `ResultPane` is a pure function here.
+ * is exercised on the seam the entry is wired to (`createWorkerSessionClick` +
+ * `workerSessionOpen`, the very functions `NodeIdEntry`'s `onClick` calls) rather than by
+ * dispatching a browser event — the same reason `ResultPane` is a pure function here.
  */
 describe('opening the session that ran a mission', () => {
   const WORKER = 'mission-aaaa1111'
@@ -396,25 +399,40 @@ describe('opening the session that ran a mission', () => {
     }
   }
 
-  it('sends the exact continuable-child address when the node-id entry is clicked', () => {
+  it('sends the exact continuable-child address when the node-id entry is clicked', async () => {
     const sent: WorkerSessionTarget[] = []
-    const element = NodeIdEntry({
+    const busy: boolean[] = []
+    const failures: string[] = []
+    const click = createWorkerSessionClick({
       nodeId: 'r1',
+      parentSessionId: 'owner-1',
       workerSessionId: WORKER,
-      workerLive: true,
-      sessionId: 'owner-1',
       open: (target) => { sent.push(target) },
-      onFailure: () => undefined,
-      className: 'avwf-dialog-head-id',
-    }) as unknown as { props: { onClick: () => void } }
-
-    element.props.onClick()
+      busy: false,
+      setBusy: (value) => { busy.push(value) },
+      setFailed: () => undefined,
+      onFailure: (message) => { failures.push(message) },
+    })
+    await click()
     // The REAL object, field for field: parent = the panel's own session, child = the worker, and
     // `continuable` so the host opens the durable subagent address rather than a bare id.
     expect(sent).toEqual([{ parentSessionId: 'owner-1', childSessionId: WORKER, mode: 'continuable' }])
     // ...and that object is the builder's own output, not two shapes kept in step by hand.
     expect(workerSessionTarget('owner-1', WORKER))
       .toEqual({ parentSessionId: 'owner-1', childSessionId: WORKER, mode: 'continuable' })
+    // ① With a handle there is NO lookup, so the button never enters 查找中… and never fails.
+    expect(busy).toEqual([false])
+    expect(failures).toEqual([])
+
+    // The same click, made while one is already in flight, is ignored rather than queued.
+    const again: WorkerSessionTarget[] = []
+    const reentrant = createWorkerSessionClick({
+      nodeId: 'r1', parentSessionId: 'owner-1', workerSessionId: WORKER, busy: true,
+      open: (target) => { again.push(target) },
+      setBusy: () => undefined, setFailed: () => undefined, onFailure: () => undefined,
+    })
+    await reentrant()
+    expect(again).toEqual([])
   })
 
   it('renders the mission id itself as the clickable element, labelled with the destination and its state', () => {
@@ -441,26 +459,116 @@ describe('opening the session that ran a mission', () => {
     expect(html).toContain('aria-label="打开执行这个任务的会话（已结束）"')
     expect(nodeIdLinkLabel(WORKER, false)).toBe('打开执行这个任务的会话（已结束）')
     expect(nodeIdLinkLabel(WORKER, true)).toBe('打开执行这个任务的会话（进行中）')
-    expect(nodeIdLinkLabel(null, false)).toBeUndefined()
+    // W18: NO handle is still an entry — the label says a lookup is about to happen instead of the
+    // id degrading to plain text.
+    expect(nodeIdLinkLabel(null, false)).toBe('尝试打开执行这个任务的会话（记录里没有句柄，点击时查找）')
   })
 
-  it('renders NO clickable element for a never-dispatched mission, and says nothing about one', () => {
-    // `workerSessionId: null` is the engine's "no executor ever": there is nothing to open, so the id
-    // stays plain text — no link, and no "executor" placeholder either.
+  it('keeps the id clickable for a node with no handle, and looks the session up lazily', async () => {
+    // `workerSessionId: null` is the engine's "no handle on this record" — for a historical node it
+    // means the session exists but was dispatched before the field did. So the id is an ENTRY, and
+    // the session comes from a CLICK-TIME lookup.
     const html = dialog({ nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: null }) }, {
       openWorkerSession: () => undefined,
     })
-    expect(html).not.toContain('avwf-worker-link')
-    expect(html).not.toContain('avwf-worker-id')
-    // The id itself is still readable — the entry degrades to text, it does not vanish.
-    expect(html).toContain('avwf-node-id')
-    expect(html).toContain('>r1<')
-    // The panel itself is intact — this is a missing link, not a broken dialog.
+    expect(html).toContain('avwf-worker-link')
+    expect(html).toContain('avwf-worker-lookup')
+    // The rendered text is STILL the mission id (no separate link appears beside it).
+    expect(html).toContain('>r1</button>')
+    expect(html).toContain('aria-label="尝试打开执行这个任务的会话（记录里没有句柄，点击时查找）"')
+    // The panel itself is intact — the id is an entry, not a broken dialog.
     expect(html).toContain('Ship it')
     expect(html).toContain('>内容<')
+
+    // The click: the lookup runs (and says so first), the resolved session is opened with the SAME
+    // continuable address a handle would have produced.
+    const events: string[] = []
+    const sent: WorkerSessionTarget[] = []
+    const outcome = await workerSessionOpen({
+      nodeId: 'r1',
+      parentSessionId: 'owner-1',
+      workerSessionId: null,
+      open: (target) => { sent.push(target); events.push('opened') },
+      resolveSession: (nodeId) => {
+        events.push(`lookup:${nodeId}`)
+        return Promise.resolve({ status: 'resolved', sessionId: 'mission-99999999' })
+      },
+      onLookupStart: () => { events.push('busy') },
+    })
+    expect(outcome).toEqual({ opened: true, workerSessionId: 'mission-99999999' })
+    expect(sent).toEqual([{ parentSessionId: 'owner-1', childSessionId: 'mission-99999999', mode: 'continuable' }])
+    // 查找中… was entered BEFORE the lookup ran, which is what makes the click visible.
+    expect(events).toEqual(['busy', 'lookup:r1', 'opened'])
+    expect(workerSessionBusyText(true, 'r1')).toBe('查找中…')
+    expect(workerSessionBusyText(false, 'r1')).toBe('r1')
   })
 
-  it('makes the tree header root id an entry too, since that is the id a reader clicks', () => {
+  it('turns every way a lookup can fail into its own sentence, never a throw', async () => {
+    const base = { nodeId: 'r1', parentSessionId: 'owner-1', workerSessionId: null, open: () => undefined }
+    const failed = async (lookup: ExecutorSessionLookup): Promise<string> => {
+      const outcome = await workerSessionOpen({ ...base, resolveSession: () => Promise.resolve(lookup) })
+      return outcome.opened ? '' : outcome.message
+    }
+
+    // ① never dispatched: a FACT, and a different sentence from "找不到".
+    expect(await failed({ status: 'never-dispatched' })).toBe('这个任务从未派发过执行者会话：没有可打开的执行者。')
+    // ② dispatched once, session gone: the sentence the spec names, and it says 找不到.
+    const notFound = await failed({ status: 'not-found' })
+    expect(notFound).toContain('找不到')
+    expect(notFound).not.toBe(await failed({ status: 'never-dispatched' }))
+    // ③ the host cannot do it: no session service to look one up in.
+    const unsupported = await failed({ status: 'unsupported' })
+    expect(unsupported).toContain('无法打开执行者会话')
+    expect(workerFailureText('unsupported', '宿主没有挂载会话查询服务（sessionQuery），无法查找执行者会话'))
+      .toContain('sessionQuery')
+    // ④ a named session that the navigation refuses.
+    const refused = await workerSessionOpen({
+      ...base,
+      resolveSession: () => Promise.resolve({ status: 'resolved', sessionId: WORKER }),
+      open: () => { throw new Error('会话已被清理') },
+    })
+    expect(refused).toMatchObject({ opened: false, reason: 'open' })
+    expect(refused.opened ? '' : refused.message).toContain('打开失败')
+
+    // The panel renders reason ③ as a line of text with `role="alert"`, not a blank pane.
+    const html = renderToStaticMarkup(<WorkerSessionHint message={workerFailureText('unsupported', '没有会话服务')} />)
+    expect(html).toContain('无法打开执行者会话')
+    expect(html).toContain('role="alert"')
+  })
+
+  it('keeps the id an ENTRY on a host that cannot jump or cannot look up, and explains on click', async () => {
+    // "宿主不支持跳转" is one of the four reasons the user must be able to tell apart, so it is the
+    // CLICK that explains it — a plain-text id would leave the reason unreachable.
+    const noWorkspace = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data: snapshot(), loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+        resolveWorkerSession={() => Promise.resolve({ status: 'never-dispatched' })}
+      />,
+    )
+    expect(noWorkspace).toContain('avwf-worker-link')
+    expect(noWorkspace).toContain('当前宿主没有 uiWorkspace 服务')
+    expect(noWorkspace).not.toContain('avwf-worker-id')
+
+    const noUiWorkspace = await workerSessionOpen({
+      nodeId: 'r1', parentSessionId: 'owner-1', workerSessionId: WORKER,
+      resolveSession: () => Promise.resolve({ status: 'resolved', sessionId: WORKER }),
+    })
+    expect(noUiWorkspace).toMatchObject({ opened: false, reason: 'unsupported' })
+    expect(noUiWorkspace.opened ? '' : noUiWorkspace.message).toContain('uiWorkspace')
+
+    // An OLDER host: the Remote face has no resolveExecutorSession, so the prop is absent. That is
+    // reported as the same "this host cannot do it" reason, with its own detail.
+    const noLookup = await workerSessionOpen({
+      nodeId: 'r1', parentSessionId: 'owner-1', workerSessionId: null, open: () => undefined,
+    })
+    expect(noLookup).toMatchObject({ opened: false, reason: 'unsupported' })
+  })
+
+  it('makes the tree header root id the SAME entry, and never a second link beside it', () => {
     const data: MissionSnapshot = {
       trees: [{
         rootId: 'r1',
@@ -480,60 +588,99 @@ describe('opening the session that ran a mission', () => {
         loadResult={() => Promise.reject(new Error('not clicked'))}
         sessionId="owner-1"
         openWorkerSession={() => undefined}
+        resolveWorkerSession={() => Promise.resolve({ status: 'not-found' })}
       />,
     )
     expect(html).toContain('avwf-root-id avwf-node-id avwf-worker-link')
     expect(html).toContain('>r1</button>')
     expect(html).toContain('打开执行这个任务的会话（已结束）')
+    // W18 acceptance ⑧: the node id is the ONLY entry — the worker session id is a tooltip.
+    expect(html.match(/avwf-worker-link/gu)).toHaveLength(1)
+
+    // ...and the same holds when the root has no handle at all: it is STILL the one entry.
+    const noHandle: MissionSnapshot = {
+      trees: [{ rootId: 'r2', closedAt: null, nodes: [{ ...data.trees[0]!.nodes[0]!, id: 'r2', workerSessionId: null }] }],
+    }
+    const lookupHtml = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data: noHandle, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+        openWorkerSession={() => undefined}
+        resolveWorkerSession={() => Promise.resolve({ status: 'never-dispatched' })}
+      />,
+    )
+    expect(lookupHtml.match(/avwf-worker-link/gu)).toHaveLength(1)
+    expect(lookupHtml).toContain('avwf-worker-lookup')
+    expect(lookupHtml).toContain('>r2</button>')
   })
 
-  it('renders the id as plain text when the host has no uiWorkspace, with no dead link', () => {
-    // `openWorkerSession` is absent exactly when `ctx.get('uiWorkspace')` found no service. The id is
-    // still the useful half of the feature, so it stays on screen — as text, never as a button.
-    const html = dialog({ nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: WORKER }) })
-    expect(html).toContain('avwf-worker-id')
-    expect(html).toContain('>r1<')
-    expect(html).toContain(WORKER)
-    expect(html).not.toContain('avwf-worker-link')
-    expect(html).toContain('当前宿主没有 uiWorkspace 服务')
-    // And nothing else changed: the dialog is fully rendered.
-    expect(html).toContain('Ship it')
-    expect(html).toContain('第 1 次派发')
+  it('renders a whole panel of handle-less node ids without ONE lookup', () => {
+    // W18 acceptance ⑤, client half: mounting and rendering (rows + the dialog) must never invoke the
+    // click-time lookup, whatever the records look like. The spy is the prop the view is handed.
+    const lookups: string[] = []
+    const resolveWorkerSession = (nodeId: string): Promise<ExecutorSessionLookup> => {
+      lookups.push(nodeId)
+      return Promise.resolve({ status: 'never-dispatched' })
+    }
+    const data: MissionSnapshot = {
+      trees: [{
+        rootId: 'r1', closedAt: null,
+        nodes: [
+          { id: 'r1', parentId: null, children: ['c1'], title: 'Root', context: [], corrections: [], status: 'done', attempts: 1, depth: 1, createdAt: 1, hasResult: true, resultRef: null, workerSessionId: null },
+          { id: 'c1', parentId: 'r1', children: [], title: 'Child', context: [], corrections: [], status: 'done', attempts: 1, depth: 2, createdAt: 2, hasResult: true, resultRef: null, workerSessionId: null },
+        ],
+      }],
+    }
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+        openWorkerSession={() => undefined}
+        resolveWorkerSession={resolveWorkerSession}
+      />,
+    )
+    expect(html.match(/avwf-worker-lookup/gu)).toHaveLength(1)
+    // The ROW's own id is not rendered, so the tree header's is the one entry on screen; either way,
+    // rendering asked the host for NOTHING.
+    expect(lookups).toEqual([])
   })
 
-  it('turns a refused or failed open into an inline message, never a throw', async () => {
-    const failures: string[] = []
-    const base = { parentSessionId: 'owner-1', workerSessionId: WORKER, onFailure: (message: string) => { failures.push(message) } }
+  it('keeps the L17 refusal path intact: a throwing or rejecting open never takes the panel down', async () => {
+    // A host can refuse a session that has already been cleaned up, and `openSession` may throw
+    // outright or answer with a rejected promise. BOTH must become the `open` failure the panel
+    // renders, never an unhandled rejection that blanks the panel.
+    const base = { nodeId: 'r1', parentSessionId: 'owner-1', workerSessionId: WORKER }
+    const threw = await workerSessionOpen({ ...base, open: () => { throw new Error('会话已被清理') } })
+    expect(threw).toMatchObject({ opened: false, reason: 'open' })
+    expect(threw.opened ? '' : threw.message).toContain('会话已被清理')
 
-    // A host may refuse a cleaned-up session by THROWING...
-    const threw = workerSessionClick({ ...base, open: () => { throw new Error('会话已被清理') } })
-    expect(() => { threw() }).not.toThrow()
-    expect(failures).toEqual(['会话已被清理'])
+    const rejected = await workerSessionOpen({ ...base, open: () => Promise.reject(new Error('会话不存在')) })
+    expect(rejected).toMatchObject({ opened: false, reason: 'open' })
+    expect(rejected.opened ? '' : rejected.message).toContain('会话不存在')
 
-    // ...or by answering with a rejected promise.
-    const rejected = workerSessionClick({ ...base, open: () => Promise.reject(new Error('会话不存在')) })
-    rejected()
-    await Promise.resolve()
-    expect(failures).toEqual(['会话已被清理', '会话不存在'])
-
-    // The ENTRY's own onClick is that seam, so a stale link cannot take the panel down with it.
-    const entry = NodeIdEntry({
+    // The ENTRY's own click handler is that seam, so a stale link cannot take the panel down with
+    // it: the failure becomes an onFailure message and the panel keeps its place.
+    const entryFailures: string[] = []
+    const entryFailed: boolean[] = []
+    const entryClick = createWorkerSessionClick({
       nodeId: 'r1',
+      parentSessionId: 'owner-1',
       workerSessionId: WORKER,
-      workerLive: false,
-      sessionId: 'owner-1',
       open: () => { throw new Error('会话已被清理') },
-      onFailure: (message) => { failures.push(message) },
-      className: 'avwf-dialog-head-id',
-    }) as unknown as { props: { onClick: () => void } }
-    expect(() => { entry.props.onClick() }).not.toThrow()
-    expect(failures.at(-1)).toBe('会话已被清理')
-
-    // The message the dialog renders in place is a line of text with `role="alert"`, not a blank pane.
-    const html = renderToStaticMarkup(<WorkerSessionHint message="会话已被清理" />)
-    expect(html).toContain('打开执行者会话失败')
-    expect(html).toContain('会话已被清理')
-    expect(html).toContain('role="alert"')
+      busy: false,
+      setBusy: () => undefined,
+      setFailed: (value) => { entryFailed.push(value) },
+      onFailure: (message) => { entryFailures.push(message) },
+    })
+    await expect(entryClick()).resolves.toBeUndefined()
+    expect(entryFailed).toEqual([false, true])
+    expect(entryFailures.at(-1)).toContain('打开失败')
   })
 
   it('asks the host for uiWorkspace on EVERY render, and never injects it', () => {
@@ -547,10 +694,12 @@ describe('opening the session that ran a mission', () => {
     const { ctx, view } = fakeClientContext(() => available)
 
     apply(ctx)
-    // 1) No service: the seat's view gets NO opener, so the id can only render as plain text.
+    // 1) No service: the seat's view gets NO opener, so the id renders as plain text. The click-time
+    //    lookup is still handed over — the entry itself is what reports the missing opener.
     const absent = view({ sessionId: 'owner-1', useChat: stubChat, useSession: stubSession })
     expect(absent.props['openWorkerSession']).toBeUndefined()
     expect(absent.props['sessionId']).toBe('owner-1')
+    expect(typeof absent.props['resolveWorkerSession']).toBe('function')
 
     // 2) The service appears afterwards: the NEXT render sees it, and the opener it hands over still
     //    forwards the target unchanged.

@@ -11,6 +11,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type {
+  ExecutorSessionLookup,
   MissionNodeDetail,
   MissionNodeView,
   MissionTreeViewData,
@@ -406,65 +407,191 @@ export function inertBackground(overlay: HTMLElement): () => void {
  * durable parent/child address of a *continuable* subagent — what the main UI sends when a child is
  * picked from the "N 个子智能" dropdown. The PARENT is the owner session this panel belongs to.
  *
- * Exported, with `workerSessionClick`/`NodeIdEntry`, because this suite has no DOM: a spec
- * cannot press a rendered button, so it asks these functions (the very ones the entry is wired to)
- * what a click sends. That keeps "点击发出的 target 形状" pinned without adding a browser environment.
+ * Exported, with `workerSessionOpen`/`createWorkerSessionClick`/`NodeIdEntry`, because this suite
+ * has no DOM: a spec cannot press a rendered button, so it asks these functions (the very ones the
+ * entry is wired to) what a click sends. That keeps "点击发出的 target 形状" pinned without adding a
+ * browser environment.
  */
 export function workerSessionTarget(parentSessionId: string, workerSessionId: string): WorkerSessionTarget {
   return { parentSessionId, childSessionId: workerSessionId, mode: 'continuable' }
 }
 
 /**
- * The panel's one click handler. A host can refuse a session that has already been cleaned up, and
- * `openSession` may throw outright or answer with a rejected promise; BOTH are turned into the
- * inline message the caller renders. The panel must never blank — or lose its place — because a
- * link went stale, which is the one failure a link invited by us can cause.
- */
-export function workerSessionClick(input: {
-  readonly parentSessionId: string
-  readonly workerSessionId: string
-  readonly open: (target: WorkerSessionTarget) => unknown
-  readonly onFailure: (message: string) => void
-}): () => void {
-  return () => {
-    const fail = (cause: unknown): void => {
-      input.onFailure(cause instanceof Error ? cause.message : String(cause))
-    }
-    try {
-      Promise.resolve(input.open(workerSessionTarget(input.parentSessionId, input.workerSessionId))).catch(fail)
-    } catch (cause) {
-      fail(cause)
-    }
-  }
-}
-
-/**
- * What a node-id entry says, or `undefined` when the node has no executor session to open. The
- * wording names the DESTINATION (the session that executed this mission) and its state, because the
- * thing rendered is the MISSION's id and a reader must not mistake the click for "open the task".
+ * What a node-id entry says, in BOTH cases — W18: the id is an entry whether or not the record
+ * already names an executor. The wording names the DESTINATION (the session that executed this
+ * mission) and its state, because the thing rendered is the MISSION's id and a reader must not
+ * mistake the click for "open the task".
+ *
+ * Without a handle the label stays honest rather than promising a session that may not exist: the
+ * click TRIES, and a miss is explained by {@link workerFailureText} instead of being a dead link.
+ * That is also why the two forms are not the same sentence — a reader can tell whether a lookup is
+ * about to happen.
  */
 export function nodeIdLinkLabel(
   workerSessionId: string | null | undefined,
   workerLive: boolean | undefined,
-): string | undefined {
-  if (workerSessionId === null || workerSessionId === undefined || workerSessionId === '') return undefined
+): string {
+  const hasHandle = typeof workerSessionId === 'string' && workerSessionId !== ''
+  if (!hasHandle) return '尝试打开执行这个任务的会话（记录里没有句柄，点击时查找）'
   return `打开执行这个任务的会话（${workerLive === true ? '进行中' : '已结束'}）`
 }
 
+/** Why one click could not open a session. Four kinds, four sentences (see {@link workerFailureText}). */
+export type WorkerSessionFailureReason = 'never-dispatched' | 'not-found' | 'unsupported' | 'open'
+
 /**
- * One node id as an ENTRY: the mission's own id, made clickable exactly when the node has an
- * executor session to open. Both places that show a node id (the tree header's root id and the
- * detail dialog's heading) render this, so the same thing never becomes two links — W8 put a second,
- * separate link on the worker session id, and that link is what this replaces.
+ * The sentence a failed click leaves behind, per reason. Exported and pure so each of the four is
+ * pinned by a test (this suite has no DOM) and so no caller has to invent wording:
  *
- * Three degradation paths, all deliberate:
- * ① no handle at all (never dispatched, or an older host) → plain text, nothing to open;
- * ② the host has no `uiWorkspace` service (`open` absent) → still plain text, with a tooltip saying
- *    why, so an id that cannot be a link does not read as a broken one;
- * ③ `open` throws or rejects (the session really was cleaned up) → `onFailure` turns it into the
- *    caller's inline message; the panel never blanks and never loses its place.
+ * - 「从未派发过」 is a FACT about the record, not a failure to find something;
+ * - 「找不到」 is the case the spec names: a node that WAS dispatched, whose session is gone;
+ * - 「无法打开」 is the host's own limitation — no `uiWorkspace` to navigate with, no session service
+ *   to look one up in, or an older host whose Remote face predates the lookup — and the detail says
+ *   which one, since the three have different remedies;
+ * - 「打开失败」 is the one case where a session WAS named and navigation refused it.
  */
-export function NodeIdEntry({ nodeId, workerSessionId, workerLive, sessionId, open, onFailure, className }: {
+export function workerFailureText(reason: WorkerSessionFailureReason, detail?: string): string {
+  const suffix = detail === undefined || detail === '' ? '' : `（${detail}）`
+  switch (reason) {
+    case 'never-dispatched':
+      return '这个任务从未派发过执行者会话：没有可打开的执行者。'
+    case 'not-found':
+      return `找不到这个任务的执行者会话${suffix}：它可能已被清理，或日志已不在本机。`
+    case 'unsupported':
+      return detail === undefined || detail === ''
+        ? '无法打开执行者会话：这个宿主不支持这次查找。'
+        : `无法打开执行者会话：${detail}`
+    case 'open':
+      return `找到执行者会话，但打开失败${suffix}。`
+  }
+}
+
+/** What a busy button shows instead of the id — a separate export because there is no DOM here to
+ *  re-render, so the affordance itself is what a test can pin. */
+export function workerSessionBusyText(busy: boolean, nodeId: string): string {
+  return busy ? '查找中…' : nodeId
+}
+
+/** What one click did, as data: a test pins the address that was opened, and the panel renders this
+ *  failure instead of the click having "done nothing". */
+export type WorkerSessionOpenOutcome =
+  | { readonly opened: true; readonly workerSessionId: string }
+  | { readonly opened: false; readonly reason: WorkerSessionFailureReason; readonly message: string }
+
+/**
+ * The panel's one click handler, W18: the node id is ALWAYS an entry, and the session is resolved
+ * lazily when the record does not already name one.
+ *
+ * Order: ① a handle on the record opens immediately (zero I/O); ② otherwise `resolveSession` asks the
+ * host, and ONLY a `resolved` answer is opened; ③ a miss becomes a sentence about WHY — never a throw,
+ * never a blank panel. `onLookupStart` fires before the first await, which is what lets the button
+ * say 查找中… instead of looking like it ignored the click.
+ *
+ * `open` may throw or answer with a rejected promise (the session really was cleaned up): both become
+ * the `open` failure. The panel must never blank — or lose its place — because a link went stale,
+ * which is the one failure a link invited by us can cause.
+ */
+export async function workerSessionOpen(input: {
+  readonly nodeId: string
+  readonly parentSessionId: string
+  /** The handle already on the record, when there is one. */
+  readonly workerSessionId?: string | null
+  readonly open?: (target: WorkerSessionTarget) => unknown
+  readonly resolveSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
+  readonly onLookupStart?: () => void
+}): Promise<WorkerSessionOpenOutcome> {
+  const fail = (reason: WorkerSessionFailureReason, detail?: string): WorkerSessionOpenOutcome =>
+    ({ opened: false, reason, message: workerFailureText(reason, detail) })
+  const textOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause))
+
+  // A host that cannot navigate cannot open ANY session, whatever the lookup says — so this is
+  // checked first and reported as its own reason.
+  if (input.open === undefined) return fail('unsupported', '当前宿主没有 uiWorkspace 服务')
+  const existing = input.workerSessionId
+  let workerSessionId = typeof existing === 'string' && existing !== '' ? existing : undefined
+
+  if (workerSessionId === undefined) {
+    const resolve = input.resolveSession
+    if (resolve === undefined) return fail('unsupported', '这个宿主还不支持查找执行者会话')
+    input.onLookupStart?.()
+    let lookup: ExecutorSessionLookup
+    try {
+      lookup = await resolve(input.nodeId)
+    } catch (cause) {
+      // The lookup REQUEST failed: transport, or a host too old to have the method.
+      return fail('unsupported', textOf(cause))
+    }
+    if (lookup.status !== 'resolved' || typeof lookup.sessionId !== 'string' || lookup.sessionId === '') {
+      const reason: WorkerSessionFailureReason = lookup.status === 'resolved' ? 'not-found' : lookup.status
+      return fail(reason, lookup.error)
+    }
+    workerSessionId = lookup.sessionId
+  }
+
+  try {
+    await Promise.resolve(input.open(workerSessionTarget(input.parentSessionId, workerSessionId)))
+    return { opened: true, workerSessionId }
+  } catch (cause) {
+    return fail('open', textOf(cause))
+  }
+}
+
+/**
+ * The click handler the entry is wired to, as a function of the entry's own state setters.
+ *
+ * Split out for the same reason `workerSessionTarget` is: this suite has no DOM, so "what a click
+ * does" has to be askable of a function rather than of a rendered, clicked button. It is also where
+ * the 查找中… bookkeeping lives — `onLookupStart` fires only when a lookup is really needed, so a
+ * click that already has a handle does not flash a wait state it never had.
+ */
+export function createWorkerSessionClick(input: {
+  readonly nodeId: string
+  readonly parentSessionId: string
+  readonly workerSessionId?: string | null
+  readonly open?: (target: WorkerSessionTarget) => unknown
+  readonly resolveSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
+  /** Whether a click is already in flight; a second one is ignored rather than queued. */
+  readonly busy: boolean
+  readonly setBusy: (busy: boolean) => void
+  readonly setFailed: (failed: boolean) => void
+  readonly onFailure: (message: string) => void
+}): () => Promise<void> {
+  return async () => {
+    if (input.busy) return
+    input.setFailed(false)
+    const outcome = await workerSessionOpen({
+      nodeId: input.nodeId,
+      parentSessionId: input.parentSessionId,
+      workerSessionId: input.workerSessionId,
+      ...input.open === undefined ? {} : { open: input.open },
+      ...input.resolveSession === undefined ? {} : { resolveSession: input.resolveSession },
+      onLookupStart: () => { input.setBusy(true) },
+    }).finally(() => { input.setBusy(false) })
+    if (outcome.opened) return
+    input.setFailed(true)
+    input.onFailure(outcome.message)
+  }
+}
+
+/**
+ * One node id as an ENTRY. W18: the id is clickable on EVERY node — an existing handle opens its
+ * session directly, and a historical record without one is looked up at CLICK time (the lookup reads
+ * session logs, so it must never happen while rendering). Both places that show a node id (the tree
+ * header's root id and the detail dialog's heading) render this, so the same thing never becomes two
+ * links — W8 put a second, separate link on the worker session id, and that link is what this
+ * replaces.
+ *
+ * Two degradation paths, both deliberate:
+ * ① the host cannot complete the jump — no `uiWorkspace` service, no session service, or an older
+ *    host whose Remote face predates the lookup → the click SAYS which
+ *    ({@link workerFailureText}); the id stays an entry rather than a dead-looking one, so the
+ *    explanation is one click away instead of a tooltip a reader has to go looking for;
+ * ② `open` throws or rejects (the session really was cleaned up) → `onFailure` turns it into the
+ *    caller's message; the panel never blanks and never loses its place.
+ */
+export function NodeIdEntry({
+  nodeId, workerSessionId, workerLive, sessionId, open, onFailure, resolveSession, className,
+}: {
   /** The MISSION's id — what is rendered; the session is only the destination. */
   nodeId: string
   workerSessionId: string | null | undefined
@@ -473,41 +600,54 @@ export function NodeIdEntry({ nodeId, workerSessionId, workerLive, sessionId, op
   sessionId: string
   open?: (target: WorkerSessionTarget) => void
   onFailure: (message: string) => void
+  /** The click-time lookup; absent on a host whose Remote face predates it (see `MissionViewProps`). */
+  resolveSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
   /** The caller's own monospace slot class, applied to both the link and the plain-text form. */
   className: string
 }): ReactNode {
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const hasHandle = typeof workerSessionId === 'string' && workerSessionId !== ''
   const label = nodeIdLinkLabel(workerSessionId, workerLive)
-  if (label === undefined || workerSessionId === null || workerSessionId === undefined) {
-    return <span className={`${className} avwf-node-id`}>{nodeId}</span>
-  }
-  const state = workerLive === true ? '进行中' : '已结束'
-  const where = `执行这个任务的会话 ${workerSessionId}（${state}）`
-  if (open === undefined) {
-    return (
-      <span className={`${className} avwf-node-id avwf-worker-id`} title={`${where}；当前宿主没有 uiWorkspace 服务，无法跳转`}>
-        {nodeId}
-      </span>
-    )
-  }
+  const where = hasHandle
+    ? `执行这个任务的会话 ${workerSessionId}（${workerLive === true ? '进行中' : '已结束'}）`
+    : '执行这个任务的会话（记录里没有句柄，点击时按时间窗与首条提示词查找）'
+  // No `uiWorkspace`: the id is STILL the entry, and the click explains why it cannot go anywhere.
+  const blocked = open === undefined ? '；当前宿主没有 uiWorkspace 服务，无法跳转' : ''
+  const click = createWorkerSessionClick({
+    nodeId,
+    parentSessionId: sessionId,
+    workerSessionId,
+    ...open === undefined ? {} : { open },
+    ...resolveSession === undefined ? {} : { resolveSession },
+    busy,
+    setBusy,
+    setFailed,
+    onFailure,
+  })
   return (
     <button
       type="button"
-      className={`${className} avwf-node-id avwf-worker-link`}
-      title={`${label}\n${where}；不是任务详情`}
+      className={`${className} avwf-node-id avwf-worker-link${hasHandle ? '' : ' avwf-worker-lookup'}`}
+      title={`${label}\n${where}；不是任务详情${blocked}`}
       aria-label={label}
-      onClick={workerSessionClick({ parentSessionId: sessionId, workerSessionId, open, onFailure })}
+      disabled={busy}
+      onClick={() => { void click() }}
     >
-      {nodeId}
+      {failed && !busy ? <span className="avwf-worker-retry" title="上次没找到；再点一次重试">↻ </span> : null}
+      {busy
+        ? <span className="avwf-worker-busy">{workerSessionBusyText(true, nodeId)}</span>
+        : workerSessionBusyText(false, nodeId)}
     </button>
   )
 }
 
 /**
- * The inline message a refused open leaves behind. Split out as a pure component, like `ResultPane`,
+ * The inline message a failed open leaves behind. Split out as a pure component, like `ResultPane`,
  * so its markup is testable without a DOM to click in; the dialog owns the state that shows it.
  */
 export function WorkerSessionHint({ message }: { message: string }): ReactNode {
-  return <span className="avwf-worker-error" role="alert">打开执行者会话失败：{message}</span>
+  return <span className="avwf-worker-error" role="alert">{message}</span>
 }
 
 /**
@@ -523,7 +663,7 @@ export function WorkerSessionHint({ message }: { message: string }): ReactNode {
  * by however much the text happened to be, so comparing two missions meant scrolling one of
  * them out of sight. A fixed panel with its own scroll keeps the tree where it was.
  */
-export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessionId, openWorkerSession }: {
+export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessionId, openWorkerSession, resolveWorkerSession }: {
   nodeId: string
   /** `undefined` until this node's first read lands; a loading state once it has been asked for. */
   state: DialogState | undefined
@@ -536,6 +676,8 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessio
   /** Open the executor's session; absent on a host with no `uiWorkspace` service, and then the id
    *  is rendered as plain text instead of a dead link (see `MissionViewProps.openWorkerSession`). */
   openWorkerSession?: (target: WorkerSessionTarget) => void
+  /** The click-time lookup for a record with no handle (see `MissionViewProps.resolveWorkerSession`). */
+  resolveWorkerSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
 }): ReactNode {
   // Escape closes, as in every other dialog in the shell. The listener lives exactly as long
   // as the dialog is mounted, so it cannot outlive the thing it closes.
@@ -623,6 +765,7 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessio
                   onFailure={setWorkerFailure}
                   className="avwf-dialog-head-id"
                   {...openWorkerSession === undefined ? {} : { open: openWorkerSession }}
+                  {...resolveWorkerSession === undefined ? {} : { resolveSession: resolveWorkerSession }}
                 />
                 {workerFailure === undefined ? null : <WorkerSessionHint message={workerFailure} />}
                 {ready === undefined
@@ -765,7 +908,7 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
  * One whole tree, with its own action. The delete button is here and not on the rows
  * because the unit of deletion is the TREE; a live tree's button says so instead of hiding.
  */
-function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession }: {
+function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession, resolveWorkerSession }: {
   tree: MissionTreeViewData
   actions: RowActions
   busy: string | undefined
@@ -774,6 +917,7 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession 
    *  executor session through the same entry the dialog uses. */
   sessionId: string
   openWorkerSession?: (target: WorkerSessionTarget) => void
+  resolveWorkerSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
 }): ReactNode {
   const root = tree.nodes.find((node) => node.id === tree.rootId)
   const settled = root !== undefined && TERMINAL.includes(root.status)
@@ -809,6 +953,7 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession 
           onFailure={setWorkerFailure}
           className="avwf-root-id"
           {...openWorkerSession === undefined ? {} : { open: openWorkerSession }}
+          {...resolveWorkerSession === undefined ? {} : { resolveSession: resolveWorkerSession }}
         />
         {workerFailure === undefined ? null : <WorkerSessionHint message={workerFailure} />}
         <span className="avwf-tree-summary">{summary}</span>
@@ -842,7 +987,7 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession 
 
 /** Render the session's mission trees. */
 export function MissionTreeView({
-  useSnapshot, onDeleteTree, loadDetail, loadResult, sessionId, openWorkerSession,
+  useSnapshot, onDeleteTree, loadDetail, loadResult, sessionId, openWorkerSession, resolveWorkerSession,
 }: MissionViewProps): ReactNode {
   INSTALL_STYLES()
   const state = useSnapshot()
@@ -928,6 +1073,7 @@ export function MissionTreeView({
         onDeleteTree={remove}
         sessionId={sessionId}
         {...openWorkerSession === undefined ? {} : { openWorkerSession }}
+        {...resolveWorkerSession === undefined ? {} : { resolveWorkerSession }}
       />
     </div>
   )
@@ -972,6 +1118,7 @@ export function MissionTreeView({
             loadResult={loadResult}
             sessionId={sessionId}
             {...openWorkerSession === undefined ? {} : { openWorkerSession }}
+            {...resolveWorkerSession === undefined ? {} : { resolveWorkerSession }}
           />
         )}
     </div>

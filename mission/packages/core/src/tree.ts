@@ -1203,6 +1203,33 @@ export class MissionTree {
     })
   }
 
+  /**
+   * Remember the executor session a LAZY lookup resolved for one node, so the panel never pays for
+   * the same lookup twice (W18: the node id is clickable on every node, and a historical record has
+   * no `executorSessionId` — the resolution reads session logs, which is exactly the cost that must
+   * not happen at render time).
+   *
+   * Write-once: a handle already on the record is authoritative and the write is skipped. A handle
+   * that arrived while the lookup was in flight belongs to a NEWER attempt, and overwriting it with
+   * a resolved OLDER one would point the panel at the wrong session — the same "only the last
+   * attempt" rule every other writer of this field follows.
+   *
+   * Tolerant rather than a mutation result, like {@link recordDispatchBaseline} and
+   * {@link markCorrectionsDelivered}: it is bookkeeping, and the caller can do nothing useful with a
+   * refusal. The `boolean` exists so the caller knows whether to announce a change.
+   */
+  async rememberExecutor(nodeId: string, sessionId: string): Promise<boolean> {
+    return this.withLock(async () => {
+      const found = this.locate(nodeId)
+      if (found === undefined) return false
+      const { state, node } = found
+      if (node.executorSessionId !== null && node.executorSessionId !== '') return false
+      this.replace(state, node, { executorSessionId: sessionId })
+      await this.flush(state.tree.rootId)
+      return true
+    })
+  }
+
   nodeHeldBy(sessionId: string): NodeRecord | undefined {
     for (const state of this.states.values()) {
       for (const node of state.nodes.values()) {
