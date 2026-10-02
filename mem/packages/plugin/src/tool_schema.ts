@@ -16,7 +16,7 @@
 import { z } from 'zod'
 import { mergedFieldDescription, type ToolSpec } from '@avantf/mem-contract'
 
-export type ParamSpec = {
+type ParamSpec = {
   type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'
   description?: string
   required?: true
@@ -25,7 +25,7 @@ export type ParamSpec = {
 }
 
 /** The slice of zod v4's `def` this derivation reads (structure only, never type tags). */
-export interface ZodDef {
+interface ZodDef {
   type?: string
   shape?: Record<string, unknown>
   options?: unknown[]
@@ -33,7 +33,7 @@ export interface ZodDef {
   values?: unknown
 }
 
-export function zodDef(schema: unknown): ZodDef {
+function zodDef(schema: unknown): ZodDef {
   return (schema as { def?: ZodDef } | undefined)?.def ?? {}
 }
 
@@ -83,7 +83,7 @@ export function zodToSpec(schema: unknown): ParamSpec {
 }
 
 /** Materialize one zod object branch's fields, or undefined for a non-object. */
-export function branchShape(schema: unknown): Record<string, unknown> | undefined {
+function branchShape(schema: unknown): Record<string, unknown> | undefined {
   return zodDef(schema).shape
 }
 

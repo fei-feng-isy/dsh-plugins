@@ -28,17 +28,17 @@ import type { AvantfLogger } from '@avantf/mem-contract'
  *    `git add` + `git commit` with nothing staged fails, and a store write that changed nothing
  *    (a re-ingest of identical text) is common.
  */
-export type GitMode = 'auto' | 'off'
+type GitMode = 'auto' | 'off'
 
 const DEFAULT_IDENTITY = { name: 'avantf-mem', email: 'avantf-mem@localhost' }
 
 /** Appended to every automatic commit, so `git log --grep` can separate them from a user's own. */
-export const AUTOMATIC_TRAILER = 'Automatic: avantf-mem'
+const AUTOMATIC_TRAILER = 'Automatic: avantf-mem'
 
 /** Bounded so a hung `git` (an index lock held by another process) cannot stall a write path. */
 const DEFAULT_TIMEOUT_MS = 10_000
 
-export interface GitRepoOptions {
+interface GitRepoOptions {
   /** The directory this repo tracks. `init`/`commit` no-op when it does not exist. */
   root: string
   /** `auto` (default) = create the repo on first commit; `off` = never invoke git at all. */

@@ -14,7 +14,7 @@
  */
 
 /** The corpus surface a reconciler drives — structural, so a test can hand it a fake. */
-export interface ReconcileCorpus {
+interface ReconcileCorpus {
   /** Re-ingest changed documents; `{}` is the full sweep that also reports corpus-level changes. */
   sync(options: { docId?: number }): Promise<unknown>
   /** One `stat` per document; no file is read. */
@@ -37,7 +37,7 @@ export interface ReconcileDeps {
 }
 
 /** The handle `index.ts` wires into an effect: request a check, and stop it on unmount. */
-export interface CorpusReconciler {
+interface CorpusReconciler {
   /** Run one check — `full` bypasses the throttle and takes the baseline after the sweep. */
   request(full: boolean): Promise<void>
   /**

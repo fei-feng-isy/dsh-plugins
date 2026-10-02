@@ -2,7 +2,7 @@ import { DEGRADED_WEIGHTS, type RecallHit, type RecallResult, type RetrievalFloo
 import { fitToTokenBudget, recordTruncation } from '@avantf/mem-core'
 import { mergeFloorDrops } from './store/floors.js'
 
-export interface CrossQueryOptions {
+interface CrossQueryOptions {
   limit?: number
   kind?: 'all' | 'fact' | 'doc_chunk'
   domain?: string
@@ -22,7 +22,7 @@ export interface CrossQueryOptions {
 }
 
 /** The memory search result the router derives degradation/weights from. */
-export type CrossQueryMemory = Pick<RecallResult, 'hits' | 'degraded' | 'weights' | 'floors' | 'dropped_by_floor'>
+type CrossQueryMemory = Pick<RecallResult, 'hits' | 'degraded' | 'weights' | 'floors' | 'dropped_by_floor'>
 
 /**
  * Joint min-max normalization over the MERGED pool — the rule the cross-store score

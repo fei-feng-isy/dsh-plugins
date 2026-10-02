@@ -268,8 +268,11 @@ export interface BaseRuntimeV2 extends BaseRuntimeV1 {
  * type-name list — which is what makes the list data (`TYPE_NAMES_V1`) mechanical rather than a second
  * hand-kept inventory.
  *
- * Most are re-exported from `.` today; `CompatReportWords` and `ServiceContract` are named here because
- * they appear in public signatures. The snapshot's type list is derived from this interface, so a
+ * Most are re-exported from `.` today. An entry is needed exactly for the ones that a caller can obtain
+ * ONLY through a public signature: `CompatReportWords` is the current example (it is a parameter type of
+ * `compatReport` and is not re-exported on its own). A name that `.` already exports wholesale — such as
+ * `ServiceContract`, via `export * from './compat.js'` — needs no entry here, and naming it would make
+ * this list a second hand-kept inventory. The snapshot's type list is derived from this interface, so a
  * member added here and not to the JSON (or the reverse) is a red gate.
  */
 export interface BaseTypeSurfaceV1 {

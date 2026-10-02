@@ -18,7 +18,7 @@ import { CAPACITY, spillPointer, statusLabel, type Refusal, type WellFormedSourc
 import type { AvantfMissionHost } from './host.js'
 
 /** The one result shape every tool returns, surfaced as the terminal text block. */
-export interface MissionToolResult {
+interface MissionToolResult {
   ok: boolean
   summary: string
   data?: JsonValue
@@ -156,7 +156,7 @@ export function optionalUnit(args: Record<string, unknown>, key: string): string
  * by the core's clamp, so an unparseable string here is the only thing dropped, and it is dropped to
  * "said nothing" rather than to a guessed number.
  */
-export function optionalWeight(args: Record<string, unknown>, key: string): number | undefined {
+function optionalWeight(args: Record<string, unknown>, key: string): number | undefined {
   const value = args[key]
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
   if (typeof value === 'string' && value.trim().length > 0) {
@@ -172,7 +172,7 @@ export function optionalWeight(args: Record<string, unknown>, key: string): numb
  * number that is not positive is dropped HERE as well as in the core normalizer, so a model that
  * writes `0` (or a negative) gets the default rather than an empty round window.
  */
-export function optionalRoundMs(args: Record<string, unknown>, key: string): number | undefined {
+function optionalRoundMs(args: Record<string, unknown>, key: string): number | undefined {
   const value = optionalWeight(args, key)
   return value !== undefined && value > 0 ? value : undefined
 }

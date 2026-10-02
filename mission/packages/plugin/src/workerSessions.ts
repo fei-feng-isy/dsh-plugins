@@ -74,7 +74,7 @@ export function sessionDirFor(root: string, id: string): string | undefined {
 }
 
 /** Bytes one directory occupies, or 0 when it is gone. */
-export function sessionBytes(dir: string | undefined): number {
+function sessionBytes(dir: string | undefined): number {
   if (dir === undefined || !existsSync(dir)) return 0
   let total = 0
   for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {

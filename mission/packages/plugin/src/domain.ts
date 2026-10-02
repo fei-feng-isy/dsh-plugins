@@ -8,7 +8,7 @@ import { domainTable, defineDomain } from '@deepseek-ai/dsh-storage-domain'
 import type { TreeDocument as TreeDocumentShape } from '@avantf/mission-core'
 
 /** Domain name; doubles as the backend unit name and must match `UNIT_NAME_RE`. */
-export const DOMAIN_NAME = 'avantf_mission'
+const DOMAIN_NAME = 'avantf_mission'
 
 /**
  * Layout version. **Stays 1 while the schema only gains optional-with-default fields**: the

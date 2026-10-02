@@ -33,7 +33,7 @@ export const SNAPSHOT_SOURCE = {
   sections: [{ name: 'avantf-mission', text: 'guidance' }],
 }
 
-export interface Message {
+interface Message {
   id: string
   content: { type: 'text'; text: string }[]
   source: Record<string, unknown>
@@ -54,7 +54,7 @@ export function loopNext(claimed: readonly Message[], snapshot?: Message) {
 }
 
 /** The pending-input half of the loop's inbox the gate may read and mutate. */
-export interface StubInbox {
+interface StubInbox {
   nextTurn: Message[]
   nextStep: Message[]
   /** Queue one message at a boundary, the way `followup`/`steer` do. */
@@ -113,7 +113,7 @@ export function agent(id: string, header: StubAgent['header'] = {}): StubAgent {
  * The prompt's `本任务` block always starts with `id: <node>`, so this is the same datum the
  * worker reads — no parallel bookkeeping that could drift from what was actually sent.
  */
-export function nodeIdOfPrompt(prompt: string): string | undefined {
+function nodeIdOfPrompt(prompt: string): string | undefined {
   return /(?:^|\n)id: ([0-9a-f]{8})(?:\n|$)/u.exec(prompt)?.[1]
 }
 

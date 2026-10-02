@@ -9,7 +9,7 @@ import { zipEntryNames } from './zip.js'
 const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04]
 
 /** Does this document begin with a ZIP local-file header? */
-export function startsWithZipMagic(bytes: Uint8Array): boolean {
+function startsWithZipMagic(bytes: Uint8Array): boolean {
   return ZIP_MAGIC.every((byte, index) => bytes[index] === byte)
 }
 

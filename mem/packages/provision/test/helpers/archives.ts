@@ -18,7 +18,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** A fixture archive's bytes plus the digest and size the installer will be told to expect. */
-export interface FixtureArchive {
+interface FixtureArchive {
   bytes: Buffer
   sha256: string
   byteLength: number
@@ -31,7 +31,7 @@ export async function sha256Of(bytes: Buffer): Promise<string> {
 }
 
 /** A shell script that reports the version marker a fixture artifact expects. */
-export function versionScript(binary: string, version: string): string {
+function versionScript(binary: string, version: string): string {
   return `#!/bin/sh\necho "${binary} ${version}"\n`
 }
 

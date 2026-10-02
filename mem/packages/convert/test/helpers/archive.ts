@@ -10,7 +10,7 @@
  */
 import { deflateRawSync } from 'node:zlib'
 
-export interface ArchiveEntry {
+interface ArchiveEntry {
   name: string
   data: Uint8Array | string
   /** Stored (`false` = deflate by default). EPUB's `mimetype` requires stored. */

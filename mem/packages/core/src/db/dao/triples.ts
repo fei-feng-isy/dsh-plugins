@@ -8,7 +8,7 @@
  */
 import type { Db } from '../port.js'
 
-export interface TripleRow {
+interface TripleRow {
   subj: string
   pred: string
   obj: string
@@ -41,7 +41,7 @@ export function sameSubjPredLookupSql(): string {
 }
 
 /** The optional `subj`/`pred`/`obj` slots an `ask` pattern may fill. */
-export interface TriplePatternParts {
+interface TriplePatternParts {
   subj?: string
   pred?: string
   obj?: string

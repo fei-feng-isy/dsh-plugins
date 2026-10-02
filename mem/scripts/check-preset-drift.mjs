@@ -36,7 +36,7 @@ import { findHarness } from '../../scripts/lib/harness-path.mjs'
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** Root of the pinned mirror of the harness repository layout. */
-export const VENDOR_ROOT = join(repo, 'packages', 'plugin', 'vendor', 'dsh-client-preset')
+const VENDOR_ROOT = join(repo, 'packages', 'plugin', 'vendor', 'dsh-client-preset')
 
 /** Vendored path → harness path. This is the whole relative-import closure of the preset entry. */
 export const PRESET_FILES = [

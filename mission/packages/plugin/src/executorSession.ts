@@ -34,7 +34,7 @@ export interface ListedSession {
  * before it reads anything. The local union stays structural (this module imports no optional
  * service), but it must mirror that shape, and only the two members actually used are declared.
  */
-export type SessionEventFilter =
+type SessionEventFilter =
   | { readonly kind: 'time'; readonly from?: number; readonly to?: number }
   | { readonly kind: 'text'; readonly text: string }
 
@@ -48,7 +48,7 @@ export interface SessionQueryLike {
   ): Promise<readonly { readonly text: string }[]>
 }
 
-export interface ResolveExecutorSessionOptions {
+interface ResolveExecutorSessionOptions {
   readonly node: {
     readonly createdAt?: number
     readonly activityAt?: number
@@ -76,7 +76,7 @@ export interface ResolveExecutorSessionOptions {
 }
 
 /** Why no session could be named. The panel turns each into its own sentence. */
-export type ExecutorSessionResolution =
+type ExecutorSessionResolution =
   | { readonly status: 'resolved'; readonly sessionId: string; readonly candidatesRead: number }
   | { readonly status: 'never-dispatched' }
   | { readonly status: 'not-found' }

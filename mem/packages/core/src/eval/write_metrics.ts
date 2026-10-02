@@ -72,7 +72,7 @@ export interface WriteObservation {
   revision_chain?: number
 }
 
-export interface WriteCaseResult {
+interface WriteCaseResult {
   id: string
   action_success: boolean
   information_integrity: boolean
@@ -95,7 +95,7 @@ export interface WriteReport {
  * "the update happened but the old revision and its content are simply gone" is an action
  * success and an integrity failure, which is exactly the case the split exists to expose.
  */
-export function informationIntegrity(c: WriteCase, obs: WriteObservation): { ok: boolean; detail: string } {
+function informationIntegrity(c: WriteCase, obs: WriteObservation): { ok: boolean; detail: string } {
   const missing: string[] = []
   const duplicated: string[] = []
   for (const token of c.live) {
@@ -114,7 +114,7 @@ export function informationIntegrity(c: WriteCase, obs: WriteObservation): { ok:
 }
 
 /** Structure half: the operation the case exists for actually happened. */
-export function actionSuccess(c: WriteCase, obs: WriteObservation): { ok: boolean; detail: string } {
+function actionSuccess(c: WriteCase, obs: WriteObservation): { ok: boolean; detail: string } {
   const e = c.expect_action
   if (e === undefined) return { ok: true, detail: '' }
   const problems: string[] = []
@@ -140,7 +140,7 @@ export function actionSuccess(c: WriteCase, obs: WriteObservation): { ok: boolea
   return { ok: problems.length === 0, detail: problems.join('; ') }
 }
 
-export function gradeWriteCase(c: WriteCase, obs: WriteObservation): WriteCaseResult {
+function gradeWriteCase(c: WriteCase, obs: WriteObservation): WriteCaseResult {
   const action = actionSuccess(c, obs)
   const integrity = informationIntegrity(c, obs)
   const parts = [action.detail, integrity.detail].filter((p) => p.length > 0)

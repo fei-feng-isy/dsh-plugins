@@ -15,8 +15,8 @@ import { FactsDao } from '../db/dao/facts.js'
 import { StatsDao } from '../db/dao/stats.js'
 import { DAY_MS, formatUtcTs, parseUtcTs } from './trust.js'
 
-export const CLOCK_KEY = 'trust_clock'
-export const LAST_SEEN_KEY = 'trust_last_seen'
+const CLOCK_KEY = 'trust_clock'
+const LAST_SEEN_KEY = 'trust_last_seen'
 
 /** Current active-day count (0 when never initialized). */
 export function readClock(db: Db): number {
@@ -26,7 +26,7 @@ export function readClock(db: Db): number {
 }
 
 /** Epoch ms of the last presence, or null on a first-ever run. */
-export function readLastSeen(db: Db): number | null {
+function readLastSeen(db: Db): number | null {
   return parseUtcTs(new StatsDao(db).read(LAST_SEEN_KEY))
 }
 

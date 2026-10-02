@@ -220,7 +220,11 @@ const toolsSchema = z.object({
 
 /** The merged runtime config shared by memory and knowledge stores. */
 export const ConfigSchema = z.object({
-  dataHome: z.string().default('~/.avantf'),
+  dataHome: z.string().default('~/.avantf').describe(
+    '数据根的配置层载体（解析次序的第 ② 层）：只承载 profile 传进来的配置值——`resolveDataHome` 在合并 '
+    + '`configs/common.yaml` 之前就要定根，所以这个文件里的同一键**不参与**解析。属历史遗留键，保留是为了'
+    + '让既有配置继续可用（见 AGENTS.md「边界与路径」）。',
+  ),
   semantic: semanticSchema.prefault({}),
   rerank: rerankSchema.prefault({}),
   vectorStore: vectorStoreSchema.prefault({}),

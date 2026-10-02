@@ -89,7 +89,7 @@ export interface CompatRuntime {
 }
 
 /** The gate's outcome. */
-export interface CompatRun {
+interface CompatRun {
   /** The verdict `apply` branches on. Plain data — the engine's provisioning guard reads it too. */
   readonly verdict: CompatVerdict
 }

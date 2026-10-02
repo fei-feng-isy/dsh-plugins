@@ -141,7 +141,7 @@ export function createHostResourceProbe(): ResourceProbe {
 const ROUND_FLOOR_MS = 10 * 60_000
 
 /** Whether the tree owner should be allowed into a proposed step. */
-export interface AdmitDecision {
+interface AdmitDecision {
   readonly admit: boolean
   readonly reason: string
 }
@@ -172,7 +172,7 @@ function workerLiveOf(node: NodeRecord): boolean {
 
 /** One node as the browser half renders it — the ROW projection. Deliberately without `description`
  *  or the submitted result: both are re-sent on every engine change and a row renders neither. */
-export interface NodeView {
+interface NodeView {
   readonly id: string
   /** Where this node was BORN (`null` for a root), NOT the dependency edge: a reused prerequisite
    *  keeps its birth parent while appearing in several parents' `children` — read the graph via `children`. */
@@ -238,7 +238,7 @@ export interface NodeDetail {
 }
 
 /** One sub-mission of a node, with the conclusion it submitted. */
-export interface NodeDetailChild {
+interface NodeDetailChild {
   readonly id: string
   readonly title: string
   readonly status: string
@@ -247,14 +247,14 @@ export interface NodeDetailChild {
 }
 
 /** One tree with its nodes, as the browser half renders it. */
-export interface TreeView {
+interface TreeView {
   readonly rootId: string
   readonly nodes: readonly NodeView[]
   readonly closedAt: number | null
 }
 
 /** One tree summarized for the owner-facing tools. */
-export interface MissionSummary {
+interface MissionSummary {
   readonly tree: TreeRecord
   readonly root: NodeRecord | undefined
   readonly counts: Readonly<Record<string, number>>
@@ -288,7 +288,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-export interface HostOptions {
+interface HostOptions {
   /** Slot ceiling on the NUMBER of concurrent units; omitted means "CPU cores minus one". Capacity is
    *  the master gate — both must admit a dispatch (see `@avantf/mission-core`'s `EngineOptions`). */
   readonly maxConcurrent?: number

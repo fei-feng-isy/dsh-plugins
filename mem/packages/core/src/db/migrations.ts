@@ -20,7 +20,7 @@ import type { Db } from './port.js'
 import type { FtsTokenizer } from './tokenizer.js'
 
 /** What a migration may need from its store (the FTS tokenizer is chosen before the DDL). */
-export interface MigrationContext {
+interface MigrationContext {
   readonly tokenizer: FtsTokenizer
 }
 

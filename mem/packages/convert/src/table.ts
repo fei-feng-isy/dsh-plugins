@@ -28,7 +28,7 @@ function synthHeader(cells: readonly string[], columns: number): string[] {
 }
 
 /** One Markdown table plus what had to be decided to produce it. */
-export interface MarkdownTable {
+interface MarkdownTable {
   markdown: string
   /** True when the first row was data and a `列N` header was synthesized. */
   synthesizedHeader: boolean

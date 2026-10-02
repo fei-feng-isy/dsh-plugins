@@ -39,7 +39,7 @@ function tableRow(cells: readonly string[]): string {
 }
 
 /** A WordprocessingML document with the given body XML. */
-export function buildDocx(body: string): Uint8Array {
+function buildDocx(body: string): Uint8Array {
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document ${DOCUMENT_NAMESPACE}><w:body>${body}</w:body></w:document>`
   return buildTestArchive([
@@ -59,7 +59,7 @@ export function buildSampleDocx(): Uint8Array {
 }
 
 /** One worksheet to build: a name and its rows (`[]` makes an empty sheet). */
-export interface SheetSpec {
+interface SheetSpec {
   name: string
   rows: (string | number)[][]
 }

@@ -2,14 +2,14 @@ import { aggregate, precisionAtK, recallAtK, reciprocalRank, type PerQueryMetric
 import type { EvalCase } from './loader.js'
 
 /** A retrieve function over the case's facts, returning indices in relevance order. */
-export type RetrieveFn = (query: string, k: number, facts: string[]) => Promise<number[]>
+type RetrieveFn = (query: string, k: number, facts: string[]) => Promise<number[]>
 
-export interface EvalReport {
+interface EvalReport {
   perQuery: PerQueryMetrics[]
   summary: AggregateMetrics
 }
 
-export async function evaluateCase(caseData: EvalCase, retrieve: RetrieveFn): Promise<PerQueryMetrics[]> {
+async function evaluateCase(caseData: EvalCase, retrieve: RetrieveFn): Promise<PerQueryMetrics[]> {
   const out: PerQueryMetrics[] = []
   for (const q of caseData.queries) {
     const actual = (await retrieve(q.query, q.k, caseData.setup_facts)).slice(0, q.k)

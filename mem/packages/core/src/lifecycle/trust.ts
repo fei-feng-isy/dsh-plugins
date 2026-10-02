@@ -13,11 +13,11 @@ import type { Config } from '@avantf/mem-contract'
 
 export const DAY_MS = 86_400_000
 /** The reinforcement quota window is a CALENDAR day ("每天" is a calendar notion, §2.3). */
-export const QUOTA_WINDOW_MS = DAY_MS
+const QUOTA_WINDOW_MS = DAY_MS
 /** Guard for "did the number actually move" comparisons. */
 export const EPSILON = 1e-9
 
-export type TrustConfig = Config['trust']
+type TrustConfig = Config['trust']
 
 /** The facts-row subset the trust math needs. */
 export interface TrustRow {
@@ -149,7 +149,7 @@ export function grantRecallBonus(
 }
 
 /** Everything a feedback write needs to persist (spec §2.4). */
-export interface FeedbackOutcome {
+interface FeedbackOutcome {
   settled: number
   next: number
   pin: boolean

@@ -91,7 +91,7 @@ export function isWindowsBatchShim(command: string, platform: NodeJS.Platform = 
 }
 
 /** Why a launch failed: the editor is not here (fall through) or the launch was refused (report). */
-export type LaunchFailure = 'missing' | 'refused'
+type LaunchFailure = 'missing' | 'refused'
 
 /**
  * Classify a synchronous spawn failure.
@@ -113,7 +113,7 @@ export interface LaunchOptions {
 }
 
 /** What to hand to `spawn` for one candidate. */
-export interface LaunchPlan {
+interface LaunchPlan {
   command: string
   args: string[]
   options: LaunchOptions
@@ -223,10 +223,10 @@ function resolveCommand(
 }
 
 /** Where a refused launch is reported; injectable so both failure paths are assertable. */
-export type WarnSink = (message: string) => void
+type WarnSink = (message: string) => void
 
 /** Host facts and side effects a caller (or a test) may replace. */
-export interface OpenDeps {
+interface OpenDeps {
   platform?: NodeJS.Platform
   env?: NodeJS.ProcessEnv
   spawn?: SpawnLike

@@ -7,7 +7,7 @@
  * differs from Python jieba (e.g. proper nouns → `nr`, 名动词 → `vn`).
  */
 
-export interface ExtractedEntity {
+interface ExtractedEntity {
   name: string
   type: string
   method: string
@@ -21,7 +21,7 @@ export interface ExtractedTriple {
   source: string
 }
 
-export type PosToken = { word: string; tag: string }
+type PosToken = { word: string; tag: string }
 type JiebaPosseg = { tag(text: string): PosToken[]; load?: () => void }
 
 /**

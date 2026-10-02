@@ -59,7 +59,7 @@ export function chunksFtsTableDdl(tokenizer: string): string {
   )`
 }
 
-export const KNOWLEDGE_FTS_TRIGGERS: string[] = [
+const KNOWLEDGE_FTS_TRIGGERS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON doc_chunks BEGIN
     INSERT INTO doc_chunks_fts(rowid, text) VALUES (new.chunk_id, new.text);
   END`,

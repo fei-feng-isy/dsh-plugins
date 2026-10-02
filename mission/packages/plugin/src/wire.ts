@@ -205,7 +205,7 @@ export const snapshotResultSchema = z.object({
  * message rather than a thrown error for the same reason `delete`'s is — "the locator is not a file
  * this host can read" is an answer the pane has to be able to show beside the locator it keeps.
  */
-export const resultTextSchema = z.object({
+const resultTextSchema = z.object({
   text: z.string(),
   error: z.string().optional(),
 })
@@ -214,7 +214,7 @@ export const resultTextSchema = z.object({
  * The ids that went away, or why none did: `error` is a message, not a thrown failure,
  * because "this mission is still running" is an answer the button should be able to show.
  */
-export const deleteResultSchema = z.object({
+const deleteResultSchema = z.object({
   deleted: z.array(z.string()),
   error: z.string().optional(),
 })
@@ -269,14 +269,14 @@ export const detailResultSchema = z.object({
  * one backward-compatible reading: an OLDER host (one that predates this method) has no such reply
  * at all, so the client says "the two halves are out of step" rather than guessing a reason.
  */
-export const executorSessionResultSchema = z.object({
+const executorSessionResultSchema = z.object({
   sessionId: z.string().optional(),
   status: z.enum(['resolved', 'never-dispatched', 'not-found', 'unsupported']).optional(),
   error: z.string().optional(),
 })
 
 /** One `watch` frame: only a revision, never the tree. */
-export const watchFrameSchema = z.object({ revision: z.number() })
+const watchFrameSchema = z.object({ revision: z.number() })
 
 declaredSchemas.push(
   declare('snapshotargs', z.object({ sessionId: z.string().optional() })),

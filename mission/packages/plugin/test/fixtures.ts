@@ -88,7 +88,7 @@ export async function persistedTree(input: {
  * `persistedTree` is that the ORDER carries meaning: a baseline stamped before a correction says the
  * session read the correction; stamped after the note it says the note was not part of the delta.
  */
-export interface SealedTree {
+interface SealedTree {
   readonly rootId: string
   /** Reclaim the binding and dispatch the node again, as a second round in the same node's life. */
   redispatch(workerId: string): Promise<void>

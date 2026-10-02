@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 
-export interface EvalQuery {
+interface EvalQuery {
   query: string
   k: number
   expected_ids: number[]

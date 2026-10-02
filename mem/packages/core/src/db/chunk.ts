@@ -10,7 +10,7 @@
  */
 
 /** Parameters per statement — far below the engine limit, still one round trip per batch. */
-export const SQL_PARAM_BATCH = 500
+const SQL_PARAM_BATCH = 500
 
 /** Split `items` into consecutive batches of at most `size` (an empty list yields none). */
 export function batches<T>(items: readonly T[], size = SQL_PARAM_BATCH): T[][] {

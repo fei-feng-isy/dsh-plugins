@@ -83,7 +83,7 @@ export const MODEL_ITEM = 'mem:model'
  * {@link MODEL_FILES} describes. A DIFFERENT repo is a different file set, which is why the item
  * omits `spec.files` for it (see {@link managedModelSpec}).
  */
-export const DEFAULT_MODEL_REPO = 'Xenova/bge-small-zh-v1.5'
+const DEFAULT_MODEL_REPO = 'Xenova/bge-small-zh-v1.5'
 
 /**
  * The files the local embedding runtime actually requests for the DEFAULT ONNX model.
@@ -95,7 +95,7 @@ export const DEFAULT_MODEL_REPO = 'Xenova/bge-small-zh-v1.5'
  * opens; declaring them would download hundreds of megabytes of dead weight. The list stays narrow
  * to what is read.
  */
-export const MODEL_FILES: readonly string[] = [
+const MODEL_FILES: readonly string[] = [
   'config.json',
   'tokenizer.json',
   'tokenizer_config.json',
@@ -126,7 +126,7 @@ const MODEL_REQUEST_TIMEOUT_MS = 300_000
 const OWN_PREFIX = 'envinit:'
 
 /** The logging surface this module needs — `AvantfLogger` satisfies it. */
-export interface EnvinitLogger {
+interface EnvinitLogger {
   info(message: string): void
   warn(message: string): void
   error(message: string): void
@@ -233,7 +233,7 @@ export interface EnvinitRuntime {
 }
 
 /** Options for {@link loadEnvinit}. */
-export interface EnvinitLoadOptions {
+interface EnvinitLoadOptions {
   readonly log?: EnvinitLogger
   /** The family root; default `$AVANTF_HOME`, else `~/.avantf/env` (framework DESIGN §6.3). */
   readonly home?: string

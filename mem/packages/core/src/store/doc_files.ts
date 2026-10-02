@@ -24,7 +24,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, s
 import { dirname, join, relative, sep } from 'node:path'
 
 /** The frontmatter a managed file carries; `content_hash` is the body AS INGESTED. */
-export interface DocFileMeta {
+interface DocFileMeta {
   doc_id: number
   domain: string
   source: string
@@ -41,14 +41,14 @@ export interface DocFileMeta {
 }
 
 /** One managed file as the file system sees it now. */
-export interface DocFileState {
+interface DocFileState {
   path: string
   stale: boolean
   missing: boolean
 }
 
 /** A parsed managed file: frontmatter (possibly partial — a hand-written file may omit it) + body. */
-export interface ParsedDocFile {
+interface ParsedDocFile {
   meta: Partial<DocFileMeta>
   body: string
 }

@@ -9,17 +9,17 @@ import { TriplesDao } from '../db/dao/triples.js'
 // alongside the contradiction machinery that runs them.
 export { polarityLookupSql, sameSubjPredLookupSql } from '../db/dao/triples.js'
 
-export const POLARITY_CONFLICT_SCORE = 0.95
-export const OBJECT_CONFLICT_SCORE = 0.5
-export const DEFAULT_CONTRADICT_THRESHOLD = 0.6
+const POLARITY_CONFLICT_SCORE = 0.95
+const OBJECT_CONFLICT_SCORE = 0.5
+const DEFAULT_CONTRADICT_THRESHOLD = 0.6
 
 /** Re-exported for `@avantf/mem` consumers; the value lives in the contract (the tool description states it). */
 export { MAX_REPORTED_CONFLICTS }
 
-export const EMBED_MIN_ENTITIES = 2
-export const EMBED_OVERLAP_MIN = 0.5
-export const EMBED_SIM_MIN = 0.75
-export const EMBED_SIM_DUP_MAX = 0.97
+const EMBED_MIN_ENTITIES = 2
+const EMBED_OVERLAP_MIN = 0.5
+const EMBED_SIM_MIN = 0.75
+const EMBED_SIM_DUP_MAX = 0.97
 
 /**
  * Embedding-fallback contradiction score: `entity_overlap * semantic_sim`, only
@@ -69,7 +69,7 @@ function cosine(a: Float32Array, b: Float32Array): number {
 const NEGATION_PREFIXES = ['不', '没', '没有', '未', '别', '无需'].sort((a, b) => b.length - a.length)
 
 /** Give the opposite-polarity spellings of a predicate. */
-export function oppositePolarityPredicates(pred: string): string[] {
+function oppositePolarityPredicates(pred: string): string[] {
   const p = pred.trim()
   if (!p) return []
   for (const neg of NEGATION_PREFIXES) {
@@ -78,7 +78,7 @@ export function oppositePolarityPredicates(pred: string): string[] {
   return NEGATION_PREFIXES.map((neg) => neg + p)
 }
 
-export interface ContradictionSig {
+interface ContradictionSig {
   fact_a: number
   fact_b: number
   score: number

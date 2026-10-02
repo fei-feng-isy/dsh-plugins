@@ -3,7 +3,7 @@
  * @module @avantf/dsh-mission/claims */
 import { defaultNewId } from '@avantf/mission-core'
 
-export const CLAIM_ID_PREFIX = 'mission-'
+const CLAIM_ID_PREFIX = 'mission-'
 
 const CLAIM_ID = /^mission-[0-9a-f]{8}$/
 

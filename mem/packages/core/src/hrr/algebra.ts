@@ -43,7 +43,7 @@ export function bundle(...vectors: Float64Array[]): Float64Array {
   return out
 }
 
-export function mod2pi(x: number): number {
+function mod2pi(x: number): number {
   const r = x % TWO_PI
   return r < 0 ? r + TWO_PI : r
 }

@@ -12,7 +12,7 @@ import { batches } from '../chunk.js'
 import { contentHash } from '../hash.js'
 
 /** One chunk to persist, in document order (`idx` is the position, not the array index). */
-export interface ChunkInsert {
+interface ChunkInsert {
   idx: number
   text: string
   headingsPath: string
@@ -40,7 +40,7 @@ export interface ChunkStateRow {
 }
 
 /** A persisted chunk with the entity names extracted at ingest time. */
-export interface ChunkEntityRow {
+interface ChunkEntityRow {
   chunk_id: number
   names: readonly string[]
 }

@@ -191,7 +191,7 @@ export interface CompatRuntime {
   readonly schemaNames: readonly string[]
 }
 
-export interface CompatLoadOptions {
+interface CompatLoadOptions {
   readonly log?: CompatLogger
   /** Test seam: the loaded base module, instead of bootstrapping it from this plugin's install. */
   readonly framework?: EnvinitModule

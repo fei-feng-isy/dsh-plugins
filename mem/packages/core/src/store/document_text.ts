@@ -29,10 +29,10 @@ import { describeError } from '@avantf/mem-contract'
 import { convertToMarkdown } from '@avantf/mem-convert'
 
 /** What the first bytes say a document is. */
-export type DocumentFormat = 'pdf' | 'binary' | 'text'
+type DocumentFormat = 'pdf' | 'binary' | 'text'
 
 /** How text bytes were decoded. Reported so a guess is visible instead of silent. */
-export type DocumentEncoding = 'utf-8' | 'utf-8-bom' | 'utf-16le' | 'utf-16be' | 'gb18030'
+type DocumentEncoding = 'utf-8' | 'utf-8-bom' | 'utf-16le' | 'utf-16be' | 'gb18030'
 
 /** One document's indexable text, and where it came from. */
 export interface DocumentText {

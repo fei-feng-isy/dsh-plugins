@@ -15,7 +15,7 @@ import { findOnPath } from '../platform.js'
 import type { BinarySpec } from '../registry.js'
 
 /** The executable name on PATH (`soffice` is the launcher on all three platforms). */
-export const LIBREOFFICE_BINARY = 'soffice'
+const LIBREOFFICE_BINARY = 'soffice'
 
 /** Detection spec. No `versionMarker`: this project does not pin LibreOffice's rendering. */
 export const LIBREOFFICE_SPEC: BinarySpec = {

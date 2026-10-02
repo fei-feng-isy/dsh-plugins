@@ -13,7 +13,7 @@ import { migrate, type Migration, type MigrationResult } from './migrations.js'
 import type { FtsTokenizer } from './tokenizer.js'
 
 /** The PRAGMA set every avantf store opens with (shared by memory + knowledge DBs). */
-export function applyPragmas(db: Db): void {
+function applyPragmas(db: Db): void {
   db.pragma('foreign_keys = ON')
   db.pragma('busy_timeout = 5000')
   db.pragma('journal_mode = WAL')

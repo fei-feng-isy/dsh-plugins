@@ -14,8 +14,8 @@ import type { DocumentRecord, DocumentSummary } from '@avantf/mem-contract'
  * declaration — a column added here without the contract would be a type error, not a silent
  * extra field on the wire.
  */
-export type DocumentRow = DocumentSummary
-export type DocumentDetailRow = DocumentRecord
+type DocumentRow = DocumentSummary
+type DocumentDetailRow = DocumentRecord
 
 export class DocumentsDao {
   constructor(private readonly db: Db) {}
