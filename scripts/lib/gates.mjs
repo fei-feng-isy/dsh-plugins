@@ -1,10 +1,14 @@
 /**
- * The PURE hearts of the two root gates, so each assertion can be replayed on constructed input —
+ * The PURE hearts of the root gates, so each assertion can be replayed on constructed input —
  * without a workspace, a registry or a build (`scripts/gates.test.mjs`).
  *
  * They live in `scripts/lib/` because that is the one place the boundary guard lets every tree share,
  * and because `scripts/release-check.mjs` / `scripts/check-dsh-lines.mjs` stay thin executables around
  * them: the executable does the I/O (read manifests, ask the registry, print), this module decides.
+ *
+ * The published-base half of the release check — reading the interface generation out of a published
+ * tarball and comparing it with a plugin's bake — lives in `scripts/lib/published-base.mjs`, for the
+ * same reason.
  */
 
 /**
@@ -59,6 +63,51 @@ export function baseDependencyProblems(pluginName, manifest, base) {
     )
   }
   return { problems, peer: peerUsable ? peer.trim() : undefined }
+}
+
+/**
+ * A dependency a publishable manifest must take from the HOST — present in `peerDependencies` and
+ * REQUIRED (not optional), and absent from every section that would let the installer nest a copy.
+ *
+ * The one-zod rule (mem DESIGN §20.11) is why this exists: two copies, even of one major, have
+ * incompatible type identities, so the plugin that uses zod at runtime must get the host's copy. A
+ * peer that drifted into `dependencies`, or one that `peerDependenciesMeta` marks optional, reads as
+ * "resolved locally" to the installer and forks the copy. `release-check` pinned the base's zod PEER
+ * RANGE but never the plugin's zod LOCATION (N15), so moving `zod` in
+ * `mem/packages/plugin/package.json` would not have turned the gate red.
+ *
+ * Pure, so `scripts/gates.test.mjs` can replay each way the rule can be broken.
+ *
+ * @param packageName - the manifest's `name`, for the message.
+ * @param manifest - a publishable package manifest.
+ * @param dependency - the package that must come from the host (e.g. `zod`).
+ * @returns a list of problems, empty when the wiring is right.
+ */
+export function requiredPeerProblems(packageName, manifest, dependency) {
+  const problems = []
+  const peer = manifest.peerDependencies?.[dependency]
+  if (typeof peer !== 'string' || peer.trim() === '') {
+    problems.push(
+      `${packageName} does not declare ${dependency} in peerDependencies — the HOST provides the single `
+      + 'copy, so a local resolution would fork its type identity (e.g. zod schema identities)',
+    )
+  }
+  if (manifest.peerDependenciesMeta?.[dependency]?.optional === true) {
+    problems.push(
+      `${packageName} marks ${dependency} an OPTIONAL peer — the host would not be required to provide it, `
+      + 'and the installer would nest the plugin\'s own copy beside the host\'s',
+    )
+  }
+  for (const section of ['dependencies', 'optionalDependencies']) {
+    if (manifest[section]?.[dependency] !== undefined) {
+      problems.push(
+        `${packageName} lists ${dependency} in ${section} — it must be a PEER: a runtime dependency lets `
+        + `the installer place a SECOND copy inside the plugin, and two copies (even of one major) do not `
+        + 'share type identity',
+      )
+    }
+  }
+  return problems
 }
 
 /**

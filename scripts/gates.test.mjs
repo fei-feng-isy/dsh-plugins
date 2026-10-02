@@ -5,15 +5,17 @@
  * The root `scripts/` have no test runner of their own, and two of these assertions are exactly the
  * kind that must be proven on constructed input: "does the version materializer touch a second
  * group's manifests?" and "does one tree missing a dsh line fail the gate?". So the decisions live in
- * `scripts/lib/` (versions.mjs, gates.mjs) and this file replays them — M7 (group-scoped version
- * materialization), §2.2-2 (the base peer↔dev pair), M8 (per-tree dsh-line coverage), and M10 (the
- * plugin prepublishOnly wiring).
+ * `scripts/lib/` (versions.mjs, gates.mjs, published-base.mjs) and this file replays them — M7
+ * (group-scoped version materialization), §2.2-2 (the base peer↔dev pair), M8 (per-tree dsh-line
+ * coverage), M10 (the plugin prepublishOnly wiring), N15 (the plugin half of the one-zod rule) and R1
+ * (the published base's interface generation vs the plugin's bake).
  *
  *   node scripts/gates.test.mjs
  *
  * No workspace build, no registry: the only external facts are `git` (the version state is read from
  * tracked manifests) and a semver implementation (the installed dsh's own copy, so the dsh-line
- * judgement is replayed against the same semver the boot gate uses).
+ * judgement is replayed against the same semver the boot gate uses). The R1 executable cases run
+ * `release-check --fixture`, so even the end-to-end replay never opens a socket.
  */
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -23,8 +25,17 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { gzipSync } from 'node:zlib'
 
-import { baseDependencyProblems, judgeDshLines } from './lib/gates.mjs'
+import { baseDependencyProblems, judgeDshLines, requiredPeerProblems } from './lib/gates.mjs'
+import {
+  INTERFACE_RECORD_PATH,
+  INTERFACE_SOURCE_PATH,
+  interfaceGenerationFromSource,
+  interfaceGenerationVerdict,
+  publishedInterfaceGeneration,
+  readTarballEntry,
+} from './lib/published-base.mjs'
 import { execToolSync } from './lib/win-spawn.mjs'
 import { groupWorkspaceTargets, workspaceTargets, withWorkspaceVersions } from './lib/versions.mjs'
 
@@ -176,6 +187,46 @@ test('release-check: the two REAL plugin manifests declare a matching base pair'
   }
 })
 
+// ── N15 · the one-zod rule reaches the plugin PUBLISH manifest, not just catalog and base ──────────
+
+test('N15: a host-provided dependency must stay a REQUIRED peer, in peerDependencies only', () => {
+  assert.deepEqual(requiredPeerProblems('@avantf/dsh-mem', {
+    peerDependencies: { zod: '>=4.4.3 <5' },
+  }, 'zod'), [])
+
+  // Moved into `dependencies`: the installer nests a second copy beside the host's.
+  const moved = requiredPeerProblems('@avantf/dsh-mem', { dependencies: { zod: '>=4.4.3 <5' } }, 'zod')
+  assert.match(moved.join('\n'), /does not declare zod in peerDependencies/u)
+  assert.match(moved.join('\n'), /SECOND copy/u)
+
+  // Present as a peer, but optional: the host is not required to provide it.
+  const optional = requiredPeerProblems('@avantf/dsh-mem', {
+    peerDependencies: { zod: '>=4.4.3 <5' }, peerDependenciesMeta: { zod: { optional: true } },
+  }, 'zod')
+  assert.match(optional.join('\n'), /OPTIONAL peer/u)
+
+  // Both at once: a peer AND a nested runtime copy — the exact drift the rule exists for.
+  const both = requiredPeerProblems('@avantf/dsh-mem', {
+    peerDependencies: { zod: '>=4.4.3 <5' }, dependencies: { zod: '^4.6.5' },
+  }, 'zod')
+  assert.match(both.join('\n'), /lists zod in dependencies/u)
+  assert.match(both.join('\n'), /SECOND copy/u)
+
+  const optionalDependency = requiredPeerProblems('@avantf/dsh-mem', {
+    peerDependencies: { zod: '>=4.4.3 <5' }, optionalDependencies: { zod: '^4.6.5' },
+  }, 'zod')
+  assert.match(optionalDependency.join('\n'), /optionalDependencies/u)
+})
+
+test('N15: the REAL mem manifest gets its single zod from the host', () => {
+  const manifest = JSON.parse(readFileSync(join(workspace, 'mem/packages/plugin/package.json'), 'utf8'))
+  assert.deepEqual(
+    requiredPeerProblems(manifest.name, manifest, 'zod'),
+    [],
+    'mem/packages/plugin must take zod as a required peer (mission\'s optional peer is deliberate and exempt)',
+  )
+})
+
 // ── M8 · a line ONE tree misses is a failure, even when the union covers it ──────────────────────
 
 test('M8: per-tree coverage fails when a single tree misses, unlike the old union', () => {
@@ -287,6 +338,201 @@ test('M8: the executable itself exits 1 when exactly one tree misses (fixture, n
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+// ── R1 · the published base's INTERFACE GENERATION, not just its version range ────────────────────
+
+/**
+ * A minimal ustar+gzip tarball — enough to exercise `readTarballEntry` (`npm pack` writes exactly this
+ * shape for short paths: regular files, octal `size`, NUL padding).
+ */
+function makeTarball(entries) {
+  const blocks = []
+  for (const [name, text] of entries) {
+    const data = Buffer.from(text, 'utf8')
+    const header = Buffer.alloc(512)
+    header.write(name, 0, 100, 'utf8')
+    header.write('0000644\0', 100, 8, 'utf8')
+    header.write('0000000\0', 108, 8, 'utf8')
+    header.write('0000000\0', 116, 8, 'utf8')
+    header.write(`${data.length.toString(8).padStart(11, '0')}\0`, 124, 12, 'utf8')
+    header.write('00000000000\0', 136, 12, 'utf8')
+    header.write('        ', 148, 8, 'utf8')
+    header.write('0', 156, 1, 'utf8')
+    header.write('ustar\0', 257, 6, 'utf8')
+    header.write('00', 263, 2, 'utf8')
+    let sum = 0
+    for (const byte of header) sum += byte
+    header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 8, 'utf8')
+    blocks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512))
+  }
+  blocks.push(Buffer.alloc(1024))
+  return gzipSync(Buffer.concat(blocks))
+}
+
+function runReleaseCheck(args) {
+  return spawnSync(process.execPath, [join(workspace, 'scripts', 'release-check.mjs'), ...args], { encoding: 'utf8' })
+}
+
+/** A temp directory whose `write(name, body)` produces a release-check `--fixture` file. */
+function withFixtureDir(run) {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-release-check-'))
+  try {
+    return run((name, body) => {
+      const file = join(dir, `${name}.json`)
+      writeFileSync(file, `${JSON.stringify(body, null, 2)}\n`)
+      return file
+    })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+test('R1: the generation is read out of the unpacked base artifact, from its one true constant', () => {
+  const tarball = makeTarball([
+    ['package/package.json', '{"name":"@avantf/dsh-plugin-base","version":"0.3.1"}'],
+    [INTERFACE_SOURCE_PATH, 'export const INTERFACE_VERSION = 1;\n'],
+  ])
+  assert.equal(readTarballEntry(tarball, INTERFACE_SOURCE_PATH), 'export const INTERFACE_VERSION = 1;\n')
+  assert.equal(readTarballEntry(tarball, 'package/lib/interface-version.json'), undefined)
+  assert.equal(readTarballEntry(tarball, 'package/dist/missing.js'), undefined)
+  assert.equal(interfaceGenerationFromSource(readTarballEntry(tarball, INTERFACE_SOURCE_PATH)), 1)
+
+  // Prose and the frozen name list mention the constant without defining it; only `NAME = <digits>`
+  // counts, and a file claiming two different generations is not one generation.
+  assert.equal(interfaceGenerationFromSource("'INTERFACE_VERSION',\n// see INTERFACE_VERSION\n"), undefined)
+  assert.equal(interfaceGenerationFromSource('export const INTERFACE_VERSION = 2;\nINTERFACE_VERSION = 3;\n'), undefined)
+  assert.equal(interfaceGenerationFromSource('export const INTERFACE_VERSION = 0;\n'), undefined)
+})
+
+test('R1: a published base generation comes from interface.js, or from the record when there is one', () => {
+  const source = 'export const INTERFACE_VERSION = 2;\n'
+  assert.deepEqual(publishedInterfaceGeneration({ source }), {
+    status: 'ok', interfaceVersion: 2, baseVersion: undefined, from: [INTERFACE_SOURCE_PATH],
+  })
+  assert.deepEqual(publishedInterfaceGeneration({ record: '{"baseVersion":"0.3.2","interfaceVersion":2}\n' }), {
+    status: 'ok', interfaceVersion: 2, baseVersion: '0.3.2', from: [INTERFACE_RECORD_PATH],
+  })
+  // Both present and agreeing: one number, and the record supplies the base version.
+  const both = publishedInterfaceGeneration({ record: '{"baseVersion":"0.3.2","interfaceVersion":2}', source })
+  assert.equal(both.status, 'ok')
+  assert.equal(both.interfaceVersion, 2)
+  assert.equal(both.baseVersion, '0.3.2')
+  assert.deepEqual(both.from, [INTERFACE_RECORD_PATH, INTERFACE_SOURCE_PATH])
+  // Both present and disagreeing: no number can be trusted.
+  const conflict = publishedInterfaceGeneration({ record: '{"baseVersion":"0.3.2","interfaceVersion":3}', source })
+  assert.equal(conflict.status, 'conflict')
+  assert.match(conflict.detail, /interface generation 3/u)
+  assert.match(conflict.detail, /says 2/u)
+  // Neither usable.
+  assert.equal(publishedInterfaceGeneration({}).status, 'unreadable')
+  assert.equal(publishedInterfaceGeneration({ record: '{not json', source: '// no constant' }).status, 'unreadable')
+})
+
+test('R1: below the bake fails and names both generations; unreadable and offline only warn', () => {
+  const bake = { baseVersion: '0.3.2', interfaceVersion: 2 }
+  const judge = (published, extra = {}) =>
+    interfaceGenerationVerdict({ plugin: '@avantf/dsh-mem', baseVersion: '0.3.1', published, bake, ...extra })
+
+  const lower = judge({ status: 'ok', interfaceVersion: 1 })
+  assert.equal(lower.level, 'fail')
+  assert.match(lower.message, /interface generation 1/u)
+  assert.match(lower.message, /generation 2/u)
+  assert.match(lower.message, /pnpm -C base\/plugin-base publish/u)
+
+  const equal = interfaceGenerationVerdict({
+    plugin: '@avantf/dsh-mem', baseVersion: '0.3.2', published: { status: 'ok', interfaceVersion: 2 }, bake,
+  })
+  assert.equal(equal.level, 'ok')
+  assert.match(equal.message, /0\.3\.2 carries interface generation 2/u)
+  assert.match(equal.message, /built against generation 2/u)
+
+  assert.equal(interfaceGenerationVerdict({
+    plugin: '@avantf/dsh-mem', baseVersion: '0.4.0', published: { status: 'ok', interfaceVersion: 3 }, bake,
+  }).level, 'ok')
+  // --allow-missing-base downgrades ONLY the fatal case.
+  assert.equal(judge({ status: 'ok', interfaceVersion: 1 }, { allowMissingBase: true }).level, 'warn')
+
+  // "读不到" is a WARNING, never a red gate: unreadable artifact, no bake, no probe at all.
+  assert.equal(judge({ status: 'unreadable', detail: 'nothing there' }).level, 'warn')
+  assert.match(judge({ status: 'unreadable', detail: 'nothing there' }).message, /could not read the interface generation/u)
+  assert.equal(interfaceGenerationVerdict({
+    plugin: '@avantf/dsh-mem', baseVersion: '0.3.1', published: { status: 'ok', interfaceVersion: 1 }, bake: undefined,
+  }).level, 'warn')
+  assert.equal(interfaceGenerationVerdict({
+    plugin: '@avantf/dsh-mem', baseVersion: '0.3.1', published: undefined, bake,
+  }).level, 'warn')
+
+  // A self-contradictory artifact is a real defect, not "unreadable".
+  const conflict = judge({ status: 'conflict', detail: 'the record says 3, interface.js says 2' })
+  assert.equal(conflict.level, 'fail')
+  assert.match(conflict.message, /contradicts itself/u)
+})
+
+test('R1: the executable fails on a lower published generation and degrades to WARNING with --allow-missing-base', () => {
+  const bake = JSON.parse(readFileSync(join(workspace, 'mem/packages/plugin/lib/interface-version.json'), 'utf8'))
+  withFixtureDir((write) => {
+    const low = write('low', {
+      baseVersions: [{ version: '0.3.1' }],
+      artifacts: { '0.3.1': { source: 'export const INTERFACE_VERSION = 1;\n' } },
+    })
+    const strict = runReleaseCheck(['--fixture', low])
+    assert.equal(strict.status, 1, `a lower published generation must exit 1\n${strict.stdout}${strict.stderr}`)
+    assert.match(strict.stderr, /carries interface generation 1/u)
+    assert.match(strict.stderr, new RegExp(`generation ${bake.interfaceVersion}\\b`, 'u'))
+    assert.match(strict.stderr, /pnpm -C base\/plugin-base publish/u)
+
+    // The pre-publication dry run: the same finding, a WARNING, exit 0.
+    const dry = runReleaseCheck(['--fixture', low, '--allow-missing-base'])
+    assert.equal(dry.status, 0, `${dry.stdout}${dry.stderr}`)
+    assert.match(dry.stdout, /WARNING: @avantf\/dsh-mem: the published base 0\.3\.1 carries interface generation 1/u)
+  })
+})
+
+test('R1: the executable passes when the published generation equals the bake and prints both sides', () => {
+  const bake = JSON.parse(readFileSync(join(workspace, 'mem/packages/plugin/lib/interface-version.json'), 'utf8'))
+  withFixtureDir((write) => {
+    const same = write('same', {
+      baseVersions: [{ version: '0.3.1' }],
+      artifacts: { '0.3.1': { source: `export const INTERFACE_VERSION = ${bake.interfaceVersion};\n` } },
+    })
+    const run = runReleaseCheck(['--fixture', same])
+    assert.equal(run.status, 0, `${run.stdout}${run.stderr}`)
+    assert.match(run.stdout, /the published base 0\.3\.1 carries interface generation \d+/u)
+    assert.match(run.stdout, new RegExp(`built against generation ${bake.interfaceVersion}\\b`, 'u'))
+  })
+})
+
+test('R1: no published version in range keeps the existing missing-base semantics', () => {
+  withFixtureDir((write) => {
+    const outOfRange = write('out-of-range', { baseVersions: [{ version: '9.9.9' }] })
+    const strict = runReleaseCheck(['--fixture', outOfRange])
+    assert.equal(strict.status, 1, `${strict.stdout}${strict.stderr}`)
+    assert.match(strict.stderr, /no version satisfies/u)
+    assert.match(strict.stderr, /Fix: publish a @avantf\/dsh-plugin-base version inside/u)
+
+    const dry = runReleaseCheck(['--fixture', outOfRange, '--allow-missing-base'])
+    assert.equal(dry.status, 0, `${dry.stdout}${dry.stderr}`)
+    assert.match(dry.stdout, /WARNING: .*no version satisfies/u)
+  })
+})
+
+test('R1: offline and an artifact that records nothing are WARNINGS, and the gate exits 0', () => {
+  // --offline: the registry half is not verified at all, and must not turn the local gate red.
+  const off = runReleaseCheck(['--offline'])
+  assert.equal(off.status, 0, `${off.stdout}${off.stderr}`)
+  assert.match(off.stdout, /WARNING: registry probe skipped \(--offline\)/u)
+
+  // A published base whose tarball records no generation: same downgrade, even WITHOUT --offline.
+  withFixtureDir((write) => {
+    const unreadable = write('unreadable', {
+      baseVersions: [{ version: '0.3.1' }],
+      artifacts: { '0.3.1': {} },
+    })
+    const run = runReleaseCheck(['--fixture', unreadable])
+    assert.equal(run.status, 0, `an unreadable generation must not fail the gate\n${run.stdout}${run.stderr}`)
+    assert.match(run.stdout, /WARNING: @avantf\/dsh-mem: could not read the interface generation/u)
+  })
 })
 
 // ── M10 · both plugins run their own packer before publishing ─────────────────────────────────────

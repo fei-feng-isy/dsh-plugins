@@ -4,7 +4,7 @@
  * three packages is published.
  *
  * The per-package gates (`pnpm release:check:mem`, `pnpm release:check:mission`, and the base's own
- * `release:check`) prove each tree builds, tests and packs. This script proves the three things that
+ * `release:check`) prove each tree builds, tests and packs. This script proves the four things that
  * only make sense once `base/`, `mem/` and `mission/` are one workspace:
  *
  *   1. **The publishable set is exactly three packages.** `@avantf/dsh-plugin-base`,
@@ -17,10 +17,17 @@
  *      path is a runtime WARNING rather than the intended experience. So, unless `--allow-missing-base`
  *      is given for a pre-publication dry run, the registry must already carry a
  *      `@avantf/dsh-plugin-base` version inside the peer range each plugin declares.
- *   3. **The one-zod rule.** `catalog.zod` is `4.6.5` (the version the installed dsh ships) and the
- *      base's own `zod` peer stays the wide `>=4.4.3 <5`, so ONE copy of zod serves the workspace's
- *      engine packages and the host. Two copies — even of one major — have incompatible type
- *      identities (mem DESIGN §20.11).
+ *   3. **The one-zod rule.** `catalog.zod` is `4.6.5` (the version the installed dsh ships), the
+ *      base's own `zod` peer stays the wide `>=4.4.3 <5`, and `@avantf/dsh-mem` — the plugin that uses
+ *      zod at runtime — takes it as a REQUIRED peer. So ONE copy of zod serves the workspace's engine
+ *      packages and the host. Two copies — even of one major — have incompatible type identities (mem
+ *      DESIGN §20.11); a peer that drifts into `dependencies`, or turns optional, forks the copy.
+ *   4. **The published base's interface GENERATION is high enough (R1).** The range check in (2) says
+ *      a base VERSION is acceptable, not that the generation inside it is. The highest published base
+ *      version each plugin's peer range accepts is unpacked and its generation read: below the plugin's
+ *      baked generation, the plugin would mount against an already-installed base and silently lose the
+ *      compat gate / prompt-file layer / envinit provisioner. That one case is fatal; offline, an
+ *      unreachable registry and an artifact that records nothing are WARNINGS.
  *
  * It is deliberately dependency-free: it reads manifests and the workspace file directly and needs no
  * `node_modules`, so it can run as the first step of a release (and be the thing that fails before a
@@ -30,31 +37,50 @@
  *   node scripts/release-check.mjs                      # strict; needs the registry
  *   node scripts/release-check.mjs --allow-missing-base # pre-publication dry run (base not on npm yet)
  *   node scripts/release-check.mjs --offline            # skip the registry probe entirely (WARNING)
+ *   node scripts/release-check.mjs --fixture <file>     # judge a fixture instead of the registry (tests)
+ *       fixture: { baseVersions?: [{ version, tarball? }], artifacts?: { <version>: { record?, source? } } }
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VERSION_GROUPS, versionState } from './lib/versions.mjs'
 import { bakedVersionProblems } from './lib/bootstrap-version.mjs'
-import { baseDependencyProblems } from './lib/gates.mjs'
+import { baseDependencyProblems, requiredPeerProblems } from './lib/gates.mjs'
+import { INTERFACE_VERSION_FILE, readInterfaceVersion } from './lib/interface-version.mjs'
+import {
+  INTERFACE_RECORD_PATH,
+  INTERFACE_SOURCE_PATH,
+  interfaceGenerationVerdict,
+  publishedInterfaceGeneration,
+  readTarballEntry,
+} from './lib/published-base.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 // ── arguments ────────────────────────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2)
-const known = new Set(['--allow-missing-base', '--offline', '--help', '-h'])
-const unknown = argv.filter((flag) => !known.has(flag))
+const known = new Set(['--allow-missing-base', '--offline', '--fixture', '--help', '-h'])
+const fixtureIndex = argv.indexOf('--fixture')
+const fixturePath = fixtureIndex === -1 ? undefined : argv[fixtureIndex + 1]
+if (fixtureIndex !== -1 && (fixturePath === undefined || fixturePath.startsWith('--'))) {
+  console.error('release-check: --fixture needs a file')
+  process.exit(2)
+}
+const unknown = argv.filter((flag, index) => !known.has(flag) && (fixtureIndex === -1 || index !== fixtureIndex + 1))
 if (unknown.length > 0) {
   console.error(`release-check: unknown option ${unknown.join(', ')}`)
-  console.error('usage: node scripts/release-check.mjs [--allow-missing-base] [--offline]')
+  console.error('usage: node scripts/release-check.mjs [--allow-missing-base] [--offline] [--fixture <file>]')
   process.exit(2)
 }
 if (argv.includes('--help') || argv.includes('-h')) {
-  console.log('usage: node scripts/release-check.mjs [--allow-missing-base] [--offline]')
+  console.log('usage: node scripts/release-check.mjs [--allow-missing-base] [--offline] [--fixture <file>]')
+  console.log('  --fixture <file>  judge baseVersions/artifacts from a JSON fixture instead of the registry:')
+  console.log('                    { baseVersions?: [{ version, tarball? }], artifacts?: { <version>: { record?, source? } } }')
   process.exit(0)
 }
 const allowMissingBase = argv.includes('--allow-missing-base')
 const offline = argv.includes('--offline')
+const fixture = fixturePath === undefined ? undefined : JSON.parse(readFileSync(resolve(fixturePath), 'utf8'))
 
 const problems = []
 const notes = []
@@ -292,6 +318,23 @@ if (baseManifest !== undefined) {
   }
 }
 
+// ── 4b. the one-zod rule's PLUGIN half: the plugin takes the host's copy, never a nested one ─────
+// Section 4 pins the base's zod PEER; this pins the other manifest that uses zod at runtime (N15). A
+// `zod` moved out of `peerDependencies`, or marked optional, would let the installer nest a second
+// copy — two copies, even of one major, have incompatible schema type identities. mission's zod is
+// DELIBERATELY an optional peer (zero runtime use), so only mem is asserted here.
+{
+  const memDir = 'mem/packages/plugin'
+  const memManifest = seen.get(memDir)
+  if (memManifest !== undefined) {
+    const zodProblems = requiredPeerProblems(memManifest.name, memManifest, 'zod')
+    for (const problem of zodProblems) fail(problem)
+    if (zodProblems.length === 0) {
+      note(`${memManifest.name} peer zod = "${memManifest.peerDependencies.zod}" (required, host-provided: one copy)`)
+    }
+  }
+}
+
 // ── 5. the tarball rule, checked statically on every publishable manifest ───────────────────────
 for (const [dir, name] of PUBLISHABLE) {
   const manifest = seen.get(dir)
@@ -311,49 +354,72 @@ for (const [dir, name] of PUBLISHABLE) {
 }
 if (problems.length === 0) note('no `link:`/`file:` specifier in any publishable manifest')
 
-// ── 6. the publish order: the registry already carries a compatible base ────────────────────────
+// ── 6. the publish order: the registry already carries a compatible base, whose INTERFACE
+//       generation is high enough for what the plugins baked (R1) ───────────────────────────────
+const artifactCache = new Map()
 let baseVersions
-if (offline) {
-  note('registry probe skipped (--offline) — base→plugin publish order NOT verified')
+let probed = false
+if (fixture !== undefined) {
+  baseVersions = (fixture.baseVersions ?? [])
+    .map((entry) => (typeof entry === 'string' ? { version: entry } : entry))
+    .sort((left, right) => compareVersions(left.version, right.version))
+  probed = true
+  note(`registry probe replaced by fixture ${fixturePath} (${baseVersions.length} published base version(s))`)
+} else if (offline) {
+  note(
+    'WARNING: registry probe skipped (--offline) — the base→plugin publish order AND the published '
+    + 'base interface generation were NOT verified',
+  )
 } else {
   baseVersions = await publishedBaseVersions()
-  if (baseVersions === undefined) {
-    const detail =
-      `${BASE} could not be looked up on the registry (offline, or the registry is unreachable). `
-      + 'The publish order (base first) could not be verified.'
-    if (allowMissingBase) note(`WARNING: ${detail}`)
-    else {
-      fail(
-        `${detail}\n    Fix: publish the base BEFORE the plugins —\n`
-        + `      pnpm -C ${BASE_DIR} publish\n`
-        + '    or, for a pre-publication dry run where the base is not on npm yet, re-run with:\n'
-        + '      node scripts/release-check.mjs --allow-missing-base',
-      )
-    }
-  } else if (baseVersions.length === 0) {
-    if (allowMissingBase) {
-      note(`WARNING: ${BASE} is not published yet — publish it BEFORE the plugins (--allow-missing-base given, so this is not fatal)`)
-    } else {
-      fail(
-        `${BASE} has no published version, but the plugins declare it as a required peer.\n`
-        + `    Publish the base FIRST:\n      pnpm -C ${BASE_DIR} publish\n`
-        + '    or, for a pre-publication dry run, re-run with:\n'
-        + '      node scripts/release-check.mjs --allow-missing-base',
-      )
-    }
+  probed = true
+}
+if (probed && baseVersions === undefined) {
+  const detail =
+    `${BASE} could not be looked up on the registry (offline, or the registry is unreachable). `
+    + 'The publish order (base first) could not be verified.'
+  if (allowMissingBase) note(`WARNING: ${detail}`)
+  else {
+    fail(
+      `${detail}\n    Fix: publish the base BEFORE the plugins —\n`
+      + `      pnpm -C ${BASE_DIR} publish\n`
+      + '    or, for a pre-publication dry run where the base is not on npm yet, re-run with:\n'
+      + '      node scripts/release-check.mjs --allow-missing-base',
+    )
+  }
+} else if (probed && baseVersions.length === 0) {
+  if (allowMissingBase) {
+    note(`WARNING: ${BASE} is not published yet — publish it BEFORE the plugins (--allow-missing-base given, so this is not fatal)`)
   } else {
-    for (const { plugin, range } of pluginRanges) {
-      const accepted = baseVersions.filter((version) => satisfies(range, version))
-      if (accepted.length === 0) {
-        const detail =
-          `${BASE} is published (${baseVersions.join(', ')}) but no version satisfies ${plugin}'s peer `
-          + `range ${range} — the plugin would install without a base it accepts.`
-        if (allowMissingBase) note(`WARNING: ${detail}`)
-        else fail(`${detail}\n    Fix: publish a ${BASE} version inside ${range} first.`)
-      } else {
-        note(`${plugin} ${range} → registry has ${BASE}@${accepted[accepted.length - 1]}`)
-      }
+    fail(
+      `${BASE} has no published version, but the plugins declare it as a required peer.\n`
+      + `    Publish the base FIRST:\n      pnpm -C ${BASE_DIR} publish\n`
+      + '    or, for a pre-publication dry run, re-run with:\n'
+      + '      node scripts/release-check.mjs --allow-missing-base',
+    )
+  }
+} else if (probed) {
+  for (const { plugin, dir, range } of pluginRanges) {
+    const accepted = baseVersions.filter((entry) => satisfies(range, entry.version))
+    if (accepted.length === 0) {
+      const detail =
+        `${BASE} is published (${baseVersions.map((entry) => entry.version).join(', ')}) but no version satisfies ${plugin}'s peer `
+        + `range ${range} — the plugin would install without a base it accepts.`
+      if (allowMissingBase) note(`WARNING: ${detail}`)
+      else fail(`${detail}\n    Fix: publish a ${BASE} version inside ${range} first.`)
+      continue
     }
+    const newest = accepted[accepted.length - 1]
+    note(`${plugin} ${range} → registry has ${BASE}@${newest.version}`)
+    // The range accepted a VERSION; this asks whether the GENERATION inside it is high enough. The
+    // plugin's bake is the generation it was compiled for; the artifact's is what users would load.
+    const bake = readInterfaceVersion(join(repo, dir, 'lib', INTERFACE_VERSION_FILE))
+    const published = await publishedInterfaceFor(newest, artifactCache)
+    const verdict = interfaceGenerationVerdict({
+      plugin, baseDir: BASE_DIR, baseVersion: newest.version, published, bake, allowMissingBase,
+    })
+    if (verdict.level === 'fail') fail(verdict.message)
+    else note(verdict.message)
   }
 }
 
@@ -368,8 +434,9 @@ console.log('\nrelease-check ok — three publishable packages, base before plug
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
 /**
- * The versions of `@avantf/dsh-plugin-base` on the registry, or `undefined` when it could not be
- * asked. A 404 is an empty list (the package does not exist yet), not an error.
+ * The published `@avantf/dsh-plugin-base` versions (with the tarball URL the generation is read from),
+ * ascending, or `undefined` when the registry could not be asked. A 404 is an empty list (the package
+ * does not exist yet), not an error.
  */
 async function publishedBaseVersions() {
   try {
@@ -382,10 +449,53 @@ async function publishedBaseVersions() {
     const body = await response.json()
     const versions = body?.versions
     if (versions === undefined || versions === null || typeof versions !== 'object') return []
-    return Object.keys(versions).sort(compareVersions)
+    return Object.entries(versions)
+      .filter(([version]) => typeof version === 'string')
+      .map(([version, manifest]) => ({ version, tarball: manifest?.dist?.tarball }))
+      .sort((left, right) => compareVersions(left.version, right.version))
   } catch {
     return undefined
   }
+}
+
+/**
+ * The interface generation inside one published base version — from the fixture when one was given,
+ * otherwise by downloading and unpacking its tarball.
+ *
+ * The network half of R1 lives HERE, not in the verdict: every failure to obtain the number is
+ * returned as an `unreadable` result that the verdict turns into a WARNING, so a release machine with
+ * a flaky mirror never sees a red gate for a reason that is not the base's generation. Results are
+ * cached by version because both plugins usually accept the same newest base.
+ */
+async function publishedInterfaceFor(entry, cache) {
+  if (cache.has(entry.version)) return cache.get(entry.version)
+  let result
+  const fromFixture = fixture?.artifacts?.[entry.version]
+  if (fromFixture !== undefined) {
+    result = publishedInterfaceGeneration(fromFixture)
+  } else if (typeof entry.tarball !== 'string' || entry.tarball === '') {
+    result = { status: 'unreadable', detail: `the registry metadata for ${entry.version} advertises no tarball URL` }
+  } else {
+    try {
+      const response = await fetch(entry.tarball, { signal: AbortSignal.timeout(30_000) })
+      if (!response.ok) {
+        result = { status: 'unreadable', detail: `its tarball could not be downloaded (HTTP ${response.status})` }
+      } else {
+        const tarball = Buffer.from(await response.arrayBuffer())
+        result = publishedInterfaceGeneration({
+          record: readTarballEntry(tarball, INTERFACE_RECORD_PATH),
+          source: readTarballEntry(tarball, INTERFACE_SOURCE_PATH),
+        })
+      }
+    } catch (error) {
+      result = {
+        status: 'unreadable',
+        detail: `its tarball could not be read (${error instanceof Error ? error.message : String(error)})`,
+      }
+    }
+  }
+  cache.set(entry.version, result)
+  return result
 }
 
 /**
