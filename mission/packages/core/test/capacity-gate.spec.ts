@@ -51,6 +51,8 @@ function makeWorld(options: {
   const now = options.clock ?? (() => (tick += 1_000))
   const started: string[] = []
   const claimsByNode = new Map<string, string[]>()
+  /** What each node's start was TOLD it waited for capacity — the fact the prompt renders. */
+  const waits = new Map<string, number>()
   const deferred: DispatchDeferral[] = []
   const tree = new MissionTree(store, {
     isAgentLive: (sessionId) => sessionId === 'owner' || started.includes(sessionId),
@@ -64,8 +66,9 @@ function makeWorld(options: {
     {
       reserveClaimId: () => `mission-${String(++sequence)}`,
       releaseClaimId: () => undefined,
-      startWorker: ({ node, claimId }) => {
+      startWorker: ({ node, claimId, waitedMs }) => {
         started.push(claimId)
+        if (waitedMs !== undefined) waits.set(node.id, waitedMs)
         const held = claimsByNode.get(node.id) ?? []
         held.push(claimId)
         claimsByNode.set(node.id, held)
@@ -92,6 +95,7 @@ function makeWorld(options: {
     started,
     claimsByNode,
     deferred,
+    waits,
     now,
     /** How many times a node's worker was STARTED — "dispatched exactly once" made observable. */
     starts: (nodeId: string): number => claimsByNode.get(nodeId)?.length ?? 0,
@@ -238,8 +242,34 @@ describe('aging into a reservation', () => {
     expectUntouched(node(world.tree, latecomer))
   })
 
-  it('serves the oldest reservation first when several aged node wait', async () => {
+  it('hands the dispatch the wait it served, read from the same aging clock the queue marker uses', async () => {
+    // ⑦ The prompt's "it queued for N" must come from the engine's own bookkeeping, not a second
+    // stopwatch: the start is told exactly the age of the entry `waitingFor` is built from.
     let clock = 0
+    const world = makeWorld({ capacity: 1, capacityWaitMs: 60_000, clock: () => clock })
+    const running = await root(world.tree, 'running', { weight: 1 })
+    await world.engine.pump()
+    expect(world.starts(running)).toBe(1)
+    // It never waited, so its dispatch is told nothing (0 = no queue line in the prompt).
+    expect(world.waits.get(running)).toBe(0)
+
+    const queued = await root(world.tree, 'queued', { weight: 1 })
+    clock += 1_000
+    await world.engine.pump()
+    // The first capacity deferral starts the clock at this instant.
+    expect(world.starts(queued)).toBe(0)
+
+    clock += 122_000
+    const claim = world.claimsByNode.get(running)?.[0] as string
+    await world.tree.submitResult(running, claim, 'done')
+    clock += 1_000
+    expect(await world.engine.pump()).toBe(1)
+    expect(world.starts(queued)).toBe(1)
+    // 124_000 − 1_000: the whole time the gate held it, as the same clock measured it.
+    expect(world.waits.get(queued)).toBe(123_000)
+  })
+
+  it('serves the oldest reservation first when several aged node wait', async () => {    let clock = 0
     const world = makeWorld({ capacity: 1, capacityWaitMs: 5_000, clock: () => clock })
     const running = await root(world.tree, 'running', { weight: 1 })
     await world.engine.pump()

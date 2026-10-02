@@ -253,6 +253,10 @@ dispatch(node):
   `MissionTree.open()` 这个**唯一入口**把缺字段规范化成默认值，`domain.ts` 的 schema 同时给出
   `nullable().default(null)`；两处都写是因为测试可以用不经 schema 的 store，而"缺字段读成 undefined"
   会让 `!== null` 判成"有句柄"。
+- **与展示句柄分开**：同一个打开动作还会顺手把 `claimedBy` 补进 `NodeRecord.executorSessionId`
+  （面板用来"点节点 id 进那个 subagent 会话"的持久展示地址，见 §9 的 2026-10-02 修订之二）。两者
+  名字相近但用途相反：`lastWorkerId` 是**会被消费掉**的冷唤醒地址，`executorSessionId` 只读、
+  终态也留着。合并它们会让普通重派开始冷唤醒，所以刻意分成两个字段。
 
 #### 3.2.3 变化差量基线：`dispatchBaseline`
 
@@ -1333,15 +1337,21 @@ python3 -c 'json.loads(...); print(...)'  →  UnicodeEncodeError: surrogates no
 
 **2026-09-23 修订：落盘结果改成"点开就能看"。** 结果超过 2 KB 就落盘，节点只留开头与一个 locator —— 而那个 locator 是**给模型的**（`mission_result` 连同检索指引一起交给它），人在面板里点不动：浏览器不会导航到文件路径，DSH 自己那条"用桌面应用打开"的路只对有**授权路由**的 deliverable 开放，而这个 spill 不是交付物。于是加 `result({ sessionId, nodeId })`：面板上的「查看完整结果」让**宿主**（唯一能读自己 spill 产物的一方）把全文读回来，在弹窗里就地展开（展开时**替换**开头那段，不叠加 —— 开头本来就是全文的第一片）。两条降级都写死了：宿主没有这个面 → 不显示按钮（不提供一个注定失败的读）；locator 不是本机路径（`SpillStore` 的契约明确 locator 是**不透明的**，测试桩给的就是 `spill://…`）→ 回一条原因，locator 照旧留在屏幕上 —— 它本来就是"知道这个存储底座的人"要的地址。
 
-**2026-10-02 修订：面板可以跳到执行该任务的会话。** 弹窗标题栏原本只显示**节点 id**（那是任务的身份），而真正跑它的 subagent 会话是另一个地址，读者想去看那一段执行过程时只能自己从"N 个子智能"下拉里找。现在两个投影（行的 `NodeView` 与详情的 `NodeDetail`）都多一个 `workerSessionId`，值为该节点**当前绑定**的 worker 会话 id（即 `claimedBy`），客户端把它渲染在弹窗标题栏节点 id 的旁边。
+**2026-10-02 修订：面板可以跳到执行该任务的会话。** 弹窗标题栏原本只显示**节点 id**（那是任务的身份），而真正跑它的 subagent 会话是另一个地址，读者想去看那一段执行过程时只能自己从"N 个子智能"下拉里找。现在两个投影（行的 `NodeView` 与详情的 `NodeDetail`）都多一个 `workerSessionId`，值为该节点**最近一次被派给的执行者会话**，客户端把它渲染成**节点 id 本身**的一个可点入口。
 
-字段语义**只认"当前绑定"**：未绑定（从未派发、已回收、已失败）一律 `null`，不会是空串，更不会拿节点 id 冒充会话 id；被中断但仍可接续的节点携带的是 `lastWorkerId`（上一任执行者），**刻意不暴露**成一个可点字段 —— 那个会话可能已经被清理，一个我们主动提供的、点下去只会报"没有这个会话"的链接，比没有链接更糟。因此"上一任"与"当前绑定"在面板上是两件事：前者不显示，后者可点。
+**2026-10-02 修订之二：入口是节点 id，句柄活到任务之后。** 第一版把 `workerSessionId` 定义为"当前绑定（`claimedBy`）"，且只在弹窗标题栏、和节点 id **并排**渲染成第二个链接；结果是任务一完成 `claimedBy` 被清空，链接整个消失，而用户点的其实是那一行的**节点 id**。三处一起改：
 
-点击时发给宿主的 target 是 `{ parentSessionId: props.sessionId, childSessionId: workerSessionId, mode: 'continuable' }` —— 与主界面从子智能下拉进入子会话时同一个形状（父会话是面板所属的 owner 会话，`continuable` 表示打开的是可接续的直接子会话地址），等价于在下拉里选中进入；面板**只做跳转**，不内嵌会话视图。
+1. **持久化展示句柄 `NodeRecord.executorSessionId`**（新字段，`DOMAIN_VERSION` 仍为 1）。三个**进入 `running` 的转换**都会写它：`dispatch`（记 `claimId`）、`adoptParked`、`adoptContinuation`（记被采纳的会话 id）。**终态不清理**：`submit` / `decompose` / `reclaim` / `cancel` 之后它照旧在记录上 —— "跑完的任务是谁执行的"必须答得出来，而这正是 `claimedBy`（每次离开 `running` 都被清空）做不到的。多次尝试**只留最后一次**：投影里是一个字符串，不塞历史数组（要看历史得自己开各个会话）。打开时若记录是 `running`（老记录没有该字段），`reconcileOnOpen` 从 `claimedBy` 把它补上再降级/保留 —— 重启前跑过的会话因此仍可从面板进入。旧记录缺该字段读作 `null`（"没有可打开的执行者"），不解析失败（`domain.ts` 的 `nullable().default(null).catch(null)`）。
+   - **它刻意不是 `lastWorkerId`**：后者是**一次性冷唤醒地址**（只有 `reconcileOnOpen` 写、只有 `adoptContinuation` 消费，花掉就置 `null`）。若把二者合并成一个字段，"同进程回收后重派"就会开始走冷唤醒，普通重派行为被改变。
+   - 投影 `workerSessionId` 现在指这个 **最近一次** 的句柄（不再是 `claimedBy`），并新增布尔 **`workerLive`**（`status === 'running' && claimedBy === executorSessionId`）让 UI 区分"进行中 / 已结束"。两者都 `.default(null)` / `.default(false)`：老宿主缺字段 ⇒ 无句柄、不显示链接。
+2. **节点 id 就是入口**：显示节点 id 的两处 —— 树头部的**根 id**（`avwf-root-id`）与弹窗标题栏的 id（`avwf-dialog-head-id`）—— 统一渲染 `NodeIdEntry`。该节点有句柄时它是有 `<button>` 的链接，文本是**节点 id**，`aria-label`/`title` 写明"打开执行这个任务的会话（进行中/已结束）"并注明**不是任务详情**；没有句柄时是纯文本。原来那个"执行者会话 id"的独立链接**已删除**：同一个东西不允许出现两个链接。
+3. 点击发往宿主的 target 仍是 `{ parentSessionId: props.sessionId, childSessionId: <executorSessionId>, mode: 'continuable' }` —— 与主界面从子智能下拉进入子会话同一个形状（父会话是面板所属的 owner 会话），等价于在下拉里选中进入；面板**只做跳转**，不内嵌会话视图。
 
-依赖是**宿主可选服务** `uiWorkspace`，用 `ctx.get('uiWorkspace')` 取、**绝不进 `inject`**（进了 inject 会让没有这个服务的宿主直接加载失败，违反"绝不拒载"）。三条降级路径都写死：① 服务缺席（或本插件应用之后才挂上，所以**每次渲染重新取**，不缓存 apply 时的结果）→ id 仍以纯文本显示并带一句"当前宿主没有 uiWorkspace 服务，无法跳转"，面板其余部分不变；② 节点没有绑定（`workerSessionId === null`）→ 什么都不渲染，不给占位符（大多数节点本来就没执行者，占位只会变成噪声）；③ `openSession` 抛错或返回被拒的 Promise（会话已被清理）→ 就地捕获成 `role="alert"` 的一行提示，弹窗照常可用。`openWorkerSession` 是可选 prop，缺席路径与"渲染成纯文本"是同一条分支。
+**三条降级路径**（与第一版同规矩，只是渲染对象从"执行者 id"换成"节点 id"）：① 没有句柄（从未派发，或老宿主缺字段）→ 节点 id 纯文本；② 宿主可选服务 `uiWorkspace` 缺席，或本插件应用之后才挂上（所以**每次渲染重新取**，不缓存 apply 时的结果）→ 节点 id 纯文本并带一句"当前宿主没有 uiWorkspace 服务"的 tooltip；③ `openSession` 抛错或返回被拒的 Promise（会话确已被清理）→ 就地捕获成 `role="alert"` 的一行提示（树头部挂在那一棵树的状态里，弹窗挂在弹窗状态里），面板照常可用。`openWorkerSession` 是可选 prop，缺席路径与"渲染成纯文本"是同一条分支。
 
-wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSchema` 都加了该字段（**strict codec 会静默丢掉没声明的键**），并写成 `.nullable().default(null)` 而不是必填 —— 老宿主根本不发这个键，缺省的语义恰好是"没有可打开的执行者"，而 `corrections` 那种必填会让整份快照读失败；对一个只影响链接的增面字段，掉一条链接远好过掉整块面板。守卫：`host.spec.ts` 的"绑定 ⇒ id / 未绑定 ⇒ null（且不是空串、不是节点 id）"、`client-api.spec.ts` 的 schema 键名与解析（含老宿主缺键 ⇒ `null`）、`client-view.spec.tsx` 的"可点元素与点击 target 形状 / null 不给链接 / 服务缺席 ⇒ 纯文本 / 抛错 ⇒ 行内提示且不崩 / `apply` 每次渲染重新取服务"。
+wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSchema` 加了 `workerSessionId`（`.nullable().default(null)`）与 `workerLive`（`.boolean().default(false)`）（**strict codec 会静默丢掉没声明的键**）。守卫：`host.spec.ts` 的"运行中 ⇒ id + live / 完成与取消后仍留 id 且 live=false / 从未派发 ⇒ null + false（不是空串、不是节点 id）"、`domain.spec.ts` 的老记录缺字段 ⇒ `null` 与真实落盘往返、`client-api.spec.ts` 的 schema 键名与解析（含老宿主缺键 ⇒ `null`/`false`）、`client-view.spec.tsx` 的"点击 target 形状 / 节点 id 本身是可点元素且区分进行中与已结束 / 树头部根 id 也是入口 / 无句柄 ⇒ 纯文本 / 服务缺席 ⇒ 纯文本 / 抛错 ⇒ 行内提示且不崩 / `apply` 每次渲染重新取服务"。
+
+**2026-10-02 修订之三：派发 prompt 写明容量排队等待。** 实测里一个真实排队 123 秒（`createdAt=13:28:21` vs `claimedAt=13:30:24`）的执行者向 owner 报告"我没有等待"—— 因为它拿到的 prompt 里根本没有这个事实。现在进入 `running` 的派发会把等待写进 prompt：`本任务在容量队列里等了约 N 分钟（原因：机器容量已被占用）。` 数据**不是新造的计时器**，而是引擎既有的 deferral 记账：`MissionEngine.pass()` 选中候选后、在 `capacityWaits.delete()` **之前**读同一条老化时钟（`capacityWaits`，即 `waitingFor` 与限流日志用的那一份），算出 `waitedMs`，经 `StartWorkerInput`/`ResumeWorkerInput` 交给宿主，宿主再作为 `WorkerPromptOptions.capacityWaitedMs` 交给 `buildWorkerPrompt`（冷唤醒同样带上）。措辞由 `waitedLabel` 统一：不足一分钟说"约 N 秒"（最小值 1 秒，`0`/缺省=从未排队 ⇒ **整句不出现**），超过则"约 N 分钟"。节点从未被容量推迟过时**一个字的排队说明都没有**。守卫：`core/test/capacity-gate.spec.ts`（引擎交给 start 的 `waitedMs` 等于 `now − 首次推迟时刻`，未排队者 `0`）、`core/test/prompt.spec.ts`（有等待 ⇒ 含该句且位于「本任务」之前 / 无等待 ⇒ 不含）、`plugin/test/capacity-host.spec.ts`（真挂载：被容量挡住的第二个任务派发时 prompt 含该句，先跑的没被挡的那个不含）。
 
 ## 十、插件构成
 

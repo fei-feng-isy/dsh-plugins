@@ -146,16 +146,27 @@ export interface AdmitDecision {
 }
 
 /**
- * The worker session CURRENTLY bound to a node, as an address a reader may open — the one field the
- * panel's "jump to the executor" link needs.
+ * The LAST executor session a node was dispatched to, as an address a reader may open — the one
+ * field the panel's "click the node id to open the session that ran it" needs.
  *
- * Only a real binding counts: `null` when the node is not bound (never dispatched, reclaimed,
- * failed), and `null` for a blank string too. It is never the node id dressed up as a session id.
- * A reclaimed node's PREVIOUS session (`lastWorkerId`) is deliberately NOT exposed here: it may no
- * longer exist, and a link a reader can press that answers "no such session" is worse than no link.
+ * Read from the PERSISTED display handle (`executorSessionId`, written at every transition into
+ * `running` and kept afterwards), not from `claimedBy`: a finished mission is exactly when a reader
+ * wants to open the session that ran it, and `claimedBy` has been cleared by then. `null` when the
+ * node was never dispatched (or the field is blank), and never the node id dressed up as a session
+ * id. `workerLive` (see {@link workerLiveOf}) is what tells the two cases apart on screen.
  */
 function workerSessionIdOf(node: NodeRecord): string | null {
-  return node.claimedBy === null || node.claimedBy === '' ? null : node.claimedBy
+  const id = node.executorSessionId
+  return id === null || id === '' ? null : id
+}
+
+/** Whether the executor handle above is the node's CURRENT, still-running binding, so the panel can
+ *  label the link 进行中 / 已结束. False for every terminal, reclaimed or never-dispatched node: the
+ *  handle is then a display address for a session that has stopped, not a live executor. */
+function workerLiveOf(node: NodeRecord): boolean {
+  return node.status === 'running'
+    && node.claimedBy !== null
+    && node.claimedBy === node.executorSessionId
 }
 
 /** One node as the browser half renders it — the ROW projection. Deliberately without `description`
@@ -180,8 +191,10 @@ export interface NodeView {
   readonly createdAt: number
   readonly hasResult: boolean
   readonly resultRef: string | null
-  /** The session executing this node right now, or `null` when none is bound (see `workerSessionIdOf`). */
+  /** The session that ran this node LAST, or `null` when none ever did (see `workerSessionIdOf`). */
   readonly workerSessionId: string | null
+  /** Whether that handle is still running (see `workerLiveOf`), so the panel can say 进行中 / 已结束. */
+  readonly workerLive: boolean
   /** Declared capacity weight (cores-equivalent); persisted, so it survives a restart. */
   readonly weight: number
   /** Why the engine has not dispatched this node yet, or `null`. Carried in the ROW projection
@@ -213,8 +226,10 @@ export interface NodeDetail {
   readonly result: string | null
   /** Where a spilled full result lives, joined with its retrieval hint. */
   readonly resultPointer: string | null
-  /** The session executing this node right now, or `null` when none is bound (see `workerSessionIdOf`). */
+  /** The session that ran this node LAST, or `null` when none ever did (see `workerSessionIdOf`). */
   readonly workerSessionId: string | null
+  /** Whether that handle is still running (see `workerLiveOf`), so the panel can say 进行中 / 已结束. */
+  readonly workerLive: boolean
   /** Declared capacity weight (cores-equivalent). */
   readonly weight: number
   /** Why this node is queued rather than running, or `null`. */
@@ -546,7 +561,7 @@ export class AvantfMissionHost extends TypertRemoteService {
           return claimId
         },
         releaseClaimId: (claimId) => this.releaseUnboundClaim(claimId),
-        startWorker: (input) => this.startWorker(input.node, input.claimId),
+        startWorker: (input) => this.startWorker(input.node, input.claimId, input.waitedMs ?? 0),
         resumeWorker: (input) => this.resumeWorker(input),
         interruptWorker: (sessionId) => this.interruptWorker(sessionId),
         notifyOwner: (rootId, reason) => this.notifyOwner(rootId, reason),
@@ -1289,6 +1304,7 @@ export class AvantfMissionHost extends TypertRemoteService {
         result: node.result,
         resultPointer: node.resultRef === null ? null : spillPointer(node),
         workerSessionId: workerSessionIdOf(node),
+        workerLive: workerLiveOf(node),
         weight: node.weight,
         waitingFor: this.waitingForOf(node.id),
       },
@@ -1411,6 +1427,7 @@ export class AvantfMissionHost extends TypertRemoteService {
           hasResult: node.hasResult,
           resultRef: node.resultRef,
           workerSessionId: workerSessionIdOf(node),
+          workerLive: workerLiveOf(node),
           weight: node.weight,
           waitingFor: this.waitingForOf(node.id),
         })),
@@ -1735,7 +1752,7 @@ export class AvantfMissionHost extends TypertRemoteService {
         return 'skip'
       }
       this.dispatchedFor.add(owned.ownerSessionId)
-      if (await this.deliverContinuation(adopted.value, workerId, parent)) {
+      if (await this.deliverContinuation(adopted.value, workerId, parent, input.waitedMs ?? 0)) {
         this.announceTree(node.rootId)
         this.log.info(`continued ${node.id} in ${workerId} (its earlier execution was interrupted)`)
         // The guard stays until `workerLive` observes the resumed agent: the delivery resolving is
@@ -1791,7 +1808,12 @@ export class AvantfMissionHost extends TypertRemoteService {
    *
    * `@returns` whether the delivery was accepted; false means "fall back to a fresh executor".
    */
-  private async deliverContinuation(view: DispatchView, workerId: string, parent: Agent): Promise<boolean> {
+  private async deliverContinuation(
+    view: DispatchView,
+    workerId: string,
+    parent: Agent,
+    waitedMs = 0,
+  ): Promise<boolean> {
     const node = view.node
     // Read on the ADOPTED view so the delta, the correction slice and the prompt all describe one
     // and the same node state. A vanished node has no delta and needs none: the adoption already
@@ -1802,6 +1824,7 @@ export class AvantfMissionHost extends TypertRemoteService {
       resumed: true,
       corrections: undelivered,
       ...(drift === undefined ? {} : { delta: drift }),
+      ...(waitedMs > 0 ? { capacityWaitedMs: waitedMs } : {}),
     }, this.wellFormed)
     // Stamped with the prompt itself: this session's NEXT wake subtracts from what it is being read
     // here, not from the original dispatch, or the same drift would be reported to it twice. After
@@ -1832,7 +1855,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     return true
   }
 
-  private async startWorker(node: NodeRecord, claimId: string): Promise<void> {
+  private async startWorker(node: NodeRecord, claimId: string, waitedMs = 0): Promise<void> {
     const tree = this.requireTree()
     const owned = tree.treeOf(node.rootId)
     if (owned === undefined) {
@@ -1855,7 +1878,11 @@ export class AvantfMissionHost extends TypertRemoteService {
       this.endStartAttempt(claimId)
       return
     }
-    const prompt = buildWorkerPrompt(view, {}, this.wellFormed)
+    const prompt = buildWorkerPrompt(
+      view,
+      waitedMs > 0 ? { capacityWaitedMs: waitedMs } : {},
+      this.wellFormed,
+    )
     // Stamped only once the child accepts it (below): a prompt the runtime refused was never read.
     this.dispatchedFor.add(owned.ownerSessionId)
 

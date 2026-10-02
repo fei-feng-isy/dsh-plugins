@@ -204,6 +204,20 @@ export interface NodeRecord {
    * behaviour is untouched. `null` for a node that was never dispatched or whose handle was spent,
    * which is also the value a record written before this field existed loads as. */
   readonly lastWorkerId: string | null
+  /** The session id of the LAST executor this node was dispatched to — the display address behind
+   * the panel's "click the node id to open the session that ran it". Written at every transition
+   * INTO `running` (`dispatch` / `adoptParked` / `adoptContinuation`) and deliberately KEPT when the
+   * node leaves `running`: a finished mission must still be able to name who executed it, which is
+   * exactly what `claimedBy` (cleared on every exit) cannot do.
+   *
+   * A display address, NOT a continuation handle: nothing consumes it, and it is deliberately not
+   * `lastWorkerId` — that one is a one-shot cold-wake address that only `reconcileOnOpen` writes and
+   * only `adoptContinuation` spends, so overloading it would change ordinary re-dispatch behaviour (a
+   * same-process reclaim would start cold-resuming). A node dispatched several times keeps only the
+   * LAST attempt, because the projection carries one string and never a history array. `null` for a
+   * node that was never dispatched, which is also the value a record written before this field
+   * existed loads as. Persisted, `DOMAIN_VERSION` stays 1. */
+  readonly executorSessionId: string | null
   /** What the prompt of the LAST dispatch showed its session, stamped by the host the moment that
    * prompt was ACCEPTED (not when the node was bound: a dispatch whose prompt was never built or
    * never delivered must not leave a baseline claiming the session read something). The cold wake

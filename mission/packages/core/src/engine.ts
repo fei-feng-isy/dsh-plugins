@@ -19,6 +19,14 @@ export interface StartWorkerInput {
   readonly node: NodeRecord
   /** The session id reserved for this dispatch, already bound on the node. */
   readonly claimId: string
+  /**
+   * How long the CAPACITY gate deferred this node before this dispatch picked it up, in ms. Read
+   * from the engine's own aging clock at the moment the candidate was selected — the same
+   * `capacityWaits` bookkeeping `waitingFor` is built from — so the prompt's "it queued for N" can
+   * never disagree with the panel's queue marker. `0`/absent means the node never waited for
+   * capacity, and the prompt then says nothing about a queue.
+   */
+  readonly waitedMs?: number
 }
 
 /** One node the host should try to CONTINUE in the session it was interrupted in (a cold wake). */
@@ -35,6 +43,8 @@ export interface ResumeWorkerInput {
    * out of the gate (the wake paths that have no plan snapshot pass nothing).
    */
   readonly capacity?: CapacityPolicy
+  /** The capacity wait this candidate served before being selected; see {@link StartWorkerInput}. */
+  readonly waitedMs?: number
 }
 
 /**
@@ -483,6 +493,12 @@ export class MissionEngine {
       // Reserved before anything can start for it: a `skip`ped continuation must not be re-selected
       // in this same pass either, or the pass would spin on the same node.
       reserved.add(candidate.id)
+      // The capacity wait this node served before being picked, read from the SAME aging clock the
+      // gate (and `waitingFor`) is built from, and read BEFORE the entry below is dropped — that
+      // drop is what makes this the last moment the fact exists. The same number goes to whichever
+      // path delivers the prompt, so a continued session is told it exactly as a fresh one is.
+      const deferredSince = this.capacityWaits.get(candidate.id)
+      const waitedMs = deferredSince === undefined ? 0 : Math.max(0, policy.now - deferredSince)
       // It is being dispatched, so it is no longer waiting for capacity.
       this.capacityWaits.delete(candidate.id)
 
@@ -494,6 +510,7 @@ export class MissionEngine {
           node: candidate,
           workerId: candidate.lastWorkerId,
           capacity: policy,
+          waitedMs,
         })
         if (outcome === 'resumed') {
           // Bound and delivered: one dispatch, and deliberately no `startWorker`.
@@ -529,7 +546,7 @@ export class MissionEngine {
       }
       dispatched += 1
       void this.hooks
-        .startWorker({ node: decision.value.node, claimId })
+        .startWorker({ node: decision.value.node, claimId, waitedMs })
         .catch((error: unknown) => {
           // The node stays bound for the stale sweep to reclaim; reporting keeps one bad spawn from stalling the pass without hiding why it failed.
           this.hooks.reportDispatchFailure?.(decision.value.node.id, error)

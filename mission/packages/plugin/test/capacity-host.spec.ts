@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { totalmem } from 'node:os'
 import { CAPACITY_CEILING } from '@avantf/mission-core'
 import { createHostResourceProbe } from '../src/host.js'
-import { callTool, agent, mount } from './mount.js'
+import { callTool, agent, mount, promptFor } from './mount.js'
 
 describe('host capacity derivation', () => {
   it('uses an explicit configuration as given, with no reserved core and no derivation', async () => {
@@ -109,5 +109,33 @@ describe('weight and waitingFor reach the panel and the tools', () => {
     expect(read.ok).toBe(true)
     expect(read.data?.['weight']).toBe(2)
     expect(read.data?.['waiting_for']).toBeNull()
+  })
+})
+
+describe('the capacity wait reaches the dispatch prompt', () => {
+  it('⑦ tells an executor that was queued how long it waited, from the engine\'s own aging clock', async () => {
+    // The report this answers: a run that had queued behind a full machine told its owner "I did not
+    // wait", because nothing in its prompt said otherwise. The queued node gets the fact on dispatch.
+    const mounted = await mount({ pluginConfig: { capacity: 1 } })
+    const first = await callTool(mounted, 'create_mission', { title: 'first', description: 'd', analysis: [] }, mounted.owner)
+    const firstId = String(first.data?.['root_id'] ?? '')
+    const second = await callTool(mounted, 'create_mission', { title: 'second', description: 'd', analysis: [] }, mounted.owner)
+    const secondId = String(second.data?.['root_id'] ?? '')
+
+    // The first holds the whole machine; the second is queued, not dispatched.
+    expect(promptFor(mounted, secondId)).toBe('')
+    await callTool(
+      mounted,
+      'submit_mission',
+      { node_id: firstId, result: 'done' },
+      mounted.makeLive(String(mounted.dispatched[0]?.childId ?? '')),
+    )
+    await mounted.flush()
+
+    const prompt = promptFor(mounted, secondId)
+    expect(prompt).toContain('本任务在容量队列里等了')
+    expect(prompt).toContain('原因：机器容量已被占用')
+    // And the FIRST mission, which never waited, must not be told it did.
+    expect(promptFor(mounted, firstId)).not.toContain('容量队列')
   })
 })

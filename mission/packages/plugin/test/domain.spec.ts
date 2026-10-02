@@ -162,8 +162,63 @@ describe('the unit field', () => {
   })
 })
 
-describe('the weight field', () => {
-  it('reads a record written before `weight` existed as the default 1, with DOMAIN_VERSION still 1', () => {
+describe('the executor display handle', () => {
+  it('⑧ reads a record written before `executorSessionId` existed as "no executor to open", without failing to parse', () => {
+    // The handle is what the panel's node-id entry opens. A missing field must NOT invent a session
+    // id (that would be offered as a clickable address going nowhere), and it must not fail the whole
+    // document open either — the link is the only thing at stake.
+    const parsed = treeDocumentSchema.parse(legacyDocument())
+    expect(parsed.nodes['n0001']?.executorSessionId).toBeNull()
+    expect(parsed.nodes['n0001']?.status).toBe('done')
+  })
+
+  it('carries the last executor when the record has one, and degrades a dirty value to null', () => {
+    const kept = treeDocumentSchema.parse(legacyDocument(legacyNode({
+      status: 'done',
+      claimedBy: null,
+      executorSessionId: 'mission-aaaa1111',
+    })))
+    expect(kept.nodes['n0001']?.executorSessionId).toBe('mission-aaaa1111')
+    // A hand-edited number is not a session id: null (no link) rather than a bricked installation.
+    expect(treeDocumentSchema.parse(legacyDocument(legacyNode({ executorSessionId: 7 }))).nodes['n0001']?.executorSessionId)
+      .toBeNull()
+  })
+
+  it('round-trips a finished node\'s handle through the durable document, with DOMAIN_VERSION still 1', async () => {
+    let latest: TreeState | undefined
+    let tick = 0
+    const tree = new MissionTree(
+      {
+        loadAll: () => Promise.resolve([]),
+        put: (state) => {
+          latest = state
+          return Promise.resolve()
+        },
+        remove: () => Promise.resolve(),
+      },
+      {
+        isAgentLive: () => false,
+        probeOwner: () => Promise.resolve({ kind: 'exists' }),
+        spill: () => Promise.resolve(null),
+        now: () => (tick += 1),
+        newId: () => 'root0003',
+      },
+    )
+    const created = await tree.createRoot({ ownerSessionId: 'owner', title: 'Ship it', description: 'd', analysis: [] })
+    if (!created.ok) throw new Error(created.message)
+    const rootId = created.value.id
+    await tree.dispatch(rootId, 'mission-bbbb2222')
+    await tree.submitResult(rootId, 'mission-bbbb2222', 'done')
+    if (latest === undefined) throw new Error('the fixture persisted nothing')
+
+    const reloaded = treeDocumentSchema.parse(JSON.parse(JSON.stringify(toDocument(latest))) as unknown)
+    expect(reloaded.nodes[rootId]?.status).toBe('done')
+    expect(reloaded.nodes[rootId]?.executorSessionId).toBe('mission-bbbb2222')
+    expect(DOMAIN_VERSION).toBe(1)
+  })
+})
+
+describe('the weight field', () => {  it('reads a record written before `weight` existed as the default 1, with DOMAIN_VERSION still 1', () => {
     const parsed = treeDocumentSchema.parse(legacyDocument())
     expect(parsed.nodes['n0001']?.weight).toBe(1)
     expect(DOMAIN_VERSION).toBe(1)

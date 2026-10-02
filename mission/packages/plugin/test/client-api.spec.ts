@@ -159,49 +159,59 @@ describe('the worker session id, through the strict codec', () => {
   // A `strict` codec DROPS every key it does not name, so a host field this schema forgot would
   // vanish between the halves — the failure this plugin has already paid for once. These assertions
   // are the client side of `host.spec.ts`'s "bound ⇒ id / unbound ⇒ null": the field must arrive.
-  const row = (workerSessionId: string | null): Record<string, unknown> => ({
+  const row = (workerSessionId: string | null, workerLive = false): Record<string, unknown> => ({
     id: 'n1', parentId: null, children: [], depth: 1, title: 'Ship it', context: [], corrections: [],
-    status: 'running', attempts: 1, createdAt: 1, hasResult: false, resultRef: null, workerSessionId,
+    status: 'running', attempts: 1, createdAt: 1, hasResult: false, resultRef: null, workerSessionId, workerLive,
   })
-  /** The same row as an OLDER host sends it: the field this release added is ABSENT. */
-  const { workerSessionId: _newer, ...legacyRow } = row(null)
+  /** The same row as an OLDER host sends it: the fields this release added are ABSENT. */
+  const { workerSessionId: _newer, workerLive: _live, ...legacyRow } = row(null)
 
-  it('NAMES the field in both schemas, so a strict codec cannot silently drop it', () => {
+  it('NAMES both fields in both schemas, so a strict codec cannot silently drop them', () => {
     expect(
       Object.keys(snapshotResultSchema.shape.trees.element.shape.nodes.element.shape),
     ).toContain('workerSessionId')
+    expect(
+      Object.keys(snapshotResultSchema.shape.trees.element.shape.nodes.element.shape),
+    ).toContain('workerLive')
     expect(Object.keys(detailResultSchema.shape.node.unwrap().shape)).toContain('workerSessionId')
+    expect(Object.keys(detailResultSchema.shape.node.unwrap().shape)).toContain('workerLive')
   })
 
-  it('keeps the bound id on a snapshot row instead of treating it as unknown', () => {
+  it('keeps the handle and the live flag on a snapshot row instead of treating them as unknown', () => {
     const parsed = snapshotResultSchema.parse({
       wire: SNAPSHOT_WIRE_VERSION,
-      trees: [{ rootId: 'r1', closedAt: null, nodes: [row('mission-aaaa1111')] }],
+      trees: [{ rootId: 'r1', closedAt: null, nodes: [row('mission-aaaa1111', true)] }],
     })
     expect(parsed.trees[0]?.nodes[0]?.workerSessionId).toBe('mission-aaaa1111')
+    expect(parsed.trees[0]?.nodes[0]?.workerLive).toBe(true)
   })
 
-  it('keeps null on an unbound row, and reads an older host\'s absent field as null', () => {
+  it('keeps null/false on a row with no executor, and reads an older host\'s absent fields as none', () => {
     const unbound = snapshotResultSchema.parse({
       trees: [{ rootId: 'r1', closedAt: null, nodes: [row(null)] }],
     })
     expect(unbound.trees[0]?.nodes[0]?.workerSessionId).toBeNull()
-    // An older host does not send the key at all: the LINK is what is missing, not the snapshot.
+    expect(unbound.trees[0]?.nodes[0]?.workerLive).toBe(false)
+    // An older host does not send the keys at all: the LINK is what is missing, not the snapshot.
     const legacy = snapshotResultSchema.parse({
       trees: [{ rootId: 'r1', closedAt: null, nodes: [legacyRow] }],
     })
     expect(legacy.trees[0]?.nodes[0]?.workerSessionId).toBeNull()
+    expect(legacy.trees[0]?.nodes[0]?.workerLive).toBe(false)
   })
 
-  it('keeps the field on the detail node, bound and unbound alike', () => {
-    const node = (workerSessionId: string | null): Record<string, unknown> => ({
+  it('keeps the fields on the detail node, bound and unbound alike', () => {
+    const node = (workerSessionId: string | null, workerLive = false): Record<string, unknown> => ({
       id: 'n1', rootId: 'r1', title: 't', description: 'd', context: [], corrections: [],
       analysisNotes: [], analysisAttempt: 0, status: 'running', attempts: 1, depth: 1,
-      result: null, resultPointer: null, workerSessionId,
+      result: null, resultPointer: null, workerSessionId, workerLive,
     })
-    expect(detailResultSchema.parse({ node: node('mission-aaaa1111'), children: [] }).node?.workerSessionId)
-      .toBe('mission-aaaa1111')
-    expect(detailResultSchema.parse({ node: node(null), children: [] }).node?.workerSessionId).toBeNull()
+    const bound = detailResultSchema.parse({ node: node('mission-aaaa1111', true), children: [] }).node
+    expect(bound?.workerSessionId).toBe('mission-aaaa1111')
+    expect(bound?.workerLive).toBe(true)
+    const unbound = detailResultSchema.parse({ node: node(null), children: [] }).node
+    expect(unbound?.workerSessionId).toBeNull()
+    expect(unbound?.workerLive).toBe(false)
   })
 })
 

@@ -226,6 +226,7 @@ function asBaseline(value: unknown): DispatchBaseline | null {
 function normalizeLoaded(node: NodeRecord): NodeRecord {
   const legacy = node as NodeRecord & {
     lastWorkerId?: string | null
+    executorSessionId?: string | null
     correctionsDeliveredUpTo?: number
     dispatchBaseline?: unknown
     unit?: unknown
@@ -233,6 +234,10 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     activityAt?: number
   }
   const lastWorkerId = legacy.lastWorkerId ?? null
+  // A record written before the display handle existed reads as "no executor to open". `?? null`
+  // rather than a check for `undefined`: the reader is a UI link, and an invented session id would
+  // be offered as a clickable address that goes nowhere.
+  const executorSessionId = legacy.executorSessionId ?? null
   const correctionsDeliveredUpTo = legacy.correctionsDeliveredUpTo ?? 0
   const dispatchBaseline = asBaseline(legacy.dispatchBaseline)
   // A record written before `unit` existed, or one whose value is not a string at all, reads as "no
@@ -253,6 +258,7 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   const activityAt = storedTime(legacy.activityAt)
   if (
     lastWorkerId === node.lastWorkerId
+    && executorSessionId === node.executorSessionId
     && correctionsDeliveredUpTo === node.correctionsDeliveredUpTo
     && dispatchBaseline === node.dispatchBaseline
     && unit === node.unit
@@ -261,7 +267,16 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   ) {
     return node
   }
-  return { ...node, lastWorkerId, correctionsDeliveredUpTo, dispatchBaseline, unit, weight, activityAt }
+  return {
+    ...node,
+    lastWorkerId,
+    executorSessionId,
+    correctionsDeliveredUpTo,
+    dispatchBaseline,
+    unit,
+    weight,
+    activityAt,
+  }
 }
 
 export class MissionTree {
@@ -339,16 +354,21 @@ export class MissionTree {
    */
   private reconcileOnOpen(node: NodeRecord): NodeRecord {
     if (node.status !== 'running') return node
+    // A record written before the display handle existed has `claimedBy` as its only trace of the
+    // executor; remembering it here is what lets a session that survived a restart (or one that was
+    // interrupted by it) still be opened from the panel. A current record already carries it.
+    const executorSessionId = node.executorSessionId ?? node.claimedBy
     if (node.claimedBy !== null && this.deps.isAgentLive(node.claimedBy)) {
       // Hot-reload survivor: reset the clocks, or a long run looks silent from the moment we open.
       const at = this.deps.now()
-      return { ...node, progressAt: at, activityAt: at }
+      return { ...node, executorSessionId, progressAt: at, activityAt: at }
     }
     return {
       ...node,
       // Only when there is something to remember: a `running` record with no holder keeps any
       // earlier handle rather than erasing it.
       lastWorkerId: node.claimedBy ?? node.lastWorkerId,
+      executorSessionId,
       status: 'interrupted',
       claimedBy: null,
       updatedAt: this.deps.now(),
@@ -653,6 +673,8 @@ export class MissionTree {
         progressAt: at,
         activityAt: at,
         parkedWorker: null,
+        // The display handle: kept after this dispatch ends, unlike `claimedBy`.
+        executorSessionId: workerId,
       })
       await this.flush(state.tree.rootId)
       return accept({
@@ -732,6 +754,8 @@ export class MissionTree {
         progressAt: at,
         activityAt: at,
         lastWorkerId: null,
+        // Last attempt wins: the continuation replaces the previous executor as the one to open.
+        executorSessionId: workerId,
       })
       await this.flush(state.tree.rootId)
       return accept({
@@ -944,6 +968,8 @@ export class MissionTree {
       spawnFailures: 0,
       parkedWorker: null,
       lastWorkerId: null,
+      // Nothing has run this node yet, so there is no session to open.
+      executorSessionId: null,
       // No prompt has been built for this node yet, so there is nothing to subtract later.
       dispatchBaseline: null,
       progressAt: 0,
@@ -1012,6 +1038,8 @@ export class MissionTree {
         activityAt: at,
         // This dispatch did not adopt the parked session, so its address is spent.
         parkedWorker: null,
+        // The display handle: last attempt wins, and it survives this attempt's terminal state.
+        executorSessionId: claimId,
       })
       await this.flush(state.tree.rootId)
       return accept({

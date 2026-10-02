@@ -99,9 +99,11 @@ const CSS = `
 .avwf-link { align-self: flex-start; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-link, var(--dsw-alias-label-primary)); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .avwf-link:hover { text-decoration-thickness: 2px; }
 .avwf-link:disabled { color: var(--dsw-alias-label-secondary); cursor: default; text-decoration: none; }
-/* The executor's session id, next to the mission's own id in the dialog header. A link (the same
-   LINK token the result pane uses) when the host can open it, plain monospace text when it cannot —
-   an id is an id, so both wear the monospace face, and the difference is the affordance, not a hue. */
+/* The node id as an ENTRY (the tree header's root id, the dialog's heading id). Plain monospace text
+   when the node has no executor session or the host cannot open one; the clickable form adds the
+   avwf-worker-link class — the same LINK token the result pane uses — so an id is an id and the
+   difference is the affordance, not a hue. */
+.avwf-node-id { font-family: ui-monospace, monospace; }
 .avwf-worker-link { padding: 0; border: 0; background: transparent; font: inherit; font-family: ui-monospace, monospace; font-size: 12px; color: var(--dsw-alias-link, var(--dsw-alias-label-primary)); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .avwf-worker-link:hover { text-decoration-thickness: 2px; }
 .avwf-worker-id { font-family: ui-monospace, monospace; font-size: 12px; color: var(--dsw-alias-label-secondary); }

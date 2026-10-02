@@ -71,6 +71,11 @@ const nodeSchema = z.object({
   // Optional-with-default: a document written before the field existed reads as "no continuation
   // handle", which is the only safe default — an invented session id would be woken.
   lastWorkerId: z.string().nullable().default(null),
+  // Optional-with-default: a document written before the field existed reads as "no executor to
+  // open". This is a DISPLAY address (kept after a node ends), so the conservative default is the
+  // one that offers no link; `.catch(null)` degrades a non-string the same way rather than failing
+  // the whole document open over a field that only decides whether a link is rendered.
+  executorSessionId: z.string().nullable().default(null).catch(null),
   // Optional-with-default, and the default is UNKNOWN rather than "nothing changed": a wake that
   // cannot subtract a baseline renders an honest caveat instead of pretending the mission is
   // unchanged. `.catch(null)` covers the other direction — a baseline object that fails to parse

@@ -17,10 +17,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import {
   MissionDetailDialog,
   MissionTreeView,
+  NodeIdEntry,
   ResultPane,
   WorkerSessionHint,
-  WorkerSessionLink,
   detailTabs,
+  nodeIdLinkLabel,
   workerSessionClick,
   workerSessionTarget,
 } from '../src/client/MissionTreeView.js'
@@ -342,9 +343,10 @@ describe('reading a spilled result back', () => {
 })
 
 /**
- * The "jump to the executor" link. This suite has no DOM, so the click is exercised on the seam the
- * button is wired to (`WorkerSessionLink`'s root element, whose `onClick` is what the panel renders)
- * rather than by dispatching a browser event — the same reason `ResultPane` is a pure function here.
+ * The node-id entry that opens the session which ran a mission. This suite has no DOM, so the click
+ * is exercised on the seam the entry is wired to (`NodeIdEntry`'s root element, whose `onClick` is
+ * what the panel renders, plus `workerSessionClick` itself) rather than by dispatching a browser
+ * event — the same reason `ResultPane` is a pure function here.
  */
 describe('opening the session that ran a mission', () => {
   const WORKER = 'mission-aaaa1111'
@@ -394,13 +396,16 @@ describe('opening the session that ran a mission', () => {
     }
   }
 
-  it('sends the exact continuable-child address when the link is clicked', () => {
+  it('sends the exact continuable-child address when the node-id entry is clicked', () => {
     const sent: WorkerSessionTarget[] = []
-    const element = WorkerSessionLink({
+    const element = NodeIdEntry({
+      nodeId: 'r1',
       workerSessionId: WORKER,
+      workerLive: true,
       sessionId: 'owner-1',
       open: (target) => { sent.push(target) },
       onFailure: () => undefined,
+      className: 'avwf-dialog-head-id',
     }) as unknown as { props: { onClick: () => void } }
 
     element.props.onClick()
@@ -412,29 +417,74 @@ describe('opening the session that ran a mission', () => {
       .toEqual({ parentSessionId: 'owner-1', childSessionId: WORKER, mode: 'continuable' })
   })
 
-  it('renders a real clickable element for a bound mission', () => {
+  it('renders the mission id itself as the clickable element, labelled with the destination and its state', () => {
     const html = dialog(
-      { nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: WORKER }) },
+      { nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: WORKER, workerLive: true }) },
       { sessionId: 'owner-1', openWorkerSession: () => undefined },
     )
     expect(html).toContain('avwf-worker-link')
     expect(html).toContain(`<button type="button"`)
+    // The rendered text is the MISSION's id, not the worker's — the worker id lives in the tooltip.
+    expect(html).toContain('>r1</button>')
     expect(html).toContain(WORKER)
-    // Labelled for assistive tech, and it says what the click does.
-    expect(html).toContain('aria-label="打开执行这个任务的会话')
+    // Labelled for assistive tech: what the click opens, and that it is still running.
+    expect(html).toContain('aria-label="打开执行这个任务的会话（进行中）"')
   })
 
-  it('renders NO clickable element for an unbound mission, and says nothing about one', () => {
-    // `workerSessionId: null` is the engine's "no executor bound": there is nothing to open, so the
-    // header shows neither a link nor a placeholder.
+  it('says 已结束 for an executor that has stopped, so a finished mission does not read as live', () => {
+    const html = dialog(
+      { nodeId: 'r1', status: 'ready', detail: detail({ status: 'done', workerSessionId: WORKER, workerLive: false }) },
+      { sessionId: 'owner-1', openWorkerSession: () => undefined },
+    )
+    // Still an entry: the whole point is that a FINISHED mission can be opened too.
+    expect(html).toContain('avwf-worker-link')
+    expect(html).toContain('aria-label="打开执行这个任务的会话（已结束）"')
+    expect(nodeIdLinkLabel(WORKER, false)).toBe('打开执行这个任务的会话（已结束）')
+    expect(nodeIdLinkLabel(WORKER, true)).toBe('打开执行这个任务的会话（进行中）')
+    expect(nodeIdLinkLabel(null, false)).toBeUndefined()
+  })
+
+  it('renders NO clickable element for a never-dispatched mission, and says nothing about one', () => {
+    // `workerSessionId: null` is the engine's "no executor ever": there is nothing to open, so the id
+    // stays plain text — no link, and no "executor" placeholder either.
     const html = dialog({ nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: null }) }, {
       openWorkerSession: () => undefined,
     })
     expect(html).not.toContain('avwf-worker-link')
     expect(html).not.toContain('avwf-worker-id')
+    // The id itself is still readable — the entry degrades to text, it does not vanish.
+    expect(html).toContain('avwf-node-id')
+    expect(html).toContain('>r1<')
     // The panel itself is intact — this is a missing link, not a broken dialog.
     expect(html).toContain('Ship it')
     expect(html).toContain('>内容<')
+  })
+
+  it('makes the tree header root id an entry too, since that is the id a reader clicks', () => {
+    const data: MissionSnapshot = {
+      trees: [{
+        rootId: 'r1',
+        closedAt: null,
+        nodes: [{
+          id: 'r1', parentId: null, children: [], title: 'Ship it', context: [], corrections: [],
+          status: 'done', attempts: 1, depth: 1, createdAt: 1, hasResult: true, resultRef: null,
+          workerSessionId: WORKER, workerLive: false,
+        }],
+      }],
+    }
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+        openWorkerSession={() => undefined}
+      />,
+    )
+    expect(html).toContain('avwf-root-id avwf-node-id avwf-worker-link')
+    expect(html).toContain('>r1</button>')
+    expect(html).toContain('打开执行这个任务的会话（已结束）')
   })
 
   it('renders the id as plain text when the host has no uiWorkspace, with no dead link', () => {
@@ -442,6 +492,7 @@ describe('opening the session that ran a mission', () => {
     // still the useful half of the feature, so it stays on screen — as text, never as a button.
     const html = dialog({ nodeId: 'r1', status: 'ready', detail: detail({ workerSessionId: WORKER }) })
     expect(html).toContain('avwf-worker-id')
+    expect(html).toContain('>r1<')
     expect(html).toContain(WORKER)
     expect(html).not.toContain('avwf-worker-link')
     expect(html).toContain('当前宿主没有 uiWorkspace 服务')
@@ -464,6 +515,19 @@ describe('opening the session that ran a mission', () => {
     rejected()
     await Promise.resolve()
     expect(failures).toEqual(['会话已被清理', '会话不存在'])
+
+    // The ENTRY's own onClick is that seam, so a stale link cannot take the panel down with it.
+    const entry = NodeIdEntry({
+      nodeId: 'r1',
+      workerSessionId: WORKER,
+      workerLive: false,
+      sessionId: 'owner-1',
+      open: () => { throw new Error('会话已被清理') },
+      onFailure: (message) => { failures.push(message) },
+      className: 'avwf-dialog-head-id',
+    }) as unknown as { props: { onClick: () => void } }
+    expect(() => { entry.props.onClick() }).not.toThrow()
+    expect(failures.at(-1)).toBe('会话已被清理')
 
     // The message the dialog renders in place is a line of text with `role="alert"`, not a blank pane.
     const html = renderToStaticMarkup(<WorkerSessionHint message="会话已被清理" />)

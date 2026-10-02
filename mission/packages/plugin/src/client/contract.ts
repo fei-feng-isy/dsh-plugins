@@ -35,9 +35,14 @@ export interface MissionNodeView {
   readonly createdAt: number
   readonly hasResult: boolean
   readonly resultRef: string | null
-  /** The session executing this node right now, or `null` when none is bound. Carried in the ROW
-   *  projection as well as the detail so a row can offer "open the executor" without a second read. */
+  /** The session that ran this node LAST, or `null` when none ever did. Carried in the ROW
+   *  projection as well as the detail so a row can offer "open the executor" without a second read.
+   *  It is a DISPLAY address kept after the session ended (the panel's node-id entry opens it), so it
+   *  is not the same thing as "is running now" — that is {@link workerLive}. */
   readonly workerSessionId: string | null
+  /** Whether {@link workerSessionId} is still running: the node-id entry uses it to say 进行中 or
+   *  已结束. Optional because an older host does not send it, and absence reads as "not live". */
+  readonly workerLive?: boolean
   /** Declared capacity weight (cores-equivalent); an older host omits it and reads as 1. */
   readonly weight?: number
   /** Why this node is queued; absent/`null` means nothing is holding it back. */
@@ -90,10 +95,13 @@ export interface MissionNodeDetailView {
   readonly result: string | null
   /** Where an oversized result was spilled, so the reader can still open it. */
   readonly resultPointer: string | null
-  /** The session executing this node right now, or `null` when none is bound. This is the NODE's
-   *  executor — a different id from `id`, which names the mission. A node whose worker was reclaimed
-   *  carries `null` on purpose: that session may no longer exist, and the panel offers no link to it. */
+  /** The session that ran this node LAST, or `null` when none ever did. This is the NODE's executor
+   *  — a different id from `id`, which names the mission. A node whose attempt was reclaimed, or one
+   *  that finished, still carries its LAST executor here on purpose: the panel's node-id entry opens
+   *  that session, and a finished mission is exactly when a reader wants to look back at it. */
   readonly workerSessionId: string | null
+  /** Whether {@link workerSessionId} is still running (see the row projection's copy). */
+  readonly workerLive?: boolean
   /** Declared capacity weight (cores-equivalent); an older host omits it and reads as 1. */
   readonly weight?: number
   /** Why this node is queued; absent/`null` means nothing is holding it back. */

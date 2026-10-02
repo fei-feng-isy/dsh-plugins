@@ -1790,6 +1790,105 @@ describe('the cold-wake handle', () => {
   })
 })
 
+describe('the executor display handle', () => {
+  it('is written at dispatch and KEPT after the node reaches a terminal state', async () => {
+    // This is the whole point of a separate field: `claimedBy` is cleared by every exit from
+    // `running`, so a finished mission would otherwise name nobody. `executorSessionId` survives.
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+
+    expect(tree.node(id)?.executorSessionId).toBeNull()
+    await tree.dispatch(id, 'mission-first')
+    expect(tree.node(id)?.executorSessionId).toBe('mission-first')
+    expect(tree.node(id)?.claimedBy).toBe('mission-first')
+
+    await tree.submitResult(id, 'mission-first', 'done')
+    expect(tree.node(id)?.status).toBe('done')
+    expect(tree.node(id)?.claimedBy).toBeNull()
+    expect(tree.node(id)?.executorSessionId).toBe('mission-first')
+  })
+
+  it('keeps it across a reclaim too, and the LAST attempt wins', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-first')
+    await tree.reclaim(id, 'vanished')
+    // A reclaim leaves the node dispatchable again; the handle still names who ran last.
+    expect(tree.node(id)?.status).toBe('interrupted')
+    expect(tree.node(id)?.executorSessionId).toBe('mission-first')
+
+    await tree.dispatch(id, 'mission-second')
+    // Only the LAST attempt: the projection carries one string, never a history array.
+    expect(tree.node(id)?.executorSessionId).toBe('mission-second')
+  })
+
+  it('is written by BOTH adoption paths, not just by a fresh dispatch', async () => {
+    // A record from a build without the display handle, parked as a cold-wake continuation: the
+    // binding is cleared, the handle is the only address, and the display field is absent.
+    const continuable = makeTree()
+    const cid = await rootOf(continuable.tree)
+    await continuable.tree.dispatch(cid, 'mission-cold')
+    const cstate = continuable.store.documents.get(cid)
+    if (cstate === undefined) throw new Error('nothing was persisted')
+    const cnodes = new Map(cstate.nodes)
+    const cnode = { ...cnodes.get(cid)!, claimedBy: null, status: 'interrupted' as const, lastWorkerId: 'mission-cold' }
+    delete (cnode as unknown as Record<string, unknown>)['executorSessionId']
+    cnodes.set(cid, cnode)
+    continuable.store.documents.set(cid, { tree: cstate.tree, nodes: cnodes })
+
+    const cold = reopen(continuable.store)
+    await cold.open()
+    expect(cold.node(cid)?.executorSessionId).toBeNull()
+    await cold.adoptContinuation(cid, 'mission-cold')
+    expect(cold.node(cid)?.executorSessionId).toBe('mission-cold')
+
+    // And the parked-adoption path: a `ready` node with a live parked address.
+    const parked = makeTree()
+    const pid = await rootOf(parked.tree)
+    await parked.tree.dispatch(pid, 'mission-parked')
+    const pstate = parked.store.documents.get(pid)
+    if (pstate === undefined) throw new Error('nothing was persisted')
+    const pnodes = new Map(pstate.nodes)
+    const pnode = { ...pnodes.get(pid)!, claimedBy: null, status: 'ready' as const, parkedWorker: 'mission-parked' }
+    delete (pnode as unknown as Record<string, unknown>)['executorSessionId']
+    pnodes.set(pid, pnode)
+    parked.store.documents.set(pid, { tree: pstate.tree, nodes: pnodes })
+
+    const reopened = reopen(parked.store)
+    await reopened.open()
+    expect(reopened.node(pid)?.executorSessionId).toBeNull()
+    await reopened.adoptParked(pid, 'mission-parked')
+    expect(reopened.node(pid)?.executorSessionId).toBe('mission-parked')
+  })
+
+  it('✓ reads a record written before the field existed as "no handle", and recovers a legacy running one from its binding', async () => {
+    // Two directions, both with a record from an earlier release:
+    // (a) a never-dispatched node has no binding to recover from → null (no link, no invented id);
+    // (b) a RUNNING node's `claimedBy` is the only trace of the executor → recovered on open, so a
+    //     session that ran before the upgrade is still openable from the panel.
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    const state = store.documents.get(id)
+    if (state === undefined) throw new Error('nothing was persisted')
+    store.documents.set(id, withoutField(state, id, 'executorSessionId'))
+
+    const neverDispatched = reopen(store)
+    await neverDispatched.open()
+    expect(neverDispatched.node(id)?.executorSessionId).toBeNull()
+
+    await tree.dispatch(id, 'mission-legacy')
+    const dispatched = store.documents.get(id)
+    if (dispatched === undefined) throw new Error('nothing was persisted')
+    store.documents.set(id, withoutField(dispatched, id, 'executorSessionId'))
+
+    const reopened = reopen(store)
+    await reopened.open()
+    // Rewritten as a running record: the display handle is recovered from the binding before the
+    // demotion clears it, exactly as `lastWorkerId` is.
+    expect(reopened.node(id)?.executorSessionId).toBe('mission-legacy')
+  })
+})
+
 describe('the correction delivery watermark', () => {
   it('is monotone and clamped to the corrections actually recorded', async () => {
     const { tree } = makeTree()

@@ -7,7 +7,7 @@
  * invites a worker to wait instead of finishing.
  */
 import { describe, expect, it } from 'vitest'
-import { buildProgressLine, buildWorkerPrompt, CAPACITY, isTroubled, isTroubledNode, type ContinuationDelta, type DispatchView, type NodeRecord } from '../src/index.js'
+import { buildProgressLine, buildWorkerPrompt, CAPACITY, isTroubled, isTroubledNode, waitedLabel, type ContinuationDelta, type DispatchView, type NodeRecord } from '../src/index.js'
 
 function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
   return {
@@ -33,6 +33,7 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     spawnFailures: 0,
     parkedWorker: null,
     lastWorkerId: null,
+    executorSessionId: null,
     dispatchBaseline: null,
     progressAt: 0,
     activityAt: 0,
@@ -161,6 +162,32 @@ describe('execution prompt', () => {
     expect(prompt).toContain('拿到后再判断改动范围')
     // Inside 「本任务」: after the node's own block, before any aggregate section.
     expect(prompt.indexOf('本任务：')).toBeLessThan(prompt.indexOf('执行本任务时写下的分析'))
+  })
+})
+
+describe('the capacity-queue notice', () => {
+  // The report this answers: a run that had queued 123 seconds behind a full machine told its owner
+  // "I did not wait", because the prompt it was handed contained no such fact. The number comes from
+  // the engine's own aging clock, through `WorkerPromptOptions.capacityWaitedMs`.
+  it('states the wait when the engine actually deferred this dispatch', () => {
+    const prompt = buildWorkerPrompt(view(), { capacityWaitedMs: 123_000 })
+    expect(prompt).toContain('本任务在容量队列里等了约 2 分钟（原因：机器容量已被占用）')
+    // Stated before the mission block: it is a fact about why this dispatch is starting now.
+    expect(prompt.indexOf('容量队列')).toBeLessThan(prompt.indexOf('本任务：'))
+  })
+
+  it('renders sub-minute waits in seconds, rounded and approximate', () => {
+    expect(buildWorkerPrompt(view(), { capacityWaitedMs: 12_400 })).toContain('等了约 12 秒')
+    // A few milliseconds is still "it queued": never "0 秒", which would read as "no wait".
+    expect(buildWorkerPrompt(view(), { capacityWaitedMs: 5 })).toContain('等了约 1 秒')
+    expect(waitedLabel(0)).toBe('约 1 秒')
+    expect(waitedLabel(59_999)).toBe('约 60 秒')
+    expect(waitedLabel(60_000)).toBe('约 1 分钟')
+  })
+
+  it('says NOTHING about a queue when the node was never deferred', () => {
+    expect(buildWorkerPrompt(view())).not.toContain('容量队列')
+    expect(buildWorkerPrompt(view(), { capacityWaitedMs: 0 })).not.toContain('容量队列')
   })
 })
 

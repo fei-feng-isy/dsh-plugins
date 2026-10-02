@@ -806,7 +806,7 @@ describe('the snapshot the 任务 view reads', () => {
 })
 
 describe('the worker session the panel can open', () => {
-  it('names the executor while a node is bound, in the snapshot and the detail alike', async () => {
+  it('names the executor while a node is bound, and marks it live', async () => {
     const mounted = await mount()
     const root = await createTree(mounted, 'Ship it')
     await mounted.flush()
@@ -817,16 +817,43 @@ describe('the worker session the panel can open', () => {
     expect(node?.workerSessionId).toBe(claim)
     // The field names the EXECUTOR — never the mission id dressed up as one.
     expect(node?.workerSessionId).not.toBe(node?.id)
+    // ② running ⇒ live, so the panel's entry says 进行中.
+    expect(node?.workerLive).toBe(true)
 
     const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
     expect(detail.node?.workerSessionId).toBe(claim)
+    expect(detail.node?.workerLive).toBe(true)
   })
 
-  it('reads null once the node is not bound, never an empty string or the node id', async () => {
+  it('KEEPS the executor handle after the node finishes, and reports it as not live', async () => {
+    // ① The bug this whole change exists for: `claimedBy` is cleared on submit, so a finished mission
+    // used to have no address at all. The display handle survives it, and `workerLive` says the
+    // session has stopped — which is exactly what lets the panel open a finished mission's session.
+    const mounted = await mount()
+    const root = await createTree(mounted, 'Finished')
+    await mounted.flush()
+    const claim = String(mounted.dispatched[0]?.childId ?? '')
+    const worker = mounted.makeLive(claim)
+
+    await callTool(mounted, 'submit_mission', { node_id: root, result: 'done' }, worker)
+    expect(mounted.nodeFor(root)?.claimedBy ?? null).toBeNull()
+
+    const node = (await mounted.host.snapshot({ sessionId: mounted.owner.id })).trees[0]?.nodes[0]
+    expect(node?.status).toBe('done')
+    expect(node?.workerSessionId).toBe(claim)
+    expect(node?.workerLive).toBe(false)
+    expect(mounted.nodeFor(root)?.executorSessionId).toBe(claim)
+
+    const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
+    expect(detail.node?.workerSessionId).toBe(claim)
+    expect(detail.node?.workerLive).toBe(false)
+  })
+
+  it('keeps the handle on a cancelled node, and never the node id or an empty string', async () => {
     const mounted = await mount()
     const root = await createTree(mounted, 'Cancelled')
     await mounted.flush()
-    // The binding was real before the cancel — otherwise "null afterwards" would prove nothing.
+    // The binding was real before the cancel — otherwise "kept afterwards" would prove nothing.
     const claim = String(mounted.dispatched[0]?.childId ?? '')
     expect(mounted.nodeFor(root)?.claimedBy).toBe(claim)
 
@@ -835,12 +862,28 @@ describe('the worker session the panel can open', () => {
 
     const node = (await mounted.host.snapshot({ sessionId: mounted.owner.id })).trees[0]?.nodes[0]
     expect(node?.status).toBe('failed')
-    expect(node?.workerSessionId).toBeNull()
+    expect(node?.workerSessionId).toBe(claim)
     expect(node?.workerSessionId).not.toBe(root)
     expect(node?.workerSessionId).not.toBe('')
+    expect(node?.workerLive).toBe(false)
 
     const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
-    expect(detail.node?.workerSessionId).toBeNull()
+    expect(detail.node?.workerSessionId).toBe(claim)
+  })
+
+  it('has no handle at all for a node that was never dispatched', async () => {
+    // ④ A mission the capacity gate is holding back: it has never run, so there is nothing to open
+    // and the panel renders the id as plain text.
+    const mounted = await mount({ pluginConfig: { capacity: 1 } })
+    await callTool(mounted, 'create_mission', { title: 'first', description: 'd', analysis: [] }, mounted.owner)
+    const second = await callTool(mounted, 'create_mission', { title: 'queued', description: 'd', analysis: [] }, mounted.owner)
+    const queuedId = String(second.data?.['root_id'] ?? '')
+    const row = mounted.host.treesForSession(mounted.owner.id).flatMap((tree) => tree.nodes)
+      .find((node) => node.id === queuedId)
+    expect(row?.waitingFor).not.toBeNull()
+    expect(row?.workerSessionId).toBeNull()
+    expect(row?.workerLive).toBe(false)
+    expect(mounted.nodeFor(queuedId)?.executorSessionId).toBeNull()
   })
 })
 

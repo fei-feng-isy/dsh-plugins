@@ -406,8 +406,8 @@ export function inertBackground(overlay: HTMLElement): () => void {
  * durable parent/child address of a *continuable* subagent — what the main UI sends when a child is
  * picked from the "N 个子智能" dropdown. The PARENT is the owner session this panel belongs to.
  *
- * Exported, with `workerSessionClick`/`WorkerSessionLink`, because this suite has no DOM: a spec
- * cannot press a rendered button, so it asks these functions (the very ones the button is wired to)
+ * Exported, with `workerSessionClick`/`NodeIdEntry`, because this suite has no DOM: a spec
+ * cannot press a rendered button, so it asks these functions (the very ones the entry is wired to)
  * what a click sends. That keeps "点击发出的 target 形状" pinned without adding a browser environment.
  */
 export function workerSessionTarget(parentSessionId: string, workerSessionId: string): WorkerSessionTarget {
@@ -439,27 +439,65 @@ export function workerSessionClick(input: {
 }
 
 /**
- * The worker session id as a LINK. Its ROOT element is the button, so a DOM-less spec can render the
- * component and invoke exactly the handler the panel wires up; the failure message is the dialog's
- * (a sibling), because the button is the whole of this component.
+ * What a node-id entry says, or `undefined` when the node has no executor session to open. The
+ * wording names the DESTINATION (the session that executed this mission) and its state, because the
+ * thing rendered is the MISSION's id and a reader must not mistake the click for "open the task".
  */
-export function WorkerSessionLink({ workerSessionId, sessionId, open, onFailure }: {
-  workerSessionId: string
+export function nodeIdLinkLabel(
+  workerSessionId: string | null | undefined,
+  workerLive: boolean | undefined,
+): string | undefined {
+  if (workerSessionId === null || workerSessionId === undefined || workerSessionId === '') return undefined
+  return `打开执行这个任务的会话（${workerLive === true ? '进行中' : '已结束'}）`
+}
+
+/**
+ * One node id as an ENTRY: the mission's own id, made clickable exactly when the node has an
+ * executor session to open. Both places that show a node id (the tree header's root id and the
+ * detail dialog's heading) render this, so the same thing never becomes two links — W8 put a second,
+ * separate link on the worker session id, and that link is what this replaces.
+ *
+ * Three degradation paths, all deliberate:
+ * ① no handle at all (never dispatched, or an older host) → plain text, nothing to open;
+ * ② the host has no `uiWorkspace` service (`open` absent) → still plain text, with a tooltip saying
+ *    why, so an id that cannot be a link does not read as a broken one;
+ * ③ `open` throws or rejects (the session really was cleaned up) → `onFailure` turns it into the
+ *    caller's inline message; the panel never blanks and never loses its place.
+ */
+export function NodeIdEntry({ nodeId, workerSessionId, workerLive, sessionId, open, onFailure, className }: {
+  /** The MISSION's id — what is rendered; the session is only the destination. */
+  nodeId: string
+  workerSessionId: string | null | undefined
+  workerLive?: boolean
   /** The owner session the worker hangs under — the parent half of the address. */
   sessionId: string
-  open: (target: WorkerSessionTarget) => void
+  open?: (target: WorkerSessionTarget) => void
   onFailure: (message: string) => void
+  /** The caller's own monospace slot class, applied to both the link and the plain-text form. */
+  className: string
 }): ReactNode {
-  const label = `打开执行这个任务的会话（${workerSessionId}）`
+  const label = nodeIdLinkLabel(workerSessionId, workerLive)
+  if (label === undefined || workerSessionId === null || workerSessionId === undefined) {
+    return <span className={`${className} avwf-node-id`}>{nodeId}</span>
+  }
+  const state = workerLive === true ? '进行中' : '已结束'
+  const where = `执行这个任务的会话 ${workerSessionId}（${state}）`
+  if (open === undefined) {
+    return (
+      <span className={`${className} avwf-node-id avwf-worker-id`} title={`${where}；当前宿主没有 uiWorkspace 服务，无法跳转`}>
+        {nodeId}
+      </span>
+    )
+  }
   return (
     <button
       type="button"
-      className="avwf-worker-link"
-      title={`执行者会话 ${workerSessionId}\n${label}`}
+      className={`${className} avwf-node-id avwf-worker-link`}
+      title={`${label}\n${where}；不是任务详情`}
       aria-label={label}
       onClick={workerSessionClick({ parentSessionId: sessionId, workerSessionId, open, onFailure })}
     >
-      {workerSessionId}
+      {nodeId}
     </button>
   )
 }
@@ -574,30 +612,18 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessio
                 {ready?.node.title ?? '任务详情'}
               </h2>
               <div className="avwf-dialog-head-meta">
-                <span className="avwf-dialog-head-id" title={ready?.node.id ?? nodeId}>{ready?.node.id ?? nodeId}</span>
-                {/* The id above is the MISSION's; the session that actually ran it is a different
-                    address, and the one a reader may want to open. Shown beside it so "which mission"
-                    and "who is running it" are answered together. A node with no binding shows
-                    nothing here — a placeholder on every queued row would be noise, and there is
-                    nothing to open. */}
-                {ready === undefined || ready.node.workerSessionId === null
-                  ? null
-                  : openWorkerSession === undefined
-                    // The id is still the useful half — this host just cannot navigate to it. The
-                    // tooltip says why, so plain text does not read as a link that is broken.
-                    ? (
-                      <span className="avwf-worker-id" title="当前宿主没有 uiWorkspace 服务，无法跳转到执行者会话">
-                        {ready.node.workerSessionId}
-                      </span>
-                    )
-                    : (
-                      <WorkerSessionLink
-                        workerSessionId={ready.node.workerSessionId}
-                        sessionId={sessionId}
-                        open={openWorkerSession}
-                        onFailure={setWorkerFailure}
-                      />
-                    )}
+                {/* The MISSION's id, made an entry: when this node has an executor session (running or
+                    already finished) it is clickable and opens that session — "which mission" and
+                    "who ran it" answered from one element, so the id never becomes two links. */}
+                <NodeIdEntry
+                  nodeId={ready?.node.id ?? nodeId}
+                  workerSessionId={ready?.node.workerSessionId}
+                  workerLive={ready?.node.workerLive}
+                  sessionId={sessionId}
+                  onFailure={setWorkerFailure}
+                  className="avwf-dialog-head-id"
+                  {...openWorkerSession === undefined ? {} : { open: openWorkerSession }}
+                />
                 {workerFailure === undefined ? null : <WorkerSessionHint message={workerFailure} />}
                 {ready === undefined
                   ? null
@@ -739,11 +765,15 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
  * One whole tree, with its own action. The delete button is here and not on the rows
  * because the unit of deletion is the TREE; a live tree's button says so instead of hiding.
  */
-function Tree({ tree, actions, busy, onDeleteTree }: {
+function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession }: {
   tree: MissionTreeViewData
   actions: RowActions
   busy: string | undefined
   onDeleteTree: (rootId: string) => void
+  /** The owner session, and the optional opener — the tree header's root id opens the ROOT's
+   *  executor session through the same entry the dialog uses. */
+  sessionId: string
+  openWorkerSession?: (target: WorkerSessionTarget) => void
 }): ReactNode {
   const root = tree.nodes.find((node) => node.id === tree.rootId)
   const settled = root !== undefined && TERMINAL.includes(root.status)
@@ -755,6 +785,9 @@ function Tree({ tree, actions, busy, onDeleteTree }: {
     .map(([status, count]) => `${String(count)} ${STATUS_LABEL[status] ?? status}`)
     .join(' · ')
   const [confirming, setConfirming] = useState(false)
+  // A refused `openSession` on THIS tree's root id, shown beside the id it came from. Per tree, so a
+  // stale session on one tree does not print an error on all of them.
+  const [workerFailure, setWorkerFailure] = useState<string | undefined>(undefined)
 
   // An armed button must not stay armed, or a later click deletes a whole tree unconfirmed.
   useEffect(() => {
@@ -766,7 +799,18 @@ function Tree({ tree, actions, busy, onDeleteTree }: {
   return (
     <section className={settled ? 'avwf-tree avwf-tree-settled' : 'avwf-tree'}>
       <header className="avwf-tree-header">
-        <span className="avwf-root-id">{tree.rootId}</span>
+        {/* The tree's ROOT ID is the node id a reader sees here; it is the entry to the session that
+            ran the root mission, exactly as the dialog's heading id is (see `NodeIdEntry`). */}
+        <NodeIdEntry
+          nodeId={tree.rootId}
+          workerSessionId={root?.workerSessionId}
+          workerLive={root?.workerLive}
+          sessionId={sessionId}
+          onFailure={setWorkerFailure}
+          className="avwf-root-id"
+          {...openWorkerSession === undefined ? {} : { open: openWorkerSession }}
+        />
+        {workerFailure === undefined ? null : <WorkerSessionHint message={workerFailure} />}
         <span className="avwf-tree-summary">{summary}</span>
         {tree.closedAt === null ? null : <span className="avwf-meta">已归档</span>}
         <span className="avwf-spacer" />
@@ -882,6 +926,8 @@ export function MissionTreeView({
         actions={actions}
         busy={busy}
         onDeleteTree={remove}
+        sessionId={sessionId}
+        {...openWorkerSession === undefined ? {} : { openWorkerSession }}
       />
     </div>
   )

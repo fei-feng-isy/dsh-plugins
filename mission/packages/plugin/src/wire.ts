@@ -113,13 +113,17 @@ const nodeSchema = z.object({
   createdAt: z.number(),
   hasResult: z.boolean(),
   resultRef: z.string().nullable(),
-  // The worker session the panel links to. DECLARED here on purpose: a `strict` codec DROPS keys it
-  // does not name, so a field the host added and this schema forgot would vanish between the two
-  // halves — the failure this plugin has already paid for once. `.default(null)` rather than a plain
-  // required field: an OLDER host simply omits it, and "no executor to open" is the right reading of
-  // that payload, where failing the whole snapshot read would blank a panel that is otherwise fine
-  // (`corrections` is required because its absence would crash the render; this one only removes a link).
+  // The LAST session that ran this node — what the node-id entry opens. DECLARED here on purpose: a
+  // `strict` codec DROPS keys it does not name, so a field the host added and this schema forgot would
+  // vanish between the two halves — the failure this plugin has already paid for once. `.default(null)`
+  // rather than a plain required field: an OLDER host simply omits it, and "no executor to open" is the
+  // right reading of that payload, where failing the whole snapshot read would blank a panel that is
+  // otherwise fine (`corrections` is required because its absence would crash the render; this one only
+  // removes a link).
   workerSessionId: z.string().nullable().default(null),
+  /** Whether that session is still running (`.default(false)`: absent on an older host), so the
+   *  node-id link can say 进行中 rather than 已结束. */
+  workerLive: z.boolean().default(false),
   /** Declared capacity weight; an older host omits it and the default 1 is the honest reading. */
   weight: z.number().default(1),
   /** Why the engine has not dispatched this node; `null` = nothing is holding it back. */
@@ -202,8 +206,12 @@ const detailNodeSchema = z.object({
   result: z.string().nullable(),
   /** Where a spilled full result lives, already joined with its retrieval hint. */
   resultPointer: z.string().nullable(),
-  /** The session executing this node right now; `null` (or, from an older host, absent) means none. */
+  /** The session that ran this node LAST; `null` (or, from an older host, absent) means none ever did. */
   workerSessionId: z.string().nullable().default(null),
+  /** Whether that session is still running, so the link can say 进行中 / 已结束. `.default(false)`
+   *  for the same reason as the id: an older host omits it, and "a stopped session" is the honest
+   *  reading of a payload that cannot say otherwise. */
+  workerLive: z.boolean().default(false),
   /** Declared capacity weight; older host → default 1. */
   weight: z.number().default(1),
   /** Why this node is queued; `null` = nothing holding it back. */

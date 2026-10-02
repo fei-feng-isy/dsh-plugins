@@ -40,6 +40,7 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     spawnFailures: 0,
     parkedWorker: null,
     lastWorkerId: 'mission-aaaa1111',
+    executorSessionId: 'mission-aaaa1111',
     dispatchBaseline: null,
     progressAt: 0,
     activityAt: 0,

@@ -241,6 +241,22 @@ export interface WorkerPromptOptions {
    * by a CONTINUATION only: a fresh executor has never executed this mission, so "since you last
    * executed" would be a lie, and it reads every correction, note and child conclusion anyway. */
   readonly delta?: ContinuationDelta
+  /** How long the CAPACITY gate deferred this node before the dispatch that built this prompt
+   * picked it up, in ms. Passed by the engine (through `StartWorkerInput`/`ResumeWorkerInput`) from
+   * its own aging clock; `0`/absent means "never waited", and then no queue line is rendered at all.
+   * It exists because an executor with no such fact reports "I did not wait" — a real answer from a
+   * run that had in fact queued for two minutes behind a full machine. */
+  readonly capacityWaitedMs?: number
+}
+
+/**
+ * How a capacity wait reads in the prompt. A stopwatch would be false precision: the number is one
+ * reading of the engine's aging clock, so it is rounded and says 约. Seconds below a minute (a node
+ * can be skipped for a few seconds and that is still "it queued"), minutes above it.
+ */
+export function waitedLabel(ms: number): string {
+  if (ms < 60_000) return `约 ${String(Math.max(1, Math.round(ms / 1000)))} 秒`
+  return `约 ${String(Math.max(1, Math.round(ms / 60_000)))} 分钟`
 }
 
 /**
@@ -282,6 +298,15 @@ export function buildWorkerPrompt(
 
   if (chain.length > 0) {
     sections.push(['任务链（根任务 → 本任务）：', ...chain.map(chainLine)].join('\n'))
+  }
+
+  // A dispatch-time fact, stated before the executor forms an opinion about whether it waited at
+  // all: a prompt without it invites "I did not wait" from a run that queued behind a full machine.
+  // Only rendered when the engine's aging clock actually recorded a capacity deferral for THIS
+  // dispatch — a mission that never queued must not be told it did.
+  const waitedMs = safeOptions.capacityWaitedMs
+  if (waitedMs !== undefined && waitedMs > 0) {
+    sections.push(`本任务在容量队列里等了${waitedLabel(waitedMs)}（原因：机器容量已被占用）。`)
   }
 
   sections.push(['本任务：', currentNodeBlock(node, safeOptions.corrections ?? node.corrections)].join('\n'))
