@@ -12,7 +12,7 @@ import {
 } from './capacity.js'
 import type { CapacityPolicy, DeferredCandidate } from './dispatch.js'
 import type { ResourceProbe } from './resources.js'
-import { CAPACITY, TERMINAL, type NodeRecord, type WaitingFor } from './types.js'
+import { TERMINAL, type NodeRecord, type WaitingFor } from './types.js'
 
 /** Resume a worker for one node; the engine awaits only the reservation, not the worker. */
 export interface StartWorkerInput {
@@ -718,6 +718,3 @@ export class MissionEngine {
     void this.tree.clearReport(rootId)
   }
 }
-
-/** Exported for tests and the plugin's capacity reporting. */
-export { CAPACITY }

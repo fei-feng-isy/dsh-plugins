@@ -1,8 +1,9 @@
 /**
  * Retry gate for the local model adapters.
  *
- * The model bootstrap runs exactly once, at startup (`warmModelsAsync`). When
- * that single attempt fails — an unreachable mirror, a poisoned DNS entry, a
+ * The model bootstrap runs exactly once, at startup (the model artifact in
+ * `provisionToolchainAsync`). When that single attempt fails — an unreachable
+ * mirror, a poisoned DNS entry, a
  * proxy that is not up yet — nothing used to try again, so a long-lived host
  * stayed on the FTS+entity fallback forever, even after the network recovered
  * or the weights landed in the cache (`vectors_fix` kept reporting

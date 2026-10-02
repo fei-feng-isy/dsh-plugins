@@ -20,6 +20,11 @@
  * `pnpm pack` is required rather than `npm pack`: it rewrites `catalog:` / `workspace:` into real
  * ranges, and the tarball's manifest is one of the things asserted.
  *
+ * ONE THING HERE IS NOT AN ASSERTION. `shippedDeclarationNote` prints how many shipped exported
+ * symbols nothing in the repo ever consumes — an OBSERVATION about how fast the surface sediments,
+ * not a gate: it proves no single property and can never fail a run (a gate must prove one thing).
+ * Everything else in this module is an assertion and does fail.
+ *
  * @module scripts/lib/pack-plugin
  */
 import { spawnSync } from 'node:child_process'
@@ -150,6 +155,81 @@ export function stripComments(source) {
  */
 export function versionPackageNames(arrayBody) {
   return [...stripComments(arrayBody).matchAll(/'([^']+)'/gu)].map((match) => match[1])
+}
+
+/**
+ * The names a declaration surface introduces: `export declare const/function/class/interface/type/…`
+ * and export lists (`export { a, b as c }`, `export type { … }`), where the name a consumer imports is
+ * the one after `as`. `export * from '…'` names no symbol and `export default` has no stable name to
+ * search the repo for, so neither contributes.
+ *
+ * This is the pure half of the dead-export OBSERVATION (`unconsumedExports`); it takes text, so a
+ * shipped artifact can be judged without a filesystem.
+ */
+export function exportedSymbolNames(declarationText) {
+  const names = new Set()
+  const declared = /^export\s+(?:declare\s+)?(?:abstract\s+)?(?:const|let|var|function|class|interface|type|enum|namespace)\s+([A-Za-z_$][\w$]*)/gmu
+  for (const match of declarationText.matchAll(declared)) names.add(match[1])
+  for (const match of declarationText.matchAll(/^export\s+(?:type\s+)?\{([^}]*)\}/gmu)) {
+    for (const name of exportListNames(match[1])) names.add(name)
+  }
+  return [...names]
+}
+
+/** The names an `export { … }` body publishes: the alias when the entry renames, the entry otherwise. */
+function exportListNames(body) {
+  const names = []
+  for (const part of body.split(',')) {
+    const entry = part.trim().replace(/^type\s+/u, '')
+    if (entry === '') continue
+    const renamed = /\bas\s+([A-Za-z_$][\w$]*)$/u.exec(entry)
+    const name = renamed === null ? entry : renamed[1]
+    if (/^[A-Za-z_$][\w$]*$/u.test(name)) names.push(name)
+  }
+  return names
+}
+
+/**
+ * Whole-identifier occurrences of every name across a corpus of source texts.
+ *
+ * Comments and string literals count: this is a text-level approximation, and counting them only ever
+ * makes a symbol look MORE consumed (a false negative), never less. That is the safe direction for an
+ * observation — it under-reports rather than pointing at live code.
+ */
+export function identifierCounts(sourceTexts) {
+  const counts = new Map()
+  for (const text of sourceTexts) {
+    for (const match of text.matchAll(/[A-Za-z_$][\w$]*/gu)) {
+      counts.set(match[0], (counts.get(match[0]) ?? 0) + 1)
+    }
+  }
+  return counts
+}
+
+/**
+ * Exported symbols declared in `declarationText` that nothing in the repo consumes.
+ *
+ * A name is UNCONSUMED when the source corpus mentions it at most once as a whole identifier: that
+ * single mention is the declaration itself. A symbol used even inside its own module is mentioned at
+ * least twice and therefore counts as alive — which is the distinction that matters, because a symbol
+ * alive but `export`ed redundantly is a style question, while one nothing references is removable.
+ *
+ * This is deliberately an OBSERVATION, not a gate: the caller only prints the count. It never fails a
+ * pack, and an empty corpus (or a surface that declares nothing) simply yields zero.
+ *
+ * @param declarationText - the shipped declaration surface, concatenated.
+ * @param sourceTexts - the consumer corpus, one text per repo source file.
+ * @param options.exclude - names never judged: deliberate mirrors and the base's frozen interface
+ *   members. They have no in-repo consumer by construction, so counting them would be noise.
+ * @returns `{ exported, unconsumed, unconsumedNames }`; `exported` is the whole scanned surface,
+ *   `unconsumed` the judged subset with no consumer.
+ */
+export function unconsumedExports(declarationText, sourceTexts, { exclude = [] } = {}) {
+  const skip = new Set(exclude)
+  const names = exportedSymbolNames(declarationText)
+  const counts = identifierCounts(sourceTexts)
+  const unconsumedNames = names.filter((name) => !skip.has(name) && (counts.get(name) ?? 0) <= 1)
+  return { exported: names.length, unconsumed: unconsumedNames.length, unconsumedNames }
 }
 
 /**
@@ -490,6 +570,115 @@ export function assertCheckout(config) {
   return { problems }
 }
 
+/** Directories never walked when building the consumer corpus (build output is not a consumer). */
+const SOURCE_SKIP_DIRS = new Set(['node_modules', 'lib', 'dist', 'release', 'coverage', '.git'])
+const SOURCE_FILE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs)$/u
+
+/**
+ * The workspace root: the nearest ancestor of a tree's `config.repo` that carries `pnpm-workspace.yaml`.
+ *
+ * `config.repo` is the TREE (`<workspace>/mem`), because the mount smoke script resolves against it;
+ * the consumer corpus spans the sibling trees, so the observation needs the workspace above it.
+ * `undefined` means the layout is not what we think it is, and the observation stays silent rather
+ * than calling every symbol dead against an empty corpus.
+ */
+function workspaceRoot(repo) {
+  let dir = resolve(repo)
+  for (;;) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir
+    const up = dirname(dir)
+    if (up === dir) return undefined
+    dir = up
+  }
+}
+
+/** Every source text under `<workspace>/{base,mem,mission}` — the corpus the dead-export observation searches. */
+function repoSourceTexts(repo) {
+  const texts = []
+  const walk = (dir) => {
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (!SOURCE_SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walk(path)
+        continue
+      }
+      if (!SOURCE_FILE.test(entry.name)) continue
+      try { texts.push(readFileSync(path, 'utf8')) } catch { /* an unreadable source excludes nothing */ }
+    }
+  }
+  for (const tree of ['base', 'mem', 'mission']) walk(join(repo, tree))
+  return texts
+}
+
+/** The base's frozen interface members, from every generation record in the checkout. */
+function frozenInterfaceNames(repo) {
+  const names = new Set()
+  const apiDir = join(repo, 'base', 'plugin-base', 'api')
+  let records
+  try { records = readdirSync(apiDir) } catch { return names }
+  for (const file of records) {
+    if (!/^interface-v\d+\.json$/u.test(file)) continue
+    try {
+      const record = JSON.parse(readFileSync(join(apiDir, file), 'utf8'))
+      for (const name of [...(record.exportedValueNames ?? []), ...(record.exportedTypeNames ?? [])]) names.add(name)
+    } catch { /* a record we cannot read excludes nothing */ }
+  }
+  return names
+}
+
+/** Exported names a declaration re-exports straight from an `@avantf/*` package: deliberate mirrors. */
+function mirrorExportNames(declarationText) {
+  const names = []
+  for (const match of declarationText.matchAll(/^export\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@avantf\//gmu)) {
+    names.push(...exportListNames(match[1]))
+  }
+  return names
+}
+
+/**
+ * The dead-export OBSERVATION printed by a pack run — one line, never a gate.
+ *
+ * WHY IT IS AN OBSERVATION AND NOT AN ASSERTION. This repo's rule is that a gate must prove one
+ * thing; "how many shipped exports has nothing in the repo ever consumed" proves nothing on its own.
+ * A plugin's entry exports are consumed by the HOST, so an in-repo count cannot decide that any of
+ * them is removable — it can only make the rate of accumulation visible. So the number is printed and
+ * never checked: no `fail`, no exit code, and any unreadable or unparsable artifact degrades to
+ * silence rather than becoming a new failure source.
+ *
+ * The COUNTING is text-level and honest about it:
+ *  - the surface is every shipped `package/lib/**\/*.d.ts` (the same set the peer scan above reads);
+ *    the engine's carried declarations are part of it, because that is where dead exports actually
+ *    sediment — a `lib/types`-only scan reads clean while the carried API rots;
+ *  - the corpus is every `.ts/.tsx/.js/.mjs` under `base/`, `mem/`, `mission/` outside build output
+ *    (`node_modules`, `lib`, `dist`), and a name is consumed once it occurs twice there — the
+ *    declaration plus one use;
+ *  - the base's frozen interface members and any symbol a declaration mirrors straight out of an
+ *    `@avantf/*` package are excluded by name, so deliberately frozen/mirrored members are never
+ *    reported as dead.
+ *
+ * @returns the note text, or `undefined` when there is nothing to report or anything went wrong.
+ */
+export function shippedDeclarationNote(config, entries, read) {
+  try {
+    if (typeof config.repo !== 'string') return undefined
+    const declarations = entries.filter((entry) => entry.startsWith('package/lib/') && entry.endsWith('.d.ts'))
+    if (declarations.length === 0) return undefined
+    const declarationText = declarations.map((entry) => read(entry)).join('\n')
+    if (declarationText.trim() === '') return undefined
+    const workspace = workspaceRoot(config.repo)
+    if (workspace === undefined) return undefined
+    const sources = repoSourceTexts(workspace)
+    if (sources.length === 0) return undefined
+    const exclude = [...frozenInterfaceNames(workspace), ...mirrorExportNames(declarationText)]
+    const { exported, unconsumed } = unconsumedExports(declarationText, sources, { exclude })
+    return `note  shipped declarations: ${String(exported)} exported symbols, ${String(unconsumed)} with no in-repo consumer (approximate — mirrors and frozen interface members are excluded)`
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * The tarball-side assertions: what the registry would actually serve. Runs on the bytes, so a
  * `files` whitelist that drops a needed file or lets a stale one through is caught here and nowhere
@@ -656,6 +845,12 @@ export function assertTarball(config, tarball) {
   if (declaredDeepseek.length > 0 && foundSpecifiers === 0) {
     fail(`declares ${String(declaredDeepseek.length)} @deepseek-ai peer(s) but no shipped file imports any — the scan is broken, not the package`)
   }
+
+  // ── the dead-export OBSERVATION (never a gate): how fast the shipped surface sediments ────────
+  // Printed, never checked — see `shippedDeclarationNote`. It cannot fail a pack by construction, and
+  // if the artifact or the checkouts cannot be read it says nothing at all.
+  const declarationNote = shippedDeclarationNote(config, contents, read)
+  if (declarationNote !== undefined) console.log(declarationNote)
 
   // ── the relative-import closure of the shipped declaration tree ────────────────────────────────
   // The carry step repoints `@avantf/<engine>` to relative specifiers. Nothing checked the other end:

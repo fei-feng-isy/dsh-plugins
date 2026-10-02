@@ -1,8 +1,9 @@
 /**
  * A rectangular grid of strings → a GitHub-flavored Markdown table.
  *
- * Shared by the CSV and XLSX converters because the two decisions are the same in both: what the
- * header row IS, and how a cell's content survives inside a `|`-delimited row. GFM tables have no
+ * The grid renderer behind the XLSX converter (CSV reaches a table through pandoc's own reader).
+ * Two decisions matter: what the header row IS, and how a cell's content survives inside a
+ * `|`-delimited row. GFM tables have no
  * "no header" form, so a first row that is plainly data (every cell numeric) is treated as data and
  * a synthetic `列1…列N` header is emitted above it — the alternative would be promoting the first
  * data row to a header and losing it from the body.

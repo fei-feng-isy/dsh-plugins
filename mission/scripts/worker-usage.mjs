@@ -6,7 +6,7 @@
  *
  *   node scripts/worker-usage.mjs [--dir <sessions dir>] [--tree <root id>]   # read-only
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'

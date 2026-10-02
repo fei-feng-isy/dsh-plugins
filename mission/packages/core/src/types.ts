@@ -328,12 +328,6 @@ export interface ChildSpec {
   readonly roundMs?: number | null
 }
 
-/** Why a node stopped being dispatchable, for the failure report. */
-export interface FailureInfo {
-  readonly reason: string
-  readonly at: number
-}
-
 /** A dispatch candidate: the node plus its resolved mission chain and, exactly when the node is a
  * ready aggregate, the current children results. */
 export interface DispatchView {

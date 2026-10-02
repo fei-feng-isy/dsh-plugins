@@ -49,7 +49,6 @@ const QUERY_TOO_LONG = `检索文本最长 ${String(MAX_QUERY_CHARS)} 字符：�
   + '把范围收窄，或先用 kb_ingest 把整篇文档入库再检索。'
 
 export type ContradictionResolution = (typeof CONTRADICTION_RESOLUTIONS)[number]
-export type QueryKind = (typeof QUERY_KINDS)[number]
 
 /** Action unions — one source of truth for tool schemas, MCP inputSchema, CLI args, UI payloads. */
 
@@ -231,8 +230,6 @@ export const AdminUnion = z.discriminatedUnion('action', [
   z.object({ action: z.literal('maintenance') }),
 ])
 export type AdminRequest = z.infer<typeof AdminUnion>
-
-export const KB_ACTIONS = ['ingest', 'import', 'list', 'detail', 'remove', 'reindex', 'sync'] as const
 
 /** The `source` a write gets when it omits one; a document's identity is `(domain, source, title)`. */
 export const DEFAULT_KB_SOURCE = 'default'

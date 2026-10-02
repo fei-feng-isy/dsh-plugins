@@ -261,7 +261,7 @@ pnpm sync:rc --yes --gate          # 同步后在 rc 里跑三个包的完整发
 
 本包的 npm 页面就是 `packages/plugin/README.md` 本身（真实文件，`files` 里有它）；rc 仓库首屏的
 `README.md` 由生成器写（本仓库没有根 README 可复制）。插件的 manifest 在 rc 里与开发树**逐字相同**
-（引擎与 `react`/`react-dom` 放 `devDependencies` 以便内联，`dependencies` / `optionalDependencies` 就是
+（引擎与 `react` 放 `devDependencies` 以便内联，`dependencies` / `optionalDependencies` 就是
 引擎的运行时依赖面；底座 `@avantf/dsh-plugin-base` 是 **peer**，本仓另在 `devDependencies` 里声明一条以便
 `pnpm install` 装上）。本仓库的 `README.md`（开发向）与 `docs/**` 都会进 rc（rc 是同一个仓库的投影，不是
 一份精简的发布物）。

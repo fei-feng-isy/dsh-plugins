@@ -32,7 +32,6 @@
  * @module @avantf/mission-core/resources
  */
 
-/** One worker process's CPU sample, in the same 0..1-ish scale as {@link ResourceProbe.pressure}. */
 export interface ResourceProbe {
   /**
    * How much independent work this machine will ACTUALLY run in parallel — i.e.

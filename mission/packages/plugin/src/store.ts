@@ -6,7 +6,6 @@
  */
 import type { TreeState, TreeStore } from '@avantf/mission-core'
 import type { TreeDocument } from './domain.js'
-import { TREES_TABLE } from './domain.js'
 
 /** The slice of the opened domain this store uses. */
 export interface TreesTable {
@@ -44,6 +43,3 @@ export function toDocument(state: TreeState): TreeDocument {
 export function toState(document: TreeDocument): TreeState {
   return { tree: document.tree, nodes: new Map(Object.entries(document.nodes)) }
 }
-
-/** The table name, re-exported so callers do not repeat the literal. */
-export { TREES_TABLE }

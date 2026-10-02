@@ -1,6 +1,5 @@
 import { describeError } from '@avantf/mem-contract'
 import {
-  ensure,
   ensureAllAsync,
   hasArtifact,
   parseToolsConfig,
@@ -197,18 +196,6 @@ export function warmTokenizerAsync(rt: AvantfRuntime, options: WarmOptions = {})
   })
 }
 
-/** Non-blocking variant for the plugin startup path. */
-export function warmModelsAsync(rt: AvantfRuntime, options: WarmOptions = {}): void {
-  // Host boot: the harness is still mounting plugins and composing its client bundles, so the
-  // tokenizer's synchronous parse waits for the host's readiness signal (when one is available) and
-  // then for a quiet turn, instead of competing with the boot for the main thread.
-  void warmModels(rt, { ...options, deferTokenizerUntilIdle: true }).catch((error: unknown) => {
-    // `describeError` keeps the cause: a bare `fetch failed` hides DNS poisoning
-    // vs. an unreachable mirror vs. a connect timeout.
-    rt.logger.error(`model bootstrap: warm failed — ${describeError(error)}`)
-  })
-}
-
 /**
  * Options for {@link provisionToolchainAsync}: the warm-up options plus the host-side dsh verdict.
  */
@@ -239,7 +226,7 @@ export interface ProvisionSweepResult {
  * The ONE startup initialization for this plugin: register every artifact this build needs, then run
  * the provisioning sweep (non-blocking).
  *
- * It replaced a `warmModelsAsync(rt, …)` call that sat beside a separate tools sweep, which meant two
+ * It replaced a one-shot model warm-up that sat beside a separate tools sweep, which meant two
  * initialization paths, two logging vocabularies, and no single answer to "is this host fully
  * provisioned?". Callers (the DSH plugin mount, the MCP entry) now make one call, and the per-artifact
  * result lines in the host log come from the same mechanism that installs pandoc.
@@ -300,7 +287,7 @@ export async function provisionToolchainAsync(
 
 // ─── the model warm-up as a provisioning artifact ───────────────────────────────────────────────
 
-/** The artifact id, used in the startup log and in `ensureModelArtifact`'s errors. */
+/** The artifact id, used in the startup log and in the model artifact's errors. */
 export const MODEL_ARTIFACT_ID = 'model'
 
 /** The environment a model-artifact call runs under: the runtime that owns the model cache. */
@@ -329,7 +316,7 @@ function runtimeOf(artifactEnv: unknown): AvantfRuntime {
  * The embedding model (plus the nodejieba tokenizer it shares its warm-up budget with) as an
  * ARTIFACT, so the startup sweep in `@avantf/mem-provision` is the only initialization path.
  *
- * It used to be a parallel `warmModelsAsync(...)` call beside the tools sweep, which meant two
+ * It used to be a parallel model warm-up call beside the tools sweep, which meant two
  * startup mechanisms with two logging vocabularies and no single place that answered "is this host
  * fully provisioned?". The model has no pinned version and no managed directory of its own ON THIS
  * (the flat `<repo>/<file>` layout the transformers.js cache reads), so it
@@ -385,29 +372,3 @@ export const modelArtifact = {
 export function registerModelArtifact(): void {
   if (!hasArtifact(MODEL_ARTIFACT_ID)) registerArtifact(modelArtifact)
 }
-
-/**
- * `ensure('model')` with the runtime attached — the form the provisioning sweep calls.
- *
- * Exported so a test (or the MCP entry, which awaits the warm-up itself) can run the model artifact
- * alone without re-implementing the env plumbing.
- */
-export async function ensureModelArtifact(
-  rt: AvantfRuntime,
-  options: { waitFor?: Promise<unknown>; waitForCapMs?: number; offline?: boolean } = {},
-): Promise<void> {
-  registerModelArtifact()
-  const result = await ensure(MODEL_ARTIFACT_ID, {
-    toolsDir: resolveToolsDir(parseToolsConfig(rt.config.common.tools)),
-    config: parseToolsConfig(rt.config.common.tools),
-    logger: rt.logger,
-    artifactEnv: {
-      runtime: rt,
-      ...(options.waitFor === undefined ? {} : { waitFor: options.waitFor }),
-      ...(options.waitForCapMs === undefined ? {} : { waitForCapMs: options.waitForCapMs }),
-    } satisfies ModelArtifactEnv,
-    ...(options.offline === true ? { offline: true } : {}),
-  })
-  if (!result.ok) throw new Error(result.error ?? `${MODEL_ARTIFACT_ID} artifact 失败`)
-}
-

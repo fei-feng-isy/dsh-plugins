@@ -15,12 +15,10 @@
  *
  * Usage:  node scripts/bench-vstore.mjs [--sizes 1000,2000,4000] [--dim 512] [--queries 30] [--json out.json]
  */
-import { createRequire } from 'node:module'
 import { writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const require = createRequire(import.meta.url)
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const lib = (name) => join(repo, 'packages/retrieval-core/lib', name)
 const { LocalNumpyVectorStore } = await import(lib('adapters/local_numpy.js'))

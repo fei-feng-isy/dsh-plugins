@@ -203,9 +203,6 @@ catalogs:
     react-dom:
       specifier: 18.3.1
       version: 18.3.1
-    tsdown:
-      specifier: 0.22.2
-      version: 0.22.2
     typescript:
       specifier: ^5.5.0
       version: 5.9.3
@@ -385,18 +382,12 @@ importers:
       '@types/react':
         specifier: ^18.3.0
         version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.31)
       lightningcss:
         specifier: 'catalog:'
         version: 1.33.0
       react:
         specifier: 'catalog:'
         version: 18.3.1
-      react-dom:
-        specifier: 'catalog:'
-        version: 18.3.1(react@18.3.1)
       tsdown:
         specifier: 0.22.2
         version: 0.22.2(typescript@5.9.3)
@@ -472,9 +463,6 @@ importers:
       '@avantf/mission-core':
         specifier: workspace:*
         version: link:../core
-      '@deepseek-ai/dsh-typert-registry':
-        specifier: ^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2
-        version: 0.2.0-rc.2
       '@tanstack/react-virtual':
         specifier: 'catalog:'
         version: 3.14.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -496,9 +484,6 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 18.3.1(react@18.3.1)
-      tsdown:
-        specifier: 'catalog:'
-        version: 0.22.2(typescript@5.9.3)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -540,11 +525,6 @@ packages:
   '@babel/types@8.0.6':
     resolution: {integrity: sha512-c+xgSWboV2pdwXP67BUWDVRHi2BO5Q3KwxyFVs7taVTY+fsK47/L51ZXQoV9rozHJDNHvJ4v4WEsI/IlxV2l2A==}
     engines: {node: ^22.18.0 || >=24.11.0}
-
-  '@deepseek-ai/dsh-typert-registry@0.2.0-rc.2':
-    resolution: {integrity: sha512-Hjepcu0cDTH4rz/SB121SVozg9ix79NBB+HNr0jW0GSHG9O24kNDyufAJD2/S4B97KVN+1nM0T8k1Dx2JSOEWQ==}
-    peerDependencies:
-      '@deepseek-ai/cordis': ~4.0.4
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -2733,10 +2713,6 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 8.0.6
       '@babel/helper-validator-identifier': 8.0.6
-
-  '@deepseek-ai/dsh-typert-registry@0.2.0-rc.2':
-    dependencies:
-      zod: 4.6.5
 
   '@emnapi/core@1.11.1':
     dependencies:

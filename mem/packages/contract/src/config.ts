@@ -1,21 +1,5 @@
 import { z } from 'zod'
 
-/** Allowed semantic (embedding) backends. */
-export const SEMANTIC_BACKEND_VALUES = ['local_bge'] as const
-
-/** Allowed reranker backends. */
-export const RERANK_BACKEND_VALUES = ['bge_reranker', 'none'] as const
-
-/** Allowed vector-store backends. */
-export const VSTORE_BACKEND_VALUES = [
-  'local_numpy',
-  'hnswlib',
-  'faiss',
-  'pgvector',
-  'qdrant',
-  'auto',
-] as const
-
 /**
  * Input window of the SHIPPED models: `Xenova/bge-small-zh-v1.5` (embedder) and
  * `Xenova/bge-reranker-base` (reranker) both read 512 tokens.
@@ -34,7 +18,7 @@ export const DEFAULT_MODEL_WINDOW_TOKENS = 512
 const maxInputTokens = z.number().int().nonnegative().default(0)
 
 const semanticSchema = z.object({
-  // string (not enum) so a third-party backend can be registered; known values documented.
+  // string (not enum) so a third-party backend can be registered; built-in: `local_bge`.
   backend: z.string().default('local_bge'),
   // Must be an ONNX repo — transformers.js cannot load the PyTorch-only `BAAI/*`
   // originals (they silently degrade to FTS+entity). Xenova/* are the ONNX ports.
@@ -50,6 +34,7 @@ const semanticSchema = z.object({
 })
 
 const rerankSchema = z.object({
+  // string (not enum) for the same reason; built-ins: `bge_reranker`, `none`.
   backend: z.string().default('none'),
   // ONNX port of bge-reranker-base (see semantic note above).
   local_model: z.string().default('Xenova/bge-reranker-base'),
@@ -63,6 +48,8 @@ const rerankSchema = z.object({
 })
 
 const vectorStoreSchema = z.object({
+  // string (not enum) for the same reason; built-ins: `local_numpy`, `hnswlib`, `auto`
+  // (`faiss`/`pgvector`/`qdrant` are recognized names that warn and fall back to `local_numpy`).
   backend: z.string().default('auto'),
   /**
    * Vector counts at which `backend: auto` migrates to an ANN index.
@@ -80,9 +67,8 @@ const vectorStoreSchema = z.object({
   auto_thresholds: z
     .object({
       hnswlib: z.number().int().positive().default(2000),
-      faiss: z.number().int().positive().default(100000),
     })
-    .default({ hnswlib: 2000, faiss: 100000 }),
+    .default({ hnswlib: 2000 }),
   /**
    * ANN search beam width (`ef`). This is the recall/speed knob of the hnswlib index, and it is
    * NOT optional in practice: the library's own default (10) returned 0.45 of the true top-10 in

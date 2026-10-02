@@ -10,7 +10,6 @@ export type {
   TreeDeps,
   SpilledText,
   CreateRootInput,
-  DispatchDecision,
   OwnerProbe,
   OrphanedTree,
 } from './tree.js'

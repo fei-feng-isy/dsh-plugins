@@ -68,7 +68,7 @@ pnpm build:dsh   # links harness packages + publishes the manifest stub, then ts
 
 > **What the gate's version line compares.** `declared` is **the dsh this artifact was compiled
 > against**: `scripts/link-dsh.mjs` links the peers from the installed dsh and then
-> `scripts/build-versions.mjs` bakes their exact versions into `lib/dsh-build.json`, which
+> `../scripts/lib/build-versions.mjs` bakes their exact versions into `lib/dsh-build.json`, which
 > `provision.ts` reads back with the base's `readBuildVersions()`; a missing file falls back PER
 > PACKAGE to the `package.json` peer range's floor. `runtime` is **the dsh this artifact's own
 > links resolve now**. It never observes the HOST's identity — a plugin cannot. So a checkout host

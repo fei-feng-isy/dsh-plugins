@@ -4,8 +4,8 @@
  * Registration order IS precedence: {@link convertToMarkdown} takes the first converter whose
  * `sniff` says yes, so a new format is added by implementing {@link MarkdownConverter} and
  * registering it — the ingestion pipeline never learns the format's name. The built-in order is
- * specific → loose: the two ZIP formats (recognized by exact archive entries), then HTML, then the
- * structurally-detected table (the only sniff that can match ordinary text, so it goes last).
+ * `pandoc` first (the canonical, version-pinned converter, which claims every format its reader
+ * table covers), then the `xlsx` converter (claimed by its archive entries); the two cannot collide.
  *
  * @module registry
  */

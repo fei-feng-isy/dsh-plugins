@@ -37,7 +37,7 @@ import {
   readTarballEntry,
 } from './lib/published-base.mjs'
 import { execToolSync } from './lib/win-spawn.mjs'
-import { versionPackageNames } from './lib/pack-plugin.mjs'
+import { exportedSymbolNames, shippedDeclarationNote, unconsumedExports, versionPackageNames } from './lib/pack-plugin.mjs'
 import { groupWorkspaceTargets, workspaceTargets, withWorkspaceVersions } from './lib/versions.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -534,6 +534,57 @@ test('R1: offline and an artifact that records nothing are WARNINGS, and the gat
     assert.equal(run.status, 0, `an unreadable generation must not fail the gate\n${run.stdout}${run.stderr}`)
     assert.match(run.stdout, /WARNING: @avantf\/dsh-mem: could not read the interface generation/u)
   })
+})
+
+// ── C5 · the dead-export OBSERVATION (printed by a pack, never a gate) ─────────────────────────────
+//
+// The count is only useful if it separates the two shapes at the boundary: a symbol SOMETHING in the
+// repo uses is alive even when that use is inside its own module, while a symbol nothing but its own
+// declaration mentions is what "sediment" means. Deliberate mirrors and the base's frozen interface
+// members are excluded by name, since they have no in-repo consumer BY CONSTRUCTION.
+
+test('C5: an exported symbol a source uses is consumed; one only its declaration mentions is not', () => {
+  const declarations = [
+    'export declare function used(): void;',
+    'export declare function orphan(): void;',
+    'export interface Config { maxConcurrent?: number }',
+    'export type { MemoryStore, RecallOutcome as Recall } from "./engine/mem/index.js";',
+    'export * from "./everything.js";',
+    'export default class Whatever {}',
+  ].join('\n')
+  // `export *` names nothing and `export default` has no stable name; `as` publishes the rename.
+  assert.deepEqual(exportedSymbolNames(declarations).sort(), ['Config', 'MemoryStore', 'Recall', 'orphan', 'used'])
+
+  const sources = [
+    // The declaration plus one in-module use: two whole-identifier mentions, so ALIVE.
+    'export function used(): void {}\nused()\n',
+    // Declared, and nothing else ever names `orphan` — one mention, the declaration itself.
+    'export function orphan(): void {}\n',
+  ]
+  const result = unconsumedExports(declarations, sources)
+  assert.equal(result.exported, 5)
+  assert.equal(result.unconsumed, 4)
+  assert.deepEqual(result.unconsumedNames, ['orphan', 'Config', 'MemoryStore', 'Recall'])
+})
+
+test('C5: the mirror/frozen names are excluded, and an unreadable artifact degrades to silence', () => {
+  // `mirror` is unused in-repo but is a deliberate mirror of a frozen base member: never judged.
+  const result = unconsumedExports(
+    'export declare function orphan(): void;\nexport declare function mirror(): void;',
+    ['export function orphan(): void {}\n'],
+    { exclude: ['mirror'] },
+  )
+  assert.equal(result.exported, 2)
+  assert.deepEqual(result.unconsumedNames, ['orphan'])
+
+  // Reading the artifact throws: the observation returns nothing instead of failing the pack.
+  assert.equal(
+    shippedDeclarationNote({ repo: '/nonexistent' }, ['package/lib/types/index.d.ts'], () => { throw new Error('boom') }),
+    undefined,
+  )
+  // No declaration entries at all, and no repo on the config: also silence, never a throw.
+  assert.equal(shippedDeclarationNote({ repo: '/nonexistent' }, ['package/lib/index.js'], () => ''), undefined)
+  assert.equal(shippedDeclarationNote({}, ['package/lib/types/index.d.ts'], () => 'export declare const a = 1;'), undefined)
 })
 
 // ── M10 · both plugins run their own packer before publishing ─────────────────────────────────────

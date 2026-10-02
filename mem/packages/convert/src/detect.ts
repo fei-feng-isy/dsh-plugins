@@ -50,12 +50,3 @@ export function extensionOf(path: string | undefined): string {
 export const PLAIN_TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
   '.md', '.markdown', '.txt', '.text', '.json', '.jsonl', '.yaml', '.yml',
 ])
-
-/** Decode bytes as UTF-8, strictly: `null` when they are not valid UTF-8 (a binary tell). */
-export function decodeUtf8Strict(bytes: Uint8Array): string | null {
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch {
-    return null
-  }
-}

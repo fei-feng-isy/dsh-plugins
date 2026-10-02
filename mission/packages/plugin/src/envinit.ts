@@ -51,11 +51,17 @@ const VERSION_PACKAGES: readonly string[] = [
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-typert-protocol',
-  // Listed although it is not a declared peer: `src/index.ts` imports it TYPE-ONLY for the
-  // `ctx.typert.register` augmentation, so it is part of what this build compiles against and its
-  // version belongs in the drift report. `readDeclaredVersions` reads only `peerDependencies`, so for
-  // this one entry the per-package comparison falls back to the baked version — the report stays a
-  // WARNING either way, and no load decision depends on it.
+  // Listed although it is NOT a declared peer — deliberately, and measured: `src/index.ts` imports it
+  // TYPE-ONLY for the `ctx.typert.register` augmentation, so it is part of what this build compiles
+  // against and its version belongs in the drift report. Declaring it in `devDependencies` (tried
+  // 2026-10-02, then reverted) makes `pnpm install` place the REGISTRY copy in `node_modules`, which
+  // shadows the copy `link-dsh.mjs` links from the INSTALLED dsh — and at the declared dsh floor that
+  // augmentation is gone: `pnpm check:old-dsh mission` fails with
+  // `src/index.ts(274,14): error TS2339: Property 'register' does not exist on type 'TypertRegistryContract'`.
+  // So the linked copy is the one that must win; the gate's `LINKS` list and this entry are the pair
+  // that stays in sync instead. `readDeclaredVersions` reads only `peerDependencies`, so for this one
+  // entry the per-package comparison falls back to the baked version — the report stays a WARNING
+  // either way, and no load decision depends on it.
   '@deepseek-ai/dsh-typert-registry',
   '@deepseek-ai/dsh-util-values',
 ]

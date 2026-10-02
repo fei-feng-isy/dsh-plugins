@@ -63,9 +63,6 @@ import { NAMESPACE, SNAPSHOT_WIRE_VERSION } from './wire.js'
 import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createTreeStore, type TreesTable } from './store.js'
 
-/** The child-side face; both tool faces live in one place, `./faces.js`. */
-export { WORKER_TOOL_DENY } from './faces.js'
-
 const WORKER_PROVIDER = 'spawn'
 
 /** Delegated mission unit, not a top-level session: `origin` names the session kind and

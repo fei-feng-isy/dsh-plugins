@@ -122,12 +122,6 @@ export interface CreateRootInput {
   readonly roundMs?: number | null
 }
 
-export interface DispatchDecision {
-  readonly view: DispatchView
-  /** The child session id reserved for this dispatch, already bound on the node. */
-  readonly claimId: string
-}
-
 const MAX_ID_ATTEMPTS = 8
 
 /**
@@ -336,12 +330,6 @@ export class MissionTree {
    */
   private get wellFormed(): WellFormedSource {
     return this.deps.wellFormed ?? LOCAL_WELL_FORMED
-  }
-
-  /** Attach the durable store. A plugin can only open its storage domain inside `apply`, so the
-   * tree is constructed first and wired before any read; `open()` fails loudly without one. */
-  attachStore(store: TreeStore): void {
-    this.store = store
   }
 
   private requireStore(): TreeStore {
@@ -566,9 +554,9 @@ export class MissionTree {
   }
 
   /**
-   * What the capacity gate currently has in flight, in the SAME definition `inFlightCount` uses: a
-   * node counts once it is BOUND (`running` with a `claimedBy`), not once its worker materializes, so
-   * a pass cannot over-subscribe the pool by dispatching into a lazily-created child.
+   * What the capacity gate currently has in flight: a node counts once it is BOUND (`running` with a
+   * `claimedBy`), not once its worker materializes, so a pass cannot over-subscribe the pool by
+   * dispatching into a lazily-created child.
    */
   runningLoad(): { count: number; weight: number } {
     let count = 0
@@ -869,15 +857,6 @@ export class MissionTree {
       await this.flush(state.tree.rootId)
       return accept(updated)
     })
-  }
-
-  /** Nodes bound to a worker and not yet resolved, deliberately NOT filtered by worker liveness:
-   * a reserved claim id is not an agent until the child materializes, so counting only live
-   * holders would let a second dispatch pass in the same tick over-subscribe the pool. Derived from
-   * {@link runningLoad} so the slot count and the capacity weight can never disagree about who is
-   * in flight. */
-  inFlightCount(): number {
-    return this.runningLoad().count
   }
 
   /** Roll up every OPEN tree into the counts the guidance layer renders; closed trees are archived

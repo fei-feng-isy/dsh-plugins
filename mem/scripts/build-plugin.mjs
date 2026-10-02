@@ -38,7 +38,8 @@ import { fileURLToPath } from 'node:url'
 import { spawnToolSync } from '../../scripts/lib/win-spawn.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+// `spawnToolSync` owns the platform shim (win32 → `cmd.exe /c pnpm.cmd`), so the bare name is right.
+const pnpm = 'pnpm'
 const pluginDir = join(repo, 'packages', 'plugin')
 /**
  * Engine packages `pnpm build` covers, derived from what this checkout has: the release tree ships

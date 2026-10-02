@@ -75,6 +75,17 @@ describe('contract', () => {
     expect(cfg.semantic.mirror).toBe('https://hf-mirror.com')
   })
 
+  it('drops a legacy `auto_thresholds.faiss` key instead of failing the whole config', () => {
+    // `faiss` has no adapter and no production reader: `resolveVStore` (retrieval-core) reads only
+    // `auto_thresholds.hnswlib`, so the key was removed (same class as `memory.category_values`).
+    // This object is NOT `.strict()`: an old `common.yaml` that still carries `faiss:` must keep
+    // loading, with the unknown key stripped. A strict schema here would have made that file fail
+    // wholesale, which is a compatibility break, not a cleanup.
+    const cfg = ConfigSchema.parse({ vectorStore: { auto_thresholds: { faiss: 100000 } } })
+    expect(cfg.vectorStore.auto_thresholds).toEqual({ hnswlib: 2000 })
+    expect('faiss' in cfg.vectorStore.auto_thresholds).toBe(false)
+  })
+
   it('derives the default chunk size from the shipped model window, not from feel', () => {
     // transformers.js truncates past the model window with NO error, so a chunk larger than the
     // window gets embedded only in part — silently, and only its FTS leg sees the tail.

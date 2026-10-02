@@ -3,7 +3,8 @@ import type { VectorStore } from '../interfaces.js'
 /**
  * `local_numpy` — in-memory brute-force vector store.
  * Default / dev backend; persists via the caller (the store DB owns the vectors).
- * For M0 this is the only implemented VectorStore; ANN backends (hnswlib/faiss) land in M4.
+ * The fallback every backend without a real adapter resolves to; `hnswlib` is the implemented ANN
+ * store, while `faiss`/`pgvector`/`qdrant` warn and land here.
  */
 export class LocalNumpyVectorStore implements VectorStore {
   readonly name = 'local_numpy'

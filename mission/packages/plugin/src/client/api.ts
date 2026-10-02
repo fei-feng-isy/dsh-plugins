@@ -277,7 +277,7 @@ export async function fetchFullResult(remote: MissionRemote, sessionId: string, 
  * side lists the session corpus and reads a few logs, which is exactly the cost the panel must not
  * pay while rendering.
  *
- * Three failure shapes, kept apart on purpose:
+ * Four failure shapes, kept apart on purpose:
  * - the host reports a `wire` older than the method (an older host, or one never restarted) → the call
  *   is NOT SENT at all, and the sentence names the remedy (restart dsh);
  * - the host has no such method despite a current `wire` → the same version-skew sentence;

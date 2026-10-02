@@ -74,8 +74,3 @@ export interface VectorStore {
    */
   flush?(): void
 }
-
-export interface TopKHit {
-  id: number
-  score: number
-}

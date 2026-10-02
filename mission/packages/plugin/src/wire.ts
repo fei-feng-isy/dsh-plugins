@@ -324,5 +324,3 @@ export const clientContribution = {
   package: PACKAGE,
   descriptors,
 } as never
-
-export { snapshotResultSchema as resultSchema }

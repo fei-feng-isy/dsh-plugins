@@ -9,11 +9,6 @@
 import type { Db } from '../port.js'
 import { batches } from '../chunk.js'
 
-export interface EntityCount {
-  entity: string
-  count: number
-}
-
 export class EntitiesDao {
   constructor(private readonly db: Db) {}
 

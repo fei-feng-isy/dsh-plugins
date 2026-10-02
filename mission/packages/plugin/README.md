@@ -119,8 +119,10 @@ Desktop 会显式设置 `DSH_HOME`，所以两边指向的是同一个会话库�
 
 - **配置项**：`capacity`（容量闸门，核当量；默认由 `os.availableParallelism()` 派生并预留 1 核）、
   `maxConcurrent`（槽位数上限）、`capacityWaitMs`（容量排队多久后预约整机）、`minFreeMemoryBytes`
-  （空闲内存下限，低于它先不派新任务）、`staleMs`（多久没有进展算卡死）、
-  `sessionsRoot`（worker 会话目录根，默认 `<dsh home>/sessions`）。
+  （空闲内存下限，低于它先不派新任务）、`staleMs`（多久没有进展算卡死）、`roundMs`（单轮派发的墙钟
+  上限，默认 1 小时，下限取 10 分钟与 `staleMs` 中的较大者）、
+  `sessionsRoot`（worker 会话目录根，默认 `<dsh home>/sessions`）、
+  `dataHome`（avantf 数据根，默认 `$AVANTF_HOME`，否则 `~/.avantf`；只用其 `prompts/` 子目录）。
   容量是**派发闸门**：装不下只会排队，绝不拒绝；`mission_result` 与「任务」面板会显示每个排队中的
   任务在等什么。
 - **数据**：任务树走 DSH 存储域（`avantf_mission`）；每个任务单元都是**真实会话**，日志在

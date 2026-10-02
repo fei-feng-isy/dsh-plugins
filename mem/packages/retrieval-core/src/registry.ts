@@ -74,9 +74,6 @@ const vstoreRegistry: Record<string, Factory<VectorStore>> = {
 export function registerSemanticBackend(name: string, factory: Factory<SemanticBackend>): void {
   semanticRegistry[name] = factory
 }
-export function registerReranker(name: string, factory: Factory<Reranker>): void {
-  rerankRegistry[name] = factory
-}
 export function registerVectorStore(name: string, factory: Factory<VectorStore>): void {
   vstoreRegistry[name] = factory
 }

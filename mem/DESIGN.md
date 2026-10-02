@@ -106,7 +106,7 @@ interface VectorStore     { add(id,vec); topk(vec,k): {id,score}[]; fetch(ids); 
 ```
 
 - **注册表 + 工厂**（默认适配器内置；可选注册新适配器）：`semanticRegistry{local_bge}`、`rerankRegistry{bge_reranker, none}`、`vstoreRegistry{local_numpy, hnswlib, faiss, pgvector, qdrant}` + `auto`。
-- **解析器**（*唯一*知道具体实现的地方）：按 `config.<backend>` 取注册实现；`isAvailable()===false` → 降级（`local_numpy`/`none`/降级权重）；向量库 `auto` 在数量越过 `auto_thresholds.hnswlib` 时**单调升级** `local_numpy → hnswlib`（native 绑定不可用则留在 numpy 并告警）。`faiss/pgvector/qdrant` 目前是**显式告警的适配面**（解析到 numpy）。
+- **解析器**（*唯一*知道具体实现的地方）：按 `config.<backend>` 取注册实现；`isAvailable()===false` → 降级（`local_numpy`/`none`/降级权重）；向量库 `auto` 在数量越过 `auto_thresholds.hnswlib` 时**单调升级** `local_numpy → hnswlib`（native 绑定不可用则留在 numpy 并告警）。`auto_thresholds` 只对**有 ANN 适配器**的 backend 有意义，因此只有 `hnswlib` 一个键；曾与之并列的 `faiss` 阈值（默认 100000）没有任何生产读点（`resolveVStore` 只读 `hnswlib`），与 `memory.category_values` 同类，已删除。`faiss/pgvector/qdrant` 目前是**显式告警的适配面**（解析到 numpy）。
 - **重排的唯一开关是 `rerank.backend`**：runtime 经 `resolveReranker` 注入两个 store，检索流程只依赖 `Reranker` 接口（`none` = 跳过重排、不加载模型）。语义后端只负责嵌入，重排器加载失败不拖垮语义路径。
 - **切换** = 只改 `.avantf/configs/common.yaml` 的 `*.backend`。
 - **测试/嵌入方的注入口**：`buildRuntime({ semantic })` 可直接注入一个 `SemanticBackend`（跨库检索一次编码的测试就用它）。这是接缝、不是第二条插拔路径——`dim` 必须等于 `config.semantic.dim`，否则 `buildRuntime` 在打开数据库之前就报错（store 的向量库是按该 dim 建的）；同理，调用方传入的 `queryVector` 长度不符时 store 直接报错，而不是拿错位向量去打分。
@@ -251,7 +251,7 @@ query(kind?/domain?/source?)
 
 DSH 的 Typert API 已经在我们脚下动过一次（`TypertSchema { schema }` → `TypertSchemaFactory { create }`），而它失败的方式很难查：插件**挂载成功**，然后某个 remote 调用或 schema 投影在**运行时**炸掉，报错里没有一个字指向版本错配。所以启动时做一次门禁，日志前缀 `compat:`（英文，见 §12 的终端诊断规矩）。**规则、探针、报告与复查全部在家族底座 `@avantf/dsh-plugin-base`**（家族共用，与 `@avantf/job-dsh` 同一份）——底座**一个包**里同时装着启动期环境初始化框架与这道门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，两个旧包不再发新版本）。启动时内联的零依赖 `bootstrap` 按 `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从**插件自己的依赖树**解析底座、动态 `import()` 它，门禁直接跑在**动态加载进来的那一份**上：**没有 `mem:compat` item、没有下载、也没有受管 `~/.avantf/env/compat/**`**。本仓只声明"只有本插件才知道的东西"（`packages/plugin/src/provision.ts` 的 `COMPAT_SPEC`：服务契约、宿主版本包清单、wire schema 名、事件清单与中文报告文案，**懒构造**）。
 
-1. **版本（两侧都只描述"本产物 ↔ 它链接的那份 dsh"）**。`runtime` 由 `readRuntimeVersions(VERSION_PACKAGES, import.meta.url)` 从**本包自己的链接**解析 —— 这是"本产物链接现在解析到哪一版"，**不是宿主版本**（插件里没有任何办法看到宿主自身的版本）。`declared` 由 `readBuildVersions(new URL('./dsh-build.json', import.meta.url), VERSION_PACKAGES, peer地板)` 读取：**优先构建时烧入的精确版本**（`scripts/build-versions.mjs` 在 `scripts/link-dsh.mjs` 链接好那份要编译的 dsh 之后写成 `lib/dsh-build.json`；`files: ["lib"]` 让它随包发布），**没有该文件才逐包回落**本包 `package.json` 的 peer 区间地板（`^0.1.5-rc.2` → `0.1.5-rc.2`）。曾经用 tsdown `define` 把构建时版本烧进 node 面（`__AVANTF_DSH_BUILD_VERSION__`）；迁移底座时改回 peer 地板，现在换成"烧入精确版本 + 逐包回落地板"—— peer 地板只是区间下界，说不清"我编译时对着哪一版"。**设计边界**：版本比较只覆盖本产物 ↔ 它链接的那份 dsh，**宿主身份未观测**；ok 行因此写 `dsh links: <包> <版本>` 并注明 "versions this build's own links resolve; the host identity is not observed"，**不用 `running`**；checkout 宿主 + 安装版链接时会打印安装版版本，这是设计边界不是 bug，此时只有真身探针是真的防线。
+1. **版本（两侧都只描述"本产物 ↔ 它链接的那份 dsh"）**。`runtime` 由 `readRuntimeVersions(VERSION_PACKAGES, import.meta.url)` 从**本包自己的链接**解析 —— 这是"本产物链接现在解析到哪一版"，**不是宿主版本**（插件里没有任何办法看到宿主自身的版本）。`declared` 由 `readBuildVersions(new URL('./dsh-build.json', import.meta.url), VERSION_PACKAGES, peer地板)` 读取：**优先构建时烧入的精确版本**（`../scripts/lib/build-versions.mjs`，由 `scripts/link-dsh.mjs` 调用，在链接好那份要编译的 dsh 之后写成 `lib/dsh-build.json`；`files: ["lib"]` 让它随包发布），**没有该文件才逐包回落**本包 `package.json` 的 peer 区间地板（`^0.1.5-rc.2` → `0.1.5-rc.2`）。曾经用 tsdown `define` 把构建时版本烧进 node 面（`__AVANTF_DSH_BUILD_VERSION__`）；迁移底座时改回 peer 地板，现在换成"烧入精确版本 + 逐包回落地板"—— peer 地板只是区间下界，说不清"我编译时对着哪一版"。**设计边界**：版本比较只覆盖本产物 ↔ 它链接的那份 dsh，**宿主身份未观测**；ok 行因此写 `dsh links: <包> <版本>` 并注明 "versions this build's own links resolve; the host identity is not observed"，**不用 `running`**；checkout 宿主 + 安装版链接时会打印安装版版本，这是设计边界不是 bug，此时只有真身探针是真的防线。
 2. **探针（对着真实注册表）**。`probeTool: toolProbeDeclaration(defineTool)` 注册一个与真实工具同形的探针并在 `finally` 撤掉；`probeTypert: () => hostContribution` **就是把真身 contribution 注册一遍**（codec 与 schema 项都带 `schema` + `create()`）→ 按精确 key 复查 → `toJSONSchema` 投影**我们记录的 zod schema**（工厂化改动会炸的点）→ 撤掉。探针通过即"真身注册会通过"；用"相似形状"的假探针曾在一个 codec 契约已变的 0.1.6 宿主上给出假 `ok`，真身注册随后在 `apply` 中途抛错——那正是这道门禁要避免的半挂载。
 
 **时机与两档严重性**：环境初始化（内联 bootstrap → 动态装载底座 → 跑门禁）在 `apply()` 最前面，这道检查紧随其后、`buildRuntime(...)` **之前**（这样"不加载"是一个什么都没分配的纯 `return`）。
@@ -584,9 +584,9 @@ avantf-mem/
 
 **我们侧（已修，`packages/core/src/modelBootstrap.ts`）**：nodejieba 的词典解析是**主线程同步**的 ~1.2 s（profile 里 `nodejieba/index.js` self 1.31 s），原先在宿主还没启动完时就开始，等于和宿主抢同一个线程——实测打印 URL 只比我们的 `tokenizer ready` 晚 **0.09 s**，即**我们的解析就是压住启动的最后一段**。现在：
 
-- `warmModelsAsync` 接受一个就绪信号 `waitFor`，插件传 **`loader.await()`**——正是 web app 打印 URL 前等待的那个 Promise（`packages/bundle/web-app`）；拿不到该服务时退化为下面的 idle 门。
+- 启动预热（`provisionToolchainAsync` 驱动的 model artifact）接受一个就绪信号 `waitFor`，插件传 **`loader.await()`**——正是 web app 打印 URL 前等待的那个 Promise（`packages/bundle/web-app`）；拿不到该服务时退化为下面的 idle 门。
 - 再叠加 `whenEventLoopIdle()`：要求事件循环连续 **300 ms** 按时触发定时器才开解析。300 ms 不是随手取的：首屏请求（index + 58 个 combo）就在 URL 行后几百毫秒内到达，实测 50 ms 窗口时解析仍恰好压在 URL 那一刻，首屏会排在它 1.2 s 后面；300 ms 窗口跨不过那波请求之间的空隙，解析因此落在首屏之后（实测解析完成于 URL 后 ~1.3 s，期间请求 15 ms 内被服务）。
-- `waitFor` 是**同步点而不是前置条件**：宿主启动失败也要预热（`.catch(() => undefined)`）。CLI 路径（`warmModels` 被 `await`）**不设门**——那里进程本来就空闲，设门只会给每条命令白加一个静默窗口；MCP 用 `warmModelsAsync`，因此拿到 idle 门但没有 `waitFor`。
+- `waitFor` 是**同步点而不是前置条件**：宿主启动失败也要预热（`.catch(() => undefined)`）。CLI 路径（`warmModels` 被 `await`）**不设门**——那里进程本来就空闲，设门只会给每条命令白加一个静默窗口；MCP 用 `provisionToolchainAsync`（不传 `waitFor`），因此拿到 idle 门但没有 `waitFor`。
 - 实测（宿主保持原样）：URL **7.4 → 6.24 s**，第一条 log 4.94 → 4.75 s（这一项本来就与我们无关）。若宿主侧那三条改法落地，同一 profile 下可到 ~3.2 s（上段数字）。
 
 结论：**启动期任何主线程同步任务都不得与宿主启动争线程**；能拿到宿主的就绪信号就等它，拿不到就用"静默窗口"近似，且两条路径都要有硬上限（`IDLE_MAX_WAIT_MS = 10 s`）以免忙宿主永远等不到。

@@ -13,7 +13,7 @@
  *
  * @module registry
  */
-import { isAbsolute, join } from 'node:path'
+import { join } from 'node:path'
 import { ProvisionError, describeError } from './errors.js'
 import { fetchToFile } from './fetch.js'
 import { installBinaryArtifact, runProbe, versionDir } from './tools.js'
@@ -407,6 +407,3 @@ export function ensureAllAsync(options: EnsureArtifactOptions): Promise<EnsureRe
     return []
   })
 }
-
-/** `isAbsolute` and the PATH delimiter, re-exported so callers need not import `node:path`. */
-export { isAbsolute as isAbsolutePath }
