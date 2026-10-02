@@ -5,6 +5,12 @@ All notable changes to `avantf-mem` are documented here.
 ## [Unreleased]
 
 ## [0.4.0] - 2026-10-01
+### Fixed（复审 R1 mem 车道：宽松档底线、卸载期 reconcile 停止标志、`mem:model` 的 `timeoutMs`）
+- **宽松档不再"无底线"**（`packages/core/src/store/floors.ts`）：`LOOSE_FLOORS` 由 `{semantic:0.40, fts:1, jaccard:0}` 改为 `{semantic:0.40, fts:max(1,⌈词元数/2⌉), jaccard:0.15}`，三者都为正；自动放宽**只放宽严格档真正掉过候选的那几条腿**（`droppedLegs`），显式 `floors:'loose'` 走同一套底线值（显式入口不是后门）。标定依据写进 DESIGN §20.20 ④：本机活库（64 条活跃事实）常见实体问句的实体腿头名 Jaccard 仅 0.0909（多数 0.02–0.07），金标 35 条评测集里最低命中对为 0.25——0.15 整段切掉噪声且一条金标不丢。**评测集数字未移动**（`eval_zh.spec.ts` 跑降级路径、不触发宽松档，`dropped_by_floor` 合计仍为 0），原因写在 DESIGN §20.20 与 `floors.spec.ts` 注释里。
+- **卸载期 in-flight 的 corpus reconcile 在每个 `await` 后复查停止标志**（`packages/plugin/src/index.ts`）：`stop()`（卸载 effect）落地后不再 `sync()`、不再读 `corpusDrift()`，也不抛。规则抽到 `packages/plugin/src/reconcile.ts`，由 `test/reconcile.spec.ts` 用注入的时钟/定时器钉住（含"只排一个尾随检查且被 stop 取消"）。
+- **`mem:model` 显式声明 `policy.timeoutMs = 300_000`**（底座 `net.ts` 的默认值——此前机制已实现但没有任何 item 声明它），并把 ensure `deadlineMs` 抬到不低于任何已声明 item 的请求预算，避免 `timeoutMs > deadlineMs` 倒挂；两项均为 `startup: 'background'`，不占启动预算。
+- `family_paths.spec.ts` 直接覆盖 provision 那份依赖自由副本的 `expandHome` `~/` 分支：`defaultToolsDir({ AVANTF_HOME: '~/x' })` 展开到 `~/x/tools`，空串按未设处理。
+
 
 ### Fixed（「我是谁」搜不到自己的名字：门槛把答案切掉）
 - **严格档为空时自动放宽一次**（默认策略）：不传 `floors` 时先按配置的严格门槛跑，**当且仅当**一条都没命中、且 `dropped_by_floor` 总数 > 0（是门槛挡掉了候选，而不是本来就没有候选）时，用宽松档再跑一遍。宽松档仍有**绝对底线** `LOOSE_FLOORS = {semantic:0.40, fts:1, jaccard:0}`——0.40 卡在实测的无关查询余弦上界 0.384 与代词式提问「我是谁」的 0.444 之间，所以无关问题在两档下都为空。只有宽松档真的产出结果才替换答案，并置 `RecallResult.relaxed: true`、`floors` 回显**宽松档生效值**；放宽也救不回时返回严格档原结果（空查询与改动前逐位一致）。跨库 `kb_query` 的放宽决定**只做在合并结果上**（两 store 各自 pin 档位跑，否则空 store 会把放宽尾部注入另一 store 的严格命中）。动机与标定见 DESIGN §20.20。

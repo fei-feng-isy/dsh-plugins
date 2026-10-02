@@ -39,7 +39,7 @@ import {
   type Reranker,
   type SemanticBackend,
 } from '@avantf/mem-core'
-import { emptyFloorDrops, resolveFloors, totalFloorDrops } from './floors.js'
+import { droppedLegs, emptyFloorDrops, resolveFloors, totalFloorDrops, type FloorLeg } from './floors.js'
 import { relevanceTerms } from './lexical.js'
 
 /** The `limit` a caller gets when it passes nothing usable. */
@@ -166,6 +166,14 @@ export interface HybridPlan {
    */
   floors?: FloorProfile
   /**
+   * Which legs a `'loose'` pass may lower (see `store/floors.ts`'s `FloorResolution.relaxLegs`).
+   * Omitted on the default policy: the single-store retry reads the STRICT pass's own drop report and
+   * lowers exactly those legs. The cross-store router has no single strict pass — it pins the legs
+   * the MERGED strict pass dropped on its second call, so "only what actually dropped" holds there
+   * too (relaxing a leg that dropped nothing admits no candidate; it only misreports `floors`).
+   */
+  relaxLegs?: readonly FloorLeg[]
+  /**
    * Emit a health event for this search (default true). The cross-store router sets it false: it
    * fuses both stores into ONE user-facing query and records a single `kind: 'cross'` event, so
    * `queries` counts questions instead of legs (DESIGN §20.5).
@@ -278,10 +286,14 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
    * probe whenever a relaxed pass may follow, and reinforcing text the caller never receives is
    * exactly the defect `onReturn`'s doc calls out. The chosen pass is delivered by the caller below.
    */
-  const runPass = async (profile: FloorProfile): Promise<{ hits: Budgeted<H>[]; used_tokens: number; floors: RetrievalFloors; dropped_by_floor: RetrievalFloorDrops; capped: number }> => {
+  const runPass = async (profile: FloorProfile, relaxLegs?: readonly FloorLeg[]): Promise<{ hits: Budgeted<H>[]; used_tokens: number; floors: RetrievalFloors; dropped_by_floor: RetrievalFloorDrops; capped: number }> => {
     // Resolved per pass and handed to the legs: the degraded relaxation of `min_fts_terms` must be
     // the same value the result reports, or a caller cannot tell which rule produced an empty answer.
-    const floors = resolveFloors(retriever, semAvail, { profile, termCount })
+    const floors = resolveFloors(retriever, semAvail, {
+      profile,
+      termCount,
+      ...(relaxLegs === undefined ? {} : { relaxLegs }),
+    })
     const legs = await runLegs(deps, {
       query,
       limit,
@@ -315,10 +327,12 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
   // all cannot gain any from relaxing). The relaxed pass keeps an absolute bottom line, so an
   // unrelated question still comes back empty instead of surfacing the archive. An explicit profile
   // (`'strict'` / `'loose'`) suppresses the retry: the caller stated which pass it wants.
-  let chosen = await runPass(plan.floors === 'loose' ? 'loose' : 'strict')
+  let chosen = await runPass(plan.floors === 'loose' ? 'loose' : 'strict', plan.relaxLegs)
   let relaxed = false
   if (plan.floors === undefined && chosen.hits.length === 0 && totalFloorDrops(chosen.dropped_by_floor) > 0) {
-    const loosened = await runPass('loose')
+    // Only the legs that actually dropped are lowered. Lowering any other cannot admit a candidate
+    // (a floor only removes); it would just make `floors` claim a leg was relaxed when it never was.
+    const loosened = await runPass('loose', droppedLegs(chosen.dropped_by_floor))
     // Only a pass that actually produced something replaces the strict answer. If relaxing changes
     // nothing, the caller gets the STRICT result — its `dropped_by_floor` is the honest "the floors
     // removed N" report, and an empty query stays bit-identical to what it was before this rule.

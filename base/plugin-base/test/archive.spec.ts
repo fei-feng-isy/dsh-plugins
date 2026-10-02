@@ -211,6 +211,54 @@ describe('binary-archive provider', () => {
     expect(report.entries[0]).toMatchObject({ action: 'present', source: 'explicit', version: '1.0.0' })
   })
 
+  // ── N13：发行版/构建后缀不是版本身份的一部分，纯数字 pin 按"数字核"比对 ──────────────────────
+  /** Install a fake binary that prints `line`, and probe it against `expected`. */
+  async function probeSays(line: string, expected: string) {
+    const explicit = join(home, 'external', 'demo')
+    await mkdir(join(home, 'external'), { recursive: true })
+    await writeFile(explicit, `#!/bin/sh\necho "${line}"\n`)
+    await chmod(explicit, 0o755)
+    const created = provisioner(archiveFetcher(new Uint8Array()))
+    created.declare({
+      plugin: 'mem',
+      items: [item({ spec: { id: 'demo', version: expected, entry: explicit, packs: {} } })],
+    } as Manifest)
+    return created.ensure({ offline: true })
+  }
+
+  it('发行版后缀与期望的纯数字版本命中：4.4.2-0ubuntu0.22.04.1 vs 4.4.2（实测形状）', async () => {
+    // Measured on `ffmpeg 4.4.2-0ubuntu0.22.04.1` against a pin of `4.4.2`: the old exact-token rule
+    // said MISS and re-downloaded a tool that was already the pinned version.
+    const report = await probeSays('ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c)', '4.4.2')
+    expect(report.entries[0]).toMatchObject({ action: 'present', source: 'explicit', version: '4.4.2' })
+  })
+
+  it('构建后缀（+build）与前缀 v 也一样命中', async () => {
+    const report = await probeSays('demo v1.2.3+2026-10-02', '1.2.3')
+    expect(report.entries[0]).toMatchObject({ action: 'present', version: '1.2.3' })
+  })
+
+  it('主次版本确实不同仍判 MISS（数字核整段比对，不是字符串前缀）', async () => {
+    // 4.5.0 is not 4.4.2, and 4.4 is not 4.4.2 either — a prefix rule would wrongly accept the latter.
+    const minor = await probeSays('demo 4.5.0', '4.4.2')
+    expect(minor.entries[0]?.action).not.toBe('present')
+    const shorter = await probeSays('demo 4.4', '4.4.2')
+    expect(shorter.entries[0]?.action).not.toBe('present')
+    const longer = await probeSays('demo 1.0.0.1', '1.0.0')
+    expect(longer.entries[0]?.action).not.toBe('present')
+  })
+
+  it('期望本身带后缀（不是纯数字）⇒ 退回全等：后缀属于被 pin 的身份', async () => {
+    const exact = await probeSays('demo 1.2.3-rc.1', '1.2.3-rc.1')
+    expect(exact.entries[0]).toMatchObject({ action: 'present', version: '1.2.3-rc.1' })
+    // The SAME numeric core without the pinned prerelease suffix must NOT match.
+    const bare = await probeSays('demo 1.2.3', '1.2.3-rc.1')
+    expect(bare.entries[0]?.action).not.toBe('present')
+    // …and neither may a different prerelease of the same core.
+    const other = await probeSays('demo 1.2.3-rc.2', '1.2.3-rc.1')
+    expect(other.entries[0]?.action).not.toBe('present')
+  })
+
   it('versionArgs 为空 ⇒ 存在但版本未知（旧代码照抄 spec.version）', async () => {
     const explicit = join(home, 'external', 'demo')
     await mkdir(join(home, 'external'), { recursive: true })

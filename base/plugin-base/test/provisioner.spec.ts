@@ -329,4 +329,120 @@ describe('createProvisioner × npm provider', () => {
       process.off('unhandledRejection', listener)
     }
   })
+
+  it('deadline 已耗尽后的阻塞项 reject：同样被提前认领（不产生 unhandledRejection）', async () => {
+    // The gap is the `remaining <= 0` branch of the blocking loop: no `Promise.race` is built there,
+    // so nothing subscribes to `tracked` until `ensure()` attaches its handler — and that only happens
+    // after `await persistStatus()`. An injectable clock makes the branch deterministic: `mem:fast`
+    // settles and then spends the whole budget, so `mem:slow` starts with 0 ms left and its rejection
+    // lands while the status write below is deliberately held for 300 ms.
+    const seen: unknown[] = []
+    const listener = (reason: unknown): void => {
+      seen.push(reason)
+    }
+    process.on('unhandledRejection', listener)
+    try {
+      let now = 0
+      const deadlineMs = 1_000
+      const slow: Provider = {
+        id: '@avantf/slow',
+        kinds: ['plugin:slow'],
+        identify: () => ({ name: 'slow' }),
+        targetDir: () => 'slow',
+        plan: () => ({ action: 'install' }),
+        probe: async (probedItem): Promise<ProbeResult> => {
+          if (probedItem.id === 'mem:fast') {
+            // Runs AFTER the loop computed this item's own remaining budget, so it only moves the
+            // clock for the NEXT blocking item.
+            await Promise.resolve()
+            now = deadlineMs
+            return { found: false }
+          }
+          // Throws outside `ensureOne`'s probe try/catch (line 760 accesses `found`), exactly like the
+          // background-item test above — the rejection reaches `tracked`, not a `settle()` path.
+          return Object.defineProperty({}, 'found', {
+            get() {
+              throw new Error('slow boom')
+            },
+          }) as unknown as ProbeResult
+        },
+        install: async () => {
+          throw new Error('unused')
+        },
+        verify: async () => undefined,
+      }
+      const heldFs = {
+        ...fs,
+        atomicWrite: async (path: string, data: Uint8Array): Promise<void> => {
+          if (path.endsWith('status.json')) await new Promise(resolve => setTimeout(resolve, 300))
+          await fs.atomicWrite(path, data)
+        },
+      }
+      const created = createProvisioner({ home, logger: silent, fs: heldFs, clock: () => now })
+      created.register(slow)
+      created.declare(
+        manifestOf([
+          { id: 'mem:fast', kind: 'plugin:slow', spec: {}, target: { root: 'runtime' }, schemaVersion: 1 },
+          { id: 'mem:slow', kind: 'plugin:slow', spec: {}, target: { root: 'runtime' }, schemaVersion: 1 },
+        ]),
+      )
+
+      const report = await created.ensure({ offline: true, deadlineMs })
+      // `mem:slow` blew the deadline: it is handed to the background (never awaited), so only the fast
+      // item is in the report.
+      expect(report.entries).toHaveLength(1)
+      expect(report.entries[0]).toMatchObject({ id: 'mem:fast', action: 'skipped', code: 'policy/offline' })
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(seen).toEqual([])
+    } finally {
+      process.off('unhandledRejection', listener)
+    }
+  })
+
+  // ── N11 相关：`timeoutMs`（单请求预算）与 `deadlineMs`（启动路径预算）的倒挂检查 ────────────────
+  it('timeoutMs > deadlineMs 倒挂 ⇒ 限频 warn（一个进程一次），不 fail', () => {
+    const lines: string[] = []
+    const log: ProvisionLogger = {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: (message: string) => lines.push(message),
+      error: () => undefined,
+    }
+    const declareInverted = (): void => {
+      const created = createProvisioner({ home, logger: log, fs, policy: { deadlineMs: 1_000 } })
+      created.register(npmPackageProvider())
+      created.declare(manifestOf([item({ id: 'mem:inverted', policy: { timeoutMs: 300_000 } })]))
+    }
+    declareInverted()
+    const inversion = (): string[] => lines.filter(line => line.includes('timeoutMs/deadlineMs 倒挂'))
+    expect(inversion()).toHaveLength(1)
+    expect(inversion()[0]).toContain('mem:inverted')
+    expect(inversion()[0]).toContain('300000')
+    expect(inversion()[0]).toContain('1000')
+    // A second provisioner instance (a plugin re-init re-declaring the same manifest) must not repeat
+    // the same line — the rate limit is process-wide, not per instance.
+    declareInverted()
+    expect(inversion()).toHaveLength(1)
+  })
+
+  it('没有倒挂就不 warn：未声明 / 0（无超时逃生门）/ 小于 deadline', () => {
+    const lines: string[] = []
+    const created = createProvisioner({
+      home,
+      logger: { debug: () => undefined, info: () => undefined, warn: (message: string) => lines.push(message), error: () => undefined },
+      fs,
+      policy: { deadlineMs: 15_000 },
+    })
+    created.register(npmPackageProvider())
+    created.declare(
+      manifestOf([
+        item({ id: 'mem:no-inversion-a' }),
+        // `0` = wait indefinitely; it is the documented escape hatch for a big download that WILL
+        // outlive the startup path, so it is not an inversion.
+        item({ id: 'mem:no-inversion-b', policy: { timeoutMs: 0 } }),
+        item({ id: 'mem:no-inversion-c', policy: { timeoutMs: 5_000 } }),
+      ]),
+    )
+    expect(lines.filter(line => line.includes('倒挂'))).toEqual([])
+  })
 })

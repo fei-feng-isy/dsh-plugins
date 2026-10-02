@@ -155,11 +155,35 @@ function runVersionProbe(
  */
 const VERSION_TOKEN = /(?:^|[^0-9A-Za-z])v?(\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)/g
 
-/** Does the probe output report exactly `expected`? */
+/** The bare numeric core of a version: `4.4.2-0ubuntu0.22.04.1` → `4.4.2`. */
+const VERSION_CORE = /^\d+(?:\.\d+)*/
+
+/** A pin that is itself nothing but the numeric core (no distro/prerelease/build decoration). */
+const PLAIN_NUMERIC = /^\d+(?:\.\d+)*$/
+
+/**
+ * Does the probe output report `expected`?
+ *
+ * The observed token may carry a DISTRO/BUILD decoration that is not part of the version identity —
+ * measured: `ffmpeg version 4.4.2-0ubuntu0.22.04.1` against a pin of `4.4.2`. That produced a MISS,
+ * which is fail-closed (the caller re-downloads a tool it already has) but wrong: the decorated
+ * token IS the pinned version. So a PLAIN NUMERIC pin is compared against each token's numeric core;
+ * a pin that is not plain numeric (a prerelease/build pin such as `1.2.3-rc.1`) keeps the exact-token
+ * rule, because there the suffix is exactly what is being pinned. A genuinely different version still
+ * misses: the core is compared whole (`4.5.0` and `1.0.0.1` are not `4.4.2`/`1.0.0`), never as a
+ * string prefix, so `4.4` cannot match `4.4.2` and `1.0.0` cannot match `1.0.0.1`.
+ */
 function reportsVersion(stdout: string, expected: string): boolean {
   const wanted = expected.replace(/^v/, '')
+  const compareCore = PLAIN_NUMERIC.test(wanted)
   for (const match of stdout.matchAll(VERSION_TOKEN)) {
-    if (match[1] === wanted) return true
+    const token = match[1]
+    if (token === undefined) continue
+    if (token === wanted) return true
+    if (!compareCore) continue
+    // `VERSION_CORE` is anchored, so this is the token's numeric head, not a substring search.
+    const core = VERSION_CORE.exec(token)?.[0]
+    if (core === wanted) return true
   }
   return false
 }

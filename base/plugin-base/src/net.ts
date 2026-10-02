@@ -16,6 +16,27 @@ export function fetchImplOf(ctx: ProviderContext): typeof fetch {
 /** Default hard byte cap for one downloaded body. */
 export const DEFAULT_MAX_BYTES = 256 * 1024 * 1024
 
+/**
+ * Hard byte cap for a METADATA body: an npm packument, a model revision response, a siblings list.
+ *
+ * Metadata is a small JSON document that is then `JSON.parse`d (`providers/npm.ts`,
+ * `providers/model.ts`), and parsing amplifies it several-fold in heap. The 256 MiB archive cap only
+ * stops the extreme; it still lets a "KB-scale document, GB-scale heap" through.
+ *
+ * 16 MiB is MEASURED, not guessed. The npm provider asks for `accept: application/json`, i.e. the
+ * FULL packument, so the real sizes are the full ones (registry.npmjs.org, 2026-10-02):
+ * `lodash` 0.2 MB, `react` 6.7 MB, `aws-sdk` 10.1 MB, `@types/node` 11.2 MB, `typescript` 15.7 MB.
+ * 16 MiB keeps every ordinary package installable with headroom while bounding the parse to a
+ * four-digit number of MB. The largest packuments on the registry (`npm`, 25.8 MB) now fail
+ * terminally as `fetch/too-large` — the intended fail-closed answer for a document that would
+ * otherwise be parsed into a multi-GB heap. Anything in that range wants a streamed download with a
+ * real cap, not `JSON.parse`. (The abbreviated form — `accept: application/vnd.npm.install-v1+json`
+ * — measured 2–10× smaller on the same packages, e.g. `npm` 25.8 MB → 2.5 MB and `typescript`
+ * 15.7 MB → 8.7 MB; switching to it would be a separate, observable change to what the provider
+ * reads, so it is recorded here as an option rather than done silently.)
+ */
+export const METADATA_MAX_BYTES = 16 * 1024 * 1024
+
 /** Default per-request timeout in milliseconds. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 300_000
 

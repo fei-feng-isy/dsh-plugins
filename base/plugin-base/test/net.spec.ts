@@ -7,7 +7,7 @@
  * @module test/net
  */
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_MAX_BYTES, DEFAULT_REQUEST_TIMEOUT_MS, downloadBytes, readCapped, signalFor } from '../src/net.js'
+import { DEFAULT_MAX_BYTES, DEFAULT_REQUEST_TIMEOUT_MS, METADATA_MAX_BYTES, downloadBytes, readCapped, signalFor } from '../src/net.js'
 import type { ProviderContext } from '../src/types.js'
 
 const bytesOf = (text: string): Uint8Array => new TextEncoder().encode(text)
@@ -101,6 +101,26 @@ describe('readCapped：声明长度与实际上限', () => {
   it('无 body 时也核对声明长度', async () => {
     const response = new Response(null, { status: 200, headers: { 'content-length': '5' } })
     await expect(readCapped(response)).rejects.toMatchObject({ code: 'fetch/failed' })
+  })
+})
+
+// ── N11：packument / revision / siblings 这些"会被 JSON.parse 的"元数据有自己的上限 ──────────────
+describe('METADATA_MAX_BYTES：元数据上限与归档上限分离', () => {
+  it('落在建议区间 8–16 MiB 内，且远小于归档上限（pin 住，防止悄悄滑回 256 MiB）', () => {
+    expect(METADATA_MAX_BYTES).toBeGreaterThanOrEqual(8 * 1024 * 1024)
+    expect(METADATA_MAX_BYTES).toBeLessThanOrEqual(16 * 1024 * 1024)
+    expect(METADATA_MAX_BYTES).toBeLessThan(DEFAULT_MAX_BYTES)
+  })
+
+  it('声明长度超过元数据上限 ⇒ fetch/too-large（虽远低于归档上限）', async () => {
+    const response = new Response('x', { status: 200, headers: { 'content-length': String(METADATA_MAX_BYTES + 1) } })
+    await expect(readCapped(response, METADATA_MAX_BYTES)).rejects.toMatchObject({ code: 'fetch/too-large' })
+  })
+
+  it('正常大小的元数据不受影响', async () => {
+    const body = '{"versions":{"1.0.0":{}}}'
+    const response = new Response(body, { status: 200, headers: { 'content-length': String(body.length) } })
+    await expect(readCapped(response, METADATA_MAX_BYTES)).resolves.toEqual(bytesOf(body))
   })
 })
 

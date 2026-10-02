@@ -14,8 +14,12 @@
  *     dropped candidates (the 「我是谁」 fix: the answering fact scored 0.444 against a 0.5 floor);
  *     an explicit `'strict'` / `'loose'` profile suppresses that retry, and a retry that changes
  *     nothing leaves the strict (bit-identical) result in place;
- *   - the relaxed floors are 0.40 / 1 / 0 — ABOVE the measured unrelated-query ceiling (0.384), so a
- *     genuinely unrelated question still comes back empty under both profiles;
+ *   - the relaxed floors are 0.40 / half-the-query's-terms (≥1) / 0.15 — every one of them POSITIVE,
+ *     so a genuinely unrelated question still comes back empty under both profiles (semantic 0.40 is
+ *     above the measured unrelated-query ceiling 0.384; the entity 0.15 sits above the measured
+ *     incidental-overlap band and below the lowest gold pair's 0.25); the relaxed pass lowers ONLY
+ *     the legs the strict pass actually dropped, and an explicit `'loose'` walks the same bottom lines
+ *     as the automatic pass (no backdoor);
  *   - the FTS bar is clamped to the terms the query can actually produce, so a 3-char CJK query (one
  *     trigram) is not judged against an unreachable `min_fts_terms: 2`;
  *   - BOTH stores apply the same rule and report the same effective values.
@@ -32,7 +36,9 @@ import {
   applyScoreFloor,
   applyTermFloor,
   countMatchedTerms,
+  droppedLegs,
   effectiveTermFloor,
+  looseTermFloor,
   mergeFloorDrops,
   passesFloor,
   resolveFloors,
@@ -132,6 +138,50 @@ describe('store/floors (pure)', () => {
     expect(resolveFloors(retriever, true, { profile: 'loose', termCount: 1 }).fts).toBe(1)
     // Degraded relaxation still comes first, and the clamp never raises it back.
     expect(resolveFloors(retriever, false, { termCount: 1 })).toEqual({ semantic: 0.5, fts: 1, jaccard: 0.2 })
+  })
+
+  it('resolveFloors: a loose pass lowers ONLY the legs that dropped, and never below a positive floor', () => {
+    const retriever = { min_semantic_similarity: 0.5, min_fts_terms: 2, min_jaccard: 0.2 }
+    // The strict pass dropped only on the entity leg: semantic/FTS keep the configured values, so the
+    // reported `floors` say which leg was actually the problem. Lowering a leg that dropped nothing
+    // cannot admit a candidate (a floor only removes), so this is what the envelope must say.
+    expect(resolveFloors(retriever, true, { profile: 'loose', relaxLegs: ['jaccard'] }))
+      .toEqual({ semantic: 0.5, fts: 2, jaccard: 0.15 })
+    expect(resolveFloors(retriever, true, { profile: 'loose', relaxLegs: ['semantic'] }))
+      .toEqual({ semantic: 0.4, fts: 2, jaccard: 0.2 })
+    // The FTS leg alone: the relaxed bar is half the query's terms, never below one. (Before this,
+    // `jaccard: 0` was ungated and the FTS bar was always 1 — "any single incidental trigram wins".)
+    expect(resolveFloors({ ...retriever, min_fts_terms: 4 }, true, { profile: 'loose', termCount: 6, relaxLegs: ['fts'] }))
+      .toEqual({ semantic: 0.5, fts: 3, jaccard: 0.2 })
+    // …and it can only RELAX: a configured 2 is already below the relaxed 3, so it stays 2.
+    expect(resolveFloors(retriever, true, { profile: 'loose', termCount: 6, relaxLegs: ['fts'] }).fts).toBe(2)
+    // …and it can only RELAX: a configured 1 is not raised to the relaxed 3.
+    expect(resolveFloors({ ...retriever, min_fts_terms: 1 }, true, { profile: 'loose', termCount: 6, relaxLegs: ['fts'] }).fts).toBe(1)
+    // Every relaxed bottom line is POSITIVE: "loose" is never "ungated".
+    expect(LOOSE_FLOORS.semantic).toBeGreaterThan(0)
+    expect(LOOSE_FLOORS.jaccard).toBeGreaterThan(0)
+    expect(looseTermFloor(1)).toBe(1)
+    expect(looseTermFloor(2)).toBe(1)
+    expect(looseTermFloor(6)).toBe(3)
+    expect(looseTermFloor(0)).toBe(1)
+    expect(looseTermFloor(undefined)).toBe(1)
+  })
+
+  it('resolveFloors: the explicit loose entry walks the SAME bottom lines (no backdoor)', () => {
+    const retriever = { min_semantic_similarity: 0.5, min_fts_terms: 2, min_jaccard: 0.2 }
+    // An explicit request has no prior pass to read, so it lowers every gated leg — to exactly the
+    // values the automatic pass would use for those legs. Naming fewer legs can only be STRICTER.
+    const explicit = resolveFloors(retriever, true, { profile: 'loose', termCount: 4 })
+    const autoAll = resolveFloors(retriever, true, { profile: 'loose', termCount: 4, relaxLegs: ['semantic', 'fts', 'jaccard'] })
+    expect(explicit).toEqual(autoAll)
+    expect(explicit).toEqual({ semantic: 0.4, fts: 2, jaccard: 0.15 })
+  })
+
+  it('droppedLegs names only the legs with drops, folding the HRR probe onto the entity leg', () => {
+    expect(droppedLegs({ semantic: 0, fts: 0, jaccard: 0, hrr: 0 })).toEqual([])
+    expect(droppedLegs({ semantic: 2, fts: 0, jaccard: 1, hrr: 0 })).toEqual(['semantic', 'jaccard'])
+    // The probe has no floor of its own; a drop there is an entity-floor decision.
+    expect(droppedLegs({ semantic: 0, fts: 3, jaccard: 0, hrr: 4 })).toEqual(['fts', 'jaccard'])
   })
 
   it('applyScoreFloor drops strictly-lower entries, counts them, and is a no-op at 0', () => {
@@ -259,11 +309,14 @@ describe('the floors through BOTH stores', () => {
       expect(strict.relaxed).toBeUndefined()
 
       // The default policy retries once at 0.40: 0.44 comes back, 0.30 does not. The reported floors
-      // and drops are the RELAXED pass's — the values actually applied to these hits.
+      // and drops are the RELAXED pass's — the values actually applied to these hits. Only the leg that
+      // actually dropped (semantic) moved; the entity floor keeps its configured 0.2 rather than the
+      // relaxed 0.15, because lowering a leg that dropped nothing cannot admit anything.
       const relaxed = await memSearch(rt, 'zzzzz', 5)
       expect(textsOf(relaxed.hits)).toEqual(['aaaaa'])
       expect(relaxed.relaxed).toBe(true)
       expect(relaxed.floors?.semantic).toBe(0.4)
+      expect(relaxed.floors?.jaccard).toBe(0.2)
       expect(relaxed.dropped_by_floor?.semantic).toBe(1)
 
       // An explicit `loose` produces the same hits but is NOT marked `relaxed`: the caller asked for
@@ -381,6 +434,48 @@ describe('the floors through BOTH stores', () => {
       expect(degraded.dropped_by_floor?.fts).toBe(0)
       setFloors(rt, { fts: 0 })
       expect((await memSearch(rt, 'write gateway', 3)).floors?.fts).toBe(0)
+    } finally {
+      rt.shutdown()
+    }
+  })
+
+  it('memory: the loose floors are a BOUNDED relaxation — weak FTS/entity evidence still comes back empty', async () => {
+    // THE N12 DEFECT. The old relaxed profile was `{semantic:0.40, fts:1, jaccard:0}`: a `jaccard: 0`
+    // leg is ungated, and because each leg is normalized by its OWN maximum, "any small Jaccard" (or
+    // any single shared trigram) became that leg's head and was returned on a weak query.
+    // The query sits on its own semantic axis (cos 0 against every fact), so the semantic leg cannot
+    // smuggle either row into the pool through a zero-weight contribution.
+    const fake = fakeSemantic({ 'alpha gamma delta': unitWithCos(1, 1) })
+    const rt = buildRuntime({ dataHome: dir, semantic: fake.backend })
+    try {
+      // Both rows hit exactly ONE of the query's three FTS terms ('alpha'; 'gamma'/'delta' are absent),
+      // so the FTS leg drops both. The entity leg separates them: sharing 「alpha」 with a 5-entity row
+      // is J = 1/7 ≈ 0.143, with a 4-entity row J = 1/6 ≈ 0.167. The relaxed 0.15 sits between them —
+      // above the measured incidental-overlap band (live store: unrelated common-entity queries top out
+      // at 0.0909) and below the lowest gold pair on the labelled eval set (0.25).
+      await rt.remember({ action: 'add', content: 'alpha zulu yankee whiskey xray' })
+      await rt.remember({ action: 'add', content: 'alpha zulu yankee whiskey' })
+      setWeights(rt, { semantic: 0, fts: 1, jaccard: 1 })
+      setFloors(rt, { semantic: 0.5, fts: 2, jaccard: 0.2 })
+
+      const strict = await memSearch(rt, 'alpha gamma delta', 5, 'strict')
+      expect(strict.hits).toHaveLength(0)
+      expect(strict.dropped_by_floor?.fts).toBe(2) // one matched term < the configured 2
+      expect(strict.dropped_by_floor?.jaccard).toBe(2) // 0.143 and 0.167 are both below 0.2
+
+      // The default policy retries once, but only down to the POSITIVE bottom lines: the 0.143 row
+      // (incidental overlap only) stays out, the 0.167 row is admitted by the entity leg. `floors.fts`
+      // is 2, not 1: the relaxed FTS bar is half of three terms — a single shared trigram is not enough.
+      const auto = await memSearch(rt, 'alpha gamma delta', 5)
+      expect(auto.relaxed).toBe(true)
+      expect(auto.floors).toEqual({ semantic: 0.4, fts: 2, jaccard: 0.15 })
+      expect(textsOf(auto.hits)).toEqual(['alpha zulu yankee whiskey'])
+
+      // The explicit entry walks the SAME bottom lines — no backdoor, and no extra noise.
+      const loose = await memSearch(rt, 'alpha gamma delta', 5, 'loose')
+      expect(loose.relaxed).toBeUndefined()
+      expect(loose.floors).toEqual(auto.floors)
+      expect(textsOf(loose.hits)).toEqual(['alpha zulu yankee whiskey'])
     } finally {
       rt.shutdown()
     }

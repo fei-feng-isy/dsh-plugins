@@ -34,7 +34,7 @@ import type { Db } from '../db/conn.js'
 import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeTerms, type LexicalProbe } from './lexical.js'
-import { applyScoreFloor, applyTermFloor } from './floors.js'
+import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
 import {
   ENTITY_EXTRACTOR_VERSION,
   entitiesFromTokens,
@@ -199,6 +199,13 @@ export interface SearchInput {
    * outcome and the drop count. `'loose'` applies the relaxed floors outright.
    */
   floors?: FloorProfile
+  /**
+   * Which legs a `'loose'` pass may lower (see `store/floors.ts`). Internal: an omitted value lets
+   * the default policy derive it from the strict pass's own drop report, while the cross-store
+   * router pins the MERGED strict pass's dropping legs on its second call — only the merged result
+   * knows which legs were the problem for the user's one question.
+   */
+  relaxLegs?: readonly FloorLeg[]
   /**
    * Emit a `kind: 'memory'` health event for this search (default true). The cross-store router
    * sets it false: it fuses this leg with the knowledge leg and records ONE `kind: 'cross'`
@@ -1117,6 +1124,7 @@ export class MemoryStore {
       queryVector: input.queryVector,
       recordStats: input.recordStats,
       floors: input.floors,
+      ...(input.relaxLegs === undefined ? {} : { relaxLegs: input.relaxLegs }),
     })
     return {
       hits: result.hits,

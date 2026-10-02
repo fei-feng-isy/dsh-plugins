@@ -105,6 +105,23 @@ export const MODEL_FILES: readonly string[] = [
 /** Startup budget for the blocking set; the framework's default is the same. */
 const DEADLINE_MS = 15_000
 
+/**
+ * The `mem:model` item's per-request download budget, declared explicitly on the item.
+ *
+ * It is the base's own default (`net.ts`'s `DEFAULT_REQUEST_TIMEOUT_MS`) made VISIBLE: an item that
+ * declares no `timeoutMs` silently inherits it, which is exactly the state the review flagged (the
+ * mechanism existed, no item used it, and a multi-gigabyte model on a slow link had no documented
+ * budget). `0` would mean "no timeout"; that is not this plugin's call to make by default.
+ *
+ * WHY THE DEADLINE BELOW IS RAISED TO MATCH IT. The base checks every declaration for an INVERSION
+ * (`timeoutMs > deadlineMs`): a per-request budget larger than the ensure deadline means a request
+ * could outlive the budget that is supposed to bound it. Both mem items are `startup: 'background'`,
+ * so they spend no part of the startup budget and the larger deadline costs no wall clock — but the
+ * declaration has to be consistent, and a caller that sets its own (smaller) deadline must enlarge it
+ * rather than ship the inversion.
+ */
+const MODEL_REQUEST_TIMEOUT_MS = 300_000
+
 /** This module's warning token, so one grep finds every environment-initialisation line. */
 const OWN_PREFIX = 'envinit:'
 
@@ -326,6 +343,9 @@ function pandocItem(framework: EnvinitModule): ProvisionItem {
  *
  * A missing model is a degraded semantic path, NOT a refused mount: both `onMissing` axes are
  * `degrade`, and the engine falls back to FTS+entity.
+ *
+ * `policy.timeoutMs` is the per-request budget (see {@link MODEL_REQUEST_TIMEOUT_MS}); it rides into
+ * the provider through the base's `policyFor` and is what `signalFor` reads.
  */
 function modelItem(framework: EnvinitModule, model: NonNullable<ResourcePlan['model']>): ProvisionItem {
   return {
@@ -342,6 +362,7 @@ function modelItem(framework: EnvinitModule, model: NonNullable<ResourcePlan['mo
     onMissing: { atStartup: 'degrade', atUse: 'degrade' },
     startup: 'background',
     schemaVersion: framework.ITEM_SCHEMA_VERSION,
+    policy: { timeoutMs: MODEL_REQUEST_TIMEOUT_MS },
   }
 }
 
@@ -480,6 +501,9 @@ async function loadOnce(options: EnvinitLoadOptions): Promise<EnvinitRuntime | u
       if (plan.pandoc) items.push(pandocItem(framework))
       if (plan.model !== undefined) items.push(modelItem(framework, plan.model))
       if (items.length === 0) return
+      // The longest per-request budget among the items being declared: the ensure deadline must not
+      // sit below it, or the base's inversion check (`timeoutMs > deadlineMs`) flags the declaration.
+      const maxItemTimeoutMs = items.reduce((max, item) => Math.max(max, item.policy?.timeoutMs ?? 0), 0)
 
       // A SECOND provisioner, on purpose: `policy.mirrors.archive` is the engine's `tools.mirror`,
       // which is only known after the runtime resolved its config — while the compat provisioner had
@@ -497,7 +521,11 @@ async function loadOnce(options: EnvinitLoadOptions): Promise<EnvinitRuntime | u
         logger: provisionLogger(options.log),
         policy: {
           autoDownload: autoDownload ? { [framework.MODEL_CACHE_KIND]: plan.modelAutoDownload } : false,
-          deadlineMs,
+          // Never BELOW the declared per-request budgets: `timeoutMs > deadlineMs` is the inversion
+          // the base warns about. Both items here are `startup: 'background'` and spend no startup
+          // budget, so the larger deadline changes nothing observable today; a caller passing a
+          // smaller `deadlineMs` gets it enlarged rather than a declaration that contradicts the plan.
+          deadlineMs: Math.max(deadlineMs, maxItemTimeoutMs),
           mirrors: { archive: [...plan.archiveMirrors] },
         },
       })

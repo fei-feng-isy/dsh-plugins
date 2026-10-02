@@ -45,7 +45,7 @@ export {
   unknownFields,
 } from './lint.js'
 export type { LintFinding, LintResult } from './lint.js'
-export { candidateUrls, downloadBytes, fetchImplOf, platformKey, readCapped, signalFor, verifySha256, DEFAULT_MAX_BYTES } from './net.js'
+export { candidateUrls, downloadBytes, fetchImplOf, platformKey, readCapped, signalFor, verifySha256, DEFAULT_MAX_BYTES, METADATA_MAX_BYTES } from './net.js'
 export {
   CONTROL_DIR,
   assertSafeRelativePath,

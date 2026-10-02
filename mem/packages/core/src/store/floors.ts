@@ -28,6 +28,15 @@
  * the whole corpus) but a SECOND pass with an absolute bottom line ({@link LOOSE_FLOORS}), run only
  * when the strict pass returned nothing at all AND the floors are why (`dropped_by_floor > 0`).
  *
+ * WHICH LEGS A RELAXED PASS LOWERS, AND WHY THAT IS NOT A NO-OP IN THE REPORT. Only the legs the
+ * strict pass actually DROPPED candidates on (see {@link droppedLegs}) are lowered. Lowering a leg
+ * that dropped nothing cannot admit anything — a floor only removes entries — so the chosen
+ * candidates are identical either way; what changes is the `floors` envelope handed back, which
+ * used to claim every leg had been relaxed even when only one was ever the problem. An EXPLICIT
+ * `floors: 'loose'` request has no prior pass to read, so it lowers every gated leg — to the SAME
+ * bottom lines the automatic pass uses, so the explicit entry can never drop below them (it is not
+ * a backdoor; see {@link resolveFloors}).
+ *
  * WHY NOT EXEMPT `pinned` FACTS FROM THE FLOORS. It was the obvious shortcut and it is wrong: the
  * exemption only lets a fact into the fusion pool, it does not add score, and `fuse` ranks by each
  * leg's normalized raw score before slicing to `limit`. So on a query with plenty of strong
@@ -56,6 +65,12 @@ export interface FloorConfig {
 }
 
 /**
+ * The legs that own a floor. The HRR probe has no floor of its own — it shares the Jaccard one — so
+ * it never appears here; a drop on `hrr` relaxes `jaccard` (see {@link droppedLegs}).
+ */
+export type FloorLeg = 'semantic' | 'fts' | 'jaccard'
+
+/**
  * What the RELAXED pass lowers each floor TO, as absolute values.
  *
  *  - semantic **0.40**: strictly BETWEEN the measured unrelated-query ceiling (0.384) and the
@@ -64,17 +79,37 @@ export interface FloorConfig {
  *    topped out at 0.300/0.384/0.315/0.351, and a 0.35 bar would already admit two of them. Below
  *    0.444, so 「我是谁」 finds its fact. 0.40 keeps the larger margin on the noise side, which is
  *    where a false positive costs the caller a wrong answer rather than a missing one.
- *  - fts **1**: one matched query term — also the weakest bar this machinery can express, since a
- *    row hitting zero terms is not in the FTS leg at all.
- *  - jaccard **0** (off): the ratio has no absolute "unrelated" line on short queries — a one-entity
- *    query against a one-entity fact is 1.0 by construction — so the relaxed pass does not pretend
- *    to have one.
- *
- * The relaxed pass takes `min(configured, relaxed)`: it can only RELAX. A leg the operator disabled
- * (`0` = off) stays disabled, and a floor the operator already set below the relaxed value is left
- * alone. "Relaxed" must never mean "ungated" — otherwise the pass cannot answer "nothing relevant".
+ *  - fts: NOT a constant — {@link looseTermFloor}, half the query's distinct terms with a floor of
+ *    1. `1` here is the "no terms to scale by" baseline (the previously constant value); a query
+ *    that cannot produce terms is not graded at all, and one that produces a single term (every
+ *    3-char CJK query) is already graded against that one term by the reachability clamp.
+ *  - jaccard **0.15** (positive — the previous `0` was the ungated hole this closes). Measured, not
+ *    guessed, on two corpora: (a) the live store, 64 active facts, the common-entity questions a
+ *    real user asks about this repo ("插件怎么安装" / "任务怎么拆分" / "知识库在哪里" …) put their
+ *    TOP non-answering entity candidate at Jaccard 0.0909 and most at 0.02–0.07, so 0.15 removes that
+ *    whole tail; (b) the gold-labelled 35-query eval set, where the LOWEST Jaccard any answering pair
+ *    reached is 0.25 (「老王喜欢什么风格」) — a bottom line above 0.25 starts dropping gold pairs,
+ *    while 0.15 filters none. The entity leg cannot fully separate the two classes on short queries
+ *    (a one-entity query against a one-entity fact is 1.0 by construction, and non-gold pairs reach
+ *    0.667), so this is deliberately a "no incidental small overlap" line, not a relevance classifier.
  */
-export const LOOSE_FLOORS: RetrievalFloors = { semantic: 0.4, fts: 1, jaccard: 0 }
+export const LOOSE_FLOORS: RetrievalFloors = { semantic: 0.4, fts: 1, jaccard: 0.15 }
+
+/**
+ * The FTS bar the RELAXED pass applies to a query carrying `termCount` distinct terms.
+ *
+ * Positive on purpose: "Relaxed" must never mean "ungated", and the old constant of `1` let a single
+ * incidental trigram become a leg's head (per-leg max normalization makes it 1.0) on any query long
+ * enough to produce several terms. Half the query's terms — `ceil(termCount / 2)`, at least 1 — keeps
+ * a real fraction of what the query asked for while still relaxing the configured bar of 2 to 1 for
+ * a two-term query. `termCount` 0/omitted keeps the baseline of 1 (such a query is not graded by
+ * {@link applyTermFloor} at all). The `min(configured, …)` in {@link resolveFloors} means this can
+ * only relax, never raise.
+ */
+export function looseTermFloor(termCount?: number): number {
+  const half = termCount === undefined || termCount <= 0 ? 0 : Math.ceil(termCount / 2)
+  return Math.max(1, half)
+}
 
 /** The floor every leg's drops start from. */
 export function emptyFloorDrops(): RetrievalFloorDrops {
@@ -106,6 +141,30 @@ export interface FloorResolution {
   profile?: FloorProfile
   /** This query's distinct term count (`relevanceTerms(query).length`), for the FTS clamp. */
   termCount?: number
+  /**
+   * Which legs a `'loose'` profile may lower, from {@link droppedLegs} of the pass that made the
+   * relaxation necessary. Omitted = every gated leg, which is what an EXPLICIT `floors: 'loose'`
+   * request means (the caller asked for the profile outright and there is no prior pass to read).
+   * Either way the target values are the same {@link LOOSE_FLOORS} / {@link looseTermFloor} bottom
+   * lines — naming fewer legs can only make the pass stricter, never looser.
+   */
+  relaxLegs?: readonly FloorLeg[]
+}
+
+/**
+ * The legs a pass actually dropped candidates on — the only ones a relaxed pass can help.
+ *
+ * A leg that dropped nothing has no candidate below its strict floor, so lowering that floor admits
+ * nothing new; including it in the relaxed `floors` would just misreport which leg was the problem.
+ * `hrr` maps onto `jaccard` because the probe shares the entity leg's candidate set and floor (see
+ * `HybridLeg.leg`).
+ */
+export function droppedLegs(drops: RetrievalFloorDrops): FloorLeg[] {
+  const legs: FloorLeg[] = []
+  if (drops.semantic > 0) legs.push('semantic')
+  if (drops.fts > 0) legs.push('fts')
+  if (drops.jaccard > 0 || drops.hrr > 0) legs.push('jaccard')
+  return legs
 }
 
 /**
@@ -113,6 +172,11 @@ export interface FloorResolution {
  *
  * Exported so both stores and the tests read the SAME rule rather than re-deriving it — the whole
  * point of hosting the orchestration in one file was that a per-store copy of a rule drifts.
+ *
+ * The relaxed profile takes `min(configured, relaxed)` per leg: it can only RELAX. A leg the
+ * operator disabled (`0` = off) stays disabled, a floor the operator already set below the relaxed
+ * value is left alone, and {@link FloorResolution.relaxLegs} can only narrow WHICH legs move.
+ * "Relaxed" never means "ungated" — otherwise the pass could not answer "nothing relevant".
  */
 export function resolveFloors(retriever: FloorConfig, semAvail: boolean, resolution: FloorResolution = {}): RetrievalFloors {
   const configured: RetrievalFloors = {
@@ -122,13 +186,14 @@ export function resolveFloors(retriever: FloorConfig, semAvail: boolean, resolut
     fts: semAvail ? retriever.min_fts_terms : (retriever.min_fts_terms > 0 ? 1 : 0),
     jaccard: retriever.min_jaccard,
   }
-  const lowered = resolution.profile === 'loose'
-    ? {
-        semantic: Math.min(configured.semantic, LOOSE_FLOORS.semantic),
-        fts: Math.min(configured.fts, LOOSE_FLOORS.fts),
-        jaccard: Math.min(configured.jaccard, LOOSE_FLOORS.jaccard),
-      }
-    : configured
+  const mayRelax = (leg: FloorLeg): boolean =>
+    resolution.profile === 'loose'
+    && (resolution.relaxLegs === undefined || resolution.relaxLegs.includes(leg))
+  const lowered = {
+    semantic: mayRelax('semantic') ? Math.min(configured.semantic, LOOSE_FLOORS.semantic) : configured.semantic,
+    fts: mayRelax('fts') ? Math.min(configured.fts, looseTermFloor(resolution.termCount)) : configured.fts,
+    jaccard: mayRelax('jaccard') ? Math.min(configured.jaccard, LOOSE_FLOORS.jaccard) : configured.jaccard,
+  }
   return { ...lowered, fts: effectiveTermFloor(lowered.fts, resolution.termCount) }
 }
 

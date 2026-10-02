@@ -10,7 +10,7 @@ import { exists, linkOrCopy } from '../fs.js'
 import { verifyIntegrity } from '../integrity.js'
 import { isInside, assertSafeRelativePath } from '../layout.js'
 import { decodeJson, readInstallManifest } from '../manifest.js'
-import { DEFAULT_MAX_BYTES, candidateUrls, fetchImplOf, readCapped, signalFor } from '../net.js'
+import { DEFAULT_MAX_BYTES, METADATA_MAX_BYTES, candidateUrls, fetchImplOf, readCapped, signalFor } from '../net.js'
 import { assertPackageName } from '../package-name.js'
 import { parseRange, parseVersion, satisfiesRange, selectVersion } from '../semver.js'
 import { extractTarGz } from '../tar.js'
@@ -66,9 +66,10 @@ async function fetchPackument(ctx: ProviderContext, spec: NpmPackageSpec): Promi
     throw new ProvisionError('fetch/failed', `无法获取 packument：${url}（${error instanceof Error ? error.message : String(error)}）`)
   }
   if (!response.ok) throw new ProvisionError('fetch/failed', `packument ${url} 返回 HTTP ${String(response.status)}`)
-  // Metadata read through the same hard byte cap as a tarball: a hostile or broken mirror must not be
-  // able to OOM the host with an unbounded `response.json()`.
-  const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response, DEFAULT_MAX_BYTES))) as unknown
+  // Metadata read through a hard byte cap of its own (`METADATA_MAX_BYTES`, not the 256 MiB archive
+  // cap): a hostile or broken mirror must not OOM the host with an unbounded `response.json()`, and
+  // because a packument is `JSON.parse`d its cap has to bound the PARSED size, not just the wire size.
+  const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response, METADATA_MAX_BYTES))) as unknown
   const versions = typeof body === 'object' && body !== null ? (body as { versions?: unknown }).versions : undefined
   if (typeof versions !== 'object' || versions === null) {
     throw new ProvisionError('fetch/failed', `packument ${url} 没有 versions`)

@@ -12,6 +12,18 @@ interface LockHolder {
   readonly startedAt: number
 }
 
+/** What a waiter observed when it refused to reclaim a lock whose holder is still alive. */
+export interface SlowHoldInfo {
+  readonly path: string
+  readonly pid: number
+  readonly startedAt: number
+  /** How old the lock file's mtime already is — the value that crossed `staleMs`. */
+  readonly heldMs: number
+  readonly staleMs: number
+  /** How long this `acquire()` call has been waiting so far. */
+  readonly waitedMs: number
+}
+
 /** `true` when the pid exists; `EPERM` counts as alive. */
 export function pidIsAlive(pid: number): boolean {
   try {
@@ -40,22 +52,51 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+/**
+ * Last warning time per `(path, holder)` pair. The poll loop re-observes the same stale-but-alive
+ * holder every `pollMs`, and a caller may retry `acquire` — both would otherwise emit the same line
+ * hundreds of times. The window is one `staleMs` (at least 1 s), i.e. the same period the warning is
+ * about; the holder identity makes a genuinely new holder warn again immediately.
+ */
+const slowHoldWarnedAt = new Map<string, number>()
+/** Bound on the rate-limit state; a lock home far past this just re-warns once more. */
+const SLOW_HOLD_WARN_STATE_LIMIT = 64
+
+function warnSlowHold(onSlowHold: (info: SlowHoldInfo) => void, info: SlowHoldInfo): void {
+  const key = `${info.path}\u0000${String(info.pid)}\u0000${String(info.startedAt)}`
+  const now = Date.now()
+  const last = slowHoldWarnedAt.get(key)
+  if (last !== undefined && now - last < Math.max(1_000, info.staleMs)) return
+  if (slowHoldWarnedAt.size >= SLOW_HOLD_WARN_STATE_LIMIT) slowHoldWarnedAt.clear()
+  slowHoldWarnedAt.set(key, now)
+  onSlowHold(info)
+}
+
 export interface DefaultLockOptions {
   /** Clock source; defaults to `Date.now`. */
   readonly clock?: () => number
   /** Poll interval while waiting; defaults to 25 ms. */
   readonly pollMs?: number
+  /**
+   * Called (rate-limited) when a waiter sees a lock whose mtime crossed `staleMs` while its holder
+   * pid is still ALIVE — the one case the lock deliberately refuses to reclaim. A long critical
+   * section is legal; this is how "the lock contract is being stretched" becomes visible instead of
+   * being silently papered over by stealing the lock.
+   */
+  readonly onSlowHold?: (info: SlowHoldInfo) => void
 }
 
 /** The default {@link ProvisionLock}. */
 export function defaultLock(options: DefaultLockOptions = {}): ProvisionLock {
   const clock = options.clock ?? Date.now
   const pollMs = options.pollMs ?? 25
+  const onSlowHold = options.onSlowHold
   return {
     async acquire(path, { timeoutMs, staleMs }): Promise<Disposable> {
       // Ensure the control-plane directory exists.
       await mkdir(dirname(path), { recursive: true })
-      const deadline = clock() + timeoutMs
+      const started = clock()
+      const deadline = started + timeoutMs
       for (;;) {
         const mine: LockHolder = { pid: process.pid, startedAt: clock() }
         let handle: Awaited<ReturnType<typeof open>> | undefined
@@ -96,9 +137,11 @@ export function defaultLock(options: DefaultLockOptions = {}): ProvisionLock {
         // The lock file's own mtime, read from the filesystem. It is compared against the WALL clock
         // rather than the injectable one: `clock` drives the timeout budget and the recorded
         // `startedAt`, but an injected clock that is deliberately far from wall time would make a
-        // freshly written lock look arbitrarily old and reclaim a live one.
+        // fresh lock look arbitrarily old.
         const info = await stat(path).then(value => value, () => undefined)
         const fileStale = info !== undefined && Date.now() - info.mtimeMs > staleMs
+        const heldMs = info === undefined ? 0 : Math.round(Date.now() - info.mtimeMs)
+        const waitedMs = Math.round(clock() - started)
         if (holder === undefined) {
           // No readable holder. mtime is the only trustworthy signal that this is a corrupt /
           // half-written lock rather than a live writer caught mid-write, so a stale file is
@@ -107,22 +150,39 @@ export function defaultLock(options: DefaultLockOptions = {}): ProvisionLock {
           if (clock() >= deadline) {
             throw new ProvisionError(
               'lock/timeout',
-              `等待发布锁超时（${String(timeoutMs)} ms）：${path} 存在但不是可读的锁文件`,
+              `等待发布锁超时（预算 ${String(timeoutMs)} ms，已等待 ${String(waitedMs)} ms）：${path} 存在但不是可读的锁文件` +
+                (info === undefined ? '' : `；锁文件 mtime 年龄 ${String(heldMs)} ms（staleMs ${String(staleMs)} ms）`),
             )
           }
           if (info !== undefined) await sleep(pollMs)
           continue
         }
-        // A readable holder. mtime is AUTHORITATIVE here: a pid can be reused by an unrelated live
-        // process, and requiring "the pid is dead" then means a dead holder's lock is never
-        // reclaimed. The recorded start time stays a secondary signal for a provably dead pid, which
-        // keeps recovery working under an injected clock or where mtime is not meaningful.
-        const recordedStale = !pidIsAlive(holder.pid) && clock() - holder.startedAt > staleMs
-        if ((fileStale || recordedStale) && await unlink(path).then(() => true, () => false)) continue
+        // A readable holder. The pid is AUTHORITATIVE: a lock is reclaimed only when its holder is
+        // provably GONE. mtime alone must never reclaim a live holder — a critical section is allowed
+        // to outlive `staleMs` (a GiB-scale copy fallback on Windows takes minutes), and stealing the
+        // lock from a live writer is worse than making the waiter fail visibly: two writers entering
+        // the same snapshot directory is a correctness break, a timeout is a report. `recordedStale`
+        // stays the secondary signal for a dead pid, keeping recovery working under an injected clock
+        // or where mtime is not meaningful.
+        const alive = pidIsAlive(holder.pid)
+        const recordedStale = !alive && clock() - holder.startedAt > staleMs
+        if (!alive && (recordedStale || fileStale) && await unlink(path).then(() => true, () => false)) continue
+        if (alive && fileStale && onSlowHold !== undefined) {
+          warnSlowHold(onSlowHold, {
+            path,
+            pid: holder.pid,
+            startedAt: holder.startedAt,
+            heldMs,
+            staleMs,
+            waitedMs,
+          })
+        }
         if (clock() >= deadline) {
+          const state = alive ? '仍存活（活体持有者，不回收）' : '已消失（尚未满足可回收条件）'
           throw new ProvisionError(
             'lock/timeout',
-            `等待发布锁超时（${String(timeoutMs)} ms）：${path} 由 pid ${String(holder.pid)} 持有`,
+            `等待发布锁超时（预算 ${String(timeoutMs)} ms，已等待 ${String(waitedMs)} ms）：${path} 由 pid ${String(holder.pid)} ` +
+              `持有（startedAt ${String(holder.startedAt)}），该进程${state}；锁文件 mtime 年龄 ${String(heldMs)} ms（staleMs ${String(staleMs)} ms）`,
           )
         }
         await sleep(pollMs)

@@ -19,7 +19,7 @@ import { assertRange, satisfiesRange } from '../src/semver.js'
 import { defaultFs, exists } from '../src/fs.js'
 import { lintManifest } from '../src/lint.js'
 import { aliasLegacyManifest, readInstallManifest } from '../src/manifest.js'
-import { DEFAULT_MAX_BYTES, platformKey } from '../src/net.js'
+import { DEFAULT_MAX_BYTES, METADATA_MAX_BYTES, platformKey } from '../src/net.js'
 import { binaryArchiveProvider } from '../src/providers/archive.js'
 import { modelCacheProvider } from '../src/providers/model.js'
 import { npmPackageProvider, packageDirOf } from '../src/providers/npm.js'
@@ -1228,6 +1228,77 @@ describe('修复回归：2026-10-01 审核的静默与不设防（D 车道）', 
 
     const report = await created.ensure()
     expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/too-large' })
+  })
+
+  // ── N11：元数据用自己那条约 16 MiB 的上限，不再沿用 256 MiB 的归档上限 ──────────────────────
+  it('元数据上限是 METADATA_MAX_BYTES（远小于 DEFAULT_MAX_BYTES），不是归档上限', async () => {
+    // The declared length is ~16 MiB: far under the 256 MiB archive cap, so this can only be terminal
+    // if the metadata path really uses the smaller cap. (`@types/node`'s full packument measured
+    // 11.2 MB, `typescript`'s 15.7 MB — both under it; see `net.ts`.)
+    const fetcher = (async () =>
+      new Response('{"versions":{}}', {
+        status: 200,
+        headers: { 'content-length': String(METADATA_MAX_BYTES + 1) },
+      })) as unknown as typeof fetch
+    const created = createProvisioner({ home, logger: logger().log, fs, fetch: fetcher })
+    created.register(npmPackageProvider())
+    created.declare(manifestOf([npmItem()]))
+
+    const report = await created.ensure()
+    expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/too-large' })
+  })
+
+  it('元数据超限是终局：不换源重试（镜像排在默认端点之前，一次都不碰）', async () => {
+    const hits: string[] = []
+    const fetcher = (async (input: Parameters<typeof fetch>[0]) => {
+      hits.push(String(input))
+      return new Response('{"sha":"x"}', {
+        status: 200,
+        headers: { 'content-length': String(METADATA_MAX_BYTES + 1) },
+      })
+    }) as unknown as typeof fetch
+    const created = createProvisioner({
+      home,
+      logger: logger().log,
+      fs,
+      fetch: fetcher,
+      policy: { mirrors: { archive: [], model: ['https://model-mirror.test'] } },
+    })
+    created.register(modelCacheProvider())
+    created.declare(
+      manifestOf([{ id: 'mem:model', kind: 'model-cache', spec: { repo: 'org/model' }, target: { root: 'models' }, schemaVersion: 1 }]),
+    )
+
+    const report = await created.ensure()
+    expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/too-large' })
+    // The mirror answers first and is oversized; a mirror serves the same oversized document, so the
+    // default endpoint must never be tried (that is the whole point of the terminal classification).
+    expect(hits).toEqual(['https://model-mirror.test/api/models/org/model/revision/main'])
+  })
+
+  it('正常大小的元数据不受新上限影响（照常解析出 sha 并继续）', async () => {
+    const sha = 'a'.repeat(40)
+    const hits: string[] = []
+    const fetcher = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input)
+      hits.push(url)
+      if (url.endsWith(`/revision/main`)) {
+        return new Response(JSON.stringify({ sha }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      // The siblings call is the next metadata read; a 503 keeps the test at the metadata layer (the
+      // point is that the ~100-byte revision response was ACCEPTED, not that the model installs).
+      return new Response('nope', { status: 503 })
+    }) as unknown as typeof fetch
+    const created = createProvisioner({ home, logger: logger().log, fs, fetch: fetcher })
+    created.register(modelCacheProvider())
+    created.declare(
+      manifestOf([{ id: 'mem:model', kind: 'model-cache', spec: { repo: 'org/model' }, target: { root: 'models' }, schemaVersion: 1 }]),
+    )
+
+    const report = await created.ensure()
+    expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/failed' })
+    expect(hits[0]).toBe('https://huggingface.co/api/models/org/model/revision/main')
+    expect(hits[1]).toBe('https://huggingface.co/api/models/org/model')
   })
 
   it('peer 只能从宿主启动目录解析到 ⇒ 告警一次（旧代码静默用 CWD）', async () => {

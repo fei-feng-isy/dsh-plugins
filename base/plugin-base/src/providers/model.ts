@@ -8,7 +8,7 @@ import { ProvisionError } from '../errors.js'
 import { ATOMIC_TEMP_PREFIX, exists, sweepAtomicTemps } from '../fs.js'
 import { isInside, lockPath } from '../layout.js'
 import { defaultLock } from '../lock.js'
-import { fetchImplOf, readCapped, signalFor } from '../net.js'
+import { METADATA_MAX_BYTES, fetchImplOf, readCapped, signalFor } from '../net.js'
 import type {
   InstallContext,
   ProbeResult,
@@ -218,9 +218,9 @@ async function resolveRevision(ctx: ProviderContext, spec: ModelCacheSpec): Prom
         problems.push(`${url} → HTTP ${String(response.status)}`)
         continue
       }
-      // Metadata goes through the same hard byte cap as model data: an unbounded `response.json()`
-      // lets a broken or hostile mirror OOM the host before any integrity check can run.
-      const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response))) as unknown
+      // Metadata goes through the METADATA byte cap (not the multi-GB model-data cap): it is parsed
+      // as JSON, so the cap has to bound the parsed size, not just the wire size.
+      const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response, METADATA_MAX_BYTES))) as unknown
       const sha = typeof body === 'object' && body !== null ? (body as { sha?: unknown }).sha : undefined
       if (!isSha(sha)) {
         problems.push(`${url} → 响应 sha 不是 40/64 位小写十六进制`)
@@ -255,7 +255,8 @@ async function listFiles(ctx: ProviderContext, spec: ModelCacheSpec): Promise<re
         problems.push(`${url} → HTTP ${String(response.status)}`)
         continue
       }
-      const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response))) as unknown
+      // The siblings list is metadata too: same METADATA cap (parsed as JSON), not the model-data cap.
+      const body: unknown = JSON.parse(new TextDecoder().decode(await readCapped(response, METADATA_MAX_BYTES))) as unknown
       const siblings = typeof body === 'object' && body !== null ? (body as { siblings?: unknown }).siblings : undefined
       const names = Array.isArray(siblings)
         ? siblings.map(row => (typeof row === 'object' && row !== null ? (row as { rfilename?: unknown }).rfilename : undefined))
@@ -362,7 +363,17 @@ function decodeRecord(bytes: Uint8Array): FlatRecord | undefined {
 
 /** Run `mission` under the core's placement lock. */
 async function withLock<T>(ctx: ProviderContext, mission: () => Promise<T>): Promise<T> {
-  const lock = ctx.lock ?? defaultLock()
+  const lock = ctx.lock ?? defaultLock({
+    // The lock exists for the GiB-scale placement below (`linkOrWrite`); when that outlives
+    // `staleMs` the waiter must hear WHY it is not reclaiming rather than only seeing a timeout.
+    onSlowHold: info => {
+      ctx.logger.warn(
+        `模型放置锁 ${info.path} 的临界区已持有 ${String(info.heldMs)} ms（超过 staleMs ${String(info.staleMs)} ms），` +
+          `但 pid ${String(info.pid)} 活着，所以不回收；按 timeoutMs 预算继续等待。`,
+        { path: info.path, pid: info.pid, startedAt: info.startedAt, heldMs: info.heldMs, staleMs: info.staleMs, waitedMs: info.waitedMs },
+      )
+    },
+  })
   const handle = await lock.acquire(lockPath(ctx.home), { timeoutMs: LOCK_TIMEOUT_MS, staleMs: STALE_LOCK_MS })
   try {
     return await mission()

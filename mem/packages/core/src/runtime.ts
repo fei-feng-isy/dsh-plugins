@@ -31,7 +31,7 @@ import { MEMORY_SCHEMA, openMemoryStore, type Db } from './db/conn.js'
 import { describeSqlite } from './db/sqlite.js'
 import { describeMigrationOutcome, wasUpgraded } from './db/store.js'
 import { looksRelevant, type RelevanceHit } from './store/lexical.js'
-import { emptyFloorDrops, totalFloorDrops } from './store/floors.js'
+import { droppedLegs, emptyFloorDrops, totalFloorDrops, type FloorLeg } from './store/floors.js'
 import { MemoryStore } from './store/memory.js'
 import { KnowledgeStore } from './store/knowledge.js'
 import { crossQuery } from './router.js'
@@ -440,8 +440,12 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
        * own relaxed fallback: only the MERGED result may decide whether relaxing is warranted,
        * otherwise a store that happens to be empty would inject its relaxed tail into an answer the
        * other store filled strictly.
+       *
+       * `relaxLegs` is the same "only the legs that actually dropped" rule the single-store retry
+       * applies (`store/floors.ts`'s `droppedLegs`), read off the MERGED strict pass — relaxing a leg
+       * that dropped nothing admits no candidate, so this only keeps the reported `floors` honest.
        */
-      const crossPass = async (profile: FloorProfile): Promise<RecallResult> => {
+      const crossPass = async (profile: FloorProfile, relaxLegs?: readonly FloorLeg[]): Promise<RecallResult> => {
         // The knowledge store answers with hits only; capture its floor report so the ONE merged
         // result can carry both stores' drops (the memory side brings its own on the result object).
         let kbDroppedByFloor: RecallResult['dropped_by_floor']
@@ -451,7 +455,10 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
           // for both legs: ONE user query must produce ONE health event (`kind: 'cross'`, below),
           // or `queries`/`zero_result_rate`/`avg_latency` count legs — two per `kb_query` — and the
           // knowledge leg's zero-result case was not counted at all.
-          this.memory.search({ query: req.query, limit: limit * 3, track: false, recordStats: false, queryVector, maxTokens: 0, floors: profile }),
+          this.memory.search({
+            query: req.query, limit: limit * 3, track: false, recordStats: false, queryVector, maxTokens: 0, floors: profile,
+            ...(relaxLegs === undefined ? {} : { relaxLegs }),
+          }),
           this.knowledge.search(req.query, {
             domain: req.domain,
             source: req.source,
@@ -460,6 +467,7 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
             queryVector,
             maxTokens: 0,
             floors: profile,
+            ...(relaxLegs === undefined ? {} : { relaxLegs }),
             onResult: (r) => { kbDroppedByFloor = r.dropped_by_floor },
           }),
         ])
@@ -477,9 +485,9 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
       // result was empty BECAUSE the floors dropped candidates.
       let result = await crossPass(req.floors === 'loose' ? 'loose' : 'strict')
       if (req.floors === undefined && result.hits.length === 0) {
-        const dropped = totalFloorDrops(result.dropped_by_floor ?? emptyFloorDrops())
-        if (dropped > 0) {
-          const loosened = await crossPass('loose')
+        const dropped = result.dropped_by_floor ?? emptyFloorDrops()
+        if (totalFloorDrops(dropped) > 0) {
+          const loosened = await crossPass('loose', droppedLegs(dropped))
           // Only a pass that produced something replaces the strict answer: if relaxing changes
           // nothing, the caller keeps the strict result and its honest "the floors removed N" report.
           if (loosened.hits.length > 0) result = { ...loosened, relaxed: true }

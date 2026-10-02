@@ -34,7 +34,7 @@ import { classifySource, listTextFiles } from './source_picker.js'
 import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeTerms, type LexicalProbe } from './lexical.js'
-import { applyScoreFloor, applyTermFloor } from './floors.js'
+import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
 import { hybridSearch, RetrievalInputError, type HybridContext, type HybridDeps, type HybridLeg, type HybridResult } from './hybrid.js'
 import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportForeignVectors, vectorSpaceOf } from './common.js'
 import { ENTITY_EXTRACTOR_VERSION, extractEntities } from '../entities/extract.js'
@@ -69,6 +69,12 @@ export interface KnowledgeSearchOptions {
    * each pass, because only the MERGED result can decide whether relaxing is warranted.
    */
   floors?: FloorProfile
+  /**
+   * Which legs a `'loose'` pass may lower (see `store/floors.ts`; same contract as
+   * `SearchInput.relaxLegs`). Internal: the cross-store router pins the MERGED strict pass's
+   * dropping legs on its second call.
+   */
+  relaxLegs?: readonly FloorLeg[]
   /** See `SearchInput.recordStats`: the cross-store router records the merged query once. */
   recordStats?: boolean
   /**
@@ -1308,6 +1314,7 @@ export class KnowledgeStore {
       queryVector: opts?.queryVector,
       recordStats: opts?.recordStats,
       floors: opts?.floors,
+      ...(opts?.relaxLegs === undefined ? {} : { relaxLegs: opts.relaxLegs }),
     })
     opts?.onResult?.(result)
     return result.hits

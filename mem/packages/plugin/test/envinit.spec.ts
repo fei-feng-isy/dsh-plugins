@@ -463,6 +463,36 @@ describe('envinit loader', () => {
     runtime.dispose()
   })
 
+  it('declares the model item\'s per-request budget, and never an inverted ensure deadline', async () => {
+    const env = await freshEnvinit()
+    const calls = emptyCalls()
+    const home = mkdtempSync(join(tmpdir(), 'avantf-mem-envinit-'))
+    const framework = fakeFramework(calls, undefined)
+    const module = fakeCompat(calls, { load: true, skipped: false, status: 'ok', problems: [], warnings: [], notes: [], lines: [], reason: '' })
+    const runtime = await env.loadEnvinit({ home, autoDownload: false, framework: framework as never, compatModule: module as never })
+    if (runtime === undefined) throw new Error('runtime')
+
+    runtime.provisionResources({
+      pandoc: true,
+      archiveMirrors: [],
+      modelAutoDownload: true,
+      model: { repo: 'Xenova/bge-small-zh-v1.5', files: ['config.json'], endpoint: 'https://hf-mirror.com' },
+    }, () => {})
+
+    const model = calls.declare[0].items.find((item: { id: string }) => item.id === 'mem:model')
+    // The budget is the base's own default made EXPLICIT (300 s), not inherited silently: the review
+    // found the `timeoutMs` mechanism implemented but unused by every item.
+    expect(model.policy).toEqual({ timeoutMs: 300_000 })
+    // The ensure deadline must not sit BELOW a declared per-request budget — the base's inversion
+    // check. The 15 s default would, so it is raised to cover the longest declared item.
+    const policy = calls.createOptions[0].policy
+    expect(policy.deadlineMs).toBeGreaterThanOrEqual(model.policy.timeoutMs)
+    // Pandoc declares no budget of its own: it keeps the base's default untouched.
+    const pandoc = calls.declare[0].items.find((item: { id: string }) => item.id === 'mem:pandoc')
+    expect(pandoc.policy).toBeUndefined()
+    runtime.dispose()
+  })
+
   it('scopes the model item to repos whose files the runtime really reads (managedModelSpec)', async () => {
     const env = await freshEnvinit()
     const root = join(tmpdir(), 'avantf-mem-envinit-models')

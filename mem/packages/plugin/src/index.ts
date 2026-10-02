@@ -64,6 +64,7 @@ import {
 import { hostContribution } from './remote.js'
 import { configDataHome } from './data_home.js'
 import { provision, registerCompatMegaphone, verifyRegisteredFaces, type CompatVerdict } from './provision.js'
+import { createCorpusReconciler } from './reconcile.js'
 import {
   managedModelSpec,
   MODEL_ITEM,
@@ -716,72 +717,26 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // the corpus through tool calls, so a finished tool call is the moment to ask "did anything under
   // `knowledge.docs.dir` change?" — and `corpusDrift()` answers that with one `stat` per document,
   // reading nothing. Only the files whose stamp moved get re-ingested, which is what makes this
-  // cheap enough to run after EVERY tool result.
-  let reconciling = false
-  // Set by the unmount effect below. Without it, the trailing timer (and the mount-time full
-  // reconcile) could still call `corpusDrift()`/`sync()` after `shutdown()` closed the databases —
-  // the timer also kept the event loop alive for up to `RECONCILE_MIN_INTERVAL_MS`.
-  let reconcileStopped = false
-  // THROTTLE, with a trailing run. Drift checks run after EVERY tool result — including other
-  // plugins' — so on a busy session a full stat pass plus a recursive readdir would fire many times
-  // a second. Skipping alone would risk dropping the LAST edit (the one that matters), so a
-  // throttled call schedules exactly one trailing check instead of being discarded.
-  let lastDriftAt = 0
-  let trailingDrift: ReturnType<typeof setTimeout> | null = null
-  const reconcile = async (full: boolean): Promise<void> => {
-    if (reconcileStopped) return
-    if (reconciling) return
-    if (!full) {
-      const wait = RECONCILE_MIN_INTERVAL_MS - (Date.now() - lastDriftAt)
-      if (wait > 0) {
-        if (trailingDrift === null) {
-          trailingDrift = setTimeout(() => { trailingDrift = null; void reconcile(false) }, wait)
-          // Not a reason for the process to stay alive: nothing promises the check runs.
-          const unref = (trailingDrift as unknown as { unref?: () => void }).unref
-          if (typeof unref === 'function') unref.call(trailingDrift)
-        }
-        return
-      }
-      lastDriftAt = Date.now()
-    }
-    reconciling = true
-    try {
-      if (full) {
-        await rt.knowledge.sync({})
-        // Take the baseline AFTER the sync: seeding it before would hide an edit that landed in
-        // between, which is the one window this whole mechanism exists to close.
-        rt.knowledge.corpusDrift()
-        return
-      }
-      const drift = rt.knowledge.corpusDrift()
-      if (drift.changed.length === 0 && drift.missing.length === 0 && !drift.fileSetChanged) return
-      if (drift.fileSetChanged || drift.missing.length > 0) {
-        // A new, vanished or frontmatter-destroyed `.md` is a corpus-level question (orphan /
-        // missing), not a doc-level one — so escalate to the full reconcile, which is the surface
-        // that reports it honestly instead of silently leaving the document un-ingested.
-        await rt.knowledge.sync({})
-        return
-      }
-      for (const docId of drift.changed) await rt.knowledge.sync({ docId })
-    } catch (error) {
+  // cheap enough to run after EVERY tool result. The throttle (with a trailing run) and the rule
+  // that an IN-FLIGHT pass stops at its next `await` once unmounted both live in `reconcile.ts`,
+  // where `test/reconcile.spec.ts` can drive them without mounting the plugin.
+  const reconciler = createCorpusReconciler({
+    corpus: {
+      sync: (options) => rt.knowledge.sync(options),
+      corpusDrift: () => rt.knowledge.corpusDrift(),
+    },
+    minIntervalMs: RECONCILE_MIN_INTERVAL_MS,
+    onError: (error) => {
       logger.warn(`知识库自动同步失败（不影响已有内容）：${error instanceof Error ? error.message : String(error)}`)
-    } finally {
-      reconciling = false
-    }
-  }
+    },
+  })
   // The reconciler's own fiber-owned resources: the trailing timer must not outlive the plugin, and
   // a check that is already in flight must not start another step against a closed database.
-  ctx.effect(() => () => {
-    reconcileStopped = true
-    if (trailingDrift !== null) {
-      clearTimeout(trailingDrift)
-      trailingDrift = null
-    }
-  })
+  ctx.effect(() => () => reconciler.stop())
   // Once at mount, for whatever changed while the host was not running; then after every tool call.
-  void reconcile(true)
+  void reconciler.request(true)
   ctx.on('tools/result', () => {
-    void reconcile(false)
+    void reconciler.request(false)
   })
 
   for (const spec of toolSpecs) {

@@ -116,6 +116,24 @@ const SILENT_LOGGER: ProvisionLogger = {
   error: () => undefined,
 }
 
+/**
+ * Last time each `timeoutMs > deadlineMs` declaration was reported, keyed by item id + both values.
+ * A plugin re-initialising its provisioner re-declares the same manifest; that must not repeat the
+ * same line, so the gate is process-wide with a time window rather than per instance.
+ */
+const deadlineInversionWarnedAt = new Map<string, number>()
+const DEADLINE_INVERSION_WARN_WINDOW_MS = 60_000
+const DEADLINE_INVERSION_WARN_STATE_LIMIT = 64
+
+function shouldWarnDeadlineInversion(key: string): boolean {
+  const now = Date.now()
+  const last = deadlineInversionWarnedAt.get(key)
+  if (last !== undefined && now - last < DEADLINE_INVERSION_WARN_WINDOW_MS) return false
+  if (deadlineInversionWarnedAt.size >= DEADLINE_INVERSION_WARN_STATE_LIMIT) deadlineInversionWarnedAt.clear()
+  deadlineInversionWarnedAt.set(key, now)
+  return true
+}
+
 /** Resource key: `kind+name`, or a best-effort `kind+id` when no provider claims the kind. */
 function resourceKey(kind: string, identity: ResourceIdentity | undefined, itemId: string): string {
   return `${kind}+${identity?.name ?? itemId}`
@@ -143,8 +161,20 @@ function combineSignals(base: AbortSignal, extra: AbortSignal | undefined): Abor
 export function createProvisioner(options: ProvisionerOptions): Provisioner {
   const fs = options.fs ?? defaultFs()
   const clock = options.clock ?? Date.now
-  const lock = options.lock ?? defaultLock({ clock })
   const logger = options.logger ?? SILENT_LOGGER
+  const lock = options.lock ?? defaultLock({
+    clock,
+    // A lock held past `staleMs` by a LIVE process is deliberately NOT reclaimed (see `lock.ts`); say
+    // so — rate-limited by the lock itself — so a critical section that keeps outgrowing the contract
+    // becomes visible instead of being silently recovered by stealing the lock.
+    onSlowHold: info => {
+      logger.warn(
+        `锁 ${info.path} 的临界区已持有 ${String(info.heldMs)} ms（超过 staleMs ${String(info.staleMs)} ms），` +
+          `但 pid ${String(info.pid)} 活着，所以不回收；按 timeoutMs 预算继续等待。`,
+        { path: info.path, pid: info.pid, startedAt: info.startedAt, heldMs: info.heldMs, staleMs: info.staleMs, waitedMs: info.waitedMs },
+      )
+    },
+  })
   const home = options.home ?? join(homedir(), '.avantf', 'env')
   const layout = options.layout ?? 'v1'
   const policy: ProvisionPolicy = options.policy ?? {}
@@ -381,6 +411,26 @@ export function createProvisioner(options: ProvisionerOptions): Provisioner {
         logger.warn(`ignored-field: ${item.id} 携带框架不认识的字段：${key}`)
       }
       noteUnimplemented(UNIMPLEMENTED_POLICY_KEYS, Object.keys(item.policy ?? {}), `${item.id}.policy`)
+      // `timeoutMs` (ONE request's budget, read by `net.signalFor`) and `deadlineMs` (the whole STARTUP
+      // critical path) are different budgets: when the deadline runs out the item is merely left
+      // `pending` and keeps running in the background, nothing is cancelled. `timeoutMs > deadlineMs`
+      // is therefore legal — the caller may always raise the deadline — but it means the request budget
+      // can never be exercised on the critical path, which is almost always a declaration mistake.
+      // Warn, never fail (see `net.ts:signalFor` and `docs/DESIGN.md`). The comparison uses the
+      // provisioner-wide policy; a per-call `ensure({ deadlineMs })` can only make it less inverted.
+      const requestBudgetMs = item.policy?.timeoutMs
+      const startupBudgetMs = policy.deadlineMs ?? DEFAULT_DEADLINE_MS
+      if (typeof requestBudgetMs === 'number' && requestBudgetMs > 0 && requestBudgetMs > startupBudgetMs) {
+        const inversion = `${item.id}\u0000${String(requestBudgetMs)}\u0000${String(startupBudgetMs)}`
+        if (shouldWarnDeadlineInversion(inversion)) {
+          logger.warn(
+            `timeoutMs/deadlineMs 倒挂：${item.id} 的 policy.timeoutMs=${String(requestBudgetMs)} ms 大于启动截止 ` +
+              `${String(startupBudgetMs)} ms —— 该项在启动路径上必然先被判 pending（不会失败）；若要它在启动路径内完成，` +
+              '需要调大 policy.deadlineMs（或本次 ensure 的 deadlineMs）。',
+            { item: item.id, timeoutMs: requestBudgetMs, deadlineMs: startupBudgetMs },
+          )
+        }
+      }
       // An illegal `onMissing` value falls back to that axis's default after a warning.
       if (item.onMissing !== undefined) {
         const normalized = normalizeOnMissing(item.onMissing)
@@ -908,6 +958,10 @@ export function createProvisioner(options: ProvisionerOptions): Provisioner {
         // Only a genuinely unfinished item becomes `pending`.
         if (!done) putPending(declared)
         background.push(tracked)
+        // Same window as the dispatch branch above: `ensure()` installs the real handler only after
+        // `await persistStatus()`, so a rejection that lands in between would be an unhandledRejection
+        // (FATAL on a strict host). Claim it now — `ensure()`'s `.catch` still does the real work.
+        void tracked.catch(() => undefined)
         continue
       }
       entries.push(entry)

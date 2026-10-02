@@ -23,7 +23,12 @@
 - **接口版本** = `INTERFACE_VERSION`（世代号）+ `api/interface-vN.json`（该代名字面的快照）。它是兼容性的
   **主契约**，由 base 的**运行期门禁**裁决（§3）：插件构建期把世代号烘进产物，启动时与加载到的 base 比对。
 - **包版本** = `base/plugin-base/package.json` 的**普通 semver**。它只表达**包自身**（新增行为、修 bug），
-  **不再**与接口绑定 —— 接口换代**不再**要求提 major。今天 base 是 **`0.3.0`**；两个插件声明同一条宽区间
+  **不再**与接口绑定 —— 接口换代**不再**要求提 major。**实测（2026-10-02）**：registry 上已发布的是
+  **`0.3.1`**（它带的是**接口 v1**，见 §5），工作区在 **`0.3.2`**（接口 v2，未发布）。两条轴各说各的：
+  包版本从 0.3.1 到 0.3.2 是一次普通递增，接口世代同时从 1 变成 2 —— 把包版本按"接口变了"读、或反过来
+  把 `INTERFACE_VERSION` 按"包发版了"读，都会读错。本轮新增的良构文本是**可观察能力**，按"业务流程 /
+  可观察行为变 ⇒ minor"该走到 **`0.4.0`**（复审 N18）；最终取 `0.3.2` 还是 `0.4.0` 是一次**待用户拍板**的
+  决定，这里只记现状与判断依据。无论选哪个都**不动 `INTERFACE_VERSION`**。两个插件声明同一条宽区间
   `>=0.3.0 <1.0.0`，所以一次 base 发版不必等插件同批改。
 
 | 变更 | 接口版本（主契约） | 包版本 | 插件是否必须同批改 |
@@ -32,13 +37,15 @@
 | **业务流程 / 可观察行为**（插件测试断言的那些） | 不变 | minor | 否 |
 | **纯修复**，无可观察变化 | 不变 | patch | 否 |
 
-`INTERFACE_VERSION` **现在是 2**。v1 从未发布（registry 上只有 `0.1.0` / `0.2.0`，它们没有这套机制），所以
-v1 期间给同一代增面（新增门禁函数）是合法的**就地精修**。v1 → v2 是一次**增量换代**：把共享 kit 的良构文本
-两个成员（`wellFormedText` / `wellFormedDeep`，§8）收归 base。增面走正常换代流程而不是继续就地精修，理由
-有两条：① 这一代**仍未发布**，正是把最后一个已知共享缺陷在发布前定形的窗口 —— 一旦两棵树各自带一份本地
-副本发了版，重复实现就成了既成事实；② 换代在 diff 里留下一个数字（2），"新成员属于哪一代、旧插件在哪一代
-降级"不必读人话。v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译在 `BaseRuntimeV1` 上，而 v2 是它
-的**超集**（§5）。
+`INTERFACE_VERSION` **现在是 2**。**v1 已经发布过** —— 实测（2026-10-02）：registry 上的
+`@avantf/dsh-plugin-base@0.3.1` 解包后 `dist/interface.js` 里写着 `INTERFACE_VERSION = 1`，而且 registry 上
+目前只有这一个版本。所以"v1 从未发布"是**过期结论**：v1 期间确实**就地**加过一面（运行期门禁的
+`checkInterface` / `readInterfaceRequirement`，§3），但那次精修发生在 **0.3.1 发布之前**，因此它没有破坏
+任何已发布契约 —— 这是一条**历史事实**（"当时还没发"），不是"同一代可以随便改"的长期许可；0.3.1 之后
+v1 就是公开契约，再增面只能换代。v1 → v2 就是一次**增量换代**：把共享 kit 的良构文本两个成员
+（`wellFormedText` / `wellFormedDeep`，§8）收归 base，而不是继续就地精修 v1。这样可以：① 让"新成员属于
+哪一代、旧插件在哪一代降级"在 diff 里留下一个数字（2），不必读人话；② 不必改动任何已发布的世代记录。
+v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译在 `BaseRuntimeV1` 上，而 v2 是它的**超集**（§5）。
 
 ## 2. 接口面由三层构成，三层都要冻结
 
@@ -128,15 +135,19 @@ v1 期间给同一代增面（新增门禁函数）是合法的**就地精修**�
   所以它随接口类型一起写（§7 第 4 步）。**注意这些测试住在插件的门禁里** —— 只有插件能链接 base，所以
   base 自己的 `release:check` 跑不到它们。这不是缺陷，但意味着：**手工发 base 之前必须把两个插件的门禁
   一起跑**（`AGENTS.md` 的「改动 `base/**` 之后」那条规则就是它），否则"语义也是接口"在 base 自己的发布
-  路径上仍然是空的。v2 的良构文本成员**尚未**有跨树 pin：那条测试只能住在两棵插件树的门禁里，而它们
-  此刻正由另两条车道改动（§8）。
+  路径上仍然是空的。v2 的良构文本成员**已有**跨树 pin：`mem/packages/plugin/test/wellformed_pin.spec.ts`
+  （6 条，从已链接的 base 取真实实现，与本地副本逐输入比对）与
+  `mission/packages/plugin/test/wellformed.spec.ts`（base-kit 优先 / 本地副本降级的解析，以及"两个来源给出
+  同一修复"）。它们同样只能住在两棵插件树的门禁里（只有插件能链接 base）。
 
 ## 5. 冻结怎么执行：快照 + 门禁
 
 1. `api/interface-vN.json` **只记名字面**：`.` 的值名集合、类型名集合，以及各自的条数。**v1 冻结的是落地
    顺序第 2 步之后的形态** —— 那次具名化是唯一的破坏性改动，而它先发生。之后 v1 又**就地**加过一面
-   （运行期门禁的 `checkInterface` / `readInterfaceRequirement`，§3）：这一代从未发布，所以在同一代里精修
-   是合法的。**v2 是新的一代**：v1 的快照与类型原样留档，v2 = v1 + 良构文本两个成员（§8），并且门禁断言
+   （运行期门禁的 `checkInterface` / `readInterfaceRequirement`，§3）：那次精修发生在 **0.3.1 发布之前**，
+   所以没有破坏任何已发布契约 —— 这是**历史事实**，不是"同一代可以随意增面"的许可。0.3.1 之后 v1 已是公开
+   契约（实测其 `dist/interface.js` 报 `INTERFACE_VERSION = 1`），再要增面只能换代。**v2 就是新的一代**：
+   v1 的快照与类型原样留档，v2 = v1 + 良构文本两个成员（§8），并且门禁断言
    v2 是 v1 的**超集**（值名多两个，类型名不增），所以"增量"是可机械检查的，不是一句承诺。换代（新建
    `interface-v(N+1).json` + 常量加一）此后只在对已发布世代做**破坏性**改动时才发生。
    **不哈希任何东西**：哈希名字没有信息量（名字就在同一个文件里逐字列着），哈希声明文本（`.d.ts` 片段）会被格式、
@@ -170,7 +181,8 @@ v1 期间给同一代增面（新增门禁函数）是合法的**就地精修**�
 
 1. **安装期**不再锁步：两个插件的 base peer 与 `devDependencies`、以及 `bootstrap.ts` 的 `supportedRange`
    都写成 **`>=0.3.0 <1.0.0`** —— 一个普通比较符区间，收得下 base 的每一次 minor/patch，停在下一个
-   大世代。base 的包版本退回 **`0.3.0`**（从 `1.0.0` 降回来）：它现在只表达包自身。
+   大世代。base 的包版本退回 **`0.3.0`**（从 `1.0.0` 降回来）：它现在只表达包自身。（这是当时的落点；
+   实测今天 registry 上是 `0.3.1`、工作区是 `0.3.2`，见 §1。）
 2. **运行期**由接口门禁裁决：区间内的 base 若报出**另一个 `INTERFACE_VERSION`**，插件按 §3 的降级路径
    挂载（用自带默认正文、跳过门禁、legacy provisioning），**绝不拒载**。
 
@@ -196,11 +208,11 @@ v1 期间给同一代增面（新增门禁函数）是合法的**就地精修**�
 | `DESIGN.md` §7 的四张协议面版本表（item / layout / status / declared） | 已有 |
 | `resolveDataHome` 改具名对象（§4 第 1 条；同时是一次接口变更） | **已有** —— 三处都收成具名 slot，不再有位置参数：base kit 与 mission `promptDir`/本地兜底是 `{ explicit?, env?, configured? }`，`@avantf/mem` 引擎是 `{ common, explicit }`（`common` 承载层 ② 的配置对象，因为它读的是 `Pick<Config,'dataHome'>`；名字不同，槽位语义相同，且都在编译期挡住"配置值放进 explicit slot"）。`family_pin.spec.ts`（跨树）、`family_paths.spec.ts`、`data_home.spec.ts`、`prompt_files.spec.ts` 同步 |
 | `api/interface-v1.json` 快照（只记名字面）与"变了就必须升编号"的门禁 | **已有** —— v1 留档在 `base/plugin-base/api/interface-v1.json`；当前世代是 `api/interface-v2.json`，门禁断言快照 == 接口类型的两份名单 == 代码实际导出（两向相等），且 v2 ⊇ v1、只多两个值名；不等时只能删导出，或新增 `interface-v(N+1).json` 并升 `INTERFACE_VERSION` |
-| 接口类型 `BaseRuntimeV2`（= `BaseRuntimeV1` + 良构文本）+ 每个带语义成员的跨树行为测试 | **已有** —— `src/interface.ts` 的 `BaseRuntimeV2`（值面，可结构化赋值；`extends BaseRuntimeV1`，v1 名字继续导出）+ `BaseTypeSurfaceV2`（类型面，`keyof` 就是类型名单）；快照由它们派生。跨树行为测试在 `mem/packages/plugin/test/interface.spec.ts` 与 `mission/packages/plugin/test/interface.spec.ts`，覆盖路径解析、`PromptFiles` 的 ensure/read/fallback、`compatReport` 的结构与文案归属、provisioner 的终态与 `code` 表，以及 bake 出的编号 == 加载到的 base 报出的编号（都是真实实现，不是 mock）。**v2 新增的良构文本成员还没有这条 pin**（见 §8 的"待补"） |
-| 良构文本 kit（`wellFormedText` / `wellFormedDeep`，v2 新成员） | **已有（实现 + base 侧测试）** —— `src/kit/wellformed.ts`，在 `.` 上、零运行期依赖；单字符串修复优先用 `String.prototype.toWellFormed`，缺失时走等价的 `charCodeAt` 扫描；递归版只碰字符串、数组与**普通对象**（含键），其它类型（含 `Date` / `Map` / 类实例 / 带 `toJSON` 的对象）按同一性原样返回。base 侧 `test/wellformed.spec.ts` 覆盖双向证据、降级路径与幂等。**跨树行为 pin 待补**（§8） |
+| 接口类型 `BaseRuntimeV2`（= `BaseRuntimeV1` + 良构文本）+ 每个带语义成员的跨树行为测试 | **已有** —— `src/interface.ts` 的 `BaseRuntimeV2`（值面，可结构化赋值；`extends BaseRuntimeV1`，v1 名字继续导出）+ `BaseTypeSurfaceV2`（类型面，`keyof` 就是类型名单）；快照由它们派生。跨树行为测试在 `mem/packages/plugin/test/interface.spec.ts` 与 `mission/packages/plugin/test/interface.spec.ts`，覆盖路径解析、`PromptFiles` 的 ensure/read/fallback、`compatReport` 的结构与文案归属、provisioner 的终态与 `code` 表，以及 bake 出的编号 == 加载到的 base 报出的编号（都是真实实现，不是 mock）。**v2 新增的良构文本成员也有这条 pin**：`mem/packages/plugin/test/wellformed_pin.spec.ts`（6 条，与已链接的 base 逐输入比对）与 `mission/packages/plugin/test/wellformed.spec.ts`（§8） |
+| 良构文本 kit（`wellFormedText` / `wellFormedDeep`，v2 新成员） | **已有（实现 + base 侧测试 + 跨树 pin）** —— `src/kit/wellformed.ts`，在 `.` 上、零运行期依赖；单字符串修复优先用 `String.prototype.toWellFormed`，缺失时走等价的 `charCodeAt` 扫描；递归版只碰字符串、数组与**普通对象**（含键），其它类型（含 `Date` / `Map` / 类实例 / 带 `toJSON` 的对象）按同一性原样返回。base 侧 `test/wellformed.spec.ts` 覆盖双向证据、降级路径与幂等。**跨树行为 pin 已有**：`mem/packages/plugin/test/wellformed_pin.spec.ts` 与 `mission/packages/plugin/test/wellformed.spec.ts`（§8） |
 | `INTERFACE_VERSION` 与插件的构建期 bake + 运行期门禁（双向断言、由 link 步骤重烤） | **已有** —— base 导出整数 `INTERFACE_VERSION`；两个 `scripts/link-envinit.mjs` 在 vendor bootstrap 的同一步把 `{ baseVersion, interfaceVersion }` 写进 `lib/interface-version.json`（`files` 随包发布），`--check` 按字节比对；启动时插件用 base 的 `readInterfaceRequirement` 读自己的 bake、再调 base 的 `checkInterface`：`incompatible` ⇒ 一条 `WARNING` + 不用 base 的共享能力（自带 prompt 正文、门禁跳过、legacy provisioning）但**照常挂载**，`cannot-tell` ⇒ 一条 `WARNING` 并照常使用（§3）。**双向**断言：①bake 的编号 == base 当时的编号（两个 `link-envinit.mjs` 的 `--check`），②声明/bake 编号 == 加载到的 base 报出的编号（插件启动路径 + 两条跨树测试） |
-| 门禁搬进 base（§3 的核心） | **已有** —— `.` 导出 `checkInterface(required, module)` 与 `readInterfaceRequirement(url)`；两者都在 `BaseRuntimeV2` / `VALUE_NAMES_V2` 与快照里（v1 期间就地精修，v2 的增量把这些名字一并继承）。插件只保留**消费**与"加载到的 base 没有这个函数 ⇒ `cannot-tell`"的兜底（老 base 必须还能被装上）。base 侧测试 `test/interface_gate.spec.ts` 覆盖三种 verdict、两个方向、缺常量/敌意 module、bake 记录缺失/畸形；两个插件的 `test/interface.spec.ts` 与 `test/envinit.spec.ts` 覆盖跨树消费与降级后果 |
-| 包版本退回普通 semver + 宽 peer（§1、§6） | **已有** —— `base/plugin-base/package.json` 是 **`0.3.0`**，两个插件的 peer 与 `devDependencies` 是 **`>=0.3.0 <1.0.0`**，`bootstrap.ts` 的 `VERSION` = `0.3.0`、`supportedRange` = `>=0.3.0 <1.0.0`，`pnpm version:check` 绿；接口变化不再要求插件同批改 peer，由运行期门禁按降级路径兜住 |
+| 门禁搬进 base（§3 的核心） | **已有** —— `.` 导出 `checkInterface(required, module)` 与 `readInterfaceRequirement(url)`；两者都在 `BaseRuntimeV2` / `VALUE_NAMES_V2` 与快照里（v1 期间、0.3.1 发布之前就地精修；v2 的增量把这些名字一并继承）。插件只保留**消费**与"加载到的 base 没有这个函数 ⇒ `cannot-tell`"的兜底（老 base 必须还能被装上）。base 侧测试 `test/interface_gate.spec.ts` 覆盖三种 verdict、两个方向、缺常量/敌意 module、bake 记录缺失/畸形；两个插件的 `test/interface.spec.ts` 与 `test/envinit.spec.ts` 覆盖跨树消费与降级后果 |
+| 包版本退回普通 semver + 宽 peer（§1、§6） | **已有** —— **实测（2026-10-02）**：`base/plugin-base/package.json` 是 **`0.3.2`**（registry 上已发表的是 `0.3.1`；本轮新增了良构文本这一可观察能力，包版本是否按 minor 走到 `0.4.0` 待用户拍板，见 §1），`bootstrap.ts` 的 `VERSION` = `0.3.2`、`supportedRange` = `>=0.3.0 <1.0.0`；两个插件的 peer 与 `devDependencies` 都是 **`>=0.3.0 <1.0.0`**，`pnpm version:check` 绿；接口变化不再要求插件同批改 peer，由运行期门禁按降级路径兜住 |
 
 **落地顺序**（第 1–6 步都已完成；保留下面的原始顺序说明，因为它是这几步为什么按这个次序落地的依据 ——
 第 2 步是后面几步的前提：形状不收成对象，"语义"就没有可检的落点；快照排在接口类型之前，是为了在起草
@@ -259,7 +271,14 @@ base 模块取 `kit.wellFormedText` / `kit.wellFormedDeep`，取不到就用本�
 用桩切换（删除 `String.prototype.toWellFormed` 再跑**同一份**行为断言），并断言修补后的 `JSON.stringify` 不再
 含 `\ud800` 式转义（jq 拒绝的形状），而完整 emoji / CJK 仍在。
 
-**待补（本任务的边界，明确记录）。** 按 §4 第 3 条，v2 的这两个带语义成员还欠一条**跨树行为 pin**：从已
-链接的 base 取真实实现，与两棵树各自的本地副本逐个输入比对。这条测试只能住在
-`mem/packages/plugin/test/` 与 `mission/packages/plugin/test/` 里（只有插件能链接 base），而那两棵树此刻正由
-另两条车道改动、并将在最终复核时统一回归，所以本条**有意留到那时补**，而不是在本任务里碰那两棵树。
+**跨树 pin（已有，实测）。** 按 §4 第 3 条，v2 的这两个带语义成员各有一条跨树行为 pin，都从**已链接的 base**
+取真实实现：
+
+- `mem/packages/plugin/test/wellformed_pin.spec.ts`（6 条）：断言链接到的 base 确实带着 v2 这一对；本地副本
+  与真实实现在每个字符串样本上给出同一结果；嵌套数组/对象与非字符串类型的读取一致；非字符串按同一性返回；
+  两侧都幂等；以及"采用真实 base 后两层仍与它相等"。
+- `mission/packages/plugin/test/wellformed.spec.ts`：`resolveWellFormed(realBase)` 取到 base 的那一对、
+  base 缺席或只有半个时回落到本地副本、两个来源给出同一修复，另加入站/出站边界与历史坏数据的用例。
+
+这条测试只能住在两棵树的门禁里（只有插件能链接 base），所以 base 自己的 `release:check` 跑不到它们；改动
+`base/**` 之后两棵树都要回归（见 `AGENTS.md`）。
