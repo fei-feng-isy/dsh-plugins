@@ -141,6 +141,11 @@ pnpm build:dsh mem && node mem/scripts/mount-smoke.mjs
 pnpm build:dsh mission && node mission/scripts/mount-smoke.mjs    # 或 pnpm -C mission release:check
 ```
 
+**验证分工**：**执行者只做针对性验证** —— 改动涉及的构建/类型检查 + **只跑新增或改动的那几个测试文件**；
+**全量门禁**（整包测试、`release:check:*` 含 pack 与 old-dsh 跨版本门、root `guard`/`release:check`、四个自测、
+mount smoke）由**派单方在收口时统一跑**。执行者验证一遍、派单方再验一遍是重复劳动；派单时要把这条写进验收，
+并要求执行者报告"实际跑了什么 / 每个测试证明了哪条要求 / 有哪些没能验证"。
+
 **RC 投影只在发版时做**（`../dsh-plugins-rc`，整仓投影 + 产物级门禁）：日常开发不投影，不发版不投影。
 
 ## 体量与枢纽文件（hub）
