@@ -133,8 +133,10 @@ export interface BaseRuntimeV1 {
   // ── the runtime interface gate ───────────────────────────────────────────────────────────────
   /**
    * Decide whether a loaded module implements the interface generation a caller requires. Pure,
-   * bidirectional, guarded and total — the ONE implementation of the verdict semantics, so a fix to
-   * them is a base release and not two plugin rebuilds.
+   * total, guarded and asymmetric — the ONE implementation of the verdict semantics, so a fix to them
+   * is a base release and not two plugin rebuilds. Only a base OLDER than the build is
+   * `incompatible`; a base NEWER than the build is `ok` plus a warning, because generations are
+   * additive and every member the older build requires is still present.
    */
   readonly checkInterface: typeof import('./interface_gate.js').checkInterface
   /**

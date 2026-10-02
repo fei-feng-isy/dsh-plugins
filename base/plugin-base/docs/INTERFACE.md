@@ -24,16 +24,18 @@
   **主契约**，由 base 的**运行期门禁**裁决（§3）：插件构建期把世代号烘进产物，启动时与加载到的 base 比对。
 - **包版本** = `base/plugin-base/package.json` 的**普通 semver**。它只表达**包自身**（新增行为、修 bug），
   **不再**与接口绑定 —— 接口换代**不再**要求提 major。**实测（2026-10-02）**：registry 上已发布的是
-  **`0.3.1`**（它带的是**接口 v1**，见 §5），工作区在 **`0.3.2`**（接口 v2，未发布）。两条轴各说各的：
-  包版本从 0.3.1 到 0.3.2 是一次普通递增，接口世代同时从 1 变成 2 —— 把包版本按"接口变了"读、或反过来
-  把 `INTERFACE_VERSION` 按"包发版了"读，都会读错。本轮新增的良构文本是**可观察能力**，按"业务流程 /
-  可观察行为变 ⇒ minor"该走到 **`0.4.0`**（复审 N18）；最终取 `0.3.2` 还是 `0.4.0` 是一次**待用户拍板**的
-  决定，这里只记现状与判断依据。无论选哪个都**不动 `INTERFACE_VERSION`**。两个插件声明同一条宽区间
-  `>=0.3.0 <1.0.0`，所以一次 base 发版不必等插件同批改。
+  **`0.3.1`**（它带的是**接口 v1**，见 §5），工作区已升到 **`0.4.0`**（接口 v2，未发布）。两条轴各说各的：
+  包版本从 0.3.1 走到 0.4.0 是普通递增，接口世代同时从 1 变成 2 —— 把包版本按"接口变了"读、或反过来把
+  `INTERFACE_VERSION` 按"包发版了"读，都会读错。
+  **`0.4.0` 的 minor 依据（复审 N18）**：v2 相对 v1 新增了两个**可观察的 kit 成员**
+  （`wellFormedText` / `wellFormedDeep`，§8），并给运行期门禁补上"新世代不再降级"的语义
+  （`loaded > required` ⇒ `ok` + `warning`，§3）—— 都落在"业务流程 / 可观察行为变 ⇒ minor"这一格，所以
+  从 `0.3.2` 走到 `0.4.0`，而不是停在 `0.3.2`。两条轴独立：这次**不动 `INTERFACE_VERSION`**（仍是 2）。
+  两个插件声明同一条宽区间 `>=0.3.0 <1.0.0`，所以一次 base 发版不必等插件同批改。
 
 | 变更 | 接口版本（主契约） | 包版本 | 插件是否必须同批改 |
 | --- | --- | --- | --- |
-| **接口**：`.` 的导出集合、类型形状、顺序敏感参数的 slot 含义、语义契约 | `INTERFACE_VERSION` +1，新增 `api/interface-vN.json` | 由包自身决定（普通 semver；**不再**是"接口变 ⇒ major"） | **否** —— 宽 peer 收得下；旧插件在运行期被判 `incompatible`，按降级路径挂载（§3） |
+| **接口**：`.` 的导出集合、类型形状、顺序敏感参数的 slot 含义、语义契约 | `INTERFACE_VERSION` +1，新增 `api/interface-vN.json` | 由包自身决定（普通 semver；**不再**是"接口变 ⇒ major"） | **否** —— 宽 peer 收得下；旧插件遇新世代 base 判 `ok` + `WARNING`（纯增量，不降级），只有 base 更旧才 `incompatible` 走降级路径挂载（§3） |
 | **业务流程 / 可观察行为**（插件测试断言的那些） | 不变 | minor | 否 |
 | **纯修复**，无可观察变化 | 不变 | patch | 否 |
 
@@ -81,9 +83,22 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
 门禁是 `.` 上的两个成员（它们本身就是 v1 面的一部分，由快照钉住）：
 
 - `checkInterface(required: number, module: { readonly INTERFACE_VERSION?: unknown })` →
-  `{ status: 'ok' | 'incompatible' | 'cannot-tell', required?, loaded?, reason? }`。**纯函数、双向、永不抛**：
-  读 `module.INTERFACE_VERSION` 有守卫（取属性就抛的敌意 module 只读成"没报"），`reason` 是调用方可以
-  原样打日志的一句话。两个方向都判：插件比 base 新 **和** 插件比 base 旧，都是 `incompatible`。
+  `{ status: 'ok' | 'incompatible' | 'cannot-tell', required?, loaded?, reason?, warning? }`。**纯函数、
+  非对称、永不抛**：读 `module.INTERFACE_VERSION` 有守卫（取属性就抛的敌意 module 只读成"没报"）。
+  `reason` 是**不为 `ok`** 时调用方可以原样打日志的一句话；`warning` 是"`ok` 但要记一条 WARNING"的那句话。
+  **两个方向的语义不再相同**：
+
+  | `required` vs `loaded` | verdict | 依据 |
+  | --- | --- | --- |
+  | 相等 | `ok`，无 `warning` | 同一世代，照常使用。 |
+  | `loaded > required`（宿主 base **更新**） | **`ok` + `warning`** | 接口世代是**纯增量**的：新世代是旧世代的超集，旧插件要用的成员**一个不少**，它只是用不到新成员。`warning` 文案写明"宿主 base 比插件更新（世代 N > M）：按纯增量规则判定为可用"。 |
+  | `loaded < required`（宿主 base **更旧**） | `incompatible` | 插件要用的成员可能**不存在** —— 这才是真正不安全的方向。 |
+
+  **`loaded > required` 只在"纯增量"被机械证明时才判 `ok`**，这不是注释里的一句承诺：
+  `BaseRuntimeV2 extends BaseRuntimeV1`、`VALUE_NAMES_V2 = [...VALUE_NAMES_V1, +2]`、以及
+  `test/public-surface.spec.ts` 断言 v1 的名字真的都还在 v2 里（§5）。`test/interface_gate.spec.ts` 把这条
+  放行规则**直接钉在真实 module 上**（"每个 v1 值名在 v2 module 上仍存在" + "v1 build 遇上真实 v2 得到
+  `ok` + WARNING"），所以一个**不是**超集的新世代一旦出现，这里会先红，而不是把旧插件悄悄放行。
 - `readInterfaceRequirement(url)` → `{ baseVersion, interfaceVersion }`；文件缺失或畸形返回 `undefined`
   （"没 bake"），不抛。这是**插件启动路径**上的读取实现；写的那一侧是
   `scripts/lib/interface-version.mjs`，而 build 侧的 `--check` 用那份共享脚本自带的 reader（它要在所 vendor
@@ -93,17 +108,18 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
 
 | verdict | 后果 |
 | --- | --- |
-| `ok` | 照常使用 base 的共享能力。 |
+| `ok`（含 `loaded > required`） | 照常使用 base 的共享能力；带 `warning` 时额外打一条 `WARNING`，**不降级**。 |
 | `incompatible` | 一条 `WARNING` + **不使用该 base 提供的共享能力**：prompt 文件层按"base 不可用"用**插件自带的默认正文**、兼容门禁**跳过**、provisioning 走 **legacy** 路径。**工具 / service / Remote / UI 照常挂载** —— 这条路径就是既有的"base 拿不到"降级路径，只是触发条件多了一个。 |
 | `cannot-tell` | 一条 `WARNING`，**照常使用** —— "说不清 ≠ 不兼容"。加载到的 base 没有门禁函数（只可能是 peer 区间外的老 base，而 peer 已排除）、bake 记录缺失/畸形，都落在这里。 |
 
-**为什么它从"只告警"变成了"告警 + 降级"**：上一轮实现与文档把它写成纯信号，理由是"超出 `supportedRange`
-的 base 在更早一步就被拒了，能走到比较的必然是违反 §1 规则的发版，能力仍然可用"。这个理由在本文件这一版
-里**不再成立**：`supportedRange` 已经放宽成 `>=0.3.0 <1.0.0`（§6），它**故意**放行 base 的 minor —— 也就
-故意放行摆在门后的整个世代差；而接口既然升格成主契约，"另一个世代"就不该再被当成一条备注。于是 verdict
-有了后果：`incompatible` 不用它的共享能力，但**仍然挂载**。这也让"接口世代"与"包区间"各司其职：
-`supportedRange` 是包的运行期门（超出即拒绝提供框架、退回 legacy），package peer 是安装期门，
-`INTERFACE_VERSION` 是**同一区间内的世代**门。
+**为什么只有"宿主更旧"才有降级后果**：上一轮实现与文档把"另一个世代"一律写成有后果，理由是"`supportedRange`
+已经放宽成 `>=0.3.0 <1.0.0`（§6），它**故意**放行 base 的 minor —— 也就故意放行摆在门后的整个世代差；而接口
+既然升格成主契约，'另一个世代'就不该再被当成一条备注"。这次校正的是**两个方向的代价不同**：
+插件比 base **新**时，它要用的成员可能不存在，所以 `incompatible` 不用该 base 的共享能力（prompt 层用插件自带
+默认正文、兼容门禁跳过、provisioning 走 legacy），但**仍然挂载**；插件比 base **旧**时，新的一方是**纯增量**
+的，旧插件要用的成员一个不少 —— 把这种最安全的情形也降级，等于"一次增面反而让所有人降级"，与增量的本意
+相反，所以判 `ok` 加一条 `WARNING`。这也让"接口世代"与"包区间"各司其职：`supportedRange` 是包的运行期门
+（超出即拒绝提供框架、退回 legacy），package peer 是安装期门，`INTERFACE_VERSION` 是**同一区间内的世代**门。
 
 为什么不用包版本当运行期的门：包版本每次发版都动，拿它当门会让 patch/minor 也告警 —— `supportedRange`
 正是如此。接口编号只在换代时动，于是"base 单独修好共享逻辑、插件零改动"在运行期也成立（新 base 报同一个
@@ -148,8 +164,10 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
    所以没有破坏任何已发布契约 —— 这是**历史事实**，不是"同一代可以随意增面"的许可。0.3.1 之后 v1 已是公开
    契约（实测其 `dist/interface.js` 报 `INTERFACE_VERSION = 1`），再要增面只能换代。**v2 就是新的一代**：
    v1 的快照与类型原样留档，v2 = v1 + 良构文本两个成员（§8），并且门禁断言
-   v2 是 v1 的**超集**（值名多两个，类型名不增），所以"增量"是可机械检查的，不是一句承诺。换代（新建
-   `interface-v(N+1).json` + 常量加一）此后只在对已发布世代做**破坏性**改动时才发生。
+   v2 是 v1 的**超集**（值名多两个，类型名不增），所以"增量"是可机械检查的，不是一句承诺。**这条断言不只是
+   冻结的一部分，它还是 §3 里 `loaded > required` 判 `ok` 的放行前提** —— 没有"新世代 ⊇ 旧世代"的机械证明，
+   旧插件遇上新 base 就不能被放行。换代（新建 `interface-v(N+1).json` + 常量加一）此后只在对已发布世代做
+   **破坏性**改动时才发生。
    **不哈希任何东西**：哈希名字没有信息量（名字就在同一个文件里逐字列着），哈希声明文本（`.d.ts` 片段）会被格式、
    注释、参数名与换行一改就翻 —— 那种门禁要么被天天重新冻结（然后没人再看），要么被加白名单绕过。
 2. 形状面交给编译（§2 第 2 层，两半都已受保护），语义面交给 §4 第 3 条的行为测试。快照只做它真正独一无二
@@ -182,12 +200,14 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
 1. **安装期**不再锁步：两个插件的 base peer 与 `devDependencies`、以及 `bootstrap.ts` 的 `supportedRange`
    都写成 **`>=0.3.0 <1.0.0`** —— 一个普通比较符区间，收得下 base 的每一次 minor/patch，停在下一个
    大世代。base 的包版本退回 **`0.3.0`**（从 `1.0.0` 降回来）：它现在只表达包自身。（这是当时的落点；
-   实测今天 registry 上是 `0.3.1`、工作区是 `0.3.2`，见 §1。）
-2. **运行期**由接口门禁裁决：区间内的 base 若报出**另一个 `INTERFACE_VERSION`**，插件按 §3 的降级路径
-   挂载（用自带默认正文、跳过门禁、legacy provisioning），**绝不拒载**。
+   实测今天 registry 上是 `0.3.1`、工作区已升到 `0.4.0`，见 §1。）
+2. **运行期**由接口门禁裁决：区间内的 base 若报出**另一个 `INTERFACE_VERSION`**，**只有"宿主更旧"那一边**
+   按 §3 的降级路径挂载（用自带默认正文、跳过门禁、legacy provisioning）；"宿主更新"那一边是纯增量，判
+   `ok` + 一条 `WARNING`，**不降级**。两边都**绝不拒载**。
 
-于是"接口变更不再要求插件同批改 peer"：旧插件会在运行期被判 `incompatible` 并按降级路径挂载，插件作者
-要跟进时只需在方便的时候重建——而**重建之所以必要，只因为它要消费新世代的能力**，不是因为安装器会拒绝。
+于是"接口变更不再要求插件同批改 peer"：旧插件遇上更新的 base 会在运行期得到 `ok` + `WARNING`（它要用的
+成员一个不少，只是用不到新成员），插件作者要跟进时只需在方便的时候重建——而**重建之所以必要，只因为它要
+消费新世代的能力**，不是因为安装器会拒绝，也不影响它继续拿 base 的共享能力。
 
 代价要认：冻结点之后内部重构要绕开 `.` 面，接口换代要走弃用周期。**当时是最便宜的时机** —— 消费方只有
 本仓两个插件，且合并后的它们尚未发布（npm 上的 `@avantf/dsh-mem@0.1.1` / `@avantf/dsh-mission@0.1.0`
@@ -210,11 +230,11 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
 | `api/interface-v1.json` 快照（只记名字面）与"变了就必须升编号"的门禁 | **已有** —— v1 留档在 `base/plugin-base/api/interface-v1.json`；当前世代是 `api/interface-v2.json`，门禁断言快照 == 接口类型的两份名单 == 代码实际导出（两向相等），且 v2 ⊇ v1、只多两个值名；不等时只能删导出，或新增 `interface-v(N+1).json` 并升 `INTERFACE_VERSION` |
 | 接口类型 `BaseRuntimeV2`（= `BaseRuntimeV1` + 良构文本）+ 每个带语义成员的跨树行为测试 | **已有** —— `src/interface.ts` 的 `BaseRuntimeV2`（值面，可结构化赋值；`extends BaseRuntimeV1`，v1 名字继续导出）+ `BaseTypeSurfaceV2`（类型面，`keyof` 就是类型名单）；快照由它们派生。跨树行为测试在 `mem/packages/plugin/test/interface.spec.ts` 与 `mission/packages/plugin/test/interface.spec.ts`，覆盖路径解析、`PromptFiles` 的 ensure/read/fallback、`compatReport` 的结构与文案归属、provisioner 的终态与 `code` 表，以及 bake 出的编号 == 加载到的 base 报出的编号（都是真实实现，不是 mock）。**v2 新增的良构文本成员也有这条 pin**：`mem/packages/plugin/test/wellformed_pin.spec.ts`（6 条，与已链接的 base 逐输入比对）与 `mission/packages/plugin/test/wellformed.spec.ts`（§8） |
 | 良构文本 kit（`wellFormedText` / `wellFormedDeep`，v2 新成员） | **已有（实现 + base 侧测试 + 跨树 pin）** —— `src/kit/wellformed.ts`，在 `.` 上、零运行期依赖；单字符串修复优先用 `String.prototype.toWellFormed`，缺失时走等价的 `charCodeAt` 扫描；递归版只碰字符串、数组与**普通对象**（含键），其它类型（含 `Date` / `Map` / 类实例 / 带 `toJSON` 的对象）按同一性原样返回。base 侧 `test/wellformed.spec.ts` 覆盖双向证据、降级路径与幂等。**跨树行为 pin 已有**：`mem/packages/plugin/test/wellformed_pin.spec.ts` 与 `mission/packages/plugin/test/wellformed.spec.ts`（§8） |
-| `INTERFACE_VERSION` 与插件的构建期 bake + 运行期门禁（双向断言、由 link 步骤重烤） | **已有** —— base 导出整数 `INTERFACE_VERSION`；两个 `scripts/link-envinit.mjs` 在 vendor bootstrap 的同一步把 `{ baseVersion, interfaceVersion }` 写进 `lib/interface-version.json`（`files` 随包发布），`--check` 按字节比对；启动时插件用 base 的 `readInterfaceRequirement` 读自己的 bake、再调 base 的 `checkInterface`：`incompatible` ⇒ 一条 `WARNING` + 不用 base 的共享能力（自带 prompt 正文、门禁跳过、legacy provisioning）但**照常挂载**，`cannot-tell` ⇒ 一条 `WARNING` 并照常使用（§3）。**双向**断言：①bake 的编号 == base 当时的编号（两个 `link-envinit.mjs` 的 `--check`），②声明/bake 编号 == 加载到的 base 报出的编号（插件启动路径 + 两条跨树测试） |
-| 门禁搬进 base（§3 的核心） | **已有** —— `.` 导出 `checkInterface(required, module)` 与 `readInterfaceRequirement(url)`；两者都在 `BaseRuntimeV2` / `VALUE_NAMES_V2` 与快照里（v1 期间、0.3.1 发布之前就地精修；v2 的增量把这些名字一并继承）。插件只保留**消费**与"加载到的 base 没有这个函数 ⇒ `cannot-tell`"的兜底（老 base 必须还能被装上）。base 侧测试 `test/interface_gate.spec.ts` 覆盖三种 verdict、两个方向、缺常量/敌意 module、bake 记录缺失/畸形；两个插件的 `test/interface.spec.ts` 与 `test/envinit.spec.ts` 覆盖跨树消费与降级后果 |
-| 包版本退回普通 semver + 宽 peer（§1、§6） | **已有** —— **实测（2026-10-02）**：`base/plugin-base/package.json` 是 **`0.3.2`**（registry 上已发表的是 `0.3.1`；本轮新增了良构文本这一可观察能力，包版本是否按 minor 走到 `0.4.0` 待用户拍板，见 §1），`bootstrap.ts` 的 `VERSION` = `0.3.2`、`supportedRange` = `>=0.3.0 <1.0.0`；两个插件的 peer 与 `devDependencies` 都是 **`>=0.3.0 <1.0.0`**，`pnpm version:check` 绿；接口变化不再要求插件同批改 peer，由运行期门禁按降级路径兜住 |
+| `INTERFACE_VERSION` 与插件的构建期 bake + 运行期门禁（由 link 步骤重烤） | **已有** —— base 导出整数 `INTERFACE_VERSION`；两个 `scripts/link-envinit.mjs` 在 vendor bootstrap 的同一步把 `{ baseVersion, interfaceVersion }` 写进 `lib/interface-version.json`（`files` 随包发布），`--check` 按字节比对；启动时插件用 base 的 `readInterfaceRequirement` 读自己的 bake、再调 base 的 `checkInterface`：`incompatible`（宿主更旧）⇒ 一条 `WARNING` + 不用 base 的共享能力（自带 prompt 正文、门禁跳过、legacy provisioning）但**照常挂载**，`ok` + `warning`（宿主更新，纯增量）⇒ 一条 `WARNING` 且**照常使用**，`cannot-tell` ⇒ 一条 `WARNING` 并照常使用（§3）。**双向**断言：①bake 的编号 == base 当时的编号（两个 `link-envinit.mjs` 的 `--check`），②声明/bake 编号 == 加载到的 base 报出的编号（插件启动路径 + 两条跨树测试） |
+| 门禁搬进 base（§3 的核心） | **已有** —— `.` 导出 `checkInterface(required, module)` 与 `readInterfaceRequirement(url)`；两者都在 `BaseRuntimeV2` / `VALUE_NAMES_V2` 与快照里（v1 期间、0.3.1 发布之前就地精修；v2 的增量把这些名字一并继承）。插件只保留**消费**与"加载到的 base 没有这个函数 ⇒ `cannot-tell`"的兜底（老 base 必须还能被装上）。base 侧测试 `test/interface_gate.spec.ts` 覆盖三种 verdict、**非对称的两个方向（宿主更新 ⇒ `ok` + `warning`；宿主更旧 ⇒ `incompatible`）、"纯增量"放行规则钉在真实 module 上**、缺常量/敌意 module、bake 记录缺失/畸形；两个插件的 `test/interface.spec.ts` 与 `test/envinit.spec.ts` 覆盖跨树消费与降级后果 |
+| 包版本退回普通 semver + 宽 peer（§1、§6） | **已有** —— **实测（2026-10-02）**：`base/plugin-base/package.json` 已按 N18 升到 **`0.4.0`**（registry 上已发表的是 `0.3.1`；minor 依据是 v2 新增了良构文本这一可观察能力 + 门禁的"新世代不再降级"语义，见 §1），`bootstrap.ts` 的 `VERSION` = `0.4.0`、`supportedRange` = `>=0.3.0 <1.0.0`；两个插件的 peer 与 `devDependencies` 都是 **`>=0.3.0 <1.0.0`**，`pnpm version:check` 绿；接口变化不再要求插件同批改 peer，由运行期门禁按降级路径（宿主更旧）或 `ok` + `WARNING`（宿主更新）兜住 |
 
-**落地顺序**（第 1–6 步都已完成；保留下面的原始顺序说明，因为它是这几步为什么按这个次序落地的依据 ——
+**落地顺序**（第 1–7 步都已完成；保留下面的原始顺序说明，因为它是这几步为什么按这个次序落地的依据 ——
 第 2 步是后面几步的前提：形状不收成对象，"语义"就没有可检的落点；快照排在接口类型之前，是为了在起草
 `BaseRuntimeV1` 的过程中先把名字面锁住）：
 
@@ -232,6 +252,11 @@ v1 的接口类型与快照**原样保留**，因为两个插件此刻仍编译�
 6. ✅ 门禁成为主契约后，`incompatible` 从"只告警"改成"告警 + 不用 base 的共享能力"（§3）：prompt 层用
    插件自带默认正文、门禁跳过、provisioning 走 legacy，工具/service/Remote/UI 照常挂载 —— 这条把上一轮
    被校正掉的"按能力降级"真正实现，文档与注释一起改回。
+7. ✅ **校正门禁的非对称性（复审 N9）+ 包版本按 minor 走到 0.4.0（复审 N18）**：第 6 步把"另一个世代"一律
+   当成降级，但只有**宿主更旧**（缺成员）才不安全；**宿主更新**是纯增量，旧插件要用的成员一个不少，判
+   `ok` + `warning`（`incompatible` 不再覆盖这个方向）。放行依据是 §5 里已经就位的机械超集断言，并在
+   `test/interface_gate.spec.ts` 里直接钉在真实 module 上。`INTERFACE_VERSION` **不动**（仍 2）—— 这是
+   对既有"纯增量"契约的校正，不是新世代；包版本从 `0.3.2` 走到 `0.4.0` 记的是可观察行为变化（§1）。
 
 ## 8. v2 的新成员：良构文本（`wellFormedText` / `wellFormedDeep`）
 

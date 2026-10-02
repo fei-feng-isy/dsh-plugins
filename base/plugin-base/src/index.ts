@@ -49,7 +49,7 @@ export type { BaseRuntimeV1, BaseRuntimeV2, BaseTypeSurfaceV1, BaseTypeSurfaceV2
 
 // The runtime interface gate: the verdict function the plugins call with the generation they baked,
 // and the ONE reader of a plugin's `lib/interface-version.json`. They live here rather than in each
-// plugin so their semantics (bidirectional, guarded, total) are fixable with one base release; the
+// plugin so their semantics (asymmetric, guarded, total) are fixable with one base release; the
 // plugins keep only the consumption and the degrade decision.
 export { checkInterface, readInterfaceRequirement } from './interface_gate.js'
 export type { InterfaceVerdict, InterfaceRequirement } from './interface_gate.js'

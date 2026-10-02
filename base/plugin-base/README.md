@@ -53,12 +53,13 @@
 - `INTERFACE_VERSION`（正整数）+ `api/interface-vN.json` 快照（该代的值名与类型名，随源码在仓库里，
   不进产物）；
 - `checkInterface(required, module)`：把"调用方构建时所对的世代"与"运行时加载到的本包报告的世代"
-  比一比，返回 `ok` / `incompatible` / `cannot-tell`。纯函数、**双向**、读属性有守卫（取属性就抛的
-  对象读成"没报"）、**永不抛**；
+  比一比，返回 `ok` / `incompatible` / `cannot-tell`。纯函数、**非对称**、读属性有守卫（取属性就抛的
+  对象读成"没报"）、**永不抛**。只有加载到的世代**更旧**（成员可能缺失）才是 `incompatible`；加载到的
+  世代**更新**是 `ok` + 一句话的 `warning`（世代是纯增量，旧调用方要用的成员都还在），相等是 `ok`；
 - `readInterfaceRequirement(url)`：读调用方产物里烘着的那条记录 `{ baseVersion, interfaceVersion }`；
   缺失或畸形返回 `undefined`（"没烘"），不抛；
-- 拿到 `incompatible` 时的建议动作是**降级**（不使用本包的共享能力）而不是拒绝挂载 —— 本包只把裁决与
-  一句话的 `reason` 交出去，怎么处理由调用方决定。
+- 拿到 `incompatible` 时的建议动作是**降级**（不使用本包的共享能力）而不是拒绝挂载；拿到 `ok` + `warning`
+  时照常使用、只把那条警告记下来 —— 本包只把裁决与一句话的 `reason` / `warning` 交出去，怎么处理由调用方决定。
 
 ## 怎么用
 
