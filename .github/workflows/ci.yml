@@ -8,10 +8,15 @@ on:
 # The merged workspace: base/ (one published package), mem/ and mission/ (one published plugin each).
 #
 # What runs here: `pnpm install` → build → typecheck → test → guard → version:check, plus the
-# publish-surface check. The PLUGIN host gates (`pnpm build:dsh mem`, `pnpm release:check:mission`,
-# `pnpm pack:plugin:*`, the mount smokes, `pnpm proof:base-swap:mount`) additionally need a harness
-# CHECKOUT and a profile, so they stay LOCAL — run them by hand before releasing; see AGENTS.md
-# §"After changing ANY shared code under base/**".
+# publish-surface check, and — in its own job, `mount-smoke` — `pnpm build:dsh` for BOTH plugin trees,
+# which builds the base and then mounts the plugin in a real Cordis context. That moves the family's
+# core promise ("it really mounts") out of the by-hand layer and into the enforced one.
+#
+# The RELEASE gates (`pnpm release:check:<pkg>` with its old-dsh leg and registry probe,
+# `pnpm pack:plugin:*`, `pnpm proof:base-swap:mount`) additionally need a profile and network, so they
+# stay LOCAL — run them by hand before releasing; see AGENTS.md §"After changing ANY shared code under
+# base/**". They are deliberately NOT in `mount-smoke`: the review asked for `build:dsh`, not for the
+# whole release gate.
 #
 # An installed dsh IS needed, though, and this workflow used to claim otherwise while calling scripts
 # that hard-require it: base's `typecheck`/`test` run `link-dsh.mjs`, which exits 1 without one, and 3
@@ -79,3 +84,55 @@ jobs:
       # the installed harness and stays local.
       - name: Base-swap proof (no plugin rebuild required)
         run: pnpm proof:base-swap
+
+  # A separate job on purpose: `build-test` proves the source COMPILES and passes its tests, this one
+  # proves the built artifact actually MOUNTS. `pnpm build:dsh mem` / `pnpm build:dsh mission` each
+  # build the base first, then run that tree's mount smoke against the installed dsh's real Cordis
+  # context — the host service, the model tools and the Typert Remote must all register. Nothing else
+  # is repeated here (no `pnpm -r build`, no typecheck, no test): the two builds ARE the point, and
+  # the pnpm store is shared with `build-test` through `cache: pnpm`.
+  #
+  # The dominant failure source is HARNESS DRIFT — a fresh dsh whose host API moved. So the harness
+  # version is printed before anything is built, and each mount's output is teed to a file and then
+  # asserted for `MOUNT SMOKE OK`. A log that instead ends in `compat: INCOMPATIBLE … REFUSING to
+  # load` or `the installed dsh peers were not found` is a version/install failure, not a mount bug.
+  mount-smoke:
+    runs-on: ubuntu-latest
+    # Two full plugin builds (each rebuilds the base) plus two real Cordis mounts: ~4x the observed
+    # end-to-end runtime, so this bounds a hung mount rather than normal work.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          # No matrix: there is one supported line, and the mount proves the artifact, not the Node
+          # version — `build-test` is where another Node would go.
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install the DSH harness (the peers a live profile loads)
+        run: npm i -g @deepseek-ai/dsh
+      # Printed BEFORE any build: with the version in the log, a red run is triaged without a rerun,
+      # and "our mount broke" is distinguishable from "dsh moved under us".
+      - name: Harness version (drift triage)
+        run: |
+          which dsh
+          dsh --version
+          npm root -g
+          npm ls -g --depth=0 @deepseek-ai/dsh
+      # `tee` keeps the full mount smoke output in the step log (that is what a failure has to be read
+      # from), while the `grep` is the explicit assertion that the smoke actually reached its OK line —
+      # an exit code alone would also be 0 if a future build flags the smoke away.
+      - name: Mount smoke — mem (@avantf/dsh-mem)
+        run: |
+          set -o pipefail
+          pnpm build:dsh mem 2>&1 | tee mount-mem.log
+          grep -q 'MOUNT SMOKE OK' mount-mem.log
+      - name: Mount smoke — mission (@avantf/dsh-mission)
+        run: |
+          set -o pipefail
+          pnpm build:dsh mission 2>&1 | tee mount-mission.log
+          grep -q 'MOUNT SMOKE OK' mount-mission.log
