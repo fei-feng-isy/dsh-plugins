@@ -38,9 +38,13 @@
    用内联的 `supportedRange` 校验版本；缺失或超出区间 → 一条 `envinit: WARNING`，插件照常挂载。
 3. **发布有序、路径干净。** 先 base，后插件；已发布的 manifest 里永远不出现 `link:`/`file:`。
 
-## base 缺失（或接口世代不同）时的降级
+## base 缺失、或运行时 base **更旧**时的降级
 
-| 能力 | base 不可用时 |
+**判定是非对称的**（`e8e6ad5` 起，见 `base/plugin-base/docs/INTERFACE.md` §3）：`loaded < required`
+（运行时 base **更旧**）→ `incompatible`，按本表降级；`loaded > required`（宿主 base **更新**）→ `ok` + 一条
+WARNING，**照常使用全部能力、不降级**（世代是纯增量，旧插件要用的成员一定还在）；`cannot-tell` 只告警。
+
+| 能力 | base 不可用（或**更旧**）时 |
 | --- | --- |
 | 提示词文件层 | 用插件**内置的默认正文**（那是插件自己的内容，不是 kit 的副本） |
 | 兼容门禁 | 一条 `compat:` WARNING，门禁跳过。裁决语义不变：只有**被证实**的不兼容才拒载，"说不清"只是备注，版本差异只是警告 |
@@ -56,8 +60,9 @@
   不内联。
 - **接口世代**：`checkInterface(required, module)` + `readInterfaceRequirement(url)` 比对"构建时所对"与
   "运行时加载到"的世代；构建期把自己的世代 bake 进 `lib/interface-version.json`。
-- **降级义务**：base 缺席或世代不匹配 → 插件仍**完整挂载**（自带默认提示词正文、门禁跳过、legacy 路径）；
-  `incompatible` 只放弃 base 的共享能力、`cannot-tell` 只告警，**绝不拒载**（逐项见上一节的降级表）。
+- **降级义务**：base 缺席、或运行时 base **更旧**（`loaded < required`）→ 插件仍**完整挂载**（自带默认提示词
+  正文、门禁跳过、legacy 路径），`incompatible` 只放弃 base 的共享能力；**base 更新**（`loaded > required`）→
+  `ok` + 一条 WARNING、能力全用、**不降级**；`cannot-tell` 只告警。**绝不拒载**（逐项见上一节的降级表）。
 - **要动四处**（构建入口是**发现式**的：新目录自带 `build:dsh` 即可 `pnpm build:dsh <目录名>`，`scripts/`
   一个字不用改）：① 根 `pnpm-workspace.yaml` 的 `packages:`；② `scripts/release-check.mjs` 的可发布集合；
   ③ 插件 manifest（required peer + 同区间 dev、`build:dsh`、`scripts/mount-smoke.mjs`、`files` 带
@@ -136,7 +141,9 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | `pnpm check:old-dsh <base\|mem\|mission>` | 在该包声明的 dsh peer **下限**上重跑 LOCAL 步骤（含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
 | `pnpm check:dsh-lines` | dsh **已发布**的版本里有没有我们的 peer 覆盖不到的（同一份 semver + `includePrerelease: true`）；有新 minor 线或 dist-tag 落到未覆盖线就退出 1，并给出该补的 `\|\|` 条款 |
 
-**改动 `base/**` 之后两个插件都要回归**（base 自己的测试不会走到挂载）：
+**改动 `base/**` 之后两个插件都要回归**（base 自己的测试不会走到挂载），**并检查根 `scripts/prove-base-swap.mjs`**——
+它同样钉住接口判定语义（2026-10-02 实测：非对称化后它仍断言"不同世代必须 incompatible"，成为第三处滞后的期望，
+前两处是两棵插件树的 `interface.spec.ts`/`envinit.spec.ts`）：
 
 ```bash
 pnpm build:dsh mem && node mem/scripts/mount-smoke.mjs

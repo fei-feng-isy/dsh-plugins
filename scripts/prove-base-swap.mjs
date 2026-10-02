@@ -331,11 +331,12 @@ try {
     }
 
     // The runtime INTERFACE GATE is the family's main contract now, and it too is SERVED BY THE
-    // SWAPPED BASE. Two things are proven here: the gate functions come off the swapped module (their
-    // wrappers recorded the calls), and the plugin's OWN BUILT loader DEGRADES — withholds the base
-    // and warns — when the generations differ, instead of refusing the mount (the family invariant:
-    // only a proven host break refuses). The control run below shows the same loader ACCEPTS a
-    // matching generation, so "degrade" is not "always undefined".
+    // SWAPPED BASE. What is proven here is the ASYMMETRY (`base/plugin-base/src/interface_gate.ts`):
+    // a NEWER generation is `ok` + a warning and KEEPS the base (generations are pure additions, so an
+    // older build's members are all still there), while an OLDER one is `incompatible` and makes the
+    // plugin's OWN BUILT loader withhold the base and warn — never refusing the mount (the family
+    // invariant: only a proven host break refuses). The control run below shows the same loader
+    // ACCEPTS a matching generation, so "degrade" is not "always undefined".
     if (typeof framework.checkInterface !== 'function' || typeof framework.readInterfaceRequirement !== 'function') {
       fail(`${plugin.name}: the swapped base does not expose the interface gate (checkInterface / readInterfaceRequirement)`)
       continue
@@ -349,9 +350,17 @@ try {
     if (framework.checkInterface(requirement.interfaceVersion, framework).status !== 'ok') {
       fail(`${plugin.name}: the swapped base judged its own generation as not-ok`)
     }
-    const otherGeneration = { ...framework, INTERFACE_VERSION: requirement.interfaceVersion + 1 }
-    if (framework.checkInterface(requirement.interfaceVersion, otherGeneration).status !== 'incompatible') {
-      fail(`${plugin.name}: a different INTERFACE_VERSION was not judged incompatible`)
+    const newerGeneration = { ...framework, INTERFACE_VERSION: requirement.interfaceVersion + 1 }
+    const newerVerdict = framework.checkInterface(requirement.interfaceVersion, newerGeneration)
+    if (newerVerdict.status !== 'ok' || typeof newerVerdict.warning !== 'string') {
+      fail(`${plugin.name}: a NEWER INTERFACE_VERSION was not judged ok + warning (${newerVerdict.status}) — an added surface must not downgrade anyone`)
+    }
+    const olderGeneration = {
+      ...framework,
+      INTERFACE_VERSION: Math.max(0, requirement.interfaceVersion - 1),
+    }
+    if (framework.checkInterface(requirement.interfaceVersion, olderGeneration).status !== 'incompatible') {
+      fail(`${plugin.name}: an OLDER INTERFACE_VERSION was not judged incompatible`)
     }
 
     const loader = await builtLoader(plugin)
@@ -371,14 +380,24 @@ try {
       return { ...outcome, warnings }
     }
 
-    const degraded = await runOnce(otherGeneration)
+    const degraded = await runOnce(olderGeneration)
     if (degraded.problem !== undefined) {
       fail(`${plugin.name}: an interface mismatch made the built loader THROW (${degraded.problem}) — it must degrade, never refuse`)
     } else if (degraded.runtime !== undefined) {
-      fail(`${plugin.name}: an interface mismatch did NOT withhold the base (the built loader returned a runtime)`)
+      fail(`${plugin.name}: an OLDER interface generation did NOT withhold the base (the built loader returned a runtime)`)
     }
     if (!degraded.warnings.join('\n').includes('shared capabilities are NOT used')) {
-      fail(`${plugin.name}: an interface mismatch emitted no "shared capabilities are NOT used" WARNING`)
+      fail(`${plugin.name}: an OLDER interface generation emitted no "shared capabilities are NOT used" WARNING`)
+    }
+
+    // The asymmetric half: a NEWER base keeps its capabilities — the loader must hand back a runtime.
+    const upgraded = await runOnce(newerGeneration)
+    if (upgraded.problem !== undefined) {
+      fail(`${plugin.name}: a NEWER interface generation made the built loader throw (${upgraded.problem})`)
+    } else if (upgraded.runtime === undefined) {
+      fail(`${plugin.name}: a NEWER interface generation withheld the base — generations are additive and must not downgrade anyone`)
+    } else {
+      upgraded.runtime.dispose?.()
     }
 
     const accepted = await runOnce({ ...framework })
