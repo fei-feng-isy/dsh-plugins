@@ -52,11 +52,14 @@ node {
   title         : string            // 一句话
   description   : string            // 任务内容
   unit          : string | null     // 改动范围（一个目录或文件）—— 引擎租约键（§2.4）
+  round_ms      : number | null     // 单轮硬上限的放宽声明（只放宽、最多 24h）；null = 引擎配置值（§3.4）
   context       : string[]          // 任务背景：拆解原因等，由拆解者写入
   corrections   : string[]          // master 的纠偏，最新在后（§6.6）
   corrections_delivered_up_to : number  // 纠偏投递水位：前 N 条已确认送达持有者那个会话（§9.2.2）
   analysis_notes: string[]          // 执行者用 note_mission 写下的判断，最老在前（§5.3.2）
   analysis_attempt: number          // 写下最后一条时的 attempts；0 表示没人写过
+  analysis_author: string | null    // 写下最后一条的 session id；身份比对用（§9.2.2）
+  hung_count    : number            // 连续 hung 次数，有真实产出即清零；到阈值通知 owner（§3.4）
   parked_worker : string | null      // 拆解后停手的会话 id —— 等待被唤醒的地址（§3.2.2）
   last_worker_id: string | null      // 被中断的会话 id —— 冷唤醒的句柄（§3.2.2）
   dispatch_baseline: Baseline | null // 这次 prompt 给会话看过什么；冷唤醒用它算差量（§3.2.2 / §9.2.2）
@@ -269,9 +272,13 @@ interface DispatchBaseline {
   notes: number              // analysisNotes 条数——之后追加的就是差量里的"新增笔记"
   terminalChildren: number   // 当时已终态的子任务数——只用于差量措辞，不参与 material 判据
   fingerprint: string        // title + description 的指纹——任务被改写过的判据
-  attempts: number           // 当时是第几次派发——判断最后一条笔记是不是本会话那次派发写的
+  attempts: number           // 当时是第几次派发——身份不可比时的退路（见 holder）
+  holder: string | null      // 这份 prompt 交给了哪个会话——判断"最后一条笔记是不是它自己写的"
 }
 ```
+
+`holder` 与节点上的 `analysisAuthor`（最后一条笔记的作者）配对使用：**按身份比对**优先，任一侧缺失（旧记录、
+非本代宿主写的）时退回 `attempts` 的代数比较。为什么代数不够用，见 §9.2.2 的 material 判据表。
 
 - **取点 = 宿主把 prompt 交给会话、投递被接受的那一刻**（`startWorker` / `wakeParkedWorker` /
   `deliverContinuation` 三处统一走 `recordBaseline`）。不放 core 的 `dispatch()`：一次 `dispatch()` 可能根本没有
@@ -303,16 +310,18 @@ interface DispatchBaseline {
   else if now - max(activity_at, progress_at, claimed_at) > STALE_MS
        → 存活但完全没有事件 → interrupt_agent(claimed_by) → interrupted（stalled，扣 failures、记 stalls）
   else if now - claimed_at > ROUND_MS
-       → 这一轮超过硬上限 → interrupt_agent(claimed_by) → interrupted（hung，不扣预算）
+       → 这一轮超过硬上限 → interrupt_agent(claimed_by) → interrupted（hung，不扣预算，hungCount+1）
   else if now - produced_at > STALE_MS
-       → 一直有事件但零产出 → interrupt_agent(claimed_by) → interrupted（hung，不扣预算）
+       → 一直有事件但零产出 → interrupt_agent(claimed_by) → interrupted（hung，不扣预算，hungCount+1）
   else
        → 还在做，不动
 ```
 
 活性是**主判据**（廉价、确定），超时只兜"活着但卡死"（需要一个阈值，是启发式）。两者都需要，但顺序不能反 —— 先看活性可以避免绝大多数无谓等待。
 
-超时按**产出**起算而不是按事件起算：worker 追加的模型输出（`assistant/message`）、工具调用（`tool/call`）与工具结果（`tool/result`）刷新 `progress_at`，其余事件（provider 重试 `assistant/attempt`、路由快照 `request/header`/`request/context`）只刷新 `activity_at`。于是判据是"多久没产出"而不是"多久没事件"，多步慢活不会被误判，而"一直有事件但零产出"（传输层一直重试）判 `hung` —— 不扣任何预算，只打日志；完全无事件仍是 `stalled`（扣 `failures`、记 `stalls`）。再加一条不看时间戳的轮级硬上限 `round_ms`（默认 1 小时）作兜底。首次停摆只有引擎自己恢复（记 `stalls`），**同一节点第二次停摆**或停摆后失败预算将用尽（`failures ≥ 4`）时才给 owner 一条消息，靠 `stalled_notified_at` 保证每节点至多一次。知会文案引用的也是失败预算而不是派发次数 —— 后者会被成功的汇总轮推高，写出来是"第 7 次派发（上限 5）"。
+超时按**产出**起算而不是按事件起算：worker 追加的模型输出（`assistant/message`）、工具调用（`tool/call`）与工具结果（`tool/result`）刷新 `progress_at`，其余事件（provider 重试 `assistant/attempt`、路由快照 `request/header`/`request/context`）只刷新 `activity_at`。于是判据是"多久没产出"而不是"多久没事件"，多步慢活不会被误判，而"一直有事件但零产出"（传输层一直重试）判 `hung` —— 不扣任何预算；完全无事件仍是 `stalled`（扣 `failures`、记 `stalls`）。再加一条不看时间戳的轮级硬上限 `round_ms`（默认 1 小时）作兜底：重活可以在 `create_mission` / `decompose_mission` 上用 `round_ms` 声明放宽（**只放宽不放紧**：引擎取 `max(配置值, 声明值)`，声明值上限 24 小时，且子任务不继承）。
+
+**"不扣预算"不等于"无上限"。** `hung` 每回收一次就 `hungCount + 1`，这是一个**连续计数**而非历史：`touchProgress` 收到任何真实产出立即清零，重新派发**不**清零（重派正是连续的一环）。累计到 `maxHungsBeforeReport`（3）时该节点命中 `isTroubledNode`，引擎走与 stalled **完全相同**的通道通知 owner —— 同一个 `notifyStalled` 回调、同一个 `isTroubledNode` 门槛、同一个 `stalledNotifiedAt` 持久标记（每节点至多一条消息，stalled / hung / 起不来三者共用）；文案说明这是连续第几次卡住、没有消耗失败预算，并指向 `adjust_mission` / `cancel_mission`。未到阈值时只打诊断日志（`notifyHung`，每次 hung 一条）。首次停摆只有引擎自己恢复（记 `stalls`），**同一节点第二次停摆**或停摆后失败预算将用尽（`failures ≥ 4`）时才给 owner 一条消息，靠 `stalled_notified_at` 保证每节点至多一次。知会文案引用的也是失败预算而不是派发次数 —— 后者会被成功的汇总轮推高，写出来是"第 7 次派发（上限 5）"。
 
 **"活性"必须包含"正在启动"。** 续期子会话是异步物化的：节点在子 agent 存在之前就已绑定，这段几十毫秒的窗口里 `ctx.agents.get(claim)` 还没有答案。若把这种绑定读作"worker 消失"，一次落在窗口里的扫描（每个 worker 结算都会触发扫描）就会回收它、重派一次 —— 第一个 worker 还活着，它的 `submit_mission` 因为不再持有节点而全部被拒。实测代价：5 个节点的三级树跑了 **13 个 worker**（每个节点多跑一次，attempts 白烧一次）。所以 claim 从**预留起**就算 live（`startingClaims`，直到子会话接受 prompt 为止），真正的"从未出现"仍由同一条扫描在启动结束后回收。
 
@@ -1160,7 +1169,7 @@ Cordis 的 `ctx.effect()` 就是 install/uninstall 接线：**disposer 在 fiber
 | 项 | 约定 |
 |---|---|
 | **优先级** | parked 会话 > `lastWorkerId` 冷唤醒 > 全新 spawn。parked 是活着、正在等唤醒的续命；`lastWorkerId` 是可能已不存在的句柄；`nextDispatchable` 照旧排除 parked 节点 |
-| **要不要续** | 认领前先算**变化差量**（`dispatchBaseline`，§3.2.3）并过 `isMaterialChange`：未读纠偏 / 笔记来自另一次派发 / 标题内容被改过 → **不续命**，消费句柄后走全新 spawn。**"子任务达到终态"被刻意排除在判据之外**：那是 parked 唤醒的触发条件本身 |
+| **要不要续** | 认领前先算**变化差量**（`dispatchBaseline`，§3.2.3）并过 `isMaterialChange`：未读纠偏 / 笔记来自**别的会话** / 标题内容被改过 → **不续命**，消费句柄后走全新 spawn。**"子任务达到终态"被刻意排除在判据之外**：那是 parked 唤醒的触发条件本身 |
 | **投递 seam** | 复用既有 `ctx.subagents.sendMessage(owner, SessionId(lastWorkerId), …)` —— dsh-subagent 的 `materialize` 就是 "Create **or resume** one child Agent"（内部 `agents.resume({ resumeSessionId })`）。不新增任何会话 API |
 | **认领顺序** | 守卫 → 认领（`adoptContinuation`：`claimedBy = lastWorkerId`、`attempts+1`、**消费**句柄）→ 投递。认领必须在前，因为被唤醒的会话立刻可以 `submit_mission` / `decompose_mission`，两者都校验 `claimedBy === caller` |
 | **守卫** | 复用 `wakingClaims`：冷恢复的目标同样按定义是 idle（没物化），只靠 `agents.get` 会把刚认领的绑定读成"已消失"，被扫描回收 → 冷恢复落地 + 新起执行者**双跑**。守卫在**认领之前**置位，直到 `workerLive` 真的观测到 resumed agent |
@@ -1190,7 +1199,7 @@ Cordis 的 `ctx.effect()` 就是 install/uninstall 接线：**disposer 在 fiber
 | 信号 | 为什么算 material |
 |---|---|
 | **未读纠偏 > 0**（水位与 baseline 取较后者） | owner 改了方向。这个会话的计划建立在旧方向上；全新执行者先读纠偏、再读别的，是这条消息更好的读者 |
-| **最后一条笔记不是本会话那次派发写的**（`analysisNotes.length > 0 && analysisAttempt !== baseline.attempts`） | 节点的判断通道被另一次派发推进过。保守是刻意的：误报只多起一个新执行者（永远正确），漏报是在自己没写过的判断上继续推理。`length > 0` 是必需的：没有笔记时 `analysisAttempt` 为 `0`，与任何 `attempts` 都不等 |
+| **最后一条笔记不是本会话写的**（`analysisAuthor !== baseline.holder`；任一侧缺失时退回 `analysisAttempt !== baseline.attempts`） | 节点的判断通道被**别的执行者**推进过。保守是刻意的：误报只多起一个新执行者（永远正确），漏报是在自己没写过的判断上继续推理。**按身份而不是按代数**是 2026-10-02 的修订（N3）：`analysisAttempt` 只记"哪一代派的"，而一个会话自己写的笔记会活过它的那次派发 —— 父节点拆解后再被唤醒（`attempts + 1`）正是这种情形，按代数比会把**自己**的判断读成"别人的"，于是一到汇总父节点冷唤醒就失效。`baseline.holder` 记录这份 prompt 交给了谁、`analysisAuthor` 记录最后一条笔记是谁写的；两者都在才比身份，否则退回旧的代数比较（旧记录缺字段时即上一代行为）。没有笔记时判否是必需的（`analysisAttempt` 为 `0`，与任何 `attempts` 都不等） |
 | **标题或内容被改过**（指纹不同） | 会话会被唤醒到一个它从未接到过的任务上 |
 
 **必须排除"子任务达到终态"，这是硬要求。** parked 会话被唤醒**就是因为**子任务全部终态 —— 那是引擎自己的触发条件
@@ -1355,7 +1364,7 @@ wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSche
 
 1. **加载零成本是硬不变量**。挂载、开面板、渲染树与详情、`mission_result` / `list_missions` 一律**不读任何会话日志**，也不列会话语料；查找只发生在**点击**时。理由不只是性能：会话日志属于另一个存储层，面板的每一次重绘（引擎每个变化推一帧）都不该把它牵进来。
 2. **解析顺序**：① 记录已有 `executorSessionId` → 直接打开，零 I/O（客户端连 Remote 都不调；宿主侧也短路，防止旧客户端把零成本点击变成一次扫描）；② 否则调**服务端**新方法 `resolveExecutorSession({ sessionId, nodeId })`；③ 打开仍走 `uiWorkspace.openSession({ parentSessionId, childSessionId, mode: 'continuable' })`。
-3. **服务端解析（`src/executorSession.ts`，与 `host.ts` 分开以便单测）**：从**可选获取**的 `ctx.get('sessionQuery')`（**不进 `inject`**：headless 部署没有它，缺了只是"无法查找"，不是挂载失败）取 `listSessions()` 做**元数据过滤，三条判据都必须满足**：① `header.parentSession === 本面板的 owner 会话`（别的 owner 的子会话不可能是这个节点的执行者）；② id 形如 `mission-xxxxxxxx`（本插件自己铸的 claim 形状，同 owner 的普通 subagent 不能被读、更不该被打开）；③ `header.createdAt` 落在该节点的时间窗内（`createdAt − 2min` 到 `max(activityAt, updatedAt, createdAt) + 2min`；**终点用节点自己最后一次变动、不用 now** —— 否则 owner 之后的无关会话会被放进来，正是第③条要挡的；记录没有任何时间戳时用最宽窗口，因为"没有钟"不等于"没跑过"）。候选按 `createdAt` 倒序，只对**最多 8 个**候选读日志，在 `sessionQuery.filterEvents(sessionId, [{ kind: 'time', from, to }, { kind: 'text', text: 'id: <nodeId>' }])` 的语义文本里找首条 worker prompt 的那一行（`core/src/prompt.ts` 的 `currentNodeBlock` 固定输出 `id: ${node.id}`），再用本模块自己的正则 `(?:^|\n)id: <id>(?:\n|$)` 复核一次 —— 后端文本过滤只做近似匹配，判定必须是精确的。**过滤条件是对象联合（`{kind:'time',from,to}` / `{kind:'text',text}`），不是元组**（见「修订之六」）。命中**最新**一个即返回（与"多次尝试只留最后一次"一致）。单个候选的日志读失败不再静默吞掉：记**一条** warn（每次查找最多一条，含 sessionId 与错误摘要）后继续，一个坏文件不能毁掉整次查找。
+3. **服务端解析（`src/executorSession.ts`，与 `host.ts` 分开以便单测）**：从**可选获取**的 `ctx.get('sessionQuery')`（**不进 `inject`**：headless 部署没有它，缺了只是"无法查找"，不是挂载失败）取 `listSessions()` 做**元数据过滤，三条判据都必须满足**：① `header.parentSession === 本面板的 owner 会话`（别的 owner 的子会话不可能是这个节点的执行者）；② id 形如 `mission-xxxxxxxx`（本插件自己铸的 claim 形状，同 owner 的普通 subagent 不能被读、更不该被打开）；③ `header.createdAt` 落在该节点的时间窗内（`createdAt − 2min` 到 `max(activityAt, updatedAt, createdAt) + 2min`；**终点用节点自己最后一次变动、不用 now** —— 否则 owner 之后的无关会话会被放进来，正是第③条要挡的；记录没有任何时间戳时用最宽窗口，因为"没有钟"不等于"没跑过"）。候选按 `createdAt` 倒序，只对**最多 8 个**候选读日志，在 `sessionQuery.filterEvents(sessionId, [{ kind: 'time', from, to }, { kind: 'text', text: 'id: <nodeId>' }])` 的语义文本里找首条 worker prompt 的那一行（`core/src/prompt.ts` 的 `currentNodeBlock` 固定输出 `id: ${node.id}`），再用本模块自己的正则 `(?:^|\n)id: <id>(?:\n|$)` 复核一次 —— 后端文本过滤只做近似匹配，判定必须是精确的。**过滤条件是对象联合（`{kind:'time',from,to}` / `{kind:'text',text}`），不是元组**（见「修订之六」）。命中**最新**一个即返回（与"多次尝试只留最后一次"一致）。单个候选的日志读失败不再静默吞掉：记**一条** warn（每次查找最多一条，含 sessionId 与错误摘要）后继续，一个坏文件不能毁掉整次查找。**并且答案本身要区分"没有匹配"与"一个都没读成"**（N7）：本次实际读过的候选**全部**失败时返回 `unsupported` + 首条失败原因（单行），只有"至少有一条读成功且无匹配"才是 `not-found` —— 否则一次形状错误/后端故障会伪装成"会话已被清理"。
 4. **写回时机**：命中后由宿主 `MissionTree.rememberExecutor(nodeId, sessionId)` **一次写回** `executorSessionId` 并落盘，下一次点击就零 I/O。写回是**写一次**的：只在该字段仍是 `null`/空串时写 —— 查找期间已经到达的新句柄属于**更新的一次尝试**，用解析出的旧会话覆盖它会指错会话。`DOMAIN_VERSION` 仍为 1（只是多了一个可选字段的**写入**，旧记录缺它照旧读 `null`）。
 5. **四类失败，四句原文**（`workerFailureText`，客户端按理由渲染，绝不让点击"没反应"）：
    - `never-dispatched`（记录 `attempts === 0`，是**事实**而非"没找到"）：`这个任务从未派发过执行者会话：没有可打开的执行者。`
@@ -1376,6 +1385,8 @@ wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSche
 3. **假实现改成校验真契约**：`test/sessionQueryContract.ts` 的 `checkEventFilters` 收到元组即记为契约违规，`executor-session.spec.ts` 的每个 fake 与 `mount.ts` 的 service stub 都过它，spec 用 `afterEach` 断言违规为空（元组会让**发出它的那个用例**失败，而不是安静地返回 `[]`）；另有一组**跨包钉死**用例直接用真实 `@deepseek-ai/dsh-session-query`（本仓是它的声明 peer）的 `materializeSessionEventResultFilters` / `filterSessionEventDocuments` 跑我们发出的 filter，形状与语义都由**拥有契约的那个包**判定。守卫：`test/executor-session.spec.ts`（发出的 filter 精确等于两个对象子句 / 契约检查本身能抓元组（非空真）/ 失败日志每次查找只 warn 一条且含 sessionId 与错误摘要 / 跨包钉死拒绝元组并选中正确事件）、`test/host.spec.ts` 的 W18 块（真挂载路径 `sessionFilterViolations` 为空）。
 
 **教训**：**假实现必须镜像真实契约，不是镜像实现里的猜测** —— 照抄猜测的假替身会让形状/语义错误在测试里完全隐形；能跨包钉死就用真实包。**并且，别把 catch 写成静默吞掉**：一次被吞掉的形状错误，看起来和"没有结果"一模一样。
+
+**2026-10-02 修订之七：答案也要区分"没有匹配"与"一条都没读成"（N7）。** 「修订之六」把 warn 与契约钉补上了，但**返回的答案本身**仍然把两种情况压成同一个 `not-found`：全部候选读取失败时，用户读到的是「找不到这个任务的执行者会话：它可能已被清理」—— 那正是 W20 的教训被重新穿上。改成：`sessionRanNode` 返回三态（命中 / 未命中 / 读不成+原因），`resolveExecutorSession` 统计本次**实际读过**的候选；**读过的全部失败**（`read > 0 && unreadable === read`，且至少有一条失败原因）时返回契约里既有的 `unsupported` + **首条失败原因**（单行、与其它宿主原因同样截断），客户端本来就用宿主原话渲染 `unsupported`；只要有**一条**读成功而无匹配，仍是 `not-found`。守卫：`test/executor-session.spec.ts`（全败 → `unsupported` 且文案含首条原因、单行、仍只 warn 一条；混合 → `not-found`；服务缺 `filterEvents` → `unsupported`）、`test/client-view.spec.tsx`（`unsupported` 文案把 N7 的原因读给用户，而不是"可能已被清理"）。
 
 ## 十、插件构成
 

@@ -4,7 +4,9 @@
  * A `unit` is the SCOPE a mission is going to modify — a directory or a file. Two nodes that declare
  * the same unit must never run at the same time, and that guarantee is made by the engine's state,
  * never by telling executors to be careful (the same stance `decompose`/`submitResult` take toward
- * mutual exclusion, see `tree.ts`).
+ * mutual exclusion, see `tree.ts`). "The same unit" is decided on the NORMALIZED key
+ * ({@link normalizeUnit}), so the usual ways of spelling one scope differently are one lease; what is
+ * deliberately still not covered is containment (`a` vs `a/b`) — see that function's note.
  *
  * ## The lease is a PROJECTION of node state, not a table
  *
@@ -33,10 +35,12 @@
  *
  * A node repeatedly skipped for capacity eventually RESERVES the machine: past `agingMs` of waiting,
  * no new node is admitted until the reserved one fits (`planDispatch`'s `reserved` flag). Several
- * reserved nodes are served oldest-wait-first. A node whose `weight > capacity` ("give me the whole
- * machine") can never fit beside anything, so it is dispatched exactly when nothing else is running —
- * the same rule, expressed arithmetically, which keeps it from waiting forever. Queue order is FIFO
- * by enqueue time (`byCreatedAtThenId`) with aging promotion — deliberately NOT weight order.
+ * reserved nodes are served oldest-wait-first. While a reservation holds, the candidates it is
+ * holding back are described as `aging` — not `slot`, which would claim capacity was free when the
+ * only reason they are not admitted is the reservation. A node whose `weight > capacity` ("give me
+ * the whole machine") can never fit beside anything, so it is dispatched exactly when nothing else is
+ * running — the same rule, expressed arithmetically, which keeps it from waiting forever. Queue order
+ * is FIFO by enqueue time (`byCreatedAtThenId`) with aging promotion — deliberately NOT weight order.
  *
  * ## Why this cannot deadlock
  *
@@ -88,14 +92,53 @@ export function byCreatedAtThenId(a: NodeRecord, b: NodeRecord): number {
 // ── unit leases ─────────────────────────────────────────────────────────────
 
 /**
- * A declared unit as stored: trimmed, and `null` for "nothing declared". A blank string is the way a
- * caller opts OUT of a lease explicitly (see `@avantf/dsh-mission`'s tool layer), and it is the same
- * value a missing field loads as, so the two cannot diverge.
+ * A declared unit as stored: trimmed, path-normalized, and `null` for "nothing declared". A blank
+ * string is the way a caller opts OUT of a lease explicitly (see `@avantf/dsh-mission`'s tool layer),
+ * and it is the same value a missing field loads as, so the two cannot diverge.
+ *
+ * ## Why the lease key is normalized
+ *
+ * `unit` is model-authored free text, and the exclusion it buys is an exact string comparison. Two
+ * executors told to change the same directory will not necessarily spell it the same way — `a/b`,
+ * `a/b/`, `./a/b` and `a\b` are one scope to a human and four different lease keys to the engine, so
+ * the guarantee ("two parallel lanes never touch one file") held only when the two agents happened to
+ * type byte-identical text.
+ *
+ * The canonical form, chosen conservatively:
+ *
+ * - separators: `\` reads as `/` (a Windows-authored path and a POSIX one name the same scope). At
+ *   most one leading `/` survives, so `//srv/x` (a UNC spelling) and `/srv/x` still differ by the
+ *   leading slash and are NOT conflated.
+ * - redundant separators collapse (`a//b` → `a/b`).
+ * - `.` segments are dropped and trailing separators are trimmed (`./a/b/` → `a/b`).
+ * - `..` segments are resolved LEXICALLY (`a/b/../c` → `a/c`), but a `..` that would escape the front
+ *   of the path is PRESERVED (`../a` stays `../a`), so distinctly-named scopes stay distinct. This is
+ *   textual, not filesystem-aware: no `realpath`, no cwd, no symlink resolution — resolving against
+ *   the real filesystem would make the lease depend on which process asked, and the core has no cwd.
+ *
+ * **What this still does not cover (v1, declared in `mission/docs/design/2026-10-02-unit-lease.md`):
+ * containment.** `a` and `a/b` remain two different keys, so a parent directory and a file inside it
+ * are not mutually exclusive. Only the identical-scope case is guaranteed; a caller that wants
+ * isolation must name the exact same scope on both nodes (the tool text recommends a path relative
+ * to the repository root, e.g. `mission/packages/core`).
  */
 export function normalizeUnit(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null
-  const trimmed = raw.trim()
-  return trimmed.length === 0 ? null : trimmed
+  const slashed = raw.trim().replace(/\\/gu, '/')
+  if (slashed.length === 0) return null
+  const absolute = slashed.startsWith('/')
+  const segments: string[] = []
+  for (const segment of slashed.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..' && segments.length > 0 && segments[segments.length - 1] !== '..') {
+      segments.pop()
+      continue
+    }
+    segments.push(segment)
+  }
+  const body = segments.join('/')
+  if (body.length === 0) return absolute ? '/' : null
+  return absolute ? `/${body}` : body
 }
 
 /**
@@ -381,9 +424,16 @@ export function planDispatch(
       ]
       return { selected: reserved, deferred, reserved: false }
     }
+    // The reservation is why nothing else is admitted, so every candidate that would otherwise have
+    // fit is described as AGING — `describe` would call it `slot` ("capacity is free, the slots are
+    // full"), which is the one thing that is not true here. The reserved node itself keeps its own
+    // `capacity` reason: it is waiting for the machine to drain, not for its own reservation.
     const deferred = [
       ...unitBlocked,
-      ...candidates.map((node) => ({ node, waitingFor: describe(node) })),
+      ...candidates.map((node) => ({
+        node,
+        waitingFor: node.id === reserved.id ? describe(node) : { reason: 'aging' as const },
+      })),
     ]
     return { selected: undefined, deferred, reserved: true }
   }

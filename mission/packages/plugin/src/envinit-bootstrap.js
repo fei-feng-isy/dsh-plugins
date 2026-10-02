@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export const VERSION = '0.3.2';
+export const VERSION = '0.4.0';
 /**
  * The framework interval this bootstrap can launch.
  *
@@ -17,7 +17,8 @@ export const VERSION = '0.3.2';
  * compatibility promise — `>=0.3.0 <1.0.0` admits every 0.x base this generation of plugins can
  * consume, and stops at the major that invented a new interface generation. The interface itself is
  * the separate, runtime axis: a base inside this interval whose `INTERFACE_VERSION` differs is judged
- * by the base's own gate (INTERFACE.md §1, §3), which degrades rather than refusing.
+ * by the base's own gate (INTERFACE.md §1, §3) — an OLDER base degrades, a NEWER one is `ok` + a
+ * warning (generations are additive), and neither ever refuses the mount.
  */
 export const supportedRange = '>=0.3.0 <1.0.0';
 const PACKAGE = '@avantf/dsh-plugin-base';

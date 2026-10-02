@@ -905,11 +905,12 @@ describe('resolving a historical executor on click', () => {
       nodes: {
         [rootId]: {
           id: rootId, rootId, parentId: null, title: 'Historical', description: 'd',
-          unit: null, weight: 1, executorSessionId: null,
+          unit: null, weight: 1, roundMs: null, executorSessionId: null,
           context: [], corrections: [], correctionsDeliveredUpTo: 0, analysisNotes: [], analysisAttempt: 0,
+          analysisAuthor: null,
           status: 'done', createdAt: at, depth: 1, claimedBy: null, claimedAt: at, attempts: 1,
           failures: 0, spawnFailures: 0, parkedWorker: null, lastWorkerId: null, dispatchBaseline: null,
-          progressAt: at, activityAt: at + 500, stalls: 0, stalledNotifiedAt: null,
+          progressAt: at, activityAt: at + 500, stalls: 0, hungCount: 0, stalledNotifiedAt: null,
           result: 'done', hasResult: true, resultReadAt: null, resultRef: null, resultHint: null,
           children: [], updatedAt: at + 500,
         },

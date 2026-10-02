@@ -41,6 +41,13 @@ export const CAPACITY = {
   /** A node reclaimed for silence this many times gets a heads-up, not a decision request — the
    * engine recovers on its own, which is why it waits for a repeat. */
   maxStallsBeforeReport: 2,
+  /** A node reclaimed as `hung` (alive but unproductive, or past its round cap) this many times IN A
+   * ROW gets the same one-message heads-up, through the same durable marker. One higher than
+   * {@link maxStallsBeforeReport} because a hung round is already a whole stale/round window long, so
+   * three in a row is unambiguous rather than jitter — and because a single long-but-legitimate step
+   * must not page the owner. This is the ceiling the old behaviour lacked: hung still charges no
+   * budget, but it can no longer repeat forever without anyone being told. */
+  maxHungsBeforeReport: 3,
   /** Longer results are spilled to the store; the node keeps the summary. */
   maxInlineResultChars: 2000,
 } as const
@@ -80,6 +87,12 @@ export interface TreeRecord {
  *   resuming a mission it was never handed.
  * - `attempts` — the dispatch generation this prompt was built under, compared against
  *   `analysisAttempt` to tell whether the node's latest note belongs to THIS dispatch.
+ * - `holder` — the session this prompt was delivered to. The generation number alone cannot answer
+ *   "is this note mine?": a session's own note survives into a LATER dispatch of the same node
+ *   (the parent that decomposed and is woken again is the common case), so `attempts` would call
+ *   its own judgement somebody else's. The wake compares this holder against the note's author
+ *   instead (`analysisAuthor`), and falls back to the generation comparison only when this is
+ *   `null` (a baseline written before the field existed).
  *
  * Missing on a record written before the field existed: that reads as "no baseline", which a wake
  * must treat as UNKNOWN rather than as "nothing changed" (see `computeContinuationDelta`).
@@ -90,6 +103,9 @@ export interface DispatchBaseline {
   readonly terminalChildren: number
   readonly fingerprint: string
   readonly attempts: number
+  /** The session holding the node when this prompt was built; `null` on a pre-`holder` record, which
+   *  the delta reads as "author unknown" and judges by the generation comparison. */
+  readonly holder: string | null
 }
 
 /**
@@ -97,19 +113,23 @@ export interface DispatchBaseline {
  * the current admission state, never persisted. `null` (or a missing field on an older payload)
  * means "nothing is holding it back".
  *
- * The three reasons are the three gates that can defer a dispatch:
+ * The four reasons are the four gates that can defer a dispatch:
  *
  * - `capacity` — the master gate: `Σ running.weight + weight > capacity`. `resource` distinguishes
  *   the machine-derived compute capacity (`cpu`) from the host's free-memory floor (`memory`, whose
  *   `needed`/`available` are BYTES, not cores). Only the `cpu` flavour can age into a reservation.
  * - `unit` — another `running` node holds the same declared scope (the unit lease).
  * - `slot` — the `maxConcurrent` ceiling on the NUMBER of units; capacity itself has room.
+ * - `aging` — an aged node has RESERVED the machine (past the aging window: no new admission until
+ *   it fits), so every OTHER queued candidate is held back even though `capacity` alone might have
+ *   room. Reported instead of `slot` because "capacity is free, the slots are just full" would be
+ *   false, and this is the one moment the anti-starvation mechanism is supposed to be visible.
  *
  * `needed`/`available` are filled only where a number is meaningful; a memory deferral whose signal
  * is `null` ("cannot tell") carries no numbers at all, because there is nothing honest to show.
  */
 export interface WaitingFor {
-  readonly reason: 'capacity' | 'unit' | 'slot'
+  readonly reason: 'capacity' | 'unit' | 'slot' | 'aging'
   readonly resource?: 'cpu' | 'memory'
   readonly needed?: number
   readonly available?: number
@@ -141,6 +161,15 @@ export interface NodeRecord {
    * loads as: such a node takes no part in the lease and behaves exactly as it did before the field
    * existed. Persisted, `DOMAIN_VERSION` stays 1. */
   readonly unit: string | null
+  /** Per-mission RELAXATION of the engine's `roundMs` ceiling — how long ONE round of this mission
+   * may run before it is reclaimed as `hung`. Declared by `create_mission` for a root and per child by
+   * `decompose_mission`, exactly like `weight`; a child's declaration is its own and is deliberately
+   * NOT inherited (a parent's long build says nothing about one child). Relaxation ONLY: the engine
+   * compares `max(configured roundMs, this)`, so a declaration can never shorten the backstop that
+   * catches a transport retrying forever, and `normalizeRoundMs` caps it at 24 h so it cannot opt out
+   * of the backstop either. `null` means "use the engine's configured cap", which is also what a
+   * record written before the field existed loads as. Persisted, `DOMAIN_VERSION` stays 1. */
+  readonly roundMs: number | null
   /** Background facts: why this mission exists (written by the decomposer), or the owner's initial
    * analysis for a root — the only channel carrying the vertical "why" down the mission chain. */
   readonly context: readonly string[]
@@ -168,6 +197,12 @@ export interface NodeRecord {
    * compares it against the current `attempts`, so an executor cannot inherit a justification
    * written by an earlier round. */
   readonly analysisAttempt: number
+  /** The session that wrote the LAST entry of {@link analysisNotes}; `null` when none, or on a record
+   * written before the field existed. The cold wake compares it against {@link DispatchBaseline}'s
+   * `holder` so a session's OWN note is not mistaken for a different dispatch's — which the
+   * generation number alone cannot tell once the same session's note outlives its dispatch. Persisted,
+   * `DOMAIN_VERSION` stays 1. */
+  readonly analysisAuthor: string | null
   readonly status: NodeStatus
   readonly createdAt: number
   readonly depth: number
@@ -248,8 +283,18 @@ export interface NodeRecord {
   readonly activityAt: number
   /** Times this node was reclaimed because its worker went silent past the stale window; a worker
    * that merely vanished is not the node's fault and does not count here. A `hung` reclaim is not
-   * counted either — see `MissionTree.reclaim`. */
+   * counted either — see `MissionTree.reclaim` and {@link hungCount}. */
   readonly stalls: number
+  /** CONSECUTIVE `hung` reclaims since this node last PRODUCED something (real output, i.e. the
+   * `MissionTree.touchProgress` clock). Hung rounds charge no budget by design, so without this
+   * counter a worker that hangs every round re-runs forever and nothing ever reaches the owner. It is
+   * a STREAK, not a history: any real output clears it to 0, and a re-dispatch does NOT (the round
+   * after a hung reclaim is exactly the next link in the streak). At
+   * `CAPACITY.maxHungsBeforeReport` it trips `isTroubledNode`, which both flags the mission as
+   * 「反复出过问题」 and routes it to the owner through the same one-message-per-node trouble channel
+   * the stall and failed-start heads-ups use. `0` is also what a record written before the field
+   * existed loads as. Persisted, `DOMAIN_VERSION` stays 1. */
+  readonly hungCount: number
   /** When the owner was told this node keeps stalling; `null` until then. Durable for the same
    * reason as `TreeRecord.reportedAt`: an in-memory memo is empty after a restart. */
   readonly stalledNotifiedAt: number | null
@@ -278,6 +323,9 @@ export interface ChildSpec {
   /** This child's declared capacity weight, in cores-equivalent. `undefined` reads as the default 1
    * and is deliberately NOT inherited from the parent — the parent's estimate is not the child's. */
   readonly weight?: number
+  /** This child's declared round-cap relaxation (see {@link NodeRecord.roundMs}). `undefined` reads
+   * as `null` — the engine's configured cap — and is deliberately NOT inherited from the parent. */
+  readonly roundMs?: number | null
 }
 
 /** Why a node stopped being dispatchable, for the failure report. */

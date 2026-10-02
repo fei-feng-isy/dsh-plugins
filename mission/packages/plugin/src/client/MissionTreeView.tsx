@@ -75,6 +75,9 @@ function waitingLabel(
   if (waiting.reason === 'slot') {
     return { text: '排队中', title: '同时执行的任务数已达上限，等一个空位' }
   }
+  if (waiting.reason === 'aging') {
+    return { text: '排队中', title: '有任务等得太久、已预留整机：正在跑的排空后先派它，本任务随后' }
+  }
   if (waiting.resource === 'memory') {
     const numbers = waiting.needed === undefined || waiting.available === undefined
       ? '剩余可用内存无法确认（本平台没有这个信号）'

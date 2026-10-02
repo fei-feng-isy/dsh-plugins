@@ -3,7 +3,7 @@
  * @module @avantf/mission-core/engine
  */
 import { MissionTree } from './tree.js'
-import { judgeWorker, type LivenessBound, type LivenessVerdict } from './liveness.js'
+import { effectiveRoundMs, judgeWorker, type LivenessBound, type LivenessVerdict } from './liveness.js'
 import { isTroubledNode } from './prompt.js'
 import {
   CAPACITY_CEILING,
@@ -39,8 +39,10 @@ export interface ResumeWorkerInput {
    * The capacity policy this candidate was selected under. The host hands it straight to
    * `adoptContinuation`, so the adoption re-runs the plan's own judgement against the live load
    * under the tree lock exactly as `dispatch` does — a continuation is a dispatch and must not bind
-   * past a machine that filled up between the plan and the adoption. Absent means the caller opted
-   * out of the gate (the wake paths that have no plan snapshot pass nothing).
+   * past a machine that filled up between the plan and the adoption. It is always supplied by
+   * `MissionEngine.pass`; the parallel parked wake builds the same object through
+   * `MissionEngine.admissionPolicy()`, so both wake paths gate identically instead of one of them
+   * opting out — which is what let a wake oversubscribe the machine.
    */
   readonly capacity?: CapacityPolicy
   /** The capacity wait this candidate served before being selected; see {@link StartWorkerInput}. */
@@ -126,10 +128,20 @@ export interface StallReport {
   /** Reclaims for silence so far, including the one being reported. */
   readonly stalls: number
   readonly silentMs: number
+  /**
+   * Which trouble this is. `silence` (the default, and what an older caller sees) is a stall; `hung`
+   * is the repeated-hang heads-up, which shares the channel, the {@link isTroubledNode} floor and the
+   * one-message-per-node marker precisely so the owner reads ONE vocabulary rather than two.
+   */
+  readonly cause?: 'silence' | 'hung'
+  /** Consecutive hangs at report time; present only for `cause: 'hung'`. */
+  readonly hungs?: number
 }
 
-/** What a `hung` reclaim looked like, for the engine's diagnostic log. It carries no owner-facing
- *  message: `hung` is deliberately NOT an `isTroubled` signal (see {@link isTroubledNode}). */
+/** What a `hung` reclaim looked like, for the engine's diagnostic log. This per-reclaim report is
+ *  NOT an owner-facing message by itself — one hung round is an apparatus event, not a decision —
+ *  but a STREAK of them is (`isTroubledNode` reads `hungCount`), and that escalation travels through
+ *  {@link StallReport} with `cause: 'hung'`. */
 export interface HungReport {
   readonly rootId: string
   readonly nodeId: string
@@ -143,6 +155,8 @@ export interface HungReport {
   readonly ranMs: number
   /** ms since the worker last produced anything. */
   readonly idleMs: number
+  /** Consecutive hangs after this reclaim, including it — the streak `isTroubledNode` reads. */
+  readonly hungCount: number
 }
 
 /** Why a dispatch is waiting, for the engine's rate-limited diagnostic log. This is NOT an
@@ -270,6 +284,22 @@ export class MissionEngine {
     return this.waiting.get(nodeId) ?? null
   }
 
+  /**
+   * The admission policy THIS moment would gate on, from the engine's own single source: the same
+   * `capacityPolicy(memoryFloor())` the dispatch loop builds, carrying the engine's own aging clock
+   * (`capacityWaits`) and the live machine-wide memory block. Built, never stored: the caller gets a
+   * snapshot for one decision, exactly like a pass's policy object.
+   *
+   * It exists for the WAKE paths. `adoptParked` / `adoptContinuation` re-run the gate under the tree
+   * lock, and the rule is that a wake must be judged by the very policy the dispatch loop would use —
+   * deriving a second one in the host (its own capacity number, its own clock) is how the two drift.
+   * The continuation wake already receives the pass's policy through `resumeWorker`; this is how the
+   * parked wake, which has no plan snapshot of its own, gets the same one.
+   */
+  admissionPolicy(): CapacityPolicy {
+    return this.capacityPolicy(this.memoryFloor())
+  }
+
   /** The capacity the engine is actually gating on, for diagnostics and tests. */
   capacity(): { capacity: number; maxConcurrent: number; runningCount: number; runningWeight: number } {
     const load = this.tree.runningLoad()
@@ -326,7 +356,6 @@ export class MissionEngine {
    */
   async reclaimStale(): Promise<number> {
     const now = this.options.now?.() ?? Date.now()
-    const windows = { staleMs: this.options.staleMs, roundMs: this.options.roundMs }
     let reclaimed = 0
     for (const root of this.tree.trees()) {
       // Resolve the tree's live holders once: one scan per tree, not one per node.
@@ -335,6 +364,12 @@ export class MissionEngine {
         if (node.status !== 'running') continue
         const holder = node.claimedBy
         if (holder !== null && held.has(node.id)) {
+          // The round cap is resolved PER NODE: a mission may declare a longer one (relaxation
+          // only), which is what keeps a legitimately heavy round from being reclaimed as hung.
+          const windows = {
+            staleMs: this.options.staleMs,
+            roundMs: effectiveRoundMs(node, this.options.roundMs),
+          }
           const verdict = judgeWorker(node, now, windows)
           if (verdict === undefined) continue
           await this.hooks.interruptWorker(holder)
@@ -344,8 +379,18 @@ export class MissionEngine {
           const result = await this.tree.reclaim(node.id, verdict.cause, holder)
           if (!result.ok) continue
           reclaimed += 1
-          if (verdict.cause === 'stalled') await this.reportStall(result.value, verdict.silentMs)
-          else this.reportHung(result.value, verdict)
+          if (verdict.cause === 'stalled') {
+            await this.escalateTrouble(result.value, { cause: 'silence', silentMs: verdict.silentMs })
+          } else {
+            // The per-reclaim diagnostic first (every hung round is logged), then the shared
+            // escalation — which fires only once the streak trips `isTroubledNode`.
+            this.reportHung(result.value, verdict)
+            await this.escalateTrouble(result.value, {
+              cause: 'hung',
+              silentMs: verdict.idleMs,
+              hungs: result.value.hungCount,
+            })
+          }
           continue
         }
         // No live holder: the worker vanished. Same CAS as above, with the snapshot's holder
@@ -358,10 +403,17 @@ export class MissionEngine {
   }
 
   /**
-   * Tell the owner about a node that keeps going silent, but only when it is worth a turn of its own: the engine already recovered, so the message is a heads-up rather than a question.
-   * Waiting for a repeat, or for a node about to run out of attempts, is what keeps a permanently flaky node from turning a sweep into a wake storm; the durable marker makes "once" true across restarts.
+   * The ONE owner-facing "this node keeps going wrong" path, shared by every cause. Three rules make
+   * it one vocabulary rather than two: the gate is {@link isTroubledNode} (the same predicate the
+   * `isTroubled` flag reads), the report rides the `notifyStalled` channel (a heads-up, never a
+   * question), and the durable `claimStallReport` marker keeps it to one message per node whichever
+   * way the node is failing. The engine already recovered on its own in every case, so waiting for a
+   * repeat is what keeps a permanently flaky node from turning a sweep into a wake storm.
    */
-  private async reportStall(node: NodeRecord, silentMs: number): Promise<void> {
+  private async escalateTrouble(
+    node: NodeRecord,
+    detail: { cause: 'silence' | 'hung'; silentMs: number; hungs?: number },
+  ): Promise<void> {
     const notify = this.hooks.notifyStalled
     if (notify === undefined) return
     // The SAME floors the owner-facing `isTroubled` flag uses (see `isTroubledNode`), so the flag and
@@ -376,13 +428,17 @@ export class MissionEngine {
       attempts: node.attempts,
       failures: node.failures,
       stalls: node.stalls,
-      silentMs,
+      silentMs: detail.silentMs,
+      cause: detail.cause,
+      ...(detail.hungs === undefined ? {} : { hungs: detail.hungs }),
     })
   }
 
-  /** Tell the host a node was reclaimed as `hung`, so the event is diagnosable. Deliberately no
-   *  owner wake and no durable marker: this is apparatus trouble, the engine recovered on its own,
-   *  and the `isTroubled` flag is reserved for facts the owner can act on. */
+  /** Tell the host a node was reclaimed as `hung`, so every hung round is diagnosable — a provider
+   *  that hangs (or only retries) every dispatch must never be invisible, which is exactly how W8
+   *  stayed unnoticed for 7.5 hours. This per-reclaim line is NOT the owner escalation: one hung
+   *  round is an apparatus event the engine recovered from, and only a STREAK crosses
+   *  {@link escalateTrouble}'s `isTroubledNode` floor. */
   private reportHung(node: NodeRecord, verdict: LivenessVerdict): void {
     const notify = this.hooks.notifyHung
     if (notify === undefined) return
@@ -397,6 +453,8 @@ export class MissionEngine {
       bound: verdict.bound === 'round' ? 'round' : 'output',
       ranMs: verdict.ranMs,
       idleMs: verdict.idleMs,
+      // The streak AFTER this reclaim, exactly as `isTroubledNode` will read it.
+      hungCount: node.hungCount,
     })
   }
 
@@ -494,13 +552,18 @@ export class MissionEngine {
       // in this same pass either, or the pass would spin on the same node.
       reserved.add(candidate.id)
       // The capacity wait this node served before being picked, read from the SAME aging clock the
-      // gate (and `waitingFor`) is built from, and read BEFORE the entry below is dropped — that
-      // drop is what makes this the last moment the fact exists. The same number goes to whichever
-      // path delivers the prompt, so a continued session is told it exactly as a fresh one is.
+      // gate (and `waitingFor`) is built from, and read BEFORE any entry is dropped — that drop is
+      // what makes this the last moment the fact exists. The same number goes to whichever path
+      // delivers the prompt, so a continued session is told it exactly as a fresh one is.
+      //
+      // The clock entry is deliberately NOT deleted here: being SELECTED is not being BOUND. A
+      // `capacity-busy` refusal below, or a continuation the host skips, leaves the node ready and
+      // still waiting — restarting its clock at `now` would give it a fresh aging window every time
+      // the lock said no, so the more concurrent bindings there are, the weaker the anti-starvation
+      // guarantee gets. It is dropped on the two outcomes that actually end the wait (bound, or
+      // terminal), and `publishWaiting` drops it for any node that left the queue.
       const deferredSince = this.capacityWaits.get(candidate.id)
       const waitedMs = deferredSince === undefined ? 0 : Math.max(0, policy.now - deferredSince)
-      // It is being dispatched, so it is no longer waiting for capacity.
-      this.capacityWaits.delete(candidate.id)
 
       // CONTINUATION FIRST (a cold wake). A node reclaimed by an ordinary sweep has no handle, so
       // this branch is reached only for a binding an interruption demoted (`reconcileOnOpen`), which
@@ -513,13 +576,16 @@ export class MissionEngine {
           waitedMs,
         })
         if (outcome === 'resumed') {
-          // Bound and delivered: one dispatch, and deliberately no `startWorker`.
+          // Bound and delivered: one dispatch, and deliberately no `startWorker`. The wait is over,
+          // so the clock goes with it.
+          this.capacityWaits.delete(candidate.id)
           dispatched += 1
           continue
         }
         if (outcome === 'skip') {
           // Nothing was bound and nothing must be spawned: another delivery owns the session, or the
-          // state moved. Leave it for the next pass.
+          // state moved. Leave it for the next pass — with its clock intact, so the wait it already
+          // served still counts toward the reservation.
           this.hooks.trace?.(`continuation of ${candidate.id} deferred`)
           continue
         }
@@ -536,14 +602,17 @@ export class MissionEngine {
         this.hooks.releaseClaimId(claimId)
         this.hooks.trace?.(`dispatch refused ${candidate.id}: ${decision.code}`)
         // A `capacity-busy` refusal is a DEFERRAL, never a dispatch failure: no budget was charged,
-        // no worker started, and the node keeps its place in the queue. Hand it back to the plan (drop
-        // this pass's reservation) so the very next iteration re-describes it through the ordinary
-        // path — publishing its `waitingFor` and starting its aging clock there — instead of leaving
-        // it "spoken for" with nothing shown. The re-plan runs against the LIVE load, which is the
-        // same load the refusal just read, so it cannot select the node again in a loop.
+        // no worker started, and the node keeps its place in the queue — including the wait it has
+        // already served (the clock is untouched above). Hand it back to the plan (drop this pass's
+        // reservation) so the very next iteration re-describes it through the ordinary path —
+        // publishing its `waitingFor` from that same clock — instead of leaving it "spoken for" with
+        // nothing shown. The re-plan runs against the LIVE load, which is the same load the refusal
+        // just read, so it cannot select the node again in a loop.
         if (decision.code === 'capacity-busy') reserved.delete(candidate.id)
         continue
       }
+      // Bound: the node left the queue, so its capacity wait is over.
+      this.capacityWaits.delete(candidate.id)
       dispatched += 1
       void this.hooks
         .startWorker({ node: decision.value.node, claimId, waitedMs })
@@ -583,6 +652,11 @@ export class MissionEngine {
    * The rate-limited deferral log: one line per node per minute while the capacity gate holds it
    * back. Deliberately not an owner wake and not an `isTroubled` fact — normal queuing is not a
    * problem the owner can act on.
+   *
+   * Two reasons count as "waiting for capacity" here: `capacity` itself (this node does not fit) and
+   * `aging` (ANOTHER node has reserved the machine, so this one is held back while capacity may have
+   * room). The second is the one the aging mechanism exists to make visible — leaving it out is how
+   * the reservation changed what the engine admits with no line anywhere saying so.
    */
   private reportDeferrals(deferred: readonly DeferredCandidate[], reserved: boolean): void {
     const notify = this.hooks.notifyDeferred
@@ -591,10 +665,11 @@ export class MissionEngine {
     const load = this.tree.runningLoad()
     for (const entry of deferred) {
       const waiting = entry.waitingFor
-      if (waiting.reason !== 'capacity') continue
+      const capacityWait = waiting.reason === 'capacity' && waiting.resource !== 'memory'
+      if (waiting.reason !== 'capacity' && waiting.reason !== 'aging') continue
       const since = this.capacityWaits.get(entry.node.id)
       const last = this.deferredLogged.get(entry.node.id)
-      const cpu = waiting.resource !== 'memory'
+      const cpu = capacityWait
       const isReserved = reserved && cpu && since !== undefined && now - since >= this.options.capacityWaitMs
       const becomingReserved = isReserved && !this.reservedLogged.has(entry.node.id)
       if (!becomingReserved && last !== undefined && now - last < DEFER_LOG_INTERVAL_MS) continue

@@ -31,11 +31,19 @@ const LINKS = [
   'dsh-agent',
   'dsh-session',
   'dsh-commands',
-  'dsh-storage',
+  // NOT here: `dsh-storage`. The plugin never imports it (it imports `dsh-storage-domain`, the declared
+  // peer, and that is where its types come from), so linking it meant a second, undeclared copy of a
+  // package the manifest does not name — exactly the LINKS-vs-manifest drift this list is checked
+  // against. Dropping the link keeps `tsc --noEmit` green (measured).
   'dsh-storage-domain',
   'dsh-subagent',
   'dsh-spill',
   'dsh-typert-protocol',
+  // Kept even though the manifest does not declare it, because the BUILD needs it: `src/index.ts` has
+  // `import type {} from '@deepseek-ai/dsh-typert-registry'` for its `ctx.typert.register` augmentation,
+  // and without the link that import does not resolve (measured: TS2307 plus TS2339 on `register`).
+  // Declaring it as a peer means editing `package.json`, which this lane must not do; whether it should
+  // be a peer or a devDependency is recorded as an open item in the lane report.
   'dsh-typert-registry',
   'dsh-session-query',
   'dsh-llm',

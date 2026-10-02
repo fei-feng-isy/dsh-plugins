@@ -345,9 +345,13 @@ describe('the interface generation gate', () => {
     }
   }
 
-  it('is bidirectional, hostile-safe and total (the base gate itself)', () => {
-    expect(realBase.checkInterface(1, { INTERFACE_VERSION: 2 }).status).toBe('incompatible')
+  it('is asymmetric, hostile-safe and total (the base gate itself)', () => {
+    // Only the OLDER-base direction is unsafe: this build may need members that base never had.
     expect(realBase.checkInterface(2, { INTERFACE_VERSION: 1 }).status).toBe('incompatible')
+    // The NEWER-base direction is the family's safe case (generations are additive): `ok` + a warning.
+    const newer = realBase.checkInterface(1, { INTERFACE_VERSION: 2 })
+    expect(newer.status).toBe('ok')
+    expect(newer.warning).toContain('host base is newer')
     expect(realBase.checkInterface(1, {}).status).toBe('cannot-tell')
     const hostile = new Proxy({}, { get: () => { throw new Error('shape mismatch') } })
     expect(() => realBase.checkInterface(1, hostile)).not.toThrow()

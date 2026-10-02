@@ -228,9 +228,11 @@ describe('the provisioner reaches a terminal state the caller can branch on', ()
  * The runtime interface gate: the base's decision, this plugin's consumption.
  *
  * The gate is a member of the v1 surface now (`checkInterface` + `readInterfaceRequirement`), so its
- * semantics are pinned HERE, across the tree, from the REAL implementation — both directions are
- * incompatible, a hostile module reads as "reports none", and the plugin's consumer maps the verdict
- * to the loader's decision (withhold the base on `incompatible` only). The loader-level consequences
+ * semantics are pinned HERE, across the tree, from the REAL implementation — they are ASYMMETRIC: a
+ * build meeting an OLDER base is `incompatible`, one meeting a NEWER base is `ok` + a warning
+ * (generations are additive, so nothing it requires is missing), a hostile module reads as "reports
+ * none", and the plugin's consumer maps the verdict to the loader's decision (withhold the base on
+ * `incompatible` only). The loader-level consequences
  * themselves — prompt fallback, gate skipped, provisioning legacy, still mounted with a WARNING — are
  * asserted in `envinit.spec.ts`, because that file is the one allowed to import the peer-dependent
  * `src/envinit.ts` (this spec must stay loadable without `@deepseek-ai/*`).
@@ -254,9 +256,20 @@ describe('the runtime interface gate is the base\'s, and this plugin consumes it
     expect(runtime.checkInterface(runtime.INTERFACE_VERSION, base).status).toBe('ok')
   })
 
-  it('is `incompatible` in BOTH directions and `cannot-tell` for a side it cannot read', () => {
-    expect(runtime.checkInterface(1, { INTERFACE_VERSION: 2 }).status).toBe('incompatible')
+  it('is asymmetric: older base `incompatible`, newer base `ok` + warning, unreadable side `cannot-tell`', () => {
+    // `loaded < required` is the ONE unsafe direction: this build may ask for members the base never had.
     expect(runtime.checkInterface(2, { INTERFACE_VERSION: 1 }).status).toBe('incompatible')
+    // `loaded > required` is the family's safe case (generations are additive): usable, with a WARNING.
+    const newer = runtime.checkInterface(1, { INTERFACE_VERSION: 2 })
+    expect(newer.status).toBe('ok')
+    expect(newer.warning).toContain('host base is newer')
+    expect(newer.reason).toBeUndefined()
+    // Equal generations are plain `ok`: no warning, no reason.
+    const equal = runtime.checkInterface(2, { INTERFACE_VERSION: 2 })
+    expect(equal.status).toBe('ok')
+    expect(equal.warning).toBeUndefined()
+    expect(equal.reason).toBeUndefined()
+    // A side that cannot be read stays `cannot-tell`, never `incompatible`.
     expect(runtime.checkInterface(1, {}).status).toBe('cannot-tell')
     expect(runtime.checkInterface(1, { INTERFACE_VERSION: 'v1' }).status).toBe('cannot-tell')
     expect(runtime.checkInterface(0, { INTERFACE_VERSION: 1 }).status).toBe('cannot-tell')
@@ -268,18 +281,25 @@ describe('the runtime interface gate is the base\'s, and this plugin consumes it
     expect(runtime.checkInterface(1, hostile).status).toBe('cannot-tell')
   })
 
-  it('consumes the base gate: ok / both mismatch directions / cannot-tell', () => {
+  it('consumes the base gate: ok / older base incompatible / newer base ok + warning / cannot-tell', () => {
     const generation = runtime.INTERFACE_VERSION
     const current = bake({ baseVersion: '0.3.0', interfaceVersion: generation })
-    expect(interfaceVerdict(base, current).status).toBe('ok')
+    const equal = interfaceVerdict(base, current)
+    expect(equal.status).toBe('ok')
+    expect(equal.warning).toBeUndefined()
 
-    // The build requires a NEWER generation than the base it loaded…
+    // The build requires a NEWER generation than the base it loaded: members it asks for may be gone.
     const newer = bake({ baseVersion: '0.3.0', interfaceVersion: generation + 1 })
     expect(interfaceVerdict(base, newer).status).toBe('incompatible')
-    // …and the other direction: the build is old, the base is new.
-    expect(interfaceVerdict({ ...base, INTERFACE_VERSION: generation + 1 }, current).status).toBe('incompatible')
-    // The generation becomes readable again as soon as both sides agree.
-    expect(interfaceVerdict({ ...base, INTERFACE_VERSION: generation + 1 }, newer).status).toBe('ok')
+    // …and the other direction is the SAFE one: the build is old, the loaded base is new, generations
+    // are additive, so the base stays usable — `ok` plus a warning, never a degradation.
+    const ahead = interfaceVerdict({ ...base, INTERFACE_VERSION: generation + 1 }, current)
+    expect(ahead.status).toBe('ok')
+    expect(ahead.warning).toContain('host base is newer')
+    // Both sides agree again, so the generations are equal and there is nothing to warn about.
+    const agreed = interfaceVerdict({ ...base, INTERFACE_VERSION: generation + 1 }, newer)
+    expect(agreed.status).toBe('ok')
+    expect(agreed.warning).toBeUndefined()
   })
 
   it('maps the verdict to the ONE degrade rule: only `incompatible` withholds the base', () => {

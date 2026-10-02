@@ -166,6 +166,17 @@ export function optionalWeight(args: Record<string, unknown>, key: string): numb
   return undefined
 }
 
+/**
+ * Read an optional round-cap relaxation (ms). Same reading as {@link optionalWeight}: a missing or
+ * unparseable argument means the caller said nothing, which keeps the engine's configured cap. A
+ * number that is not positive is dropped HERE as well as in the core normalizer, so a model that
+ * writes `0` (or a negative) gets the default rather than an empty round window.
+ */
+export function optionalRoundMs(args: Record<string, unknown>, key: string): number | undefined {
+  const value = optionalWeight(args, key)
+  return value !== undefined && value > 0 ? value : undefined
+}
+
 /** Read the child-mission array of `decompose_mission`, accepting the array or its JSON text. */
 export function childSpecs(args: Record<string, unknown>): {
   title: string
@@ -173,6 +184,7 @@ export function childSpecs(args: Record<string, unknown>): {
   context: string[]
   unit?: string | null
   weight?: number
+  roundMs?: number | null
 }[] {
   const value = structuredArg(args, 'children')
   if (!Array.isArray(value)) throw new Error('mission tool: parameter "children" must be an array')
@@ -192,6 +204,7 @@ export function childSpecs(args: Record<string, unknown>): {
     const context = structuredArg(record, 'context')
     const unit = optionalUnit(record, 'unit')
     const weight = optionalWeight(record, 'weight')
+    const roundMs = optionalRoundMs(record, 'roundMs')
     return {
       title,
       description,
@@ -200,6 +213,7 @@ export function childSpecs(args: Record<string, unknown>): {
         : typeof context === 'string' ? textLines(context) : [],
       ...unit === undefined ? {} : { unit },
       ...weight === undefined ? {} : { weight },
+      ...roundMs === undefined ? {} : { roundMs },
     }
   })
 }
@@ -221,9 +235,15 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       '',
       '`unit` 写这件事将要改动的范围（一个目录或文件）。同一个范围，同一时刻只有一个任务在跑 ——',
       '会改到同一处、又不能同时改的任务，就靠它错开；不写表示不占用任何范围，任务之间互不影响。',
+      '写相对仓库根的目录路径，如 `mission/packages/core`：同一个范围要写成同一个字符串（大小写、',
+      '分隔符、结尾斜杠不同都算同一个范围），但父目录与它下面的文件算两个范围，不会互相排斥。',
       '',
       '`weight` 写这件事大约会占几核：整机按这个数分配同时能跑多少任务。不写就是普通任务（按 1 核算）——',
       '吃满多核的任务（跑构建、训练、大规模测试）才需要写大一点，写小了会让它和别人挤在一起。',
+      '',
+      '`roundMs` 写这件事单轮最多能跑多久（毫秒），用来放宽引擎的轮级上限（默认 1 小时）。一般不用写；',
+      '确实有单步要跑一小时以上（整仓构建、大训练、长压测）才写大一点——不写就按默认上限，超时会被当作',
+      '卡住中断重排。上限最多放宽到 24 小时。',
     ].join('\n'),
     parameters: {
       title: { type: 'string', required: true, description: '一行命名这件事。' },
@@ -241,11 +261,15 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       },
       unit: {
         type: 'string',
-        description: '这件事将要改动的范围（一个目录或文件）。同一范围同一时刻只有一个任务在跑；不写表示不占用范围。',
+        description: '这件事将要改动的范围（一个目录或文件），写相对仓库根的路径，如 `mission/packages/core`。同一范围同一时刻只有一个任务在跑；不写表示不占用范围。',
       },
       weight: {
         type: 'number',
         description: '这件事大约会占几核（整机按它决定同时跑几个任务）。不写按 1 核算。',
+      },
+      roundMs: {
+        type: 'number',
+        description: '这件事单轮最多能跑多久（毫秒），用来放宽默认 1 小时的轮级上限；最多放宽到 24 小时。有单步超过一小时的重活才写。',
       },
     },
     presentCall: (args) => present('create_mission', args),
@@ -259,6 +283,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
         strList(args, 'analysis'),
         optionalUnit(args, 'unit'),
         optionalWeight(args, 'weight'),
+        optionalRoundMs(args, 'roundMs'),
       )
       if (!result.ok) return fail(result)
       return {
@@ -280,6 +305,8 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       '所以要并行改不同地方的子任务，给它们各自写清自己的 `unit`。',
       '',
       '子任务的 `weight` 不继承当前任务，不写就按 1 核算：父任务吃满多核，不代表它的每个前置任务都吃满。',
+      '',
+      '子任务的 `roundMs`（单轮最多跑多久，毫秒）同样不继承当前任务，不写就按引擎默认上限（1 小时）。',
     ].join('\n'),
     parameters: {
       node_id: { type: 'string', required: true, description: '你正在做的任务 id。' },
@@ -304,11 +331,15 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
                 },
                 unit: {
                   type: 'string',
-                  description: '这个前置任务要改动的范围（一个目录或文件）。不写就继承当前任务的范围；同一范围同一时刻只有一个任务在跑。',
+                  description: '这个前置任务要改动的范围（一个目录或文件），写相对仓库根的路径，如 `mission/packages/core`。不写就继承当前任务的范围；同一范围同一时刻只有一个任务在跑。',
                 },
                 weight: {
                   type: 'number',
                   description: '这个前置任务大约会占几核。不写按 1 核算，不继承当前任务的估值。',
+                },
+                roundMs: {
+                  type: 'number',
+                  description: '这个前置任务单轮最多跑多久（毫秒），放宽默认 1 小时的轮级上限，最多 24 小时。不写按默认，不继承当前任务。',
                 },
               },
             },

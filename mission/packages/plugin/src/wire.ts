@@ -84,9 +84,12 @@ function declare(name: string, schema: ZodType): DeclaredSchema {
 /**
  * Why a node is queued instead of running (see `@avantf/mission-core`'s `WaitingFor`). `.nullable()`
  * with a `.default(null)` so an older host that omits it reads as "nothing is holding it back".
+ * `aging` is the fourth reason (an aged node has reserved the machine and is holding this one back);
+ * a client that does not know it still renders, because the enum here and the view's fallback are
+ * the only two readers.
  */
 const waitingForSchema = z.object({
-  reason: z.enum(['capacity', 'unit', 'slot']),
+  reason: z.enum(['capacity', 'unit', 'slot', 'aging']),
   resource: z.enum(['cpu', 'memory']).optional(),
   needed: z.number().optional(),
   available: z.number().optional(),

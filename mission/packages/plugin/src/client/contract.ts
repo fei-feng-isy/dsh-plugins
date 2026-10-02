@@ -9,7 +9,7 @@
  * must not import the engine); `null`/absent on the node means nothing is holding it back.
  */
 export interface WaitingForView {
-  readonly reason: 'capacity' | 'unit' | 'slot'
+  readonly reason: 'capacity' | 'unit' | 'slot' | 'aging'
   /** Which capacity signal, when `reason` is `capacity`: compute units or the free-memory floor. */
   readonly resource?: 'cpu' | 'memory'
   readonly needed?: number

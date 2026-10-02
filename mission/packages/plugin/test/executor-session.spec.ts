@@ -274,6 +274,60 @@ describe('resolving a historical executor session', () => {
     expect(warnings[0]).toContain('stubbed: cannot read mission-99999999')
   })
 
+  /**
+   * N7: "none of the candidates could be read" is NOT "no candidate matched". The panel already has a
+   * sentence for `unsupported` (it carries the host's own words), so the resolver must answer with
+   * that status instead of letting a broken filter shape or a dead backend wear the "已被清理" mask.
+   */
+  it('answers `unsupported` with the first reason when EVERY candidate log failed to read', async () => {
+    const listed = [worker('mission-aaaaaaa1', 19_000), worker('mission-aaaaaaa2', 18_000)]
+    const query = fakeQuery(listed, {}, { failing: ['mission-aaaaaaa1', 'mission-aaaaaaa2'] })
+    const warnings: string[] = []
+    const resolved = await resolveExecutorSession(NODE, {
+      node: NODE_RECORD,
+      ownerSessionId: OWNER,
+      query,
+      now: 30_000,
+      warn: (message) => warnings.push(message),
+    })
+    expect(resolved.status).toBe('unsupported')
+    const error = resolved.status === 'unsupported' ? resolved.error : ''
+    // The FIRST failure's own words, so the shape error that hid W20 survives to the surface...
+    expect(error).toContain('无法读取任何候选会话的日志')
+    expect(error).toContain('stubbed: cannot read mission-aaaaaaa1')
+    // ...on one line, capped like every other host reason (the panel renders it inside a sentence).
+    expect(error).not.toContain('\n')
+    expect(error.length).toBeLessThan(240)
+    // The warn sink keeps its "once per lookup" contract unchanged.
+    expect(warnings).toHaveLength(1)
+    // Non-vacuity: the same candidates with ONE readable log is a plain miss, not an outage.
+    const partly = fakeQuery(listed, {}, { failing: ['mission-aaaaaaa1'] })
+    expect(await resolveExecutorSession(NODE, {
+      node: NODE_RECORD,
+      ownerSessionId: OWNER,
+      query: partly,
+      now: 30_000,
+    })).toEqual({ status: 'not-found' })
+  })
+
+  it('answers `unsupported` when the service cannot filter events at all', async () => {
+    // A `sessionQuery` missing `filterEvents` fails every candidate identically — the same outage the
+    // previous build reported as "找不到". Cast through the shape the contract forbids, because that
+    // is exactly how such a host reaches this code.
+    const listed = [worker('mission-aaaaaaa1', 19_000)]
+    const query = {
+      listSessions: () => Promise.resolve(listed),
+    } as unknown as SessionQueryLike
+    const resolved = await resolveExecutorSession(NODE, {
+      node: NODE_RECORD,
+      ownerSessionId: OWNER,
+      query,
+      now: 30_000,
+    })
+    expect(resolved.status).toBe('unsupported')
+    expect(resolved.status === 'unsupported' ? resolved.error : '').toContain('filterEvents')
+  })
+
   it('ignores a text filter that only came CLOSE to the node line', async () => {
     // The regex after the backend's text filter is what makes the answer exact: another node's id
     // shares the prefix, and a session that merely mentions the id in prose must not match.

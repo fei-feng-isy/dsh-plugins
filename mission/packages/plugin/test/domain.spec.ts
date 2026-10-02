@@ -267,3 +267,69 @@ describe('the weight field', () => {  it('reads a record written before `weight`
     expect(DOMAIN_VERSION).toBe(1)
   })
 })
+
+describe('the round cap, the hang streak and note authorship', () => {
+  it('reads a document written before them as "engine cap / no hangs / author unknown"', () => {
+    const parsed = treeDocumentSchema.parse(legacyDocument())
+    // `null` roundMs is the engine's configured cap — NOT a relaxed one; 0 hangs pages nobody; an
+    // unknown author sends the cold wake down its generation-comparison fallback.
+    expect(parsed.nodes['n0001']?.roundMs).toBeNull()
+    expect(parsed.nodes['n0001']?.hungCount).toBe(0)
+    expect(parsed.nodes['n0001']?.analysisAuthor).toBeNull()
+    expect(DOMAIN_VERSION).toBe(1)
+  })
+
+  it('degrades a wrong-shaped value instead of failing the whole document open', () => {
+    const parsed = treeDocumentSchema.parse(legacyDocument(legacyNode({
+      roundMs: 'an hour',
+      hungCount: 'twice',
+      analysisAuthor: 7,
+    })))
+    expect(parsed.nodes['n0001']?.roundMs).toBeNull()
+    expect(parsed.nodes['n0001']?.hungCount).toBe(0)
+    expect(parsed.nodes['n0001']?.analysisAuthor).toBeNull()
+  })
+
+  it('round-trips a declared cap, a hang streak and the baseline holder', async () => {
+    let latest: TreeState | undefined
+    let tick = 0
+    const tree = new MissionTree(
+      {
+        loadAll: () => Promise.resolve([]),
+        put: (state) => {
+          latest = state
+          return Promise.resolve()
+        },
+        remove: () => Promise.resolve(),
+      },
+      {
+        isAgentLive: () => false,
+        probeOwner: () => Promise.resolve({ kind: 'exists' }),
+        spill: () => Promise.resolve(null),
+        now: () => (tick += 1),
+        newId: () => 'root0004',
+      },
+    )
+    const created = await tree.createRoot({
+      ownerSessionId: 'owner',
+      title: 'Ship it',
+      description: 'd',
+      analysis: [],
+      roundMs: 20 * 60_000,
+    })
+    if (!created.ok) throw new Error(created.message)
+    const rootId = created.value.id
+    await tree.dispatch(rootId, 'mission-aaaa1111')
+    await tree.recordDispatchBaseline(rootId, 'mission-aaaa1111')
+    await tree.recordAnalysis(rootId, 'mission-aaaa1111', '先拿到调用点清单')
+    if (latest === undefined) throw new Error('the fixture persisted nothing')
+
+    const reloaded = treeDocumentSchema.parse(JSON.parse(JSON.stringify(toDocument(latest))) as unknown)
+    const node = reloaded.nodes[rootId]
+    expect(node?.roundMs).toBe(20 * 60_000)
+    expect(node?.analysisAuthor).toBe('mission-aaaa1111')
+    // The baseline's holder is what makes the cold wake's identity comparison possible at all.
+    expect(node?.dispatchBaseline?.holder).toBe('mission-aaaa1111')
+    expect(DOMAIN_VERSION).toBe(1)
+  })
+})

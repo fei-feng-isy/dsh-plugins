@@ -172,6 +172,16 @@ function candidatesFor(
 }
 
 /**
+ * What one candidate's log read answered. Three shapes rather than a boolean because "the log says
+ * this is not the session" and "the log could not be read at all" are different facts, and reading
+ * the second as the first is exactly how W20's total outage passed as "not found".
+ */
+type SessionProbe =
+  | { readonly kind: 'hit' }
+  | { readonly kind: 'miss' }
+  | { readonly kind: 'unreadable'; readonly error: string }
+
+/**
  * Does this session's log say it ran `nodeId`?
  *
  * The worker prompt's `本任务` block always opens with `id: <nodeId>` (`core/src/prompt.ts`'s
@@ -190,22 +200,31 @@ async function sessionRanNode(
   nodeId: string,
   window: { from: number; to: number },
   warn: (message: string) => void,
-): Promise<boolean> {
-  if (typeof query.filterEvents !== 'function') return false
+): Promise<SessionProbe> {
   const pattern = new RegExp(`(?:^|\\n)id: ${nodeId}(?:\\n|$)`, 'u')
+  // A service that cannot filter events at all fails EVERY candidate the same way. Reported through
+  // the same one-line sink as a rejected filter, and returned as `unreadable` so the caller's total
+  // outage is distinguishable from "no session matched".
+  if (typeof query.filterEvents !== 'function') {
+    const error = '会话查询服务不支持按事件过滤（filterEvents）'
+    warn(`executor session lookup: filtering ${sessionId} failed — ${error}; trying the rest`)
+    return { kind: 'unreadable', error }
+  }
   try {
     const hits = await query.filterEvents(sessionId, [
       { kind: 'time', from: window.from, to: window.to },
       { kind: 'text', text: `id: ${nodeId}` },
     ])
-    return hits.some((hit) => pattern.test(hit.text))
+    return hits.some((hit) => pattern.test(hit.text)) ? { kind: 'hit' } : { kind: 'miss' }
   } catch (cause) {
     // One unreadable log (a session-store migration refusing an old file, a race with a cleanup)
     // must not fail the whole lookup — the other candidates are still worth asking. It must not
     // vanish either: a rejected filter SHAPE fails on every candidate and reads as "not found", so
-    // the first failure is reported once per lookup (the caller bounds it), session id included.
-    warn(`executor session lookup: filtering ${sessionId} failed — ${oneLine(cause)}; trying the rest`)
-    return false
+    // the first failure is reported once per lookup (the caller bounds it), session id included —
+    // and the caller turns an ALL-failed lookup into `unsupported` rather than `not-found`.
+    const error = oneLine(cause)
+    warn(`executor session lookup: filtering ${sessionId} failed — ${error}; trying the rest`)
+    return { kind: 'unreadable', error }
   }
 }
 
@@ -223,8 +242,13 @@ function oneLine(cause: unknown): string {
  * there is nothing to look for — and the panel must be able to say that instead of "it may have
  * been cleaned up"); a host without `sessionQuery` is `unsupported` (a real deployment can be
  * headless, and the panel must say so instead of crashing); otherwise the filtered candidates are
- * read newest-first until one matches or the budget is spent, and no match is `not-found` — the
- * honest reading of "it was dispatched once, and the session is gone now".
+ * read newest-first until one matches or the budget is spent.
+ *
+ * A spent budget with no match splits in two, and the split is the point: if at least ONE candidate
+ * was read successfully, the honest reading is `not-found` ("it was dispatched once, and the session
+ * is gone now"); if EVERY candidate we read failed, nothing was actually searched and the answer is
+ * `unsupported` carrying the first reason — a broken filter shape or a dead backend must never be
+ * dressed up as "the session was cleaned up" (W20).
  */
 export async function resolveExecutorSession(
   nodeId: string,
@@ -258,11 +282,26 @@ export async function resolveExecutorSession(
     options.warn?.(message)
   }
   let read = 0
+  let unreadable = 0
+  let firstFailure: string | undefined
   for (const candidate of candidates) {
     if (read >= RESOLVE_READ_BUDGET) break
     read += 1
-    if (await sessionRanNode(query, candidate.id, nodeId, window, warnOnce)) {
+    const probe = await sessionRanNode(query, candidate.id, nodeId, window, warnOnce)
+    if (probe.kind === 'hit') {
       return { status: 'resolved', sessionId: candidate.id, candidatesRead: read }
+    }
+    if (probe.kind === 'unreadable') {
+      unreadable += 1
+      firstFailure ??= probe.error
+    }
+  }
+  // "None of the logs could be read" is not "no log matched": the first failure is carried so the
+  // panel can say what actually went wrong instead of guessing at a cleanup.
+  if (read > 0 && unreadable === read && firstFailure !== undefined) {
+    return {
+      status: 'unsupported',
+      error: `无法读取任何候选会话的日志（${String(unreadable)} 条都失败）：${firstFailure}`,
     }
   }
   return { status: 'not-found' }

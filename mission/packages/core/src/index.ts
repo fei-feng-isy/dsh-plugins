@@ -41,7 +41,7 @@ export {
 } from './capacity.js'
 export type { CapacityInput, CapacityReading, CapacitySource } from './capacity.js'
 export type { ResourceProbe } from './resources.js'
-export { heardAt, judgeWorker, producedAt, storedTime } from './liveness.js'
+export { effectiveRoundMs, heardAt, judgeWorker, MAX_DECLARED_ROUND_MS, normalizeRoundMs, producedAt, resolveChildRoundMs, storedTime } from './liveness.js'
 export type { LivenessBound, LivenessVerdict, LivenessWindows, ReclaimCause } from './liveness.js'
 export {
   byCreatedAtThenId,

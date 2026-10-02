@@ -216,6 +216,55 @@ describe('one executor per unit', () => {
     expect(running(tree).map((node) => node.id)).toEqual([second])
     expect(tree.node(first)?.status).toBe('done')
   })
+
+  it('⑨ treats different spellings of one scope as ONE lease (trailing slash, backslash, dot segment)', async () => {
+    // The defect this closes: exclusion was a byte-exact string comparison over model-authored text,
+    // so `a/b`, `a/b/`, `./a/b` and `a\b` were four scopes and two "mutually exclusive" lanes ran
+    // together. The declaration is normalized at the one parse point, so the keys collapse BEFORE
+    // the lease is computed.
+    const { tree, engine } = makeWorld({ maxConcurrent: 5 })
+    const forms = ['pkg/a/b', 'pkg/a/b/', './pkg/a/b', 'pkg\\a\\b', 'pkg//a//b'] as const
+    const ids: string[] = []
+    for (const [index, unit] of forms.entries()) {
+      const id = await root(tree, { title: `spelling ${String(index)}`, unit })
+      ids.push(id)
+      // Stored in the canonical form, so even a durability round trip reads the same key.
+      expect(tree.node(id)?.unit).toBe('pkg/a/b')
+    }
+    // One executor at a time, whichever spelling won the race.
+    expect(await engine.pump()).toBe(1)
+    expect(running(tree)).toHaveLength(1)
+    const holder = running(tree)[0]
+    for (const id of ids) {
+      if (id === holder?.id) continue
+      expect(tree.node(id)?.status).toBe('ready')
+    }
+
+    // The holder submits; exactly one of the remaining spellings runs, still one at a time.
+    const submitted = await tree.submitResult(holder?.id ?? '', holder?.claimedBy ?? '', 'done')
+    expect(submitted.ok).toBe(true)
+    expect(await engine.pump()).toBe(1)
+    expect(running(tree)).toHaveLength(1)
+  })
+
+  it('⑩ does NOT conflate a directory with a file inside it (v1 declares containment out of scope)', async () => {
+    // Deliberate boundary, not an oversight: a parent directory and one file under it are different
+    // keys, so `pkg/a` does not exclude `pkg/a/b`. Guaranteed v1 semantics: the SAME normalized
+    // scope excludes; a containing scope does not. See the design note for why prefix logic is v2.
+    const { tree, engine } = makeWorld({ maxConcurrent: 5 })
+    const dir = await root(tree, { title: 'dir', unit: 'pkg/a' })
+    const file = await root(tree, { title: 'file', unit: 'pkg/a/b' })
+    expect(tree.node(dir)?.unit).toBe('pkg/a')
+    expect(tree.node(file)?.unit).toBe('pkg/a/b')
+    expect(await engine.pump()).toBe(2)
+    expect(running(tree)).toHaveLength(2)
+    // And the escape-preserving case: `..` that would leave the front of the path is NOT resolved
+    // away, so two distinct relative scopes never collapse into one key.
+    const up = await root(tree, { title: 'up', unit: '../shared' })
+    const plain = await root(tree, { title: 'plain', unit: 'shared' })
+    expect(tree.node(up)?.unit).toBe('../shared')
+    expect(tree.node(plain)?.unit).toBe('shared')
+  })
 })
 
 describe('durable compatibility', () => {

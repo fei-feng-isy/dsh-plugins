@@ -7,7 +7,15 @@
  * noticing it took the other path.
  */
 import { describe, expect, it } from 'vitest'
-import { heardAt, judgeWorker, producedAt, type NodeRecord } from '../src/index.js'
+import {
+  MAX_DECLARED_ROUND_MS,
+  effectiveRoundMs,
+  heardAt,
+  judgeWorker,
+  normalizeRoundMs,
+  producedAt,
+  type NodeRecord,
+} from '../src/index.js'
 
 /** A running node, complete enough for the pure judgement. */
 function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
@@ -19,11 +27,13 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     description: 'd',
     unit: null,
     weight: 1,
+    roundMs: null,
     context: [],
     corrections: [],
     correctionsDeliveredUpTo: 0,
     analysisNotes: [],
     analysisAttempt: 0,
+    analysisAuthor: null,
     status: 'running',
     createdAt: 0,
     depth: 1,
@@ -39,6 +49,7 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     progressAt: 1_000,
     activityAt: 1_000,
     stalls: 0,
+    hungCount: 0,
     stalledNotifiedAt: null,
     result: null,
     hasResult: false,
@@ -86,5 +97,35 @@ describe('reading the two clocks', () => {
     const idle = node({ claimedAt: 0, progressAt: 0, activityAt: 20_000 })
     expect(judgeWorker(idle, 20_000, { staleMs: 100, roundMs: 1_000_000 }))
       .toMatchObject({ cause: 'hung', bound: 'output', idleMs: 20_000 })
+  })
+})
+
+/**
+ * The round-cap relaxation: a mission may ask for a LONGER round, never a shorter one, and a value
+ * that cannot be believed must leave the configured cap exactly where it was.
+ */
+describe('the declared round cap', () => {
+  it('reads missing, dirty and non-positive declarations as "declared nothing"', () => {
+    expect(normalizeRoundMs(undefined)).toBeNull()
+    expect(normalizeRoundMs(null)).toBeNull()
+    expect(normalizeRoundMs('3600000')).toBeNull()
+    expect(normalizeRoundMs(Number.NaN)).toBeNull()
+    expect(normalizeRoundMs(0)).toBeNull()
+    expect(normalizeRoundMs(-5)).toBeNull()
+    expect(normalizeRoundMs(60_000)).toBe(60_000)
+  })
+
+  it('caps a declaration at one day, so it cannot opt out of the backstop', () => {
+    expect(normalizeRoundMs(MAX_DECLARED_ROUND_MS * 10)).toBe(MAX_DECLARED_ROUND_MS)
+  })
+
+  it('relaxes the configured cap and never shortens it', () => {
+    expect(effectiveRoundMs(node({ roundMs: 20_000 }), 5_000)).toBe(20_000)
+    expect(effectiveRoundMs(node({ roundMs: 1_000 }), 5_000)).toBe(5_000)
+    expect(effectiveRoundMs(node({ roundMs: null }), 5_000)).toBe(5_000)
+    // A legacy record has no value at runtime even though the type says `number | null`; the guard
+    // in `normalizeRoundMs` is what keeps that from becoming `Math.max(configured, undefined)` = NaN,
+    // which would compare false against every round and let the node run forever.
+    expect(effectiveRoundMs(node({ roundMs: undefined as unknown as null }), 5_000)).toBe(5_000)
   })
 })

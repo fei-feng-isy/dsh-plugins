@@ -23,18 +23,25 @@ export function statusLabel(status: string | undefined): string {
 }
 
 /**
- * Whether ONE node carries trouble worth telling the owner about: three durable, never-reset
- * histories — silent reclaims (`stalls`), failed attempts (`failures`), starts that never got a
- * worker (`spawnFailures`) — each at the ENGINE's own floor.
+ * Whether ONE node carries trouble worth telling the owner about: four durable counters, each at the
+ * ENGINE's own floor — silent reclaims (`stalls`), consecutive hangs (`hungCount`), failed attempts
+ * (`failures`), starts that never got a worker (`spawnFailures`).
  *
- * ONE definition, because three channels ask this question: the owner-facing flag below, the stall
- * heads-up (`reportStall`), and the failed-start heads-up. They used to disagree — the flag counted
- * `spawnFailures` while the stall gate did not — so a mission that could not get a worker started read
- * as 「反复出过问题」 in `list_missions` and the owner was never told why. Splitting the predicate out is
- * what makes "both channels speak one vocabulary" true by construction rather than by comment.
+ * ONE definition, because four channels ask this question: the owner-facing flag below, and the three
+ * heads-ups (`escalateTrouble` for stalls and repeated hangs, and the failed-start one in the host).
+ * They used to disagree — the flag counted `spawnFailures` while the stall gate did not —
+ * so a mission that could not get a worker started read as 「反复出过问题」 in `list_missions` and the
+ * owner was never told why. Splitting the predicate out is what makes "both channels speak one
+ * vocabulary" true by construction rather than by comment.
+ *
+ * `hungCount` is the one member that is a STREAK rather than a history: any real output clears it, so
+ * a node that hung three times and then made progress stops reading as troubled. That is deliberate —
+ * the flag answers "is this happening to it NOW", and the other three counters are the ones that
+ * never clear.
  */
 export function isTroubledNode(node: NodeRecord): boolean {
   return node.stalls >= CAPACITY.maxStallsBeforeReport
+    || node.hungCount >= CAPACITY.maxHungsBeforeReport
     || node.failures >= CAPACITY.maxAttempts - 1
     || node.spawnFailures >= CAPACITY.maxAttempts - 1
 }

@@ -96,6 +96,57 @@ describe('the parked session is woken, not replaced', () => {
     expect(rootDispatches).toHaveLength(1)
   })
 
+  it('reverts a failed wake to a ready node that still owns its address, charging no budget', async () => {
+    // M5's undo contract, on the path the host now makes a compare-and-swap: `reclaim(..., 'wake-failed')`
+    // is expected to still find the holder it just adopted. Here nothing raced, so it reverts exactly
+    // that binding and charges nothing; the refusal half (a holder that moved under the await) is the
+    // CAS the tree owns and is pinned in the core's `tree.spec.ts`.
+    const mounted = await mount({ failSend: true })
+    const { root } = await parkedRoot(mounted)
+
+    await mounted.wake()
+
+    // The parked session was gone, so the wake failed and the undo ran.
+    const node = mounted.host.nodeFor(root)
+    expect(node?.status).toBe('running')
+    expect(node?.failures).toBe(0)
+    expect(node?.spawnFailures).toBe(0)
+    // The fallback reserved a fresh claim and delivered to it.
+    expect(mounted.host.nodeFor(root)?.claimedBy).not.toBeNull()
+    expect(mounted.host.nodeFor(root)?.parkedWorker).toBeNull()
+  })
+
+  it('refuses the stale wake-failed undo once another pass has re-bound the node', async () => {
+    // M5: the adoption awaits a delivery. A sweep can reclaim the parked binding in that window (the
+    // session is idle, so it reads as vanished), and the engine can then re-dispatch the node to a
+    // fresh claim — a LIVE worker. The `reclaim(..., 'wake-failed')` that undoes a failed parked wake
+    // used to run without an `expectedHolder`, so it would bind-check nothing, drag the node back to
+    // `ready` and unbind that live worker (whose `submit_mission` then answers `not-owner`), and the
+    // next pass would start a SECOND executor for the same node. The expectation closes it.
+    //
+    // What is observable here is the state INVARIANT the expectation buys: the node may end this window
+    // reverted (`ready`, no holder) or still bound, but never `ready` while a holder is stamped — that
+    // is the corruption the missing compare-and-swap produced.
+    const mounted = await mount({ deferSend: true })
+    const { root, rootWorker } = await parkedRoot(mounted)
+
+    // The owner's step adopts the parked session and starts delivering; the delivery is held open.
+    const waking = mounted.wake()
+    for (let tick = 0; tick < 20 && mounted.host.nodeFor(root)?.claimedBy !== rootWorker.id; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(mounted.host.nodeFor(root)?.claimedBy).toBe(rootWorker.id)
+
+    // The delivery is then allowed to fail, and the undo runs against whatever binding it finds.
+    mounted.releaseSends()
+    await waking.catch(() => undefined)
+
+    const node = mounted.host.nodeFor(root)
+    if (node?.status === 'ready') expect(node.claimedBy).toBeNull()
+    expect(node?.failures).toBe(0)
+    expect(node?.spawnFailures).toBe(0)
+  })
+
   it('degrades to a fresh session when the parked one cannot be resumed', async () => {
     const mounted = await mount({ failSend: true })
     const { root, rootWorker } = await parkedRoot(mounted)

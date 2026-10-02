@@ -24,7 +24,9 @@ export const TREES_TABLE = 'trees'
  * The dispatch baseline: what a prompt showed its session, so a later cold wake can subtract it.
  * Every member is required — a partially-written baseline is not a weaker snapshot, it is a wrong
  * one, and the consumer (`continuation.ts`) reads a malformed object as "no baseline" rather than
- * trusting invented numbers.
+ * trusting invented numbers. The one deliberate exception is `holder`, added after the shape shipped:
+ * a missing holder means "author unknown", which the delta handles with its own conservative
+ * fallback, so it carries a default instead of invalidating five members that are still exact.
  */
 const baselineSchema = z.object({
   corrections: z.number(),
@@ -32,6 +34,10 @@ const baselineSchema = z.object({
   terminalChildren: z.number(),
   fingerprint: z.string(),
   attempts: z.number(),
+  // Optional-with-default, NOT required: a baseline written before the field existed still has five
+  // trustworthy members, and `null` (= "holder unknown") is exactly the fallback the delta wants —
+  // dropping the whole baseline would turn a one-field migration into a permanent loss of context.
+  holder: z.string().nullable().default(null).catch(null),
 })
 
 const nodeSchema = z.object({
@@ -50,6 +56,11 @@ const nodeSchema = z.object({
   // ordinary slot), and `.catch(1)` degrades a dirty value to it too. A dirty weight must never make
   // a node invisible to the capacity gate, so the fallback is the conservative one — a full slot.
   weight: z.number().default(1).catch(1),
+  // Optional-with-default: a document written before the round-cap declaration existed reads as
+  // `null` = the engine's configured cap, i.e. exactly the previous behaviour. `.catch(null)` degrades
+  // a dirty value to it too, because an unbounded or nonsensical declaration must never relax the
+  // backstop that catches a transport retrying forever.
+  roundMs: z.number().nullable().default(null).catch(null),
   context: z.array(z.string()),
   // Optional-with-default: a document written before the field existed must keep loading.
   corrections: z.array(z.string()).default([]),
@@ -59,6 +70,10 @@ const nodeSchema = z.object({
   correctionsDeliveredUpTo: z.number().default(0),
   analysisNotes: z.array(z.string()).default([]),
   analysisAttempt: z.number().default(0),
+  // Optional-with-default: a document written before note authorship existed reads as "author
+  // unknown", which sends the cold wake's material judgement down its generation-comparison fallback
+  // — the previous build's behaviour, never a fabricated "somebody else wrote this".
+  analysisAuthor: z.string().nullable().default(null).catch(null),
   status: z.enum(['blocked', 'ready', 'running', 'interrupted', 'done', 'failed']),
   createdAt: z.number(),
   depth: z.number(),
@@ -89,6 +104,10 @@ const nodeSchema = z.object({
   // default: an invented timestamp could make a hung node look productive.
   activityAt: z.number().default(0),
   stalls: z.number().default(0),
+  // Optional-with-default: a document written before the hang streak existed reads as "no consecutive
+  // hangs". `.catch(0)` degrades a dirty value the same way — an invented streak would page the owner
+  // about a node that never hung.
+  hungCount: z.number().default(0).catch(0),
   stalledNotifiedAt: z.number().nullable().default(null),
   result: z.string().nullable(),
   hasResult: z.boolean(),

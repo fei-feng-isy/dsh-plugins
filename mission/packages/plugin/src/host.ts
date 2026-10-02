@@ -28,7 +28,6 @@ import {
   defaultNewId,
   deriveCapacity,
   detectConcurrency,
-  isMaterialChange,
   isTroubled,
   spillPointer,
   statusLabel,
@@ -38,7 +37,6 @@ import {
   type ChildSpec,
   type ContinuationDelta,
   type DispatchDeferral,
-  type DispatchView,
   type HungReport,
   type MutationResult,
   type NodeRecord,
@@ -54,6 +52,11 @@ import {
   type WellFormedSource,
 } from '@avantf/mission-core'
 import { workDomain, TREES_TABLE } from './domain.js'
+import {
+  resumeWorker as runResumeWorker,
+  wakeParkedWorkers as runWakeParkedWorkers,
+  type ColdResumeDeps,
+} from './coldResume.js'
 import { resolveExecutorSession, type SessionQueryLike } from './executorSession.js'
 import { createLogger, type MissionLogger } from './log.js'
 import { NAMESPACE, SNAPSHOT_WIRE_VERSION } from './wire.js'
@@ -950,7 +953,9 @@ export class AvantfMissionHost extends TypertRemoteService {
 
   /** Root a new mission. `unit` is the scope the mission will modify (a directory or file), or
    *  `undefined`/blank for none: a tree whose root declares a scope serializes every one of its
-   *  executors against any other `running` mission declaring the same scope, across trees. */
+   *  executors against any other `running` mission declaring the same scope, across trees. `roundMs`
+   *  is the declared round-cap relaxation (see `NodeRecord.roundMs`); `undefined` keeps the engine's
+   *  configured cap. */
   async createWork(
     agent: Agent,
     title: string,
@@ -958,6 +963,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     analysis: readonly string[],
     unit?: string | null,
     weight?: number,
+    roundMs?: number | null,
   ): Promise<MutationResult<NodeRecord>> {
     const tree = this.requireTree()
     // Only a top-level session roots a tree: a self-rooted mission would be an executor nobody dispatches or reclaims.
@@ -975,6 +981,7 @@ export class AvantfMissionHost extends TypertRemoteService {
       analysis,
       unit: unit ?? null,
       weight,
+      roundMs,
     })
     if (result.ok) {
       this.log.info(`create_mission: root ${result.value.id} "${result.value.title}" owned by ${agent.id}`)
@@ -1573,8 +1580,8 @@ export class AvantfMissionHost extends TypertRemoteService {
   /**
    * The drift a cold wake of this node would report right now, or `undefined` when the node is gone.
    * Read-only and cheap: a test (and, later, the panel) can ask what the wake would say without
-   * performing one. The DECISION to continue or replace lives in `resumeWorker`, which consults
-   * `isMaterialChange` on exactly this value.
+   * performing one. The DECISION to continue or replace lives in `coldResume.ts`'s `resumeWorker`,
+   * which consults `isMaterialChange` on exactly this value.
    */
   continuationDeltaOf(nodeId: string): ContinuationDelta | undefined {
     return this.tree?.continuationDelta(nodeId)
@@ -1645,206 +1652,48 @@ export class AvantfMissionHost extends TypertRemoteService {
   }
 
   /**
-   * Wake every parked session whose children have landed. Called from the owner's pre-step, and only
-   * there: that turn is the one place the owner is guaranteed materialized, and the only Agent the
-   * continuation protocol accepts as the authorizing parent (`authorizeLineage`).
-   *
-   * Order per node is fixed: ADOPT (bind `claimedBy`) before delivering — a woken session can call
-   * `submit_mission` immediately, which authorizes on `claimedBy === caller`. A failed delivery gets no
-   * retry: undo the adoption (`wake-failed`, charging neither failure counter, no cooldown) and
-   * dispatch fresh; `attempts` advances, being the `note_mission` generation marker, not a budget.
+   * The port the continuation wake works through (see `coldResume.ts`): the host hands in the state
+   * and callbacks the delivery needs, and keeps the private members private. Rebuilt per call, which
+   * is a handful of references — and the mutable sets are passed by REFERENCE on purpose, because
+   * they are the same guards the rest of the host (and the sweep) reads.
    */
-  async wakeParkedWorkers(agent?: Agent): Promise<number> {
-    const tree = this.tree
-    if (tree === undefined) return 0
-    let woken = 0
-    for (const node of tree.parkedReadyNodes()) {
-      // A step may only start mission for trees its session owns: otherwise any owner's step could wake
-      // another owner's parked worker. The leak is one of reach, and a tree is visible only to its owner.
-      if (agent !== undefined && tree.treeOf(node.rootId)?.ownerSessionId !== agent.id) continue
-      const workerId = node.parkedWorker
-      if (workerId === null) continue
-      // Nothing can be woken without the owner, so bail out BEFORE adoption: adopting then failing to
-      // deliver would consume the address and turn "the owner is away" into "start a fresh session".
-      if (this.ctx.agents.get(SessionId(tree.treeOf(node.rootId)?.ownerSessionId ?? '')) === undefined) {
-        continue
-      }
-      // The node is about to be owned by an IDLE session, so it must count as live BEFORE the adoption
-      // lands: the sweep that the last child's own `subagent/end` triggers runs concurrently with this
-      // loop, and `heldByLiveWorkers` cannot see an idle parked session (see `workerLive`).
-      this.wakingClaims.add(workerId)
-      let handedOff = false
-      try {
-        const adopted = await tree.adoptParked(node.id, workerId)
-        if (!adopted.ok) {
-          this.trace(`wake refused ${node.id}: ${adopted.code}`)
-          continue
-        }
-        this.parkedSignaled.delete(node.id)
-        if (await this.wakeParkedWorker(adopted.value.node, workerId)) {
-          woken += 1
-          // The guard stays until `workerLive` observes the resumed agent: the delivery resolving is
-          // not the same event as the agent being registered, and the sweep may land in between.
-          handedOff = true
-          this.dispatchedFor.add(tree.treeOf(node.rootId)?.ownerSessionId ?? '')
-          this.announceTree(node.rootId)
-          continue
-        }
-        // Delivery failed: give the node back. A fresh claim is reserved here so a cleaned-up session
-        // costs one round trip, not one pass.
-        await tree.reclaim(node.id, 'wake-failed').catch(() => undefined)
-        const claimId = newClaimId()
-        this.issuedClaims.add(claimId)
-        this.startingClaims.add(claimId)
-        const dispatched = await tree.dispatch(node.id, claimId)
-        if (!dispatched.ok) {
-          this.endStartAttempt(claimId)
-          continue
-        }
-        void this.startWorker(dispatched.value.node, claimId).catch((error: unknown) => {
-          this.log.warn(`dispatch of ${node.id} failed: ${String(error)}`)
-        })
-      } finally {
-        // Every exit but a successful hand-off drops the guard here. A successful one is kept until the
-        // agent is observed (or the engine gives up on the binding and interrupts it) — dropping it on
-        // the delivery's own resolution would reopen exactly the window it exists to close.
-        if (!handedOff) this.wakingClaims.delete(workerId)
-      }
-    }
-    return woken
-  }
-
-  /** Deliver the ordinary dispatch prompt, read fresh: a sibling result may have arrived since the
-   *  children landed. `@returns` whether delivery was accepted (false means "start a fresh one"). */
-  private async wakeParkedWorker(node: NodeRecord, workerId: string): Promise<boolean> {
-    const tree = this.requireTree()
-    const owned = tree.treeOf(node.rootId)
-    if (owned === undefined) return false
-    // The worker's recorded direct parent is the tree owner, and `authorizeLineage` accepts nobody else.
-    const parent = this.ctx.agents.get(SessionId(owned.ownerSessionId))
-    if (parent === undefined) {
-      this.log.info(`owner ${owned.ownerSessionId} is not live; ${node.id} cannot be woken`)
-      return false
-    }
-    const view = tree.view(node.id)
-    if (view === undefined) return false
-    const prompt = buildWorkerPrompt(view, {}, this.wellFormed)
-    try {
-      await this.ctx.subagents.sendMessage(
-        parent,
-        SessionId(workerId),
-        [{ type: 'text', text: prompt }],
-        { signal: new AbortController().signal },
-      )
-      // A parked session is a continuation too: the round this prompt opens is what its NEXT cold
-      // wake must subtract from, not the dispatch that parked it. Stamped only now that it was read.
-      await this.recordBaseline(node.id, workerId)
-      this.log.info(`woke ${workerId} for ${node.id} (its children are all terminal)`)
-      return true
-    } catch (error: unknown) {
-      // A cleaned-up session or one the runtime refuses to resume: no retry and no failure counter is
-      // touched — `note_mission` carries the hand-off, so a fresh session is a complete answer.
-      this.log.warn(`wake of ${workerId} for ${node.id} failed; starting a fresh executor: ${String(error)}`)
-      return false
+  private coldResumeDeps(): ColdResumeDeps {
+    return {
+      tree: this.tree,
+      requireTree: () => this.requireTree(),
+      engine: this.engine,
+      agents: this.ctx.agents,
+      subagents: this.ctx.subagents,
+      log: this.log,
+      wellFormed: this.wellFormed,
+      wakingClaims: this.wakingClaims,
+      parkedSignaled: this.parkedSignaled,
+      dispatchedFor: this.dispatchedFor,
+      issuedClaims: this.issuedClaims,
+      startingClaims: this.startingClaims,
+      trace: (message) => this.trace(message),
+      announceTree: (rootId) => this.announceTree(rootId),
+      endStartAttempt: (claimId) => this.endStartAttempt(claimId),
+      recordBaseline: (nodeId, holder) => this.recordBaseline(nodeId, holder),
+      startWorker: (node, claimId) => this.startWorker(node, claimId),
     }
   }
 
   /**
-   * Try to continue a node in the session recorded when an interruption demoted it (`lastWorkerId`)
-   * instead of starting a fresh executor — the "cold wake" of a mission that survived a restart.
-   * Reached from the engine's dispatch pass, before any claim is reserved; returns whether the node
-   * was dispatched by this call, must be left alone, or needs the ordinary fresh path.
-   *
-   * The delivery rides the seam the parked wake already uses: `ctx.subagents.sendMessage` to a
-   * non-resident child goes through `dsh-subagent`'s `materialize` ("create OR resume one child
-   * Agent"), which calls `agents.resume({ resumeSessionId: ... })`. That is the same code path for
-   * "the residency was released" and "the process restarted and the session is being rebuilt from
-   * disk", so there is no second protocol to invent here.
-   *
-   * Order per node is the parked wake's, for the same reason: GUARD → ADOPT → DELIVER. The guard has
-   * to land BEFORE the adoption, because the target session is idle/unmaterialized by definition:
-   * `heldByLiveWorkers` cannot see it, so the sweep fired by the previous run's own `subagent/end`
-   * would strip the binding mid-delivery while the cold resume still lands — two executors for one
-   * node, one wasted round, and `failures` charged for it.
-   *
-   * Failure is not a failure of the mission: the delivery being refused means "that session is
-   * gone or not resumable", and a fresh executor is the complete answer (`note_mission` is the
-   * hand-off). So the host undoes its own adoption with `wake-failed` — no budget, no cooldown —
-   * and answers `failed`, and the engine immediately takes the ordinary path in the same pass.
+   * Wake every parked session whose children have landed; the protocol (guard → adopt → deliver,
+   * with `wake-failed` on a refused delivery) lives in `coldResume.ts`, and this is the delegation
+   * `index.ts` calls from the owner's pre-step.
+   */
+  async wakeParkedWorkers(agent?: Agent): Promise<number> {
+    return runWakeParkedWorkers(this.coldResumeDeps(), agent)
+  }
+
+  /**
+   * Try to continue a node in the session that was interrupted in it (the "cold wake"); the
+   * decision and the delivery live in `coldResume.ts`.
    */
   private async resumeWorker(input: ResumeWorkerInput): Promise<ResumeOutcome> {
-    const tree = this.requireTree()
-    const { node, workerId } = input
-    // A delivery for this very session is already in flight. Spawning on top of it is the exact
-    // "cold resume lands + a fresh executor starts" double run this answer exists to prevent.
-    if (this.wakingClaims.has(workerId)) return 'skip'
-    const owned = tree.treeOf(node.rootId)
-    if (owned === undefined) return 'skip'
-    // The owner is the child's recorded direct parent, and the only sender `authorizeLineage`
-    // accepts. Without it nothing can be resumed, so the handle stays on the node and the next pass
-    // retries — the same "owner away means this waits" rule the parked wake follows.
-    const parent = this.ctx.agents.get(SessionId(owned.ownerSessionId))
-    if (parent === undefined) {
-      this.log.info(`owner ${owned.ownerSessionId} is not live; ${node.id} cannot be continued yet`)
-      return 'skip'
-    }
-
-    // MATERIAL DRIFT: the node moved enough that continuing this session would have it reason from
-    // a picture we know is out of date (the owner changed the direction, somebody else advanced the
-    // node's judgement, or the mission itself was re-defined). The address is SPENT rather than left
-    // for the next pass, and the answer is `failed` so the engine's ORDINARY fresh path takes over
-    // in this same pass — a fresh executor reads every correction, every note and every child
-    // conclusion, so nothing is lost but the session's own history, which is the point.
-    //
-    // Guard first, and evaluated AFTER the owner check, exactly like the adoption below: without a
-    // live owner a `failed` answer would fall through to a spawn that cannot happen, leaving the
-    // node bound with no worker for the sweep to charge.
-    const drift = tree.continuationDelta(node.id)
-    if (drift !== undefined && isMaterialChange(drift)) {
-      await tree.abandonContinuation(node.id, workerId).catch((error: unknown) => {
-        this.log.warn(`continuation of ${node.id}: could not spend its handle — ${String(error)}`)
-      })
-      this.trace(`continuation of ${node.id} declined: the mission changed materially since ${workerId} last read it`)
-      this.log.info(`not continuing ${node.id} in ${workerId}: the mission changed materially; starting a fresh executor`)
-      return 'failed'
-    }
-
-    // Live from here on: an idle session reads as "vanished" to the sweep (see `workerLive`).
-    this.wakingClaims.add(workerId)
-    try {
-      const adopted = await tree.adoptContinuation(node.id, workerId, input.capacity)
-      if (!adopted.ok) {
-        // The handle moved, the node left the dispatchable states, or another pass bound it. None of
-        // those is a reason to spawn: whoever moved it owns the node now. A `capacity-busy` refusal
-        // is the same answer — the node stays ready with its handle intact and the next pass retries
-        // it — because a machine that filled up is not a failed continuation.
-        this.trace(`continuation refused ${node.id}: ${adopted.code}`)
-        this.wakingClaims.delete(workerId)
-        return 'skip'
-      }
-      this.dispatchedFor.add(owned.ownerSessionId)
-      if (await this.deliverContinuation(adopted.value, workerId, parent, input.waitedMs ?? 0)) {
-        this.announceTree(node.rootId)
-        this.log.info(`continued ${node.id} in ${workerId} (its earlier execution was interrupted)`)
-        // The guard stays until `workerLive` observes the resumed agent: the delivery resolving is
-        // not the same event as the agent being registered, and the sweep may land in between.
-        return 'resumed'
-      }
-      // The delivery was refused: undo the adoption and hand the node back for the fresh path. The
-      // guard goes FIRST — it would otherwise answer "live" for a session nobody holds any more.
-      this.wakingClaims.delete(workerId)
-      await tree.reclaim(node.id, 'wake-failed').catch(() => undefined)
-      return 'failed'
-    } catch (error: unknown) {
-      // An UNEXPECTED failure (a store that refuses `put`): never let it escape into the dispatch
-      // pass, and never leave a binding nobody will deliver into. Either the adoption landed — then
-      // undo it — or it did not, in which case the reclaim is refused as a no-op; both leave the
-      // node ready for the caller's ordinary fresh path.
-      this.wakingClaims.delete(workerId)
-      await tree.reclaim(node.id, 'wake-failed').catch(() => undefined)
-      this.log.warn(`continuation of ${node.id} failed unexpectedly; starting a fresh executor: ${String(error)}`)
-      return 'failed'
-    }
+    return runResumeWorker(this.coldResumeDeps(), input)
   }
 
   /**
@@ -1858,6 +1707,9 @@ export class AvantfMissionHost extends TypertRemoteService {
    * failed stamp (the node was reclaimed and re-dispatched in between; the store refused the write)
    * must not fail the delivery. The cost is one conservative wake later: a missing baseline renders
    * "the drift cannot be determined", never "nothing changed".
+   *
+   * Kept on the host rather than moved with the wakes: `startWorker` (a fresh spawn) stamps through
+   * the same method, so it belongs to the host's delivery bookkeeping, not to the continuation seam.
    */
   private async recordBaseline(nodeId: string, holder: string): Promise<void> {
     try {
@@ -1868,62 +1720,6 @@ export class AvantfMissionHost extends TypertRemoteService {
     } catch (error: unknown) {
       this.log.warn(`could not record the dispatch baseline for ${nodeId}: ${String(error)}`)
     }
-  }
-
-  /**
-   * Deliver the continuation prompt to a session that is about to be cold-resumed. The view is the
-   * ordinary dispatch view — mission chain, the node's own block, the children's conclusions — with
-   * two deliberate differences from a fresh spawn: the node's corrections are reduced to the ones
-   * this session has NOT been given yet, and the prompt opens with what changed since that session
-   * last read this mission (the delta), so it can tell its own memory from the node's current state.
-   *
-   * `@returns` whether the delivery was accepted; false means "fall back to a fresh executor".
-   */
-  private async deliverContinuation(
-    view: DispatchView,
-    workerId: string,
-    parent: Agent,
-    waitedMs = 0,
-  ): Promise<boolean> {
-    const node = view.node
-    // Read on the ADOPTED view so the delta, the correction slice and the prompt all describe one
-    // and the same node state. A vanished node has no delta and needs none: the adoption already
-    // failed and the caller is on its way to the fresh path.
-    const drift = this.requireTree().continuationDelta(node.id)
-    const undelivered = drift?.corrections ?? node.corrections.slice(node.correctionsDeliveredUpTo)
-    const prompt = buildWorkerPrompt(view, {
-      resumed: true,
-      corrections: undelivered,
-      ...(drift === undefined ? {} : { delta: drift }),
-      ...(waitedMs > 0 ? { capacityWaitedMs: waitedMs } : {}),
-    }, this.wellFormed)
-    // Stamped with the prompt itself: this session's NEXT wake subtracts from what it is being read
-    // here, not from the original dispatch, or the same drift would be reported to it twice. After
-    // the delivery resolved — a refused prompt was never read, and the delivery must not carry an
-    // extra awaited durable write.
-    try {
-      await this.ctx.subagents.sendMessage(
-        parent,
-        SessionId(workerId),
-        [{ type: 'text', text: prompt }],
-        { signal: new AbortController().signal },
-      )
-    } catch (error: unknown) {
-      // A cleaned-up session or one the runtime refuses to resume: no retry and no failure counter
-      // is touched — a fresh session is a complete answer.
-      this.log.warn(`continuation of ${node.id} in ${workerId} failed; starting a fresh executor: ${String(error)}`)
-      return false
-    }
-    await this.recordBaseline(node.id, workerId)
-    // Those corrections have now been READ by the session they were addressed to. Advancing the
-    // durable mark HERE (never when the prompt is merely built) is what keeps a later wake from
-    // repeating them; it is monotone, so a raced, older report cannot pull it back.
-    await this.requireTree()
-      .markCorrectionsDelivered(node.id, node.corrections.length)
-      .catch((error: unknown) => {
-        this.log.warn(`continuation of ${node.id}: could not record its correction mark — ${String(error)}`)
-      })
-    return true
   }
 
   private async startWorker(node: NodeRecord, claimId: string, waitedMs = 0): Promise<void> {
@@ -1976,8 +1772,11 @@ export class AvantfMissionHost extends TypertRemoteService {
     } catch (error) {
       this.log.warn(`dispatch of ${node.id} failed: ${String(error)}`)
       // Charged to `spawnFailures`, not the mission's `failures` budget: the node never got a worker. The
-      // reclaim also starts the cooldown that holds it out of the next few pumps.
-      const reverted = await tree.reclaim(node.id, 'spawn-failed').catch(() => undefined)
+      // reclaim also starts the cooldown that holds it out of the next few pumps. `claimId` is the
+      // expectation — the start awaited, so a sweep that already reclaimed this binding must not have
+      // its outcome overwritten by this stale revert (which would charge `spawnFailures` twice for one
+      // attempt and move the cooldown off the reclaim that actually happened).
+      const reverted = await tree.reclaim(node.id, 'spawn-failed', claimId).catch(() => undefined)
       // A node that cannot even get a worker started is trouble the owner can act on, at the SAME floor
       // `isTroubledNode` reports at (one short of the ceiling that fails it). Without this it was the one
       // trouble `list_missions` flagged that never reached the owner as a message — the stall heads-up
@@ -2105,9 +1904,22 @@ export class AvantfMissionHost extends TypertRemoteService {
     )
   }
 
-  /** Tell the owner that one node keeps going silent. A heads-up, not a request: the engine has already
-   *  interrupted the worker and re-queued the mission. */
+  /** Tell the owner that one node keeps going wrong. A heads-up, not a request: the engine has already
+   *  interrupted the worker and re-queued the mission. Two causes share the channel (the engine's
+   *  `escalateTrouble`), because both are the same fact from the owner's side — this mission keeps
+   *  needing to be taken back — and the wording names which one so the remedy is legible. */
   private notifyStalled(info: StallReport): void {
+    if (info.cause === 'hung') {
+      const idleMin = Math.max(1, Math.round(info.silentMs / 60_000))
+      this.deliverToOwner(
+        info.rootId,
+        `任务 ${info.nodeId}（"${info.title}"）已连续 ${String(info.hungs ?? 0)} 次卡住没有产出`
+        + `（最近一次 ${String(idleMin)} 分钟没有产出），每次都被中断并重新入队，且没有消耗失败预算。`
+        + '如果它总是卡在同一处，用 adjust_mission 纠正方向，或用 cancel_mission 停掉它。',
+        `repeated hangs on ${info.nodeId} reported to the owner`,
+      )
+      return
+    }
     const minutes = Math.max(1, Math.round(info.silentMs / 60_000))
     // Quote the FAILURE budget, not the dispatch count: `attempts` also rises on rounds that succeed,
     // so "第 N 次派发（上限 5）" could read "第 7 次…上限 5" on a node that is converging fine.
@@ -2124,19 +1936,21 @@ export class AvantfMissionHost extends TypertRemoteService {
   }
 
   /** Log a `hung` reclaim. The engine recovered on its own and charged nothing, so there is nothing
-   *  for the owner to decide and no wake is sent — but the line MUST be there, or a provider that
+   *  for the owner to decide HERE and no wake is sent — but the line MUST be there, or a provider that
    *  hangs (or only retries) every dispatch is invisible, which is exactly how W8 stayed unnoticed
-   *  for 7.5 hours. */
+   *  for 7.5 hours. The streak is logged with it, because that is the number the owner escalation
+   *  (a few lines up in the engine) counts. */
   private reportHung(info: HungReport): void {
     const ranMin = Math.max(1, Math.round(info.ranMs / 60_000))
     const idleMin = Math.max(1, Math.round(info.idleMs / 60_000))
     const bound = info.bound === 'round'
       ? `round cap ${String(ranMin)} min`
       : `no output for ${String(idleMin)} min`
-    this.trace(`hung: ${info.nodeId} reclaimed (${bound})`)
+    this.trace(`hung: ${info.nodeId} reclaimed (${bound}, streak ${String(info.hungCount)})`)
     this.log.warn(
       `hung: worker on ${info.nodeId} ("${info.title}") was alive but unproductive (${bound}, `
-      + `attempt ${String(info.attempts)}); interrupted and re-queued without charging the failure budget`,
+      + `attempt ${String(info.attempts)}, consecutive hangs ${String(info.hungCount)});`
+      + ' interrupted and re-queued without charging the failure budget',
     )
   }
 

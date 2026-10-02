@@ -537,6 +537,16 @@ describe('opening the session that ran a mission', () => {
     expect(unsupported).toContain('无法打开执行者会话')
     expect(workerFailureText('unsupported', '宿主没有挂载会话查询服务（sessionQuery），无法查找执行者会话'))
       .toContain('sessionQuery')
+    // ③b the N7 shape: every candidate log failed to read. The host carries its first reason, and the
+    // client sentence stays readable — the reason reaches the user instead of "可能已被清理".
+    const allFailed = workerFailureText(
+      'unsupported',
+      '无法读取任何候选会话的日志（2 条都失败）：stubbed: cannot read mission-aaaaaaa1',
+    )
+    expect(allFailed).toContain('无法打开执行者会话')
+    expect(allFailed).toContain('无法读取任何候选会话的日志')
+    expect(allFailed).toContain('stubbed: cannot read mission-aaaaaaa1')
+    expect(allFailed).not.toContain('可能已被清理')
     // ④ a named session that the navigation refuses.
     const refused = await workerSessionOpen({
       ...base,
@@ -793,6 +803,37 @@ describe('MissionTreeView', () => {
     expect(html).toContain('等容量')
     expect(html).toContain('约占 3 核')
     // The tile reads as a QUEUE marker, not as a status hue.
+    expect(html).toContain('avwf-waiting')
+  })
+
+  it('renders the aging reservation as a queue reason of its own, not as a full slot', () => {
+    // The engine added `aging` for the node an aged reservation holds back (N5): it used to be
+    // reported as `slot` ("capacity has room, the slots are full"), which is the one thing that is
+    // not true, and it carries no numbers — so an unknowing view would fall through to the capacity
+    // branch and render "等容量" with the mismatched `needed`/`available` of the RESERVING node.
+    const data: MissionSnapshot = {
+      trees: [{
+        rootId: 'r1',
+        closedAt: null,
+        nodes: [{
+          id: 'r1', parentId: null, children: [], title: 'Ship it', context: [], corrections: [],
+          status: 'ready', attempts: 0, depth: 1, createdAt: 1, hasResult: false, resultRef: null,
+          workerSessionId: null, weight: 1,
+          waitingFor: { reason: 'aging' },
+        }],
+      }],
+    }
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+      />,
+    )
+    expect(html).toContain('已预留整机')
+    expect(html).not.toContain('等内存')
     expect(html).toContain('avwf-waiting')
   })
 

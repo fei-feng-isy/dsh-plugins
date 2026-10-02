@@ -24,7 +24,7 @@ import {
   type DispatchScope,
 } from './dispatch.js'
 import { normalizeWeight } from './capacity.js'
-import { storedTime } from './liveness.js'
+import { normalizeRoundMs, resolveChildRoundMs, storedTime } from './liveness.js'
 import { LOCAL_WELL_FORMED, type WellFormedSource } from './wellformed.js'
 import {
   CAPACITY,
@@ -117,6 +117,9 @@ export interface CreateRootInput {
   /** This mission's declared capacity weight (cores-equivalent); `undefined` reads as the default 1.
    * The root has no parent to inherit from. */
   readonly weight?: number
+  /** This mission's declared round-cap relaxation (see {@link NodeRecord.roundMs}); the root has no
+   * parent, so this is the only declaration site for a tree's relaxed ceiling. */
+  readonly roundMs?: number | null
 }
 
 export interface DispatchDecision {
@@ -196,18 +199,28 @@ function isCount(value: unknown): value is number {
 function asBaseline(value: unknown): DispatchBaseline | null {
   if (value === null || typeof value !== 'object') return null
   const candidate = value as Partial<DispatchBaseline>
+  const { corrections, notes, terminalChildren, fingerprint, attempts } = candidate
   if (
-    !isCount(candidate.corrections)
-    || !isCount(candidate.notes)
-    || !isCount(candidate.terminalChildren)
-    || typeof candidate.fingerprint !== 'string'
-    || !isCount(candidate.attempts)
+    !isCount(corrections)
+    || !isCount(notes)
+    || !isCount(terminalChildren)
+    || typeof fingerprint !== 'string'
+    || !isCount(attempts)
   ) {
     return null
   }
-  // The SAME object when it is already in shape, so `normalizeLoaded`'s identity check still holds
-  // for a current document (opening one must not allocate a copy of every node).
-  return candidate as DispatchBaseline
+  // `holder` is the one member a baseline written before it existed legitimately lacks. It reads as
+  // `null` (= "author unknown", the conservative fallback) rather than voiding the whole snapshot:
+  // the other five members are still exactly what the prompt showed, and throwing them away would
+  // make every in-flight mission's next wake render the "cannot tell what changed" caveat for a
+  // question four of its five components can still answer.
+  const holder = typeof candidate.holder === 'string' ? candidate.holder : null
+  if (holder === candidate.holder) {
+    // The SAME object when it is already in shape, so `normalizeLoaded`'s identity check still holds
+    // for a current document (opening one must not allocate a copy of every node).
+    return candidate as DispatchBaseline
+  }
+  return { corrections, notes, terminalChildren, fingerprint, attempts, holder }
 }
 
 /**
@@ -220,6 +233,10 @@ function asBaseline(value: unknown): DispatchBaseline | null {
  * direction the owner gave that nobody ever reads; a missing `dispatchBaseline` must read as `null`
  * (= UNKNOWN drift), never as "nothing changed"; a missing `unit` must read as `null` (= no lease),
  * never as an invented scope that would serialize the mission against a resource it never named.
+ * The three fields added with the hung/identity work follow the same rule: a missing `roundMs` reads
+ * as `null` (= the engine's cap, NOT a relaxed one), a missing `hungCount` as `0` (nobody has been
+ * paged), and a missing `analysisAuthor` as `null` (= author unknown, the delta's conservative
+ * fallback) — never as a value that would change a decision.
  *
  * Returns the SAME object when nothing changed, so opening a current document does not churn it.
  */
@@ -232,6 +249,9 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     unit?: unknown
     weight?: unknown
     activityAt?: number
+    roundMs?: unknown
+    hungCount?: unknown
+    analysisAuthor?: unknown
   }
   const lastWorkerId = legacy.lastWorkerId ?? null
   // A record written before the display handle existed reads as "no executor to open". `?? null`
@@ -256,6 +276,16 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   // cap). A missing value must never read as `undefined`: `Math.max(undefined, …)` is `NaN`, which
   // keeps a node running forever.
   const activityAt = storedTime(legacy.activityAt)
+  // A record written before the round-cap declaration existed reads as `null` = "the engine's cap";
+  // a dirty value that cannot be believed reads the same way rather than relaxing a backstop by
+  // accident. Same normalizer as the declaration sites, so one value cannot mean two things.
+  const roundMs = normalizeRoundMs(legacy.roundMs)
+  // A record written before the hang streak existed reads as 0 = "no consecutive hangs", the only
+  // safe default: an invented streak would page the owner about a node that never hung.
+  const hungCount = isCount(legacy.hungCount) ? legacy.hungCount : 0
+  // A record written before note authorship existed reads as `null` = "author unknown", which sends
+  // the delta down its generation-comparison fallback — exactly the previous build's judgement.
+  const analysisAuthor = typeof legacy.analysisAuthor === 'string' ? legacy.analysisAuthor : null
   if (
     lastWorkerId === node.lastWorkerId
     && executorSessionId === node.executorSessionId
@@ -264,6 +294,9 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     && unit === node.unit
     && weight === node.weight
     && activityAt === node.activityAt
+    && roundMs === node.roundMs
+    && hungCount === node.hungCount
+    && analysisAuthor === node.analysisAuthor
   ) {
     return node
   }
@@ -276,6 +309,9 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     unit,
     weight,
     activityAt,
+    roundMs,
+    hungCount,
+    analysisAuthor,
   }
 }
 
@@ -797,6 +833,9 @@ export class MissionTree {
           // The generation this prompt is being built under, i.e. the value `recordAnalysis` stamps
           // onto a note written by this very dispatch.
           attempts: node.attempts,
+          // WHO was shown it. The generation alone cannot tell a session's own surviving note from a
+          // stranger's; the wake compares this against `analysisAuthor` (see `continuation.ts`).
+          holder,
         },
       })
       await this.flush(state.tree.rootId)
@@ -903,6 +942,7 @@ export class MissionTree {
         context: safe.analysis,
         unit: normalizeUnit(safe.unit),
         weight: safe.weight,
+        roundMs: safe.roundMs,
         depth: 1,
         now,
       })
@@ -942,6 +982,8 @@ export class MissionTree {
     readonly unit: string | null
     /** Declared capacity weight; `undefined` reads as the default 1. */
     readonly weight?: number
+    /** Declared round-cap relaxation; `undefined`/dirty reads as `null` = the engine's cap. */
+    readonly roundMs?: number | null
     readonly depth: number
     readonly now: number
   }): NodeRecord {
@@ -953,11 +995,13 @@ export class MissionTree {
       description: input.description,
       unit: input.unit,
       weight: normalizeWeight(input.weight),
+      roundMs: normalizeRoundMs(input.roundMs),
       context: [...input.context],
       corrections: [],
       correctionsDeliveredUpTo: 0,
       analysisNotes: [],
       analysisAttempt: 0,
+      analysisAuthor: null,
       status: 'ready',
       createdAt: input.now,
       depth: input.depth,
@@ -975,6 +1019,7 @@ export class MissionTree {
       progressAt: 0,
       activityAt: 0,
       stalls: 0,
+      hungCount: 0,
       stalledNotifiedAt: null,
       result: null,
       hasResult: false,
@@ -1077,7 +1122,9 @@ export class MissionTree {
    * dispatch proceeds. `hung`: the worker was still alive but produced nothing for a whole window
    * (or exceeded the round cap) — like `wake-failed` it charges NEITHER budget and adds no cooldown,
    * because an apparatus outage is not a failed mission and must not spend the budget that ends the
-   * node; unlike `wake-failed` it lands in `interrupted`, the ordinary re-queue. `attempts` is never
+   * node; unlike `wake-failed` it lands in `interrupted`, the ordinary re-queue, and it advances the
+   * `hungCount` STREAK (cleared by real output, never by a re-dispatch) so a node that hangs every
+   * round eventually reaches the owner instead of re-running forever. `attempts` is never
    * rolled back: it is the `note_mission` generation marker, not a budget.
    *
    * Every arm leaves `running`, so this is one of the paths that RELEASES the node's unit lease
@@ -1126,10 +1173,17 @@ export class MissionTree {
         // apparatus outage, and retries must not eat the budget that ends the node (`wake-failed`
         // set the same precedent). `failures` stays for missions that actually failed; a worker
         // merely vanishing is already not the node's fault.
+        //
+        // What it DOES charge is the hang STREAK. That is not a budget — nothing fails at a
+        // threshold — but it is what makes an unbounded retry loop visible: at
+        // `CAPACITY.maxHungsBeforeReport` the node trips `isTroubledNode`, and the engine routes it
+        // to the owner through the same one-message channel the stall heads-up uses. Cleared by real
+        // output only (see `touchProgress`), never by the re-dispatch that follows this reclaim —
+        // that re-dispatch is exactly the next link in the streak.
         ...(cause === 'spawn-failed'
           ? { spawnFailures: node.spawnFailures + 1 }
           : cause === 'hung'
-            ? {}
+            ? { hungCount: node.hungCount + 1 }
             : { failures: node.failures + 1 }),
       })
       await this.flush(state.tree.rootId)
@@ -1151,13 +1205,21 @@ export class MissionTree {
   /** Record that one worker PRODUCED something — model output, a tool call, a tool result — on a
    * hot path from the worker's durable append feed, so it updates memory only. This is the clock the
    * stale check reads: output is also evidence of life, so one write moves `activityAt` too. A
-   * timestamp not newer than what we have is ignored, which makes racing a dispatch safe. */
+   * timestamp not newer than what we have is ignored, which makes racing a dispatch safe.
+   *
+   * It is ALSO the clearing point of the hang streak: production is the one event that proves the
+   * round was not merely retrying forever, so `hungCount` goes back to 0 here (and only then — a
+   * re-dispatch sets `progressAt` without proving anything and deliberately leaves the streak). */
   touchProgress(nodeId: string, at: number): void {
     const found = this.locate(nodeId)
     if (found === undefined) return
     const { state, node } = found
     if (node.status !== 'running' || at <= node.progressAt) return
-    this.replace(state, node, { progressAt: at, activityAt: Math.max(at, storedTime(node.activityAt)) })
+    this.replace(state, node, {
+      progressAt: at,
+      activityAt: Math.max(at, storedTime(node.activityAt)),
+      ...(node.hungCount === 0 ? {} : { hungCount: 0 }),
+    })
     this.progressDirty.add(state.tree.rootId)
   }
 
@@ -1267,6 +1329,9 @@ export class MissionTree {
       const updated = this.replace(state, node, {
         analysisNotes: appendNotes(node.analysisNotes, notes),
         analysisAttempt: node.attempts,
+        // WHO wrote it, beside WHEN: the cold wake's material judgement is an identity comparison
+        // against the baseline's holder, with the generation number as the pre-identity fallback.
+        analysisAuthor: callerSessionId,
       })
       await this.flush(state.tree.rootId)
       return accept(updated)
@@ -1378,6 +1443,8 @@ export class MissionTree {
             unit: resolveChildUnit(node.unit, spec.unit),
             // Weight is deliberately NOT inherited: `undefined` on the spec means the default 1.
             weight: resolveChildWeight(spec.weight),
+            // Nor is the round-cap relaxation: a parent's long round says nothing about one child.
+            roundMs: resolveChildRoundMs(spec.roundMs),
             depth: node.depth + 1,
             now,
           }),

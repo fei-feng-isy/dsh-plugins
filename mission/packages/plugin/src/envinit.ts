@@ -44,12 +44,18 @@ const VERSION_PACKAGES: readonly string[] = [
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-session-query',
   '@deepseek-ai/dsh-spill',
-  '@deepseek-ai/dsh-storage',
+  // Not listed: `dsh-storage`. It is a transitive dependency of the declared `dsh-storage-domain`, not
+  // part of this plugin's compile surface, and `link-dsh.mjs` no longer links it (see the note there).
   '@deepseek-ai/dsh-storage-domain',
   '@deepseek-ai/dsh-subagent',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-typert-protocol',
+  // Listed although it is not a declared peer: `src/index.ts` imports it TYPE-ONLY for the
+  // `ctx.typert.register` augmentation, so it is part of what this build compiles against and its
+  // version belongs in the drift report. `readDeclaredVersions` reads only `peerDependencies`, so for
+  // this one entry the per-package comparison falls back to the baked version — the report stays a
+  // WARNING either way, and no load decision depends on it.
   '@deepseek-ai/dsh-typert-registry',
   '@deepseek-ai/dsh-util-values',
 ]

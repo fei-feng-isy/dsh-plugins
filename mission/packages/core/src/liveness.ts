@@ -25,7 +25,11 @@
  *   shape exactly: the worker keeps being heard from while producing nothing.
  *
  * Both `hung` bounds are reclaimed WITHOUT charging the failure budget: a stuck provider is not a
- * failed mission, and letting retries eat the budget would turn a recoverable node `failed`.
+ * failed mission, and letting retries eat the budget would turn a recoverable node `failed`. What
+ * keeps that leniency from becoming an unbounded loop is `hungCount` — the engine's own consecutive
+ * hang counter, cleared by real output — which at `CAPACITY.maxHungsBeforeReport` makes the node
+ * visible to the owner through the same trouble channel `stalled` uses (see `MissionTree.reclaim`
+ * and `MissionEngine.reclaimStale`).
  *
  * A record written before `activityAt` existed has no value there, and its `progressAt` was
  * refreshed by ANY event. {@link heardAt}/{@link producedAt} then fall back to `progressAt` for
@@ -56,6 +60,46 @@ export interface LivenessVerdict {
 export interface LivenessWindows {
   readonly staleMs: number
   readonly roundMs: number
+}
+
+/**
+ * Hard ceiling on a DECLARED round cap: 24 hours. The declaration exists to relax the cap for
+ * genuinely heavy work, not to opt out of it — a single round longer than a day is indistinguishable
+ * from a hang, and the mission can always be re-entered by the ordinary retry. An operator's own
+ * configured `roundMs` is NOT clamped by this; only a node's declaration is.
+ */
+export const MAX_DECLARED_ROUND_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Read a node's declared round-cap relaxation into shape: a finite number > 0, or `null` for
+ * "declared nothing". Missing, dirty and non-positive values all read as `null`, the same direction
+ * as a record written before the field existed — a declaration that cannot be believed must not
+ * change when a round is taken back. Anything past {@link MAX_DECLARED_ROUND_MS} falls to it.
+ */
+export function normalizeRoundMs(raw: unknown): number | null {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return null
+  return Math.min(raw, MAX_DECLARED_ROUND_MS)
+}
+
+/**
+ * A decomposed child's round-cap relaxation. `undefined` — the spec said nothing — does NOT inherit
+ * the parent's declaration: a parent that needs hours says nothing about one child, and the same
+ * reasoning already governs `weight` (`resolveChildWeight`).
+ */
+export function resolveChildRoundMs(declared: number | null | undefined): number | null {
+  return normalizeRoundMs(declared)
+}
+
+/**
+ * The round cap actually applied to one node: the engine's configured ceiling, RELAXED by the node's
+ * own declaration and never shortened by it. Relaxation-only is the whole rule — the cap is the
+ * backstop against a transport that retries forever, so a mission may ask for more room but may not
+ * opt out of the backstop, and a smaller declaration (a countdown a model could otherwise set for
+ * itself) is a no-op.
+ */
+export function effectiveRoundMs(node: NodeRecord, configured: number): number {
+  const declared = normalizeRoundMs(node.roundMs)
+  return declared === null ? configured : Math.max(configured, declared)
 }
 
 /** A timestamp as stored. A record written before the field existed has `undefined` at runtime even

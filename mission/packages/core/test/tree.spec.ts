@@ -1643,7 +1643,7 @@ describe('the dispatch baseline', () => {
     expect(isMaterialChange(carried!)).toBe(false)
   })
 
-  it('reports a node whose latest note belongs to an earlier dispatch', async () => {
+  it('does NOT call a session’s own surviving note "another dispatch" — the aggregate-parent case', async () => {
     const { tree } = makeTree()
     const id = await rootOf(tree)
     await tree.dispatch(id, 'mission-1')
@@ -1656,16 +1656,35 @@ describe('the dispatch baseline', () => {
     await tree.submitResult(child, 'mission-child', 'child conclusion')
 
     // Same dispatch wrote the note: the node's judgement is this session's own.
+    expect(tree.node(id)?.analysisAuthor).toBe('mission-1')
     const own = tree.continuationDelta(id)
     expect(own?.analysisFromAnotherDispatch).toBe(false)
 
     // The parked session is adopted for its convergence round (attempts 2) and its new prompt is
-    // stamped. The note on the node still belongs to dispatch 1, so the node's judgement channel has
-    // moved without the session that is now bound — the conservative "somebody else is writing here"
-    // reading, which is exactly what `analysisAttempt` exists to answer.
+    // stamped. The GENERATION moved, the AUTHOR did not: `analysisAttempt` alone would read this as
+    // "somebody else is writing here" and throw away the very session with the most context on the
+    // node — the systematic misjudgement N3 was about. Identity wins while both sides are known.
     await tree.adoptParked(id, 'mission-1')
     await tree.recordDispatchBaseline(id, 'mission-1')
+    const stillOwn = tree.continuationDelta(id)
+    expect(tree.node(id)?.attempts).toBe(2)
+    expect(stillOwn?.analysisFromAnotherDispatch).toBe(false)
+    expect(isMaterialChange(stillOwn!)).toBe(false)
+  })
+
+  it('calls a note written by ANOTHER session material', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-1')
+    await tree.recordDispatchBaseline(id, 'mission-1')
+    await tree.recordAnalysis(id, 'mission-1', '第一轮自己的判断')
+    // A fresh executor takes the node over; the baseline still belongs to the session that has gone.
+    await tree.reclaim(id, 'vanished', 'mission-1')
+    await tree.dispatch(id, 'mission-2')
+    await tree.recordAnalysis(id, 'mission-2', '新执行者的判断')
+
     const foreign = tree.continuationDelta(id)
+    expect(tree.node(id)?.analysisAuthor).toBe('mission-2')
     expect(foreign?.analysisFromAnotherDispatch).toBe(true)
     expect(isMaterialChange(foreign!)).toBe(true)
   })

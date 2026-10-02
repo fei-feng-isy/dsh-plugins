@@ -94,6 +94,8 @@ export interface SealedTree {
   redispatch(workerId: string): Promise<void>
   /** `note_mission` by the session the node is currently bound to. */
   note(text: string): Promise<void>
+  /** `note_mission` by an EXPLICIT session — how a fixture builds "somebody else advanced this node". */
+  noteAs(sessionId: string, text: string): Promise<void>
   /** The owner's `adjust_mission` correction, recorded while the node is bound. */
   correct(text: string): Promise<void>
   /** The dispatch baseline, as the host stamps it for the CURRENT binding. */
@@ -153,6 +155,10 @@ export async function sealedTree(workerId: string): Promise<SealedTree> {
     },
     note: async (text) => {
       const noted = await tree.recordAnalysis(rootId, workerId, text)
+      if (!noted.ok) throw new Error(`note_mission failed: ${noted.message}`)
+    },
+    noteAs: async (sessionId, text) => {
+      const noted = await tree.recordAnalysis(rootId, sessionId, text)
       if (!noted.ok) throw new Error(`note_mission failed: ${noted.message}`)
     },
     correct: async (text) => {

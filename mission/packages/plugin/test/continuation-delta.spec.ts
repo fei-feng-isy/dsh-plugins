@@ -8,7 +8,7 @@
  * - the host stamps the baseline at the moment it hands a session its prompt, so a later wake can
  *   subtract it;
  * - a wake renders what changed since that session last read the mission;
- * - drift that is MATERIAL (an unread correction, a judgement written by another dispatch) declines
+ * - drift that is MATERIAL (an unread correction, a judgement written by ANOTHER session) declines
  *   the continuation and lets the ordinary fresh path take over — which reads every correction and
  *   every note, so nothing is lost but the session's own history;
  * - a record with no baseline (written before the field existed) still continues, with an honest
@@ -155,13 +155,34 @@ describe('drift large enough to stop continuing', () => {
     expect(node?.status).toBe('running')
   })
 
-  it('declines when the latest judgement was written by another dispatch', async () => {
+  it('continues when the latest judgement is the session’s OWN, even after a re-dispatch', async () => {
     const fixture = await sealedTree(WORKER)
     await fixture.note('上一轮的结论：先换掉那个调用点')
-    // A second round on the same node, and its baseline: the note on the node now belongs to an
-    // EARLIER dispatch than the one this session's prompt was built under.
+    // A second round on the same node, and its baseline: the note's GENERATION is now behind the
+    // dispatch this session's prompt was built under, but its AUTHOR is still this very session.
     await fixture.redispatch(WORKER)
     await fixture.stamp()
+    const mounted = await mount({ seedDocuments: [fixture.document()] })
+
+    await mounted.flush()
+
+    // Identity beats the generation: this is the aggregate-parent shape N3 was about, where reading
+    // the session's own surviving note as "somebody else wrote here" throws away the executor with
+    // the most context on the node. It is continued...
+    expect(mounted.sent).toHaveLength(1)
+    expect(mounted.sent[0]?.targetId).toBe(WORKER)
+    expect(mounted.dispatched).toHaveLength(0)
+    // ...and the note still reaches it, in the current mission block.
+    expect(mounted.sent[0]?.text ?? '').toContain('上一轮的结论：先换掉那个调用点')
+  })
+
+  it('declines when the latest judgement was written by ANOTHER session', async () => {
+    const fixture = await sealedTree(WORKER)
+    // The baseline belongs to the session that has gone...
+    await fixture.stamp()
+    // ...and a DIFFERENT executor took the node over and wrote the latest judgement.
+    await fixture.redispatch('mission-bbbb2222')
+    await fixture.noteAs('mission-bbbb2222', '别人的结论：这条路走不通')
     const mounted = await mount({ seedDocuments: [fixture.document()] })
 
     await mounted.flush()
@@ -169,7 +190,7 @@ describe('drift large enough to stop continuing', () => {
     expect(mounted.sent).toHaveLength(0)
     expect(mounted.dispatched).toHaveLength(1)
     // The fresh executor reads the judgement its predecessor recorded.
-    expect(mounted.dispatched[0]?.prompt ?? '').toContain('上一轮的结论：先换掉那个调用点')
+    expect(mounted.dispatched[0]?.prompt ?? '').toContain('别人的结论：这条路走不通')
   })
 })
 

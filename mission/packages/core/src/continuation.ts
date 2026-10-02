@@ -10,7 +10,7 @@
  *
  * @module @avantf/mission-core/continuation
  */
-import type { NodeRecord } from './types.js'
+import type { DispatchBaseline, NodeRecord } from './types.js'
 
 /** The node's accumulating channels as the delta reads them. */
 export interface ContinuationDelta {
@@ -34,13 +34,33 @@ export interface ContinuationDelta {
   readonly terminalChildren: number
   /** Whether title or description changed since the baseline; `false` when unknown. */
   readonly titleOrContentChanged: boolean
-  /** The node's latest analysis was written under a DIFFERENT dispatch than the one this session's
-   * prompt was built from, and the node carries notes at all. It is the closest thing the record
-   * has to "somebody other than this dispatch has been writing this node's judgement", which is a
-   * freshness signal the next wake must not ignore — with one exception it is conservative about:
-   * a node with no notes has `analysisAttempt = 0`, which must not be read as another dispatch
-   * having written one. */
+  /** The node's latest analysis was written by somebody OTHER than the session this baseline belongs
+   * to, and the node carries notes at all. It is the closest thing the record has to "another
+   * executor has been writing this node's judgement", which is a freshness signal the next wake must
+   * not ignore.
+   *
+   * Compared by IDENTITY (`analysisAuthor` vs the baseline's `holder`) whenever both are known: the
+   * generation number alone misreads the common case this field exists for — a session's OWN note
+   * outliving its dispatch, which happens to every parent that wrote its analysis and decomposed.
+   * When either side is missing (a record written before the fields existed) it falls back to the
+   * generation comparison (`analysisAttempt` vs `baseline.attempts`), which is the conservative
+   * reading: a false positive only costs a fresh executor. */
   readonly analysisFromAnotherDispatch: boolean
+}
+
+/**
+ * The identity-or-generation reading behind {@link ContinuationDelta.analysisFromAnotherDispatch}.
+ * Split out so the one subtle rule — identity when both sides are known, the previous generation's
+ * comparison otherwise — is stated once.
+ */
+function analysisFromAnotherDispatch(node: NodeRecord, baseline: DispatchBaseline): boolean {
+  if (node.analysisNotes.length === 0) return false
+  const author = node.analysisAuthor
+  const holder = baseline.holder
+  if (author !== null && author !== undefined && holder !== null && holder !== undefined) {
+    return author !== holder
+  }
+  return node.analysisAttempt !== baseline.attempts
 }
 
 /**
@@ -92,7 +112,7 @@ export function computeContinuationDelta(node: NodeRecord, terminalChildren: num
     notes: node.analysisNotes.slice(baseline.notes),
     terminalChildren: Math.max(terminalChildren - baseline.terminalChildren, 0),
     titleOrContentChanged: nodeFingerprint(node.title, node.description) !== baseline.fingerprint,
-    analysisFromAnotherDispatch: node.analysisNotes.length > 0 && node.analysisAttempt !== baseline.attempts,
+    analysisFromAnotherDispatch: analysisFromAnotherDispatch(node, baseline),
   }
 }
 
@@ -111,10 +131,12 @@ export function computeContinuationDelta(node: NodeRecord, terminalChildren: num
  *    (the new executor reads the correction before it reads anything else). This is also why the
  *    delta's correction clause is normally empty: unread corrections do not reach the delta, they
  *    change the route.
- * 2. `analysisFromAnotherDispatch` — the node's latest analysis belongs to a dispatch other than
- *    this session's own, i.e. the node's judgement channel has been advanced by somebody else.
+ * 2. `analysisFromAnotherDispatch` — the node's latest analysis was written by somebody other than
+ *    this session, i.e. the node's judgement channel has been advanced by a different executor.
  *    Conservative by construction: a false positive only costs a fresh executor, which is always a
  *    correct answer, while a false negative would resume a session over a judgement it never wrote.
+ *    Compared by holder identity where the record carries it; the pre-identity generation comparison
+ *    is the fallback (see the field's own note).
  * 3. `titleOrContentChanged` — the mission was re-defined under the session. It would be resuming a
  *    mission it was never handed.
  *

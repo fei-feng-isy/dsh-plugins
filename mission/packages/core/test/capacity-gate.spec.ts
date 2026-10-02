@@ -269,7 +269,117 @@ describe('aging into a reservation', () => {
     expect(world.waits.get(queued)).toBe(123_000)
   })
 
-  it('serves the oldest reservation first when several aged node wait', async () => {    let clock = 0
+  it('describes the nodes a reservation holds back as AGING, not as a full slot', async () => {
+    // N5: an aged node reserves the machine; the nodes its reservation holds back were projected as
+    // `slot` ("capacity has room, the slots are full"), which is false — the reservation is the
+    // reason — and `reportDeferrals` skipped them entirely, so the anti-starvation mechanism changed
+    // what the engine admits with no line anywhere saying so.
+    //
+    // The projection is read off the PLAN, not only off `engine.waitingFor`: a candidate the lock
+    // then refuses with `capacity-busy` is re-described as `capacity` in the next iteration (because
+    // the refusing load is what it waited for), which would mask the reservation reason in the final
+    // map. The lock recheck is not what is under test here — `capacityWaitingFor` is, and it is the
+    // same judgement both paths use.
+    let clock = 0
+    const world = makeWorld({ capacity: 2, capacityWaitMs: 5_000, clock: () => clock })
+    const running = await root(world.tree, 'running', { weight: 2 })
+    expect(await world.engine.pump()).toBe(1)
+    expect(world.starts(running)).toBe(1)
+
+    // Both queued nodes fit the capacity that is free; both are deferred because it is not free.
+    // The RESERVING one is created first, so FIFO order makes it the aged candidate; the lighter one
+    // behind it is the node the eventual reservation holds back.
+    const waiter = await root(world.tree, 'waiter', { weight: 2 })
+    const blocked = await root(world.tree, 'blocked', { weight: 1 })
+    if (waiter >= blocked) throw new Error('fixture assumed FIFO order waiter < blocked')
+    clock += 1_000
+    await world.engine.pump()
+    expect(world.starts(waiter)).toBe(0)
+    expect(world.starts(blocked)).toBe(0)
+    // Both clocks start on that first deferral.
+    expect(world.engine.waitingFor(waiter)?.reason).toBe('capacity')
+    expect(world.engine.waitingFor(blocked)?.reason).toBe('capacity')
+
+    // Past the aging window the heavier node reserves the machine and does not fit yet: nothing is
+    // admitted this pass. The jump is also past the deferral log's one-minute rate limit, so the
+    // hold-back is allowed to reach the log — the rate limit would otherwise swallow it (the node was
+    // already logged when it was first deferred) and the aging transition would stay invisible.
+    clock += 61_000
+    expect(await world.engine.pump()).toBe(0)
+    const plan = world.tree.planDispatch(new Set(), world.engine.admissionPolicy())
+    expect(plan.selected).toBeUndefined()
+    expect(plan.reserved).toBe(true)
+    // The node the reservation holds back says AGING; the reserving node itself keeps its own
+    // capacity reason (it is waiting for the machine to drain, not for its own reservation).
+    expect(plan.deferred.find((entry) => entry.node.id === blocked)?.waitingFor).toEqual({ reason: 'aging' })
+    expect(plan.deferred.find((entry) => entry.node.id === waiter)?.waitingFor).toEqual({
+      reason: 'capacity',
+      resource: 'cpu',
+      needed: 2,
+      available: 0,
+    })
+    expectUntouched(node(world.tree, blocked))
+    // And the deferral log reaches it, as an aging hold-back (not a slot).
+    const logged = world.deferred.filter((info) => info.nodeId === blocked)
+    expect(logged.length).toBeGreaterThan(0)
+    expect(logged.at(-1)?.waitingFor).toEqual({ reason: 'aging' })
+
+    // Drain the machine: the reserved node runs, and the blocked one follows on the next completion.
+    const claim = world.claimsByNode.get(running)?.[0] as string
+    await world.tree.submitResult(running, claim, 'done')
+    clock += 1_000
+    expect(await world.engine.pump()).toBe(1)
+    expect(world.starts(waiter)).toBe(1)
+    expect(world.engine.waitingFor(blocked)).toEqual({
+      reason: 'capacity',
+      resource: 'cpu',
+      needed: 1,
+      available: 0,
+    })
+  })
+
+  it('keeps the aging clock across a lock-held capacity refusal instead of restarting it', async () => {
+    // N6: the clock used to be deleted the moment the plan SELECTED a candidate. A `capacity-busy`
+    // refusal under the lock (the live load moved between the plan snapshot and the bind) then left
+    // the node ready with no clock at all, and the next pass restarted it at `now` — a brand new
+    // aging window per refusal, so the more concurrent bindings there are, the weaker the
+    // anti-starvation guarantee gets.
+    let clock = 0
+    const world = makeWorld({ capacity: 1, capacityWaitMs: 5_000, clock: () => clock })
+    const running = await root(world.tree, 'running', { weight: 1 })
+    expect(await world.engine.pump()).toBe(1)
+    const queued = await root(world.tree, 'queued', { weight: 1 })
+
+    clock += 1_000
+    await world.engine.pump()
+    expect(world.starts(queued)).toBe(0)
+    // The first capacity deferral started the wait the aging rule is about.
+    expect(world.engine.admissionPolicy().deferredSince.get(queued)).toBe(1_000)
+
+    // The node's wait was already long enough to reserve the machine, and `dispatch` re-runs the gate
+    // against a load that is now equal to the capacity, so the lock holds it back. That refusal is
+    // precisely the path that used to consume the clock.
+    clock += 122_000
+    const refused = await world.tree.dispatch(queued, 'mission-refused', world.engine.admissionPolicy())
+    expect(refused.ok).toBe(false)
+    expect(refused.ok ? '' : refused.code).toBe('capacity-busy')
+    expectUntouched(node(world.tree, queued))
+    // The clock is STILL the first deferral: the wait it served did not restart at the refusal.
+    expect(world.engine.admissionPolicy().deferredSince.get(queued)).toBe(1_000)
+
+    // The machine drains: what the node is told it waited is that whole span. With the clock dropped
+    // by the refusal, this pass would have to restart it at 124_000 and the node would be told it
+    // waited 0 — the anti-starvation window would begin again every time the lock said no.
+    const claim = world.claimsByNode.get(running)?.[0] as string
+    await world.tree.submitResult(running, claim, 'done')
+    clock += 1_000
+    expect(await world.engine.pump()).toBe(1)
+    expect(world.starts(queued)).toBe(1)
+    expect(world.waits.get(queued)).toBe(123_000)
+  })
+
+  it('serves the oldest reservation first when several aged node wait', async () => {
+    let clock = 0
     const world = makeWorld({ capacity: 1, capacityWaitMs: 5_000, clock: () => clock })
     const running = await root(world.tree, 'running', { weight: 1 })
     await world.engine.pump()

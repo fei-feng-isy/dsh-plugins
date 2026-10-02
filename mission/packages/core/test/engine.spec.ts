@@ -7,10 +7,12 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  CAPACITY,
   CAPACITY_CEILING,
   DEFAULT_ENGINE_OPTIONS,
   MissionEngine,
   MissionTree,
+  isTroubledNode,
   type HungReport,
   type ResourceProbe,
   type ResumeOutcome,
@@ -662,6 +664,107 @@ describe('hung workers: alive but producing nothing', () => {
     expect(h.world.hung[0]).toMatchObject({ bound: 'round', ranMs: 6_000 })
     // Still budget-free: hitting the cap is an apparatus event, not a failed mission.
     expect(h.world.tree.node(h.id)).toMatchObject({ failures: 0, spawnFailures: 0, stalls: 0 })
+  })
+
+  /**
+   * The N2 half: hung still charges no budget, but it can no longer repeat forever in silence. The
+   * streak is durable, cleared by production, and at the engine's floor it routes the node to the
+   * owner through the SAME channel the stall heads-up uses.
+   */
+  it('① escalates a hung STREAK to the owner exactly once, at the threshold', async () => {
+    const h = await hungWorld({ staleMs: 1_000 })
+    const hangOnce = async (): Promise<void> => {
+      // Past the stale window in steps, each carrying a noise event: alive, never producing.
+      for (let step = 0; step < 4; step += 1) h.noise(400)
+      await h.world.engine.sweep()
+    }
+
+    await hangOnce()
+    await hangOnce()
+    // Two in a row: below the floor, so the owner is not paged yet — and each round is still logged.
+    expect(h.world.tree.node(h.id)?.hungCount).toBe(2)
+    expect(h.world.stalled).toEqual([])
+    expect(h.world.hung).toHaveLength(2)
+    expect(h.world.hung[1]?.hungCount).toBe(2)
+
+    await hangOnce()
+    const node = h.world.tree.node(h.id)
+    expect(node?.hungCount).toBe(CAPACITY.maxHungsBeforeReport)
+    expect(isTroubledNode(node!)).toBe(true)
+    expect(h.world.stalled).toHaveLength(1)
+    // One vocabulary with the stall heads-up: the same report type, naming the cause and the streak.
+    expect(h.world.stalled[0]).toMatchObject({ nodeId: h.id, cause: 'hung', hungs: 3 })
+    // The streak is not a budget: nothing was charged on the way there.
+    expect(node).toMatchObject({ failures: 0, spawnFailures: 0, stalls: 0 })
+
+    // A fourth hang advances the counter but NOT the message: the durable marker keeps it to one.
+    await hangOnce()
+    expect(h.world.tree.node(h.id)?.hungCount).toBe(4)
+    expect(h.world.stalled).toHaveLength(1)
+  })
+
+  it('② clears the hang streak as soon as the worker produces something', async () => {
+    const h = await hungWorld({ staleMs: 1_000 })
+    const hangOnce = async (): Promise<void> => {
+      for (let step = 0; step < 4; step += 1) h.noise(400)
+      await h.world.engine.sweep()
+    }
+    await hangOnce()
+    await hangOnce()
+    expect(h.world.tree.node(h.id)?.hungCount).toBe(2)
+
+    // Real output is the one event that proves the round was not merely retrying: the streak resets
+    // and the node stays the very binding it was.
+    h.output(100)
+    expect(h.world.tree.node(h.id)?.hungCount).toBe(0)
+    expect(h.world.stalled).toEqual([])
+    // The next hang starts the streak over from 1 rather than resuming at 3.
+    h.noise(4_000)
+    expect(await h.world.engine.reclaimStale()).toBe(1)
+    expect(h.world.tree.node(h.id)?.hungCount).toBe(1)
+    expect(h.world.stalled).toEqual([])
+  })
+
+  it('③ honours a mission’s declared round-cap relaxation, and never shortens the configured cap', async () => {
+    let value = 1_000_000
+    const world = makeWorld({ maxConcurrent: 1, staleMs: 1_000_000, roundMs: 5_000, clock: () => value })
+    // A heavy mission declares 20 s for itself; the engine's cap is 5 s.
+    const created = await world.tree.createRoot({
+      ownerSessionId: 'owner',
+      title: 'heavy',
+      description: 'd',
+      analysis: [],
+      roundMs: 20_000,
+    })
+    if (!created.ok) throw new Error('root failed')
+    const id = created.value.id
+    await world.engine.pump()
+
+    value += 6_000
+    // Past the configured cap, well inside the declared one: the declaration bought it that room.
+    expect(await world.engine.reclaimStale()).toBe(0)
+    expect(world.tree.node(id)?.status).toBe('running')
+
+    value += 15_000
+    // Past the declaration too: the round bound fires, exactly as the configured cap would have.
+    expect(await world.engine.reclaimStale()).toBe(1)
+    expect(world.hung[0]).toMatchObject({ nodeId: id, bound: 'round' })
+
+    // Relaxation ONLY: a node asking for a SHORTER round than the machine's is a no-op, so a model
+    // cannot set itself a small countdown and have the engine take its work back on demand.
+    const short = makeWorld({ maxConcurrent: 1, staleMs: 1_000_000, roundMs: 5_000, clock: () => value })
+    const other = await short.tree.createRoot({
+      ownerSessionId: 'owner',
+      title: 'impatient',
+      description: 'd',
+      analysis: [],
+      roundMs: 1_000,
+    })
+    if (!other.ok) throw new Error('root failed')
+    await short.engine.pump()
+    value += 6_000
+    expect(await short.engine.reclaimStale()).toBe(1)
+    expect(short.hung[0]).toMatchObject({ nodeId: other.value.id, bound: 'round' })
   })
 })
 

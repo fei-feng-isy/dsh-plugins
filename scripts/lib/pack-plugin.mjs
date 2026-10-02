@@ -298,6 +298,12 @@ function contextOf(config) {
  * @param config.allowBakedSuperset - `true` when the tree deliberately bakes every linked dsh package
  *   while its gate compares a named subset (mem). The reverse direction (every package the gate names
  *   is baked) is enforced for both trees either way.
+ *
+ *   **这处不对称是接受的（用户 2026-10-02 决定，落档在此，免去后来者考古）**：mem 故意 bake 整个 linked 集合
+ *   （这样该文件不会与实际链接到的版本漂移），而它的门禁只比对 `provision.ts` 里的两个名字；正向断言会要求
+ *   改 `provision.ts`，超出那次收敛的范围。反向断言——门禁点到的每个包都必须被 bake——对两棵树一律强制，
+ *   而那个方向才是"静默回落到 peer 区间下限"的风险所在。mission 不需要豁免（它的 `VERSION_PACKAGES` 已列全，
+ *   两个方向本来就一致）。
  * @returns `{ problems, notes }`.
  */
 export function assertCheckout(config) {

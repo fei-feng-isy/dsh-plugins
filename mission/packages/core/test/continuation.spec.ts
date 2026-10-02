@@ -25,11 +25,13 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     description: 'Do the whole thing',
     unit: null,
     weight: 1,
+    roundMs: null,
     context: [],
     corrections: [],
     correctionsDeliveredUpTo: 0,
     analysisNotes: [],
     analysisAttempt: 0,
+    analysisAuthor: null,
     status: 'interrupted',
     createdAt: 1,
     depth: 1,
@@ -45,6 +47,7 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     progressAt: 0,
     activityAt: 0,
     stalls: 0,
+    hungCount: 0,
     stalledNotifiedAt: null,
     result: null,
     hasResult: false,
@@ -73,6 +76,9 @@ function dispatched(
       terminalChildren: 0,
       fingerprint: nodeFingerprint(base.title, base.description),
       attempts: base.attempts,
+      // Identity is part of the fixture now: a baseline names the session the prompt was delivered
+      // to, and only the legacy cases below blank it out to exercise the fallback.
+      holder: base.claimedBy ?? 'mission-aaaa1111',
       ...baseline,
     },
   }
@@ -176,6 +182,56 @@ describe('the material-change judgement', () => {
     )
     expect(delta.analysisFromAnotherDispatch).toBe(true)
     expect(isMaterialChange(delta)).toBe(true)
+  })
+
+  it('does NOT call a session’s OWN note material, even after the generation moved past it', () => {
+    // The N3 case exactly: the session wrote this note while holding the node (`analysisAuthor` is
+    // the holder), then the node was re-dispatched to the SAME session for its convergence round
+    // (`attempts` went 1 → 2, so the old generation comparison called its own note a stranger's).
+    const delta = computeContinuationDelta(
+      dispatched(
+        { analysisNotes: ['第一轮自己的判断'], analysisAttempt: 1, attempts: 2, analysisAuthor: 'mission-aaaa1111' },
+        { holder: 'mission-aaaa1111' },
+      ),
+      0,
+    )
+    expect(delta.analysisFromAnotherDispatch).toBe(false)
+    expect(isMaterialChange(delta)).toBe(false)
+  })
+
+  it('calls a note written by ANOTHER session material, whatever the generation says', () => {
+    const delta = computeContinuationDelta(
+      dispatched(
+        { analysisNotes: ['别人写的判断'], analysisAttempt: 2, attempts: 2, analysisAuthor: 'mission-bbbb2222' },
+        { holder: 'mission-aaaa1111' },
+      ),
+      0,
+    )
+    expect(delta.analysisFromAnotherDispatch).toBe(true)
+    expect(isMaterialChange(delta)).toBe(true)
+  })
+
+  it('falls back to the generation comparison when a legacy record names no holder or author', () => {
+    // A baseline written before `holder` existed, over a note written before `analysisAuthor` did.
+    // Both sides unknown → the pre-identity judgement, unchanged: a differing generation is material.
+    const legacyMaterial = computeContinuationDelta(
+      dispatched(
+        { analysisNotes: ['旧记录写的'], analysisAttempt: 1, attempts: 2 },
+        { holder: null },
+      ),
+      0,
+    )
+    expect(legacyMaterial.analysisFromAnotherDispatch).toBe(true)
+
+    // ...and a matching generation is not, which is the safe half of the same fallback.
+    const legacyQuiet = computeContinuationDelta(
+      dispatched(
+        { analysisNotes: ['旧记录写的'], analysisAttempt: 2, attempts: 2 },
+        { holder: null },
+      ),
+      0,
+    )
+    expect(legacyQuiet.analysisFromAnotherDispatch).toBe(false)
   })
 
   it('never reads "no notes yet" as somebody else writing one', () => {

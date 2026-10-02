@@ -157,25 +157,29 @@ mount smoke）由**派单方在收口时统一跑**。执行者验证一遍、�
 
 ## 体量与枢纽文件（hub）
 
-实测（2026-10-02，六条车道收尾后）：436 个源文件、95693 行，其中 **>800 行且非测试脚手架的 11 个** —— 问题
-不是"大文件多"，而是少数**枢纽**被反复改动。**注意：它们本轮全部比上次更大**——抽缝的收益是"抑制增长"，
-不是"变小"（`tree.ts` 抽走 `dispatch.ts` 之后仍净增，因为同一波次加进来的功能更多）。名单（行数 / 备注）：
+实测（2026-10-02，复审 R1 一轮七条车道收尾后；**枢纽口径** = `base/mem/mission` 下 `git ls-files` 的 `.ts/.tsx`，
+排除 `test/`、`*.spec.*`、`*.test.*`）：全仓 461 个源文件、105666 行（`git ls-files` 的全部 `.ts/.tsx/.mjs`），
+其中 **>800 行的 10 个** —— 问题不是"大文件多"，而是少数**枢纽**被反复改动。
+
+**这一版与上一版的不同**：上一版写"它们全部比上次更大"，现在**不再成立**——`host.ts` 因抽出 `coldResume.ts`
+（371 行）**首次下降**（2275 → 2089）；mem 插件的 `index.ts` 因抽出 `reconcile.ts` 跌破阈值出榜（831 → 786）；
+但 `tree.ts`（1859 → 1926）与 `MissionTreeView.tsx`（1126 → 1129）仍在长。名单（行数 / 备注）：
 
 | 文件 | 行数 | 备注 |
 |---|---|---|
-| `mission/packages/plugin/src/host.ts` | 1998 | 唯一**持续回长**的枢纽，每个新特性都插一脚 |
-| `mem/packages/core/src/store/memory.ts` | 1723 | 含实测性能结论的 SQL/索引形状，慎动 |
-| `mission/packages/core/src/tree.ts` | 1690 | 状态机 + 持久化 + 投影 |
+| `mission/packages/plugin/src/host.ts` | 2089 | 长期回长的枢纽；本轮**首次下降**（N8 抽出 `coldResume.ts`） |
+| `mission/packages/core/src/tree.ts` | 1926 | 状态机 + 持久化 + 投影 |
+| `mem/packages/core/src/store/memory.ts` | 1731 | 含实测性能结论的 SQL/索引形状，慎动 |
 | `mem/packages/plugin/src/client/index.ts` | 1678 | hyperscript 内联 UI，可按页面拆 |
-| `mem/packages/core/src/store/knowledge.ts` | 1609 | 同上（SQL 形状慎动） |
-| `base/plugin-base/src/provisioner.ts` | 1101 | base 枢纽，最后动 |
+| `mem/packages/core/src/store/knowledge.ts` | 1616 | 同上（SQL 形状慎动） |
+| `base/plugin-base/src/provisioner.ts` | 1155 | base 枢纽，最后动 |
+| `mission/packages/plugin/src/client/MissionTreeView.tsx` | 1129 | 面板 UI（执行者会话跳转 + 懒查后越过 800） |
 | `mem/packages/core/src/db/dao/facts.ts` | 992 | |
 | `base/plugin-base/src/compat.ts` / `conformance.ts` | 937 / 877 | base 枢纽，最后动 |
-| `mission/packages/plugin/src/client/MissionTreeView.tsx` | 891 | 面板 UI（加执行者会话跳转后越过 800） |
-| `mem/packages/plugin/src/index.ts` | 831 | 插件装配入口 |
 
 **规矩**：① **触及枢纽时，若正在加的关注点能干净分离，就顺手抽成独立模块**——`claims.ts` /
-`continuation.ts` / `prompt.ts` / `hybrid.ts` / `dao/facts.ts` 都是这么来的，**不专门开重构线**；
+`continuation.ts` / `prompt.ts` / `hybrid.ts` / `dispatch.ts` / `coldResume.ts` / `reconcile.ts` / `dao/facts.ts`
+都是这么来的，**不专门开重构线**；
 ② **不为"变小"做整体重构**：行为被测试、**被冻结的评测集数字**、提示词正文与 wire 格式钉死，一次性重构的
 静默漂移风险大于收益；③ **`base/**` 的枢纽最后动**（改 base 要求两棵插件树都回归）。名单只作观察、
 **不做门禁**：本仓没有行数限制，也不打算加。
