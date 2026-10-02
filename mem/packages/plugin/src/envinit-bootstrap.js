@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export const VERSION = '0.3.2';
+export const VERSION = '0.4.0';
 /**
  * The framework interval this bootstrap can launch.
  *

@@ -99,6 +99,55 @@ describe('launchPlan — the Windows shell rule (CVE-2024-27980)', () => {
   })
 })
 
+/**
+ * N14: `shell: true` hands the whole line to cmd.exe, which does not quote for us. Wrapping a value
+ * in `"` is only half the job — an embedded `"` ends the quoted run early, so the rest of the value
+ * reaches cmd as syntax (`$EDITOR`/`$VISUAL` is a user-supplied string, and a path may hold a quote).
+ * cmd's escape for a literal quote inside a quoted argument is to double it; these assert the exact
+ * line Node will build, through the public `launchPlan` (the only caller of the quoting helper).
+ */
+describe('launchPlan — cmd.exe quoting of an embedded quote (N14)', () => {
+  /** The single argument of a win32 batch-shim launch, i.e. what cmd.exe sees for the document. */
+  const argFor = (value: string): string | undefined =>
+    launchPlan('C:\\tools\\code.cmd', value, 'win32').args[0]
+
+  it('doubles an embedded quote and still wraps the value', () => {
+    expect(argFor('C:\\My "Docs"\\a.md')).toBe('"C:\\My ""Docs""\\a.md"')
+    // A bare quote is enough to trigger quoting: without the wrap the rest leaks to cmd as syntax.
+    expect(argFor('a"b')).toBe('"a""b"')
+    expect(argFor('"quoted"')).toBe('"""quoted"""')
+  })
+
+  it('wraps every metacharacter that would otherwise split or rewrite the line', () => {
+    for (const value of [
+      'C:\\My Docs\\a.md', // whitespace
+      'a&b', // command separator
+      'a|b', // pipe
+      'a^b', // escape character
+      'a(b)', // grouping
+      'a<b>c', // redirection
+    ]) {
+      expect(argFor(value)).toBe(`"${value}"`)
+    }
+  })
+
+  it('returns a value that needs no quoting verbatim', () => {
+    expect(argFor('C:\\docs\\a.md')).toBe('C:\\docs\\a.md')
+  })
+
+  it('quotes the shim path itself with the same rule', () => {
+    const plan = launchPlan('C:\\my "editor"\\code.cmd', 'C:\\docs\\a.md', 'win32')
+    expect(plan.command).toBe('"C:\\my ""editor""\\code.cmd"')
+    expect(plan.args).toEqual(['C:\\docs\\a.md'])
+  })
+
+  it('leaves POSIX arguments untouched (no shell, so no quoting is needed or wanted)', () => {
+    const plan = launchPlan('/usr/bin/code.cmd', '/docs/a "b".md', 'linux')
+    expect(plan.args).toEqual(['/docs/a "b".md'])
+    expect(plan.options.shell).toBeUndefined()
+  })
+})
+
 describe('classifyLaunchFailure', () => {
   it('reads ENOENT as "editor missing" and everything else as "launch refused"', () => {
     expect(classifyLaunchFailure(Object.assign(new Error('spawn code ENOENT'), { code: 'ENOENT' }))).toBe('missing')

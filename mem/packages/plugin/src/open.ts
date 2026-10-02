@@ -122,9 +122,18 @@ export interface LaunchPlan {
 /** The slice of `child_process.spawn` this module uses — narrow so a test can inject a fake. */
 export type SpawnLike = (command: string, args: string[], options: LaunchOptions) => { unref: () => void }
 
-/** `cmd.exe` builds the line for `shell: true`, so anything that would split it has to be quoted. */
+/**
+ * `cmd.exe` builds the line for `shell: true`, so anything that would split it has to be quoted.
+ *
+ * Wrapping alone is not enough: an embedded `"` would END the quoted run early and hand the rest of
+ * the value to cmd as syntax (a `$EDITOR` like `C:\Program "Files"\ed.exe`, or a document under a
+ * folder whose name holds a quote, breaks the launch). cmd's convention for a literal quote inside a
+ * quoted argument is to DOUBLE it, so `a"b` becomes `"a""b"` — the same shape
+ * `mission/scripts/build.mjs` `quoteForCmd` produces for its own `shell: true` line.
+ * A value with nothing to quote is returned verbatim.
+ */
 function cmdQuote(value: string): string {
-  return /[\s"&|<>^()]/u.test(value) ? `"${value}"` : value
+  return /[\s"&|<>^()]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value
 }
 
 /**
