@@ -11,6 +11,8 @@ import { mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { spawnToolSync } from '../../../scripts/lib/win-spawn.mjs'
+
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(repo, 'release')
 rmSync(outDir, { recursive: true, force: true })
@@ -22,7 +24,12 @@ const check = (condition, message) => {
   if (!condition) failures.push(message)
 }
 
-const packed = spawnSync('pnpm', ['pack', '--pack-destination', outDir], { cwd: repo, stdio: 'inherit', env: process.env })
+// `spawnToolSync('pnpm', …)`, not a bare `spawnSync`: on win32 `pnpm` is a `.cmd` shim and Node refuses
+// the no-shell spawn of one (CVE-2024-27980), so a bare call is EINVAL there. The shared helper turns
+// it into `cmd.exe /c pnpm.cmd pack --pack-destination <outDir>` (no Node-side shell, no DEP0190), the
+// shape pinned from Linux in `scripts/check-dsh-lines.test.mjs`. `[win]` — the shape is asserted
+// there; a real Windows box still has to confirm the launch end to end.
+const packed = spawnToolSync('pnpm', ['pack', '--pack-destination', outDir], { cwd: repo, stdio: 'inherit', env: process.env })
 check(packed.status === 0, 'pnpm pack failed')
 
 // The npm page is the package's OWN README: it is in the required-entry list above, and its title has

@@ -48,7 +48,6 @@
     "dist"
   ],
   "sideEffects": false,
-  "dependencies": {},
   "peerDependencies": {
     "zod": ">=4.4.3 <5"
   },

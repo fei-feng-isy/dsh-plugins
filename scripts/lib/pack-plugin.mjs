@@ -23,10 +23,10 @@
  * @module scripts/lib/pack-plugin
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, posix, relative, resolve, sep } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
 
 import { readBootstrapVersion } from './bootstrap-version.mjs'
 
@@ -234,22 +234,6 @@ export function linkedVersion(require, name) {
   } catch (error) {
     return `UNRESOLVED(${String(error?.code ?? error?.name ?? error)})`
   }
-}
-
-/** Every file a manifest's `files` whitelist would ship from `dir`. */
-export function shippedFiles(dir, manifest) {
-  const out = []
-  const walk = (path) => {
-    const stat = statSync(path, { throwIfNoEntry: false })
-    if (stat === undefined) return
-    if (stat.isDirectory()) {
-      for (const child of readdirSync(path)) walk(join(path, child))
-      return
-    }
-    out.push(path)
-  }
-  for (const listed of manifest.files ?? []) walk(join(dir, listed))
-  return out
 }
 
 /**

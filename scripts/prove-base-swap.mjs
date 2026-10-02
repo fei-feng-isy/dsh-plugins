@@ -33,7 +33,7 @@
  *   node scripts/prove-base-swap.mjs --allow-unbuilt # dev convenience: use the vendored src/ bootstrap when lib/ is not built yet
  */
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { spawnSync } from 'node:child_process'

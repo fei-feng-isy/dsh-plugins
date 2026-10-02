@@ -12,14 +12,10 @@ dist/
 !scripts/lib/
 !scripts/lib/**
 
-# Release tarballs (the release/README.md files are tracked source)
-release/*.tgz
-mem/release/*.tgz
-work/release/*.tgz
-# …and any STRAY pack artifact, wherever it lands: a `npm pack` / `npm publish` run inside a package
-# directory drops `<name>-<version>.tgz` next to that package.json, and it is not ours to track. The
-# repository never tracks a tarball (the release/ lines above are the deliberate location, also
-# ignored). One stray 0.3.0 tarball did get committed this way once; this rule is why it cannot again.
+# Stray pack artifacts, wherever they land: a `npm pack` / `npm publish` run inside a package
+# directory drops `<name>-<version>.tgz` next to that package.json, and it is not ours to track —
+# the repository never tracks a tarball. One stray 0.3.0 tarball did get committed this way once;
+# this rule is why it cannot again (a package's own `release/` included — the pattern is global).
 *.tgz
 
 # Test / tool caches
@@ -29,6 +25,6 @@ coverage/
 
 # Review records: kept in the working tree for reference, deliberately not in the
 # repository (they quote internals and go stale as the code moves). They cover the
-# WORKSPACE now — base/ and mem/ as well as work/ — so the rule lives here, not in a
+# WORKSPACE now — base/, mem/ and mission/ — so the rule lives here, not in a
 # subtree's .gitignore.
 docs/review/
