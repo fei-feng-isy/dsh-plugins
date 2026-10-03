@@ -29,6 +29,25 @@ RC（`../dsh-plugins-rc`）当初存在的唯一理由是产生三处差异：
 `../dsh-plugins-rc` 目录**已废弃、不再投影**：不要从它发布，也不要再往里同步。它不在本仓，
 本仓不再有代码引用它。
 
+## 收口分两档（2026-10-03）
+
+"每次派发完成后跑什么"与"发版前跑什么"现在是两条命令，由 `scripts/check-tier.mjs` 统一定义
+（完整对照表、实测数字与并行安全性判定见 `CLOSURE-TIERS.md`）：
+
+| 档 | 命令 | 什么时候 |
+| --- | --- | --- |
+| **快档** | `pnpm check:fast <base\|mem\|mission\|root>`（不给树名则从 git 自动判） | 日常每个派发任务结束后（默认档） |
+| **发版档** | `pnpm check:release` | 发版前；改 `base/**`、发布面/接口、门禁脚本或版本号 |
+
+- **快档**：只覆盖被改到的那棵树 —— build + typecheck + 该树**一次**全套测试，再加
+  `guard` + 四个自测 + `prepublish:assert`。**不跑** `old-dsh` / pack / mount smoke /
+  根 `release:check`。它证明"这棵树的源码编译、类型自洽、测试通过"，**不证明**"产物能挂、在
+  dsh 下限上能跑、发布面自洽"。
+- **发版档**：三个包的严格门禁（含 pack 与 `old-dsh` 下限门）+ 两棵树的 mount smoke
+  （在各自严格门禁里）+ 根 `release:check` + `prepublish:assert`。
+- 两档都去重：一条流程里测试只跑一次，base 在快档里只构建一次。发版档仍会看到各树严格门禁
+  内部重建 base——那是三棵树各自的黑盒门禁，根脚本不修改三棵树，去不掉（见 `CLOSURE-TIERS.md`）。
+
 ## 怎么发
 
 ```bash
@@ -38,14 +57,15 @@ pnpm version:set mem   <x.y.z>
 pnpm version:set mission <x.y.z>
 pnpm version:check                  # 每组版本只记在一处；base manifest 与 baked VERSION 一致
 
-# 2) 严格门禁（全量）：可发布集合 / peer / 一份 zod / registry 上已有兼容 base
-pnpm release:check
-# 每包自己的门禁：链接 → 编译 → 类型检查 → 测试 → pack（mem/mission 还含真 Cordis mount smoke）
+# 2) 发版档（三个严格门禁 + 两棵树 mount smoke + 根发布面 + 发布前断言）
+pnpm check:release
+# 需要单独重跑某一包时，仍可用它自己的门禁（链接 → 编译 → 类型检查 → 测试 → pack，
+# mem/mission 还含真 Cordis mount smoke）：
 pnpm release:check:base
 pnpm release:check:mem
 pnpm release:check:mission
 
-# 3) 发布前断言（各包的 prepublishOnly 也会自动跑；这里可先手工过一遍）
+# 3) 需要时单独跑发布前断言（发版档已包含；各包的 prepublishOnly 也会自动跑）
 node scripts/prepublish-assert.mjs
 #   打包之后还可以断言"真实产物字节"里没有发布工具链、README 是这一包的：
 node scripts/prepublish-assert.mjs --tarball dist/avantf-dsh-mem-<x.y.z>.tgz

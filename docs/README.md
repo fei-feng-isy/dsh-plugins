@@ -6,6 +6,9 @@ place for anything that is about the WORKSPACE as a whole.
 - `RELEASING.md` — how the three packages are released from THIS checkout (base → plugins), why the
   `../dsh-plugins-rc` projection was retired, and the publish-time assertions
   (`scripts/prepublish-assert.mjs`) that replaced its three differences.
+- `CLOSURE-TIERS.md` — the two closure tiers (`pnpm check:fast` / `pnpm check:release`): what each
+  covers and does not, the dedup, the measured before/after wall-clock, the mutation check that keeps
+  the fast tier honest, and the parallelism verdict for the three trees.
 - `review/` — the code-review records, one file per review, oldest first (`YYYY-MM-DD-<topic>.md`).
   They cover the workspace (or a subtree of it), quote internals freely and are **deliberately not
   committed** (see the rule in `../.gitignore`): they are kept in the working tree for reference and

@@ -17,6 +17,8 @@
     "release:check:mem": "pnpm -C mem release:check",
     "release:check:mission": "pnpm -C mission release:check",
     "release:check": "node scripts/release-check.mjs",
+    "check:fast": "node scripts/check-tier.mjs fast",
+    "check:release": "node scripts/check-tier.mjs release",
     "pack:plugin:mem": "pnpm -C mem pack:plugin",
     "pack:plugin:mission": "pnpm -C mission pack:plugin",
     "guard": "node scripts/boundary-guard.mjs",
