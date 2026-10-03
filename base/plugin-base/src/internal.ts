@@ -61,7 +61,8 @@ export {
   unknownFields,
 } from './lint.js'
 export type { LintFinding, LintResult } from './lint.js'
-export { candidateUrls, downloadBytes, fetchImplOf, platformKey, readCapped, signalFor, verifySha256, DEFAULT_MAX_BYTES, METADATA_MAX_BYTES } from './net.js'
+export { candidateUrls, downloadBytes, fetchImplOf, platformKey, readCapped, readCappedOrSpill, signalFor, verifySha256, DEFAULT_MAX_BYTES, METADATA_MAX_BYTES, SPILL_THRESHOLD_BYTES } from './net.js'
+export type { BodySpill, CappedReadOptions } from './net.js'
 export {
   CONTROL_DIR,
   assertSafeRelativePath,

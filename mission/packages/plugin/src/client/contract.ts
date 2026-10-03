@@ -25,11 +25,19 @@ export interface MissionNodeView {
   readonly children: readonly string[]
   readonly depth: number
   readonly title: string
-  /** Why this mission exists (written by whoever decomposed its parent). */
+  /** Why this mission exists (written by whoever decomposed its parent). In the ROW projection the
+   *  texts are no longer carried (a current host sends `[]`); the detail dialog has every one. A
+   *  non-empty array is what an OLDER host still sends, and {@link contextCount} falls back to it. */
   readonly context: readonly string[]
+  /** How many premises the mission carries — the row's marker. The detail dialog renders the texts. */
+  readonly contextCount?: number
   /** The owner's corrections, newest last. A row renders the count as a "steered" marker: the title
-   *  above is the goal as created, so a corrected mission needs this to be readable at all. */
+   *  above is the goal as created, so a corrected mission needs this to be readable at all. Capped to
+   *  the newest few by a current host; {@link correctionCount} is the true number. */
   readonly corrections: readonly string[]
+  /** The owner's FULL correction count, including any past the row cap. Optional so a client built
+   *  before this field still renders (the badge falls back to `corrections.length`). */
+  readonly correctionCount?: number
   readonly status: string
   readonly attempts: number
   readonly createdAt: number

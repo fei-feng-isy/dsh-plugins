@@ -1215,7 +1215,7 @@ export class MemoryStore {
     const legs: (HybridLeg | Promise<HybridLeg>)[] = [
       // The async legs (model encode) are independent — the orchestrator awaits them concurrently.
       ctx.semAvail
-        ? this.semanticPath(ctx.query, input.category, ctx.overFetch, ctx.queryVector)
+        ? this.semanticPath(ctx.query, input.category, ctx.overFetch, ctx.queryVector, ctx.onQueryVector)
             .then((raw) => {
               const floored = applyScoreFloor(raw, ctx.floors.semantic)
               return { weight: ctx.weights.semantic, scores: floored.scores, leg: 'semantic' as const, droppedByFloor: floored.dropped } satisfies HybridLeg
@@ -1352,9 +1352,11 @@ export class MemoryStore {
 
   /**
    * Semantic leg. `queryVector` short-circuits the encode when the caller already
-   * encoded this exact query (the cross-store router does, for both stores at once).
+   * encoded this exact query (the cross-store router does, for both stores at once);
+   * `onVector` publishes the vector this leg actually used, so the relaxed retry pass can reuse it
+   * instead of re-encoding (performance review §7.7 / P8).
    */
-  private async semanticPath(query: string, category: string | undefined, k: number, queryVector?: Float32Array): Promise<Map<number, number>> {
+  private async semanticPath(query: string, category: string | undefined, k: number, queryVector?: Float32Array, onVector?: (vec: Float32Array) => void): Promise<Map<number, number>> {
     const vec = queryVector ?? await this.semantic.encode(query)
     // A caller-supplied vector is trusted to come from this backend (see `SearchInput`), but the
     // dimension is cheap to check and a mismatch would otherwise score as garbage. It is an INPUT
@@ -1364,6 +1366,7 @@ export class MemoryStore {
     if (vec.length !== this.vstore.dim) {
       throw new RetrievalInputError(`queryVector 维度不符：${vec.length} != ${this.vstore.dim}`)
     }
+    onVector?.(vec)
     const topk = this.vstore.topk(vec, Math.max(50, k))
     if (!topk.length) return new Map()
     // The vstore has no notion of status/category — filter candidates through the DB

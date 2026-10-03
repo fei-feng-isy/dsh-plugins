@@ -53,6 +53,14 @@ const preparedScratch = process.env['AVANTF_MOUNT_SCRATCH']
 const pluginDir = packagedDir ?? join(repo, 'packages', 'plugin')
 const packagedProfile = packagedDir !== undefined && preparedScratch !== undefined
 
+/**
+ * The loose ceiling on mount→ready (see the timeline block near the top of the assertions). It is a
+ * "did something pathological get pulled into the mount window" tripwire, NOT a performance budget:
+ * the smoke's in-memory storage and this machine make absolute milliseconds unrepresentative, so the
+ * margin is deliberately enormous.
+ */
+const MOUNT_READY_BUDGET_MS = 15_000
+
 /** Every harness package the smoke resolves at runtime, plus the workspace core. */
 const LINKS = [
   ['cordis', 'vendor/cordis'],
@@ -373,7 +381,17 @@ agents.set(owner.id, owner)
 // exists only as a `console.error` line, turning "the gate ran" into an assertion.
 const stderr = []
 const realConsoleError = console.error.bind(console)
-console.error = (...args) => { stderr.push(args.map(String).join(' ')); realConsoleError(...args) }
+// The mount timeline: the FIRST plugin log to the moment storage is open and the host is ready. It
+// exists to back the one loose assertion at the end — "mounting did not become obviously slow" —
+// and each run prints it, so a drift is visible long before it trips.
+const mountStartedAt = Date.now()
+let firstLogAt
+console.error = (...args) => {
+  const line = args.map(String).join(' ')
+  stderr.push(line)
+  if (firstLogAt === undefined && line.includes('[avantf-mission]')) firstLogAt = Date.now()
+  realConsoleError(...args)
+}
 await ctx.plugin({ name: plugin.name, inject: plugin.inject, apply: plugin.apply }, { maxConcurrent: 1 })
 const host = ctx.get('avantfMission')
 // The gate REFUSES a proven-incompatible host and registers nothing, so `host` is undefined; say
@@ -399,6 +417,25 @@ const check = (label, condition, detail) => {
 }
 
 console.log(`avantf-mission mount smoke (${runtime ? 'installed dsh' : 'harness checkout'}${gateOn ? '' : ', base ABSENT'})`)
+
+// ── the mount timeline, and the one thing it is allowed to assert ─────────────
+// The threshold is deliberately LOOSE. Per the repo's "a gate must prove one thing" rule, this proves
+// only that mounting did not become OBVIOUSLY slow (a full-corpus synchronous scan or a 1.2 s parse
+// pulled back into the window would blow past it); it is not a latency budget, and the smoke's in-memory storage
+// makes absolute milliseconds unrepresentative, so a tight number would be a false-alarm generator.
+// The measured value is printed on every run regardless, which is where a drift shows up first.
+{
+  const hostReadyAt = Date.now()
+  const mountReadyMs = hostReadyAt - mountStartedAt
+  const firstLogMs = firstLogAt === undefined ? undefined : hostReadyAt - firstLogAt
+  console.log(`  timeline: mount→ready ${String(mountReadyMs)} ms`
+    + `${firstLogMs === undefined ? '' : `（首条插件日志→ready ${String(firstLogMs)} ms）`}`)
+  check(
+    `mount is not obviously slow (< ${String(MOUNT_READY_BUDGET_MS)} ms; loose by design)`,
+    mountReadyMs < MOUNT_READY_BUDGET_MS,
+    `${String(mountReadyMs)} ms`,
+  )
+}
 
 // Assert which side of the gate this run exercised: a silent fallback to the ABSENT path would make
 // every assertion below pass for the wrong reason. In the normal profile the gate IS the installed

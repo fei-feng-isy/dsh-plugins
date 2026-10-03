@@ -357,7 +357,6 @@ describe('opening the session that ran a mission', () => {
   /** The seat's session hook, structurally: `seat.ts` reads every field defensively. */
   const stubSession = <T,>(select: (session: { queue?: readonly unknown[]; running?: boolean }) => T): T =>
     select({ queue: [], running: false })
-  const stubChat = <T,>(select: (chat: { order?: readonly string[] }) => T): T => select({ order: [] })
 
   /**
    * A structural client Context: only what `apply` touches, with `get` answering per call so a test
@@ -722,7 +721,7 @@ describe('opening the session that ran a mission', () => {
     apply(ctx)
     // 1) No service: the seat's view gets NO opener, so the id renders as plain text. The click-time
     //    lookup is still handed over — the entry itself is what reports the missing opener.
-    const absent = view({ sessionId: 'owner-1', useChat: stubChat, useSession: stubSession })
+    const absent = view({ sessionId: 'owner-1', useSession: stubSession })
     expect(absent.props['openWorkerSession']).toBeUndefined()
     expect(absent.props['sessionId']).toBe('owner-1')
     expect(typeof absent.props['resolveWorkerSession']).toBe('function')
@@ -730,7 +729,7 @@ describe('opening the session that ran a mission', () => {
     // 2) The service appears afterwards: the NEXT render sees it, and the opener it hands over still
     //    forwards the target unchanged.
     available = workspace
-    const present = view({ sessionId: 'owner-2', useChat: stubChat, useSession: stubSession })
+    const present = view({ sessionId: 'owner-2', useSession: stubSession })
     expect(present.props['sessionId']).toBe('owner-2')
     const open = present.props['openWorkerSession'] as ((target: WorkerSessionTarget) => void) | undefined
     expect(typeof open).toBe('function')
@@ -1200,5 +1199,65 @@ describe('MissionTreeView', () => {
     )
     expect(empty).not.toContain('avwf-clean')
     expect(empty.replace(/<[^>]*>/gu, '').replace(/<!--.*?-->/gu, '').trim()).toBe('')
+  })
+})
+
+/**
+ * The row now carries a COUNT of the premises and a bounded slice of the corrections, because the
+ * snapshot is re-sent on every engine change and the full texts were the payload (see `wire.ts`).
+ * These pin that the count form renders, and that a bounded corrections array cannot understate the
+ * steering (the badge reads the FULL count, not the array length).
+ */
+describe('the row projection carries counts, not texts', () => {
+  const render = (node: MissionNodeView): string => renderToStaticMarkup(
+    <MissionTreeView
+      useSnapshot={() => ({
+        data: { trees: [{ rootId: 'r1', closedAt: null, nodes: [node] }] },
+        loading: false,
+        error: undefined,
+        refresh: () => Promise.resolve(),
+      })}
+      onDeleteTree={() => Promise.resolve()}
+      loadDetail={() => Promise.reject(new Error('not clicked'))}
+      loadResult={() => Promise.reject(new Error('not clicked'))}
+      sessionId="owner-1"
+    />,
+  )
+
+  it('shows the premise count without the premise texts', () => {
+    const html = render({
+      id: 'r1', parentId: null, children: [], depth: 1, title: 'Ship it',
+      context: [], contextCount: 3, corrections: [], status: 'running', attempts: 1, createdAt: 1,
+      hasResult: false, resultRef: null, workerSessionId: null,
+    })
+    expect(html).toContain('背景 3 条（详情里可见）')
+    // A row with no premises renders no line at all.
+    const bare = render({
+      id: 'r1', parentId: null, children: [], depth: 1, title: 'Ship it',
+      context: [], contextCount: 0, corrections: [], status: 'running', attempts: 1, createdAt: 1,
+      hasResult: false, resultRef: null, workerSessionId: null,
+    })
+    expect(bare).not.toContain('avwf-context')
+  })
+
+  it('falls back to the array when an older host sends no count, and never understates a capped one', () => {
+    // Older host: full arrays, no counts → the fallback is the array length.
+    const legacy = render({
+      id: 'r1', parentId: null, children: [], depth: 1, title: 'Ship it',
+      context: ['a', 'b'], corrections: ['c'], status: 'running', attempts: 1, createdAt: 1,
+      hasResult: false, resultRef: null, workerSessionId: null,
+    })
+    expect(legacy).toContain('背景 2 条（详情里可见）')
+    expect(legacy).toContain('已纠偏 1 次')
+
+    // Current host: a capped array plus the true count. The badge says 9, not 2, and the tooltip says
+    // the rest are in the detail dialog.
+    const capped = render({
+      id: 'r1', parentId: null, children: [], depth: 1, title: 'Ship it',
+      context: [], contextCount: 0, corrections: ['c8', 'c9'], correctionCount: 9,
+      status: 'running', attempts: 1, createdAt: 1, hasResult: false, resultRef: null, workerSessionId: null,
+    })
+    expect(capped).toContain('已纠偏 9 次')
+    expect(capped).toContain('只列最新 2 条，全部在详情里')
   })
 })

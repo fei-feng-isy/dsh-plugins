@@ -201,6 +201,11 @@ export interface AvantfRuntime {
    * (DESIGN §12).
    */
   relevance(text: string): RelevanceHit
+  /**
+   * True once {@link shutdown} has run: the databases are closed and no background pass may start.
+   * A gated startup job checks this (as well as the plugin's fiber) before touching the stores.
+   */
+  readonly closed: boolean
   shutdown(): void
 }
 
@@ -270,6 +275,12 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
   const knowledge = new KnowledgeStore(config.knowledge.db.path, config.common, config.knowledge, semantic, kbVstore, reranker, knowledgeConfigPath(config.home), logger)
   logger.info(`runtime ready in ${Date.now() - started}ms (embeddings warm asynchronously)`)
 
+  /**
+   * Set by {@link AvantfRuntime.shutdown}. Exposed because a background job that the plugin starts
+   * behind a startup gate (the entity sweep) can otherwise fire after the databases are closed and
+   * log a spurious failure.
+   */
+  let closed = false
   const api = {
     config,
     db,
@@ -511,6 +522,8 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
       return result
     },
     shutdown() {
+      if (closed) return
+      closed = true
       // Diagnostics that live in memory are flushed before the handle goes away; closing the
       // DB is the runtime's job (it owns the handle), so this is not a `close()`.
       memory.flushHealth()
@@ -527,6 +540,9 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
   // Everything else is still checked against `AvantfRuntime` by this return type.
   return {
     ...api,
+    // Re-declared because the spread above would SNAPSHOT the getter's value at this moment
+    // (`false`), leaving `runtime.closed` stuck at `false` after `shutdown()`.
+    get closed(): boolean { return closed },
     remember: api.remember as RememberDispatch,
     recall: api.recall as RecallDispatch,
     admin: api.admin as AdminDispatch,

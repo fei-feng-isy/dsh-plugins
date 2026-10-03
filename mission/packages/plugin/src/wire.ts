@@ -3,7 +3,11 @@
  * harness workspace, and both halves import this one module so the two faces cannot drift.
  * @module @avantf/dsh-mission/wire
  */
-import { z, type ZodType } from 'zod'
+// Namespace import, not `import { z, type ZodType }`: see the note in `domain.ts` — a named import of
+// `z` drags zod's whole locale namespace into the browser bundle. The type is pulled separately so it
+// costs nothing at runtime.
+import * as z from 'zod'
+import type { ZodType } from 'zod'
 import type { InvocationDescriptor } from '@deepseek-ai/dsh-typert-protocol'
 
 export const PACKAGE = '@avantf/dsh-mission'
@@ -97,8 +101,25 @@ const waitingForSchema = z.object({
 })
 
 /**
+ * How many of a node's corrections the ROW projection carries. The texts themselves stay (a row marks
+ * a steered mission, and the tooltip explains a title that no longer matches its result), but a node
+ * whose owner corrected it many times must not make every frame carry all of them: past this many, the
+ * row keeps the NEWEST ones and {@link nodeSchema}'s `correctionCount` still reports the true number.
+ * The detail dialog is not affected — it reads every correction from `detailResultSchema`.
+ */
+export const ROW_CORRECTIONS_MAX = 5
+
+/**
  * One node as the summary wire carries it — the row projection. No `description`: rows
  * do not render it and this schema is re-sent on every engine change.
+ *
+ * The CONTEXT RULE. `context` used to travel as its full text array, which contradicted the same
+ * principle `description` is held to: the row renders only "this mission had premises", and the
+ * detail dialog (a second, on-demand read) is where the premises are actually read. So a current
+ * host sends `contextCount` and an EMPTY `context`; `context` is kept in the schema as an optional,
+ * defaulted array purely so a client built before this change still PARSES the frame (it would
+ * otherwise fail on a missing required field and blank the panel) — it renders no premises, which is
+ * the honest reading of a payload whose texts are gone.
  */
 const nodeSchema = z.object({
   id: z.string(),
@@ -107,10 +128,20 @@ const nodeSchema = z.object({
   children: z.array(z.string()),
   depth: z.number(),
   title: z.string(),
+  /** Legacy field: a current host sends `[]` (see the context rule above); an older host still sends
+   *  the texts, and a client reading one of those falls back to `context.length` for the count. Kept
+   *  REQUIRED, like `corrections`: a missing one is a version skew this boundary must name loudly, and
+   *  every host that ever sent this field sent it. */
   context: z.array(z.string()),
+  /** How many premises this mission carries. The texts are in the detail dialog, not on the row. */
+  contextCount: z.number().default(0),
   // In the row projection on purpose: a row marks a steered mission, because the title it renders is
-  // the goal as created and a correction is the only thing explaining a differing result.
+  // the goal as created and a correction is the only thing explaining a differing result. Newest
+  // {@link ROW_CORRECTIONS_MAX} only; `correctionCount` still reports the full number.
   corrections: z.array(z.string()),
+  /** The owner's correction count, including any past {@link ROW_CORRECTIONS_MAX}. The row's badge
+   *  says 已纠偏 N 次 from THIS, so a capped array cannot understate the steering. */
+  correctionCount: z.number().default(0),
   status: z.string(),
   attempts: z.number(),
   createdAt: z.number(),

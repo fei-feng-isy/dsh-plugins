@@ -162,6 +162,11 @@ type ResourceState =
 
 - 两种布局共用同一套 revision 解析、文件列表、`spec.endpoint` / `policy.mirrors.model`、内容寻址
   `blobs`、原子落盘、`verify` 与报告；布局只改"数据目录怎么摆"，不改"怎么取"。
+- 单个模型文件的上限是 **2 GiB**（`MAX_MODEL_BYTES`）。body 超过 **64 MiB**
+  （`SPILL_THRESHOLD_BYTES`）时不再整读进内存，而是边收边写同目录 `.atomic-spill-*` 临时文件、
+  边算 sha256，写完且声明长度核对后原子改名到 `blobs/<sha256>`：峰值内存与文件大小无关。小文件
+  仍走"整读 → sha256 → `atomicWrite`"的原路径。无符号链接时的复制回退同理走"复制到同目录临时
+  文件 + 改名"，不再把 blob 整读一遍。
 - `probe` 只做廉价的存在性判断（存在、不是目录、大小 > 0），不联网、不改盘；`verify` 才证明内容：
   `hub` 按"条目 -> `blobs/<sha256>`"核对链接目标、blob 名与内容哈希，`flat` 按记录里的 sha256 核对。
 - `flat` 的侧车只放 revision/版本记录与 blobs，**不进运行时直接读取的目录**；记录最后一次原子写入，
@@ -288,7 +293,7 @@ interface ProvisionerOptions {
 
 `ItemPolicy.timeoutMs` 是**每项的请求超时**（毫秒），作用于该项的每一次 HTTP 请求（packument /
 revision / siblings / tarball / 模型文件与归档）；缺省是 300 000ms，`0` 表示**不设超时**。
-它存在的理由：4 GiB 的模型上限在 300s 内需要持续 >14 MB/s，慢链路下永远装不上——声明
+它存在的理由：2 GiB 的模型上限在 300s 内需要持续 >7 MB/s，慢链路下永远装不上——声明
 `timeoutMs: 0` 是唯一能把"上限"与"超时"解耦的出口。`ctx.signal`（关闭 / 调用方中止）在任何取值下
 依然生效。
 `experimental().prune()` 是显式告警的 no-op：受管模型数据只增不减，`blobs` / `snapshots` 不回收，

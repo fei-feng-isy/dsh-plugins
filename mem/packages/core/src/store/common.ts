@@ -77,3 +77,44 @@ export function reportForeignVectors(kind: string, space: string, foreign: numbe
     + `still ranked; run ${fix} to re-encode them`,
   )
 }
+
+/**
+ * Hand the event loop back between two synchronous batches.
+ *
+ * The mount-time corpus reconcile reads and hashes EVERY managed document (and then walks the tree
+ * again for orphans), all of it synchronous `node:fs`; at 10k documents that is a >0.6 s block of the
+ * host's event loop (measured — see the performance review §7.5 / P6). `setImmediate` (a macrotask),
+ * not a resolved-promise microtask: yielding to the microtask queue would let other JS continuations
+ * run while timers and I/O queued behind the batch still waited.
+ */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => { setImmediate(() => { resolve() }) })
+}
+
+/**
+ * How many items one synchronous batch may visit before {@link yieldToEventLoop} runs.
+ *
+ * 200 is a compromise: large enough that the yields themselves are noise next to the per-item
+ * `read`+`sha256` (measured ~60 µs each), small enough that the longest single block stays in the
+ * low tens of milliseconds at any corpus size.
+ */
+export const YIELD_BATCH = 200
+
+/**
+ * Visit `items` in order, yielding the event loop every `every` items.
+ *
+ * Use this INSTEAD of a bare `for` loop whenever the per-item mission is synchronous filesystem or
+ * hashing work whose item count follows the corpus (not the request): the caller's whole loop used to
+ * be one uninterrupted block, so the host could not serve a timer or an I/O callback until it was
+ * over. An empty list does nothing (and never yields).
+ */
+export async function forEachYielding<T>(
+  items: readonly T[],
+  visit: (item: T, index: number) => void,
+  every: number = YIELD_BATCH,
+): Promise<void> {
+  for (let index = 0; index < items.length; index += 1) {
+    visit(items[index] as T, index)
+    if ((index + 1) % every === 0) await yieldToEventLoop()
+  }
+}

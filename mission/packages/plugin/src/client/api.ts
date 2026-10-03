@@ -14,19 +14,31 @@ import type { ExecutorSessionLookup, MissionNodeDetail, MissionSnapshot } from '
 /** Safety-net re-read interval; slow on purpose, since the session itself is the primary trigger. */
 export const POLL_INTERVAL_MS = 5_000
 
-/** Coalescing window: one turn's burst of session revisions becomes a single read. */
+/**
+ * Coalescing window: one turn's burst of session revisions becomes a single read.
+ */
 export const REFRESH_COALESCE_MS = 400
 
 /**
- * The cheap session-side value that changes when the mission tree may have (node count, inbox,
- * turn boundary); a string because React compares selector results by identity.
+ * How often the panel re-reads even while the engine's change stream is up. The stream is the update
+ * channel, but a stream that is silently dead (open, delivering nothing) is not detectable from this
+ * side, and the panel must not be able to go stale forever — this bounds the staleness. It is not a
+ * "poll": at 30 s it is a backstop, and a healthy stream still gives sub-second freshness.
+ */
+export const STREAM_KEEPALIVE_MS = 30_000
+
+/**
+ * The cheap session-side value that changes when the mission tree may have. It deliberately does NOT
+ * include the chat node count: the mission tree is not a function of how many messages the
+ * conversation holds, and folding that in made every chat activity re-read and re-render the whole
+ * tree (the stream is what carries actual mission changes; `queued`/`running` are the session-side
+ * facts that matter).
  */
 export function sessionRevision(input: {
-  readonly chatNodes: number
   readonly queued: number
   readonly running: boolean
 }): string {
-  return `${String(input.chatNodes)}:${String(input.queued)}:${input.running ? '1' : '0'}`
+  return `${String(input.queued)}:${input.running ? '1' : '0'}`
 }
 
 /** The Remote namespace surface this plugin consumes. */

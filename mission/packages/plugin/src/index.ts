@@ -51,6 +51,7 @@ import {
   type ArchiveRegistry,
   type GhostReconcile,
   type SessionCorpus,
+  type StoredSession,
   type WorkerCleanup,
   type WorkerSession,
 } from './workerSessions.js'
@@ -633,10 +634,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
    * count and never touched. Best-effort by construction: every failure is a warning, and the caller
    * (mount or sweep) is never affected. `undefined` when the policy is off or nothing can be archived.
    */
-  const retainWorkersFor = async (ownerId: string): Promise<WorkerCleanup | undefined> => {
+  const retainWorkersFor = async (ownerId: string, all?: readonly StoredSession[]): Promise<WorkerCleanup | undefined> => {
     if (keepWorkers <= 0 || registryOf() === undefined) return undefined
     try {
-      const result = await cleanWorkers(sessionDeps, ownerId, (id) => archivedIds().has(id), { retain: keepWorkers })
+      const result = await cleanWorkers(sessionDeps, ownerId, (id) => archivedIds().has(id), {
+        retain: keepWorkers,
+        ...all === undefined ? {} : { all },
+        // The decision needs no sizes, and the sessions this pass KEEPS must not be walked at all:
+        // only what is actually released is measured (see `cleanWorkers`).
+        measureBytes: false,
+      })
       if (result.cleaned.length > 0) {
         log.info(
           `retention: ${ownerId} kept the newest ${String(keepWorkers)} settled worker(s), `
@@ -660,18 +667,78 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
 
   /**
-   * The automatic retention pass over EVERY owner session the task library knows about. Runs once at
-   * mount and on every sweep (registered through `host.onSweep`), so it rides the existing cadence
-   * instead of arming a second timer. Each owner is handled independently — one owner's failure never
-   * stops another's pass — and the whole thing never throws.
+   * The automatic retention pass over EVERY owner session the task library knows about.
+   *
+   * THREE gates keep it off the hot path, because it used to be the heaviest periodic IO this plugin
+   * does — one full `listSessions` per owner, per sweep (60 s tick AND every `subagent/end`):
+   *
+   *  - **one listing** — sessions are listed ONCE and the same corpus is handed to every owner, so
+   *    the cost stops scaling with owner count;
+   *  - **only after a settlement** — `host.workerSettlementCount` is monotonic and the pass skips a
+   *    sweep entirely when no worker settled since it last ran (the mount pass runs unconditionally,
+   *    since a restart resets the counter and may have old records to release);
+   *  - **debounced** — a burst of workers settling together coalesces into one pass.
+   *
+   * An OVERDUE run (nothing for {@link RETENTION_MAX_QUIET_MS}) is the backstop: a host that never
+   * emits `subagent/end` would otherwise never settle, and a worker that settled without that event
+   * would never be seen. Ten minutes of quiet costs one listing.
+   *
+   * Each owner is handled independently — one owner's failure never stops another's pass — and the
+   * deferred run catches its own rejection, since nothing awaits a timer callback.
    */
-  const retentionPass = async (): Promise<void> => {
+  const RETENTION_DEBOUNCE_MS = 2_000
+  const RETENTION_MAX_QUIET_MS = 10 * 60_000
+  let retentionTimer: ReturnType<typeof setTimeout> | undefined
+  let retentionRunning = false
+  let retentionPending = false
+  let retentionSeenSettlements = 0
+  let retentionLastRunAt = Date.now()
+  /** The mount pass must run even with zero settlements; later passes are settlement-gated. */
+  let retentionForce = true
+
+  const runRetention = async (): Promise<void> => {
+    if (retentionRunning) {
+      retentionPending = true
+      return
+    }
+    retentionRunning = true
+    retentionLastRunAt = Date.now()
+    try {
+      const owners = host.ownerSessionIds()
+      if (owners.length === 0) return
+      const all = await sessionDeps.list()
+      for (const ownerId of owners) await retainWorkersFor(ownerId, all)
+    } finally {
+      retentionRunning = false
+      if (retentionPending) {
+        retentionPending = false
+        scheduleRetention()
+      }
+    }
+  }
+
+  function scheduleRetention(): void {
+    if (retentionTimer !== undefined) return
+    retentionTimer = setTimeout(() => {
+      retentionTimer = undefined
+      void runRetention().catch((error: unknown) => {
+        log.warn(`retention pass failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }, RETENTION_DEBOUNCE_MS)
+  }
+
+  const retentionPass = (): void => {
     if (keepWorkers <= 0) return
-    for (const ownerId of host.ownerSessionIds()) await retainWorkersFor(ownerId)
+    const settled = host.workerSettlementCount
+    const overdue = Date.now() - retentionLastRunAt >= RETENTION_MAX_QUIET_MS
+    if (!retentionForce && !overdue && settled === retentionSeenSettlements) return
+    retentionForce = false
+    retentionSeenSettlements = settled
+    scheduleRetention()
   }
 
   // The sweep half of the trigger pair. Registered here (after the pass is defined); the interval
-  // armed by `host.start()` fires well after mount, and the pass is fire-and-forget inside the host.
+  // armed by `host.start()` fires well after mount.
   host.onSweep(retentionPass)
 
   /** The `archive` scope as a read-only listing: what a cleanup pass would free, and what it would skip. */

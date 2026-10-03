@@ -232,7 +232,8 @@ query(kind?/domain?/source?)
 - **写入即检测**：`add`/`update` 落库后立刻对该事实跑一次检测（`checkOne`），返回值里带 `contradictions`——**该事实当前全部未处理冲突**（`other_fact_id` + `score`，按分数降序，最多 `MAX_REPORTED_CONFLICTS=20` 条，完整列表仍在 `contradict`/设置页），不只是本次新入账的：`maybeLog` 会跳过已 open 的配对，所以只回传新入账会把「合并进一条已有冲突的事实」显示成无冲突。**只有写入真的改变了状态才报告**（`add`：`is_new || revived`；`update`：再加 `newId !== fact_id`——合并进既有事实也归档了一个修订），因此 `add` 命中完全重复的内容、`update` 重存同一内容都是静默 no-op。`admin contradict_check` 退化为**补扫**：消费 `notifyChanged` 积压的 id（含"写入时模型不可用、嵌入腿没能比对"的旧事实），已 open 的配对不会重复记账——幂等追赶，不是第二个写入者。**待办集只保留"还没能跑嵌入腿"的事实**：`checkOne`/`check` 在拉到向量后就把它从队列里删掉（否则每次写入都留一条，队列与补扫代价都随写入量无界增长），补扫失败时队列不清空（下次重试）。**补扫队列在内存里**：只在同一进程内追赶，进程重启（或从 CLI/MCP 这种独立进程调用）时队列为空；`vectors_fix` 会给它刚补上向量的事实重新入队，否则"模型不可用 + 重启 + 之后再没被改写"的事实永远不会被嵌入腿检查。
 - **离开 active 即结案**：事实被归档/被修订取代/被遗忘时，它名下的 open 矛盾行会被 `resolveForFact` 置为 resolved（`loser_fact_id` = 该事实），`list` 也只展示两侧都 active 的配对。否则 `update` 每次都会为同一逻辑冲突再记一条，且旧行会一直指向已归档的旧修订——而 API 面没有 resolve 入口，这些行只增不减。
 - **单条检测的代价（候选集的两级无损收窄）**：第一级是"与该事实共享至少一个实体"的 active 事实（一次 `fact_entities` self-join，`idx_fact_entities_entity`）；第二级按打分公式的必要条件再剪：令 `p = max(EMBED_OVERLAP_MIN, threshold / EMBED_SIM_DUP_MAX)`（因 `score = 重叠 × 余弦 ≤ 重叠 × simDupMax`），则任何可能入库的配对必须满足 **共享实体数 ≥ ⌈p·|A|⌉**（由 `|A∪B| ≥ |A|`）且 **|B| ≤ ⌊|A|/p⌋**（由 `|A∩B| ≤ |A|` 且 `|A∩B| ≥ p·|B|`），外加打分器自身的 `|·| ≥ EMBED_MIN_ENTITIES`。两级都只做**必要条件**过滤，所以不会丢掉任何可能达到阈值的配对。效果：`|A|=2` 时共享 1 个实体的候选上限只有 `(1/3)×0.97≈0.32`，整个这类 hub 直接被剪掉（实测 3 万 hub：保留候选 200ms → 剪掉后 23ms，剩余部分是 SQL 聚合本身的成本）。
-- **代价与语料规模无关（靠索引点查，不扫全库）**：结构腿按 `(subj,obj,pred)`／`(subj,pred)` 走 `idx_triples_subj`／`idx_triples_obj`，实体腿走 `idx_fact_entities_entity`（显式 `INDEXED BY` 固定 `mine → other → facts` 的 join 顺序）。两条结构查询必须写成 `JOIN facts f ON f.fact_id = t.fact_id AND f.status='active'`，**不能**写成 `fact_id IN (SELECT fact_id FROM facts WHERE status='active')`——后者会让 SQLite 每次调用都物化全部 active id，实测 30 万三元组上零命中仍要 202ms／145ms，且成本随语料增长；JOIN 版为 0.18ms／0.13ms。`ANALYZE` 统计信息由生命周期 tick 与 `maintenance()` 里的 `PRAGMA optimize` 维护（否则规划器会退化成覆盖索引全扫：实测 115ms → 0.13ms；统计信息新鲜时 `optimize` 是 0.05ms 的空操作）。
+- **代价与语料规模无关——只对"索引点查"成立，对"候选集"不成立（靠索引点查，不扫全库）**：结构腿按 `(subj,obj,pred)`／`(subj,pred)` 走 `idx_triples_subj`／`idx_triples_obj`，实体腿走 `idx_fact_entities_entity`（显式 `INDEXED BY` 固定 `mine → other → facts` 的 join 顺序）。两条结构查询必须写成 `JOIN facts f ON f.fact_id = t.fact_id AND f.status='active'`，**不能**写成 `fact_id IN (SELECT fact_id FROM facts WHERE status='active')`——后者会让 SQLite 每次调用都物化全部 active id，实测 30 万三元组上零命中仍要 202ms／145ms，且成本随语料增长；JOIN 版为 0.18ms／0.13ms。`ANALYZE` 统计信息由生命周期 tick 与 `maintenance()` 里的 `PRAGMA optimize` 维护（否则规划器会退化成覆盖索引全扫：实测 115ms → 0.13ms；统计信息新鲜时 `optimize` 是 0.05ms 的空操作）。
+- **`add` 的成本 = O(实体 hub 大小)**（第六轮性能审查 §7.10）：上面两级收窄剪掉的是"**不可能达到阈值**"的候选，剪不掉真正的 hub——一个共享实体挂着一大批事实时，第一级的 `fact_entities` 自连接本身就要过完这批行。所以"与规模无关"只适用于上一条的**索引点查**（谓词各吃一条索引），**不适用于候选集**：候选集随"该事实实体所连的 hub 有多大"增长。`bench-memory` 的合成语料实体高度重复（`svc-payment-*` / `cache-layer-*` 只有 200 / 50 个名字在轮转），正是这条的**最坏形状**；审查者用"1000 条全共享实体"的语料单独复现到 **22.7ms/add**（官方 bench 的实体分布在 200/50 个名字间轮转、稍缓，2k 语料上 add p50 ≈ 4ms）。真实语料的实体稀疏得多，量级会明显低于此，但口径必须写清是 O(hub) 而不是 O(1)。
 - **增量**：对子 `(min,max)` 归一化；`contradiction_log.resolved` 三态 `0=open/1=resolved/2=false_positive`。
 
 ## 12. UI（`conversation.view` 两个标签页）
@@ -571,7 +572,7 @@ avantf-mem/
 
 每个脚本头部写明它支撑报告里的哪一节、以及**为什么必须这样测**（例如"stub 语义后端是刻意的：这些数字要隔离 store 而不是 embedder"、"用真模型的那一个脚本才有资格谈 ms/chunk"）。**P0 的复现不长期化**为脚本，而是变成单元测试——它守的是正确性，必须进 CI 而不是靠人跑。
 
-**固定开销（同一轮，实测于 n=2000 合成语料）**：`remember add` 6.0 → **1.42 ms**、`remember update` 9.7 → **2.15 ms**、`search` 18.4 → **10.1 ms**、`admin list` 12.1 → **0.87 ms**。四项改动：① HRR `atom()` 进程内 memo（纯函数、确定性，每次命中省下 `dim/32` 次 SHA-256 + `dim` 次 BigInt 除法，实测 ~0.7 ms/原子），返回的数组因此是**共享**的（`bundle()` 只读）；边界是**字节预算 16 MiB + FIFO 增量淘汰**（一条恰好 `dim*8` 字节 ⇒ dim=1024 时 2048 条）——按条数设限会让 dim 大的进程按比例多占内存，而溢出时整表 `clear()` 又会让接下来的调用集中重算（正是 memo 想省掉的那笔），所以两者都不取；② 一次写入只做**一遍 jieba 分词**（`tagText` → `entitiesFromTokens`/`triplesFromTokens`，原先 entities 与 triples 各 tag 一遍）；③ `maxTokens <= 0` 时三个调用点**直接跳过** `fitToTokenBudget`（它会为求和 `used_tokens` 走遍每条，而这三处都丢弃该值——预算模块自身的语义与其单测保持不变）；④ 上面的预编译语句缓存。注意 `add` 的 4.2× 有语料成分：合成语料的实体名高度重复，memo 命中率高；真实语料省下的是"每次命中一次 256×SHA-256"。
+**固定开销（同一轮，实测于 n=2000 合成语料）**：`remember add` 6.0 → **1.42 ms**、`remember update` 9.7 → **2.15 ms**、`search` 18.4 → **10.1 ms**、`admin list` 12.1 → **0.87 ms**。四项改动：① HRR `atom()` 进程内 memo（纯函数、确定性，每次命中省下 `dim/32` 次 SHA-256 + `dim` 次 BigInt 除法，实测 ~0.7 ms/原子），返回的数组因此是**共享**的（`bundle()` 只读）；边界是**字节预算 16 MiB + FIFO 增量淘汰**（一条恰好 `dim*8` 字节 ⇒ dim=1024 时 2048 条）——按条数设限会让 dim 大的进程按比例多占内存，而溢出时整表 `clear()` 又会让接下来的调用集中重算（正是 memo 想省掉的那笔），所以两者都不取；② 一次写入只做**一遍 jieba 分词**（`tagText` → `entitiesFromTokens`/`triplesFromTokens`，原先 entities 与 triples 各 tag 一遍）；③ `maxTokens <= 0` 时三个调用点**直接跳过** `fitToTokenBudget`（它会为求和 `used_tokens` 走遍每条，而这三处都丢弃该值——预算模块自身的语义与其单测保持不变）；④ 上面的预编译语句缓存。注意 `add` 的 4.2× 有语料成分：合成语料的实体名高度重复，memo 命中率高；真实语料省下的是"每次命中一次 256×SHA-256"。（**时代注记**：这些数字产自 better-sqlite3 / SQLite 3.49 与本审查当时的机器，其后引擎整体切到 `node:sqlite`；现机器 + `node:sqlite` 的重冻基线见 §20.21 ③——两者同量级、不互相作废，但引用时要说清是哪一代。）
 
 **§9 全部完成**：最后的相邻项也在发布就绪那轮落地（`CHANGELOG.md` 的 release readiness 一节）。memory 侧 `facts_fts` 的 rebuild 走**迁移 v8**（`INSERT INTO facts_fts(facts_fts) VALUES('rebuild')`）——FTS5 的 external-content 表能从内容表重建索引，这是把"触发器出现之前写入的行"重新纳入 FTS 腿的唯一办法；它是幂等的，对 fresh/已索引的库只是一次语料遍历。`initClock` 也接上了：它原先有实现有测试却没有生产调用者，于是"元数据行丢了而事实还在"会让所有生命周期窗口从 0 起重算、行永远不过期；现在它跑在 **store 打开时**（`max(存储值, MAX(settle_clock))`，一次索引扫描），而不是每次 presence——后者会让这趟扫描骑在每个心跳上。
 
@@ -724,3 +725,41 @@ avantf-mem/
 
 **⑥ 成本与可观测性**：放宽最多多跑一遍（只在严格为空且确有条目被丢时），健康事件仍是**一次用户查询一条**（探路那一遍不记事件、不强化），`onReturn`（强化/信任）也只对**最终交给调用方的那一遍**触发。`relaxed` 与生效 `floors` 一起回报，UI 因此能把"门槛挡掉的空"和"真的没东西"分开说。
 
+
+### 20.21 第六轮性能审查收口：FTS 腿计划钉死 + 基线在 node:sqlite 上重冻
+
+第六轮（性能专项，2026-10-03）的 P0（§7.1）与 §7.10。复审原文 `docs/review/2026-10-03-performance-review.md`（按 `.gitignore` 约定只留工作树、不入库）。
+
+**① FTS 腿计划翻转（P1，已修）**。`FactsDao.ftsSearch` 的 JOIN 在**缺 `sqlite_stat1` 统计**时被规划成 `facts` 覆盖索引驱动、**每行重跑一次整个外部内容 MATCH**：
+
+```
+坏：SEARCH fa USING COVERING INDEX idx_facts_status_category (status=?)
+    | SCAN f VIRTUAL TABLE INDEX 0:=M1          ← 内侧（=M1）
+好：SCAN f VIRTUAL TABLE INDEX 0:M1
+    | SEARCH fa USING INTEGER PRIMARY KEY (rowid=?)
+```
+
+本机 n=1000 合成语料、选择性查询（约 10 命中，运行时在**空库**上打开、seed 后**不重开**）实测：主腿 **574ms → 4.6ms**（无 category）/ **285ms → 2.4ms**（带 category）；hint 形状（**同一条语句**、`LIMIT 1`、无 category）**568ms → 1.9ms**；`rt.relevance()` 整条（memory 侧两次探测、`stopAt=2`）从秒级回到 **~4ms**。
+
+**修法选"形状钉死"，不选复审三选一里的①"开库时 stat1 无 facts 行且 facts 有行 ⇒ `ANALYZE facts`"**，因为①在本机实测**不覆盖被点名的窗口**：新装首会话在**空库**上开库，判据 `count>0` 为假（`PRAGMA optimize` 对空库不写统计），而会话内写入的行要等下一次 tick（≤60min 心跳）或重启；反方向，**凡开库时 `facts` 已有行，`PRAGMA optimize` 本来就会写统计**（实测：空库开库后 seed 1000 行，再 `PRAGMA optimize` ⇒ `sqlite_stat1` 出现 12 行 `facts`）——即①在能生效的场合是空转、在唯一真正坏的场合又看不见。改为在 SQL 里给 `facts` 加 **`NOT INDEXED`**：禁止那条覆盖索引做驱动，而 `fact_id` 是 INTEGER PRIMARY KEY、rowid 点查仍可用，于是计划**与 `sqlite_stat1` 无关地**恒为 FTS 驱动，没有窗口。`status`/`category` 退化为对那一行的残余过滤，与上面的"好计划"完全一致；结果集不变（spec 拿未加 `NOT INDEXED` 的同语句比对返回值逐条相等）。先例是 §19 `page()` 用 `INDEXED BY` 反制 `optimize` 翻计划。语句文本导出为 `FTS_SEARCH_SQL`，门禁因此 EXPLAIN 的是生产文本本身，不是手抄副本。
+
+**hint 同病判定**：`memory.lexicalProbe` 调的就是同一个 `facts.ftsSearch`（`LIMIT 1`、无 category），EXPLAIN 与主腿逐字相同、随统计同样翻转——**同病，同一处改动即覆盖**，它不是一个"存在性探测"的独立形状。复审记的"本机 hint 恒 ~24.5ms、不随 stats 变化"与本次复现不符，最可能是那次测量跑在统计已就绪或行数很小的库上：`MATCH` 是绑定参数、计划不依赖词元，只要缺统计、这条 SQL 就一定是坏计划。`knowledge` 侧的 `chunks.ftsSearch` **不同病**：过滤在 `documents d` 上，join 链是 `doc_chunks_fts → doc_chunks(rowid) → documents(rowid)`，没有"被直接 join 的表上的 status 覆盖索引"可做驱动（EXPLAIN：`SCAN c VIRTUAL TABLE INDEX 0:M1 | SEARCH dc USING INTEGER PRIMARY KEY | SEARCH d USING INTEGER PRIMARY KEY`），故未改。
+
+**门禁（两条，互相独立）**
+
+- `packages/core/test/fts_plan.spec.ts`：**先开库（空库）再 seed、不重开**，直接 EXPLAIN 从 DAO 导入的 `FTS_SEARCH_SQL`，断言计划里**不得出现内侧 `SCAN f VIRTUAL TABLE INDEX 0:=M1`**、且必须出现 `SCAN f VIRTUAL TABLE INDEX 0:M1` 与 `SEARCH fa USING INTEGER PRIMARY KEY`；另断言 `ANALYZE facts` + `PRAGMA optimize` 之后计划不变，以及加/不加 `NOT INDEXED` 返回同样的行。**变异验证**：把 `NOT INDEXED` 去掉重跑 ⇒ 第一条**红**（失败信息逐字打印 `… | SCAN f VIRTUAL TABLE INDEX 0:=M1 | …`），第二、三条仍绿——这正好证明"在 ANALYZE 之后断言计划"这种常见写法**抓不到**它，必须用首会话形状。
+- `scripts/bench-memory.mjs` 的 `no_reopen` 对照组：在**播种那个 runtime 关闭之前**测 FTS 腿（`stat1_facts`、`fts_inner_scan` 布尔、`fts_selective` p50），与重开后的 `search_selective` 并排输出。原 bench 只测重开后的库（开库 tick 恰好把 stats 写掉），病理因此隐形。本次基线上两条都是 `stat1_facts=0 / fts_inner_scan=false`，p50 与 `search_selective` 同量级。
+
+**② §7.10 口径**：`add` 的成本是 **O(实体 hub 大小)**，不是 O(1)——见 §11 新增的那条；§11 的"与规模无关"只对**索引点查**成立、对**候选集**不成立。
+
+**③ 基线在 `node:sqlite` + 本机重冻**。§20.13 的固定开销数字产自 **better-sqlite3 / SQLite 3.49** 时代，引擎其后整体切到 **`node:sqlite`**（§19 末段），本次在现机器上重跑 `--mode db` 重新冻结：
+
+- 命令：`node scripts/bench-memory.mjs --mode db --sizes 2000,10000`（`--json` 落盘完整报告）。
+- 环境：**Intel i7-8700K（12 逻辑核）、16 GiB、WSL2 / Linux 6.18 x64、Node v22.23.2、node:sqlite = SQLite 3.51.3**；语义后端是脚本自带的确定性 stub（`--mode db` 报告其不可用），`iterations=20`、`dim=512`。
+
+| n | search p50 | common | probe | add | update | startup | RSS |
+|---|---|---|---|---|---|---|---|
+| 2 000 | **12.65** | 16.35 | 21.0 | **4.16** | 3.96 | 8.5 | 382MB |
+| 10 000 | **52.9** | 61.2 | 59.8 | **12.0** | 13.0 | 16.7 | 406MB |
+
+为什么可信：① 每个数是脚本可复现的 p50（非单次采样），命令、Node/SQLite 版本、CPU 与语料形状（`docs/PERFORMANCE_REVIEW.md` §1 的合成语料）都记在这里；② 与第六轮审查在**同一台机器**上跑出的 12.85 / 3.97（2k）与 64.3 / 18.1（10k）同量级，差异是负载与迭代数的正常抖动，没有量级分歧；③ 仓库既有纪律是"比值随 CPU 变、绝对数才可对照"，所以这组数字是"本机 + `node:sqlite`"的参照物，换机器要重跑、不能当常数外推。

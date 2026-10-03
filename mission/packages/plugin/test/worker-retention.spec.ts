@@ -82,7 +82,8 @@ describe('automatic retention at mount', () => {
     })
 
     // `owner` had 13 settled → 3 released; `owner-b` had 12 → 2 released. Each owner's own oldest go.
-    // The mount pass is chained on `ready` (fire-and-forget, so `apply` never waits on storage).
+    // The mount pass is chained on `ready` (fire-and-forget, so `apply` never waits on storage) and
+    // DEBOUNCED, so the wait has to outlast the coalescing window, not just the next tick.
     await vi.waitFor(() => {
       expect(mounted.registryCalls).toEqual([
         `archive:${mine[2]}`, `unarchive:${mine[2]}`,
@@ -91,7 +92,7 @@ describe('automatic retention at mount', () => {
         `archive:${theirs[1]}`, `unarchive:${theirs[1]}`,
         `archive:${theirs[0]}`, `unarchive:${theirs[0]}`,
       ])
-    })
+    }, { timeout: 5_000 })
     for (const id of mine.slice(0, 3)) expect(existsSync(projectDir(root, id)), id).toBe(false)
     for (const id of mine.slice(3)) expect(existsSync(projectDir(root, id)), id).toBe(true)
     for (const id of theirs.slice(0, 2)) expect(existsSync(projectDir(root, id)), id).toBe(false)
@@ -120,7 +121,7 @@ describe('automatic retention at mount', () => {
         `archive:${mine[1]}`, `unarchive:${mine[1]}`,
         `archive:${mine[0]}`, `unarchive:${mine[0]}`,
       ])
-    })
+    }, { timeout: 5_000 })
     for (const id of mine.slice(3)) expect(existsSync(projectDir(root, id)), id).toBe(true)
     for (const id of live) expect(existsSync(projectDir(root, id)), id).toBe(true)
   })
@@ -152,13 +153,16 @@ describe('automatic retention on the sweep', () => {
       // Exactly the budget at mount: the mount pass is a no-op, so the sweep is what does the work.
       seedListedSessions: older.map((id, index) => listed(id, OWNER, index)),
     })
-    // The mount pass is chained on `ready` and fire-and-forget: wait until it has read the listing
-    // before adding the newer records, or the race itself would decide which pass releases what.
-    await vi.waitFor(() => expect(mounted.sessionListCalls()).toBeGreaterThan(0))
+    // The mount pass is chained on `ready`, fire-and-forget and debounced: wait until it has read
+    // the listing before adding the newer records, or the race itself would decide what gets released.
+    await vi.waitFor(() => expect(mounted.sessionListCalls()).toBeGreaterThan(0), { timeout: 5_000 })
     expect(mounted.registryCalls).toEqual([])
 
     pushWorker(mounted, newer[0]!, OWNER, 100)
     pushWorker(mounted, newer[1]!, OWNER, 101)
+    // The gate the automatic pass rides is a SETTLEMENT, not the tick: a sweep with nothing new must
+    // do no listing at all, so this models the real edge (`onSubagentEnd` is what raises the counter).
+    mounted.host.onSubagentEnd(newer[0]!)
     await mounted.host.sweep()
 
     await vi.waitFor(() => {
@@ -166,7 +170,7 @@ describe('automatic retention on the sweep', () => {
         `archive:${older[1]}`, `unarchive:${older[1]}`,
         `archive:${older[0]}`, `unarchive:${older[0]}`,
       ])
-    })
+    }, { timeout: 5_000 })
     for (const id of older) expect(existsSync(projectDir(root, id)), id).toBe(false)
     for (const id of newer) expect(existsSync(projectDir(root, id)), id).toBe(true)
   })
@@ -214,5 +218,45 @@ describe('the /clean listing shows where the number stops', () => {
     const listing = await mounted.runCommand('clean', 'archive')
     expect(listing.text).toContain('保留策略已关闭（keepWorkers=0）')
     expect(listing.text).toContain('正在执行：0 个')
+  })
+})
+
+describe('the retention pass stays off the hot path', () => {
+  it('lists sessions ONCE per pass, however many owners there are', async () => {
+    const mine = Array.from({ length: 12 }, (_, index) => workerId(index))
+    const theirs = Array.from({ length: 12 }, (_, index) => workerId(100 + index))
+    const root = sessionRoot([...mine, ...theirs])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      sessions: [OTHER],
+      seedTrees: [OWNER, OTHER],
+      pluginConfig: { sessionsRoot: root, keepWorkers: 10 },
+      seedListedSessions: [
+        ...mine.map((id, index) => listed(id, OWNER, index)),
+        ...theirs.map((id, index) => listed(id, OTHER, index)),
+      ],
+    })
+    // Wait for the mount pass to actually run (debounced), then check it read the corpus ONCE — the
+    // old shape called `listSessions` once per owner on every sweep.
+    await vi.waitFor(() => expect(mounted.registryCalls.length).toBeGreaterThan(0), { timeout: 5_000 })
+    expect(mounted.sessionListCalls()).toBe(1)
+  })
+
+  it('does no listing at all on a sweep where no worker settled', async () => {
+    const root = sessionRoot([workerId(0)])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      seedTrees: [OWNER],
+      pluginConfig: { sessionsRoot: root, keepWorkers: 10 },
+      seedListedSessions: [listed(workerId(0), OWNER, 0)],
+    })
+    await vi.waitFor(() => expect(mounted.sessionListCalls()).toBe(1), { timeout: 5_000 })
+
+    // The 60 s tick fires with nothing new: the settlement counter has not moved, so the pass must
+    // not touch the session corpus. (The mount counter is what guards against a restart's leftovers.)
+    await mounted.host.sweep()
+    await mounted.host.sweep()
+    expect(mounted.sessionListCalls()).toBe(1)
+    expect(mounted.registryCalls).toEqual([])
   })
 })

@@ -28,7 +28,8 @@
  * the configured sessions root. Another session's worker is reported, never touched.
  * @module @avantf/dsh-mission/workerSessions
  */
-import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { readdirSync, rmSync } from 'node:fs'
+import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { isWorkerClaimId } from './claims.js'
@@ -114,35 +115,63 @@ export function isOurWorker(record: StoredSession, ownerId: string): boolean {
   return isMissionWorker(record) && record.header.parentSession === ownerId
 }
 
-/** The directory a session id owns, scanned by name so no path encoding is replicated. */
+/**
+ * The directory a session id owns, scanned by name so no path encoding is replicated.
+ *
+ * One `readdir` per project directory, with `withFileTypes` so the check needs no `statSync` at all
+ * — the old shape asked `existsSync` AND `statSync` for every project on every call, and this runs
+ * once per candidate worker in a listing.
+ */
 export function sessionDirFor(root: string, id: string): string | undefined {
-  if (!existsSync(root)) return undefined
-  for (const project of readdirSync(root)) {
-    const candidate = join(root, project, id)
-    if (existsSync(candidate) && statSync(candidate).isDirectory()) return candidate
+  let projects
+  try {
+    projects = readdirSync(root, { withFileTypes: true })
+  } catch {
+    // No sessions root (or it is unreadable): "not found", which is what the callers read it as.
+    return undefined
+  }
+  for (const project of projects) {
+    if (!project.isDirectory()) continue
+    const dir = join(root, project.name)
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true })
+      if (entries.some((entry) => entry.name === id && entry.isDirectory())) return join(dir, id)
+    } catch {
+      // A project directory that vanished or is unreadable contributes no session.
+    }
   }
   return undefined
 }
 
-/** Bytes one directory occupies, or 0 when it is gone. */
-function sessionBytes(dir: string | undefined): number {
-  if (dir === undefined || !existsSync(dir)) return 0
-  let total = 0
-  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile()) continue
-    try {
-      total += statSync(join(entry.parentPath, entry.name)).size
-    } catch {
-      // A file that vanished mid-walk contributes nothing.
-    }
+/**
+ * Bytes one directory occupies, or 0 when it is gone.
+ *
+ * ASYNC on purpose: the recursive walk is the single heaviest IO this plugin does routinely (it runs
+ * for every candidate worker on a retention pass), and doing it with `statSync` blocked the host's
+ * event loop. `readdir` with `recursive`/`withFileTypes` enumerates the FILES in one pass; the sizes
+ * still need a `stat` per file (a `Dirent` carries no size), but those run off the event loop and in
+ * parallel. A file that vanished mid-walk contributes nothing.
+ */
+async function sessionBytes(dir: string | undefined): Promise<number> {
+  if (dir === undefined) return 0
+  let entries
+  try {
+    entries = await readdir(dir, { recursive: true, withFileTypes: true })
+  } catch {
+    return 0
   }
-  return total
+  const files: string[] = []
+  for (const entry of entries) {
+    if (entry.isFile()) files.push(join(entry.parentPath, entry.name))
+  }
+  const sizes = await Promise.all(files.map((file) => stat(file).then((info) => info.size).catch(() => 0)))
+  return sizes.reduce((total, size) => total + size, 0)
 }
 
 /** This session's own workers, newest last. */
 export async function workerSessions(deps: WorkerSessionDeps, ownerId: string): Promise<readonly WorkerSession[]> {
   const all = await deps.list()
-  return toWorkers(deps, all.filter((record) => isOurWorker(record, ownerId)))
+  return await toWorkers(deps, all.filter((record) => isOurWorker(record, ownerId)))
 }
 
 /** Mission workers of OTHER sessions, as ids: shown so a skip is legible, never an authorization. */
@@ -153,20 +182,73 @@ export async function foreignWorkerIds(deps: WorkerSessionDeps, ownerId: string)
     .map((record) => record.header.id)
 }
 
-/** Stored records projected into the shape the commands report, with the bytes each one owns. */
-function toWorkers(deps: WorkerSessionDeps, records: readonly StoredSession[]): WorkerSession[] {
-  return records
-    .map((record) => {
-      const dir = sessionDirFor(deps.sessionsRoot, record.header.id)
-      return {
-        id: record.header.id,
-        createdAt: record.header.createdAt ?? 0,
-        live: record.live || deps.isLive(record.header.id),
-        bytes: sessionBytes(dir),
-        dir,
-      }
-    })
-    .sort((a, b) => a.createdAt - b.createdAt)
+/**
+ * One `id → directory` index for the whole sessions root, built ASYNC.
+ *
+ * `sessionDirFor` answers the same question for ONE id and does it synchronously (it is the predicate
+ * the ghost checks are written against, and those run at mount / on a click). A pass that needs the
+ * directories of MANY ids must not call it in a loop: that is `projects × ids` synchronous `readdir`
+ * calls, which blocked the event loop for tens of milliseconds in the retention pass. One async scan
+ * of the root and each project answers all of them at once.
+ */
+async function sessionDirIndex(root: string): Promise<Map<string, string>> {
+  const index = new Map<string, string>()
+  let projects
+  try {
+    projects = await readdir(root, { withFileTypes: true })
+  } catch {
+    return index
+  }
+  await Promise.all(projects.filter((project) => project.isDirectory()).map(async (project) => {
+    const dir = join(root, project.name)
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) index.set(entry.name, join(dir, entry.name))
+    }
+  }))
+  return index
+}
+
+/** Size the workers a caller actually needs, from ONE index, in one parallel batch. */
+async function sizeWorkers(deps: WorkerSessionDeps, workers: readonly WorkerSession[]): Promise<WorkerSession[]> {
+  const index = await sessionDirIndex(deps.sessionsRoot)
+  return await Promise.all(workers.map(async (worker) => {
+    const dir = index.get(worker.id)
+    return { ...worker, dir, bytes: await sessionBytes(dir) }
+  }))
+}
+
+/**
+ * Stored records projected into the shape the commands report, with the bytes each one owns.
+ *
+ * `measure: false` skips the directory scan entirely and leaves `dir`/`bytes` empty. That is what the
+ * AUTOMATIC retention pass uses: its decision is made from `live`/`createdAt` alone, so walking and
+ * sizing sessions it is about to KEEP was pure waste. The few candidates it does release are measured
+ * lazily, in one batch, right before removal (see {@link sizeWorkers}).
+ */
+async function toWorkers(
+  deps: WorkerSessionDeps,
+  records: readonly StoredSession[],
+  options: { readonly measure?: boolean } = {},
+): Promise<WorkerSession[]> {
+  const measure = options.measure !== false
+  const index = measure ? await sessionDirIndex(deps.sessionsRoot) : undefined
+  const workers = await Promise.all(records.map(async (record): Promise<WorkerSession> => {
+    const dir = index?.get(record.header.id)
+    return {
+      id: record.header.id,
+      createdAt: record.header.createdAt ?? 0,
+      live: record.live || deps.isLive(record.header.id),
+      bytes: measure ? await sessionBytes(dir) : 0,
+      dir,
+    }
+  }))
+  return workers.sort((a, b) => a.createdAt - b.createdAt)
 }
 
 /** One owner session's retention picture, computed from its own workers (never from the store). */
@@ -300,20 +382,25 @@ function reasonOf(error: unknown): string {
  * unarchive → purge pipeline. Live workers are excluded from the count, so they never occupy a
  * retention slot and are never released. `retain <= 0` means "policy off", which keeps everything.
  * A named `only` pass is an explicit manual action and ignores `retain`.
+ *
+ * `all` is the corpus to work from — the automatic pass lists sessions ONCE and hands the same list
+ * to every owner (it used to call `listSessions` once per owner, on every sweep). `measureBytes`
+ * defaults to true for the manual commands, which report what each worker occupies; the automatic
+ * pass turns it off and measures only what it actually releases.
  */
 export async function cleanWorkers(
   deps: WorkerSessionDeps,
   ownerId: string,
   archived: (id: string) => boolean,
-  options: { readonly only?: string; readonly retain?: number } = {},
+  options: { readonly only?: string; readonly retain?: number; readonly all?: readonly StoredSession[]; readonly measureBytes?: boolean } = {},
 ): Promise<WorkerCleanup> {
-  const all = await deps.list()
+  const all = options.all ?? await deps.list()
   const foreign = all
     .filter((record) => isMissionWorker(record) && !isOurWorker(record, ownerId))
     .map((record) => record.header.id)
   const mine = all.filter((record) =>
     isOurWorker(record, ownerId) && (options.only === undefined || record.header.id === options.only))
-  const workers = toWorkers(deps, mine)
+  const workers = await toWorkers(deps, mine, { measure: options.measureBytes !== false })
   const running = workers.filter((worker) => worker.live).map((worker) => worker.id)
   // Automatic retention: release only what falls outside the newest `retain` settled workers. The
   // named form is manual and explicit, so it is never narrowed.
@@ -339,7 +426,12 @@ export async function cleanWorkers(
   const unarchiveFailures: RefusedWorker[] = []
   const purged: string[] = []
   const purgeFailures: RefusedWorker[] = []
-  for (const worker of candidates) {
+  // When the listing skipped the directory walk, size the candidates we MIGHT release in ONE parallel
+  // batch (from a single async index) rather than one synchronous scan at a time inside the loop.
+  const sized = options.measureBytes === false && candidates.length > 0
+    ? await sizeWorkers(deps, candidates)
+    : candidates
+  for (const worker of sized) {
     if (worker.live) continue
     const already = archived(worker.id)
     if (!already) {

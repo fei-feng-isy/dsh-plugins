@@ -16,14 +16,14 @@
 import { describe, expect, it } from 'vitest'
 import { agent, callTool, callToolChecked, mount } from './mount.js'
 
-/** The root node's stored context — where a root's `analysis` lands. */
+/** The root node's stored context — where a root's `analysis` lands. Read from the DETAIL read: the
+ *  row projection deliberately carries only `contextCount` (see `wire.ts`), the texts live here. */
 async function rootContext(
   mounted: Awaited<ReturnType<typeof mount>>,
   root: string,
 ): Promise<readonly string[]> {
-  const snapshot = await mounted.host.snapshot({ sessionId: mounted.owner.id })
-  const tree = snapshot.trees.find((candidate) => candidate.rootId === root)
-  return tree?.nodes.find((node) => node.id === root)?.context ?? []
+  const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
+  return detail.node?.context ?? []
 }
 
 /** Create a root and hand its dispatched worker back, as the engine would. */
@@ -54,13 +54,17 @@ async function notedWorker(
   return { root, worker }
 }
 
-/** The context a child mission was created with. */
+/** The context a child mission was created with, read from the DETAIL of the row with that title
+ *  (the row itself carries only the count). */
 async function childContext(
   mounted: Awaited<ReturnType<typeof mount>>,
   title: string,
 ): Promise<readonly string[]> {
   const snapshot = await mounted.host.snapshot({ sessionId: mounted.owner.id })
-  return snapshot.trees[0]?.nodes.find((node) => node.title === title)?.context ?? []
+  const row = snapshot.trees[0]?.nodes.find((node) => node.title === title)
+  if (row === undefined) return []
+  const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: row.id })
+  return detail.node?.context ?? []
 }
 
 describe('create_mission.analysis accepts the array, its JSON text, and one line per item', () => {

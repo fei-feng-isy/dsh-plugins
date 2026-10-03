@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { hasArtifact, registerArtifact, whenEventLoopIdle } from '@avantf/mem-provision'
-import { provisionToolchainAsync, warmModels } from '../src/modelBootstrap.js'
+import { provisionToolchainAsync, awaitStartupGate, warmModels } from '../src/modelBootstrap.js'
 import type { AvantfRuntime } from '../src/runtime.js'
 
 /** Block the main thread for `ms` — a stand-in for the host's CPU-bound boot. */
@@ -106,6 +106,43 @@ describe('warmModels tokenizer gating', () => {
     setTimeout(() => { blockFor(150) }, 5)
     await warmModels(fakeRuntime(lines))
     expect(lines.some((line) => line.includes('tokenizer warm waited'))).toBe(false)
+  })
+})
+
+describe('awaitStartupGate', () => {
+  it('does not resolve before the host readiness signal does', async () => {
+    let release: () => void = () => {}
+    const waitFor = new Promise<void>((resolve) => { release = resolve })
+    let opened = false
+    const gate = awaitStartupGate({ waitFor, waitForCapMs: 5_000 }).then(() => { opened = true })
+    await new Promise<void>((resolve) => { setTimeout(resolve, 30) })
+    expect(opened).toBe(false)
+    release()
+    await gate
+    expect(opened).toBe(true)
+  })
+
+  it('still opens when the readiness signal rejects (a failed boot is a sync point, not a precondition)', async () => {
+    const failed: Promise<unknown> = Promise.reject(new Error('boot failed'))
+    failed.catch(() => undefined)
+    await expect(awaitStartupGate({ waitFor: failed, waitForCapMs: 50 })).resolves.toBe(0)
+  })
+
+  it('does not wait for an idle loop unless asked (the CLI path)', async () => {
+    setTimeout(() => { blockFor(120) }, 5)
+    const started = Date.now()
+    // No `deferTokenizerUntilIdle`: the gate is only the host signal, so this returns immediately.
+    await awaitStartupGate()
+    expect(Date.now() - started).toBeLessThan(100)
+  })
+
+  it('waits out an idle turn when asked (the host path the entity sweep shares)', async () => {
+    // First window is blocked, so the idle gate must keep trying; the same gate the tokenizer warm
+    // uses, now also guarding the mount-time entity sweep (a jieba parse would otherwise re-enter
+    // the boot window through that second door).
+    setTimeout(() => { blockFor(150) }, 5)
+    const waited = await awaitStartupGate({ deferTokenizerUntilIdle: true })
+    expect(waited).toBeGreaterThanOrEqual(100)
   })
 })
 

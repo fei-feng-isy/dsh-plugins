@@ -17,8 +17,12 @@
 interface ReconcileCorpus {
   /** Re-ingest changed documents; `{}` is the full sweep that also reports corpus-level changes. */
   sync(options: { docId?: number }): Promise<unknown>
-  /** One `stat` per document; no file is read. */
-  corpusDrift(): { changed: number[]; missing: number[]; fileSetChanged: boolean }
+  /**
+   * One `stat` per document; no file is read. ASYNC because it is a per-document walk that yields
+   * the event loop every batch (see `KnowledgeStore.corpusDrift`), so it is another `await`
+   * boundary at which `stop()` is honoured.
+   */
+  corpusDrift(): Promise<{ changed: number[]; missing: number[]; fileSetChanged: boolean }>
 }
 
 /** What {@link createCorpusReconciler} needs from its caller. */
@@ -88,10 +92,13 @@ export function createCorpusReconciler(deps: ReconcileDeps): CorpusReconciler {
         if (stopped) return
         // Take the baseline AFTER the sync: seeding it before would hide an edit that landed in
         // between, which is the one window this whole mechanism exists to close.
-        deps.corpus.corpusDrift()
+        await deps.corpus.corpusDrift()
         return
       }
-      const drift = deps.corpus.corpusDrift()
+      const drift = await deps.corpus.corpusDrift()
+      // The drift walk is itself batched (it yields the event loop), so `stop()` can land inside it:
+      // never act on a stale answer for a plugin that has already been unloaded.
+      if (stopped) return
       if (drift.changed.length === 0 && drift.missing.length === 0 && !drift.fileSetChanged) return
       if (drift.fileSetChanged || drift.missing.length > 0) {
         // A new, vanished or frontmatter-destroyed `.md` is a corpus-level question (orphan /

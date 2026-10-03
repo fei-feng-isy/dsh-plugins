@@ -52,8 +52,10 @@ const config = {
    * `lib/types/**\/*.js` (+ its `.js.map`) is the tsc INTERMEDIATE the tsdown preset consumes: a build
    * input, not a published surface. `package.json`'s `files` negations keep it out of the tarball;
    * this regex makes a `files` edit that lets it back in a STRAY (a hard failure), never a silent ship.
-   * `lib/client.js.map` is deliberately not shipped: the client bundle keeps its sourcemap for local
-   * debugging, so its trailing `sourceMappingURL` comment dangles on purpose.
+   * `lib/client.js.map` is neither shipped nor built: the client config drops the preset's sourcemap,
+   * because the map is never in the tarball and its trailing `sourceMappingURL` otherwise 404s in a
+   * consumer's devtools. A map that reappears is a STRAY here (the regex has no entry for it) AND a
+   * build failure (`scripts/client-portable.mjs` rejects a residual map reference).
    */
   libAllow: /^package\/lib\/(index\.js|client\.js|dsh-build\.json|interface-version\.json|types\/.*\.d\.ts(?:\.map)?|engine\/.*\.d\.ts)$/,
   requiredEntries: [

@@ -21,7 +21,9 @@
  */
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { readdir } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
+import { forEachYielding } from './common.js'
 
 /** The frontmatter a managed file carries; `content_hash` is the body AS INGESTED. */
 interface DocFileMeta {
@@ -315,12 +317,21 @@ export class DocFiles {
   /**
    * Every `.md` under the root, with the `doc_id` its frontmatter names (when it names one).
    * Used to report orphans — files left behind by a document that no longer exists.
+   *
+   * ASYNC and batched: the walk itself is an async recursive `readdir` (a `readdirSync` gathers
+   * every entry in one ~41 ms call at 10k files), and the per-file parse is a `read` — at 10k
+   * documents that is a second full read of the corpus on top of `sync`'s staleness pass, and it
+   * used to be one uninterrupted synchronous block (performance review §7.5 / P6).
    */
-  scan(): { path: string; doc_id?: number }[] {
+  async scan(): Promise<{ path: string; doc_id?: number }[]> {
     if (!existsSync(this.root)) return []
     const found: { path: string; doc_id?: number }[] = []
-    for (const entry of readdirSync(this.root, { recursive: true, withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue
+    // The WALK is async too: `readdirSync(recursive)` gathers every entry in one synchronous call
+    // (measured ~41 ms at 10k files) before the first yield, which would dominate the block the
+    // batched reads below are trying to remove.
+    const files = (await readdir(this.root, { recursive: true, withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    await forEachYielding(files, (entry) => {
       // `parentPath` is Node ≥20.12; the fallback keeps this working on anything older.
       const path = join(entry.parentPath ?? this.root, entry.name)
       const parsed = this.read(path)
@@ -328,7 +339,7 @@ export class DocFiles {
         path: relative(this.root, path).split(sep).join('/'),
         ...(parsed?.meta.doc_id === undefined ? {} : { doc_id: parsed.meta.doc_id }),
       })
-    }
+    })
     return found
   }
 }

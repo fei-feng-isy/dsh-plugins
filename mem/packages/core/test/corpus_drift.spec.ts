@@ -30,28 +30,28 @@ describe('KnowledgeStore.corpusDrift', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('the first call only seeds the baseline', () => {
-    expect(rt.knowledge.corpusDrift()).toEqual({ changed: [], missing: [], fileSetChanged: false })
+  it('the first call only seeds the baseline', async () => {
+    expect(await rt.knowledge.corpusDrift()).toEqual({ changed: [], missing: [], fileSetChanged: false })
   })
 
   it('reports an external edit, and its own writes are NOT an external edit', async () => {
-    rt.knowledge.corpusDrift() // seed
+    await rt.knowledge.corpusDrift() // seed
     // Our own ingest refreshed the baseline, so a second ingest of another document must be quiet.
     await rt.knowledge.ingest('另一篇', 'design', 'spec', '第二篇')
-    expect(rt.knowledge.corpusDrift()).toEqual({ changed: [], missing: [], fileSetChanged: false })
+    expect(await rt.knowledge.corpusDrift()).toEqual({ changed: [], missing: [], fileSetChanged: false })
 
     // An edit that PRESERVES the frontmatter — what the `edit` tool and an editor do.
     writeFileSync(file, readFileSync(file, 'utf8').replace('原始正文', '被外部改过的正文'))
-    expect(rt.knowledge.corpusDrift()).toMatchObject({ changed: [docId], missing: [] })
+    expect(await rt.knowledge.corpusDrift()).toMatchObject({ changed: [docId], missing: [] })
   })
 
   it('sees a whole-file overwrite, which destroys the frontmatter', async () => {
     // The bug this pins: the drift check used `pathFor`, which resolves collisions by READING the
     // frontmatter — so a file stripped of it answered with a different path, `stat` returned null,
     // and the edit became invisible to the very check meant to catch it. `basePath` cannot be fooled.
-    rt.knowledge.corpusDrift()
+    await rt.knowledge.corpusDrift()
     writeFileSync(file, '整篇覆写，frontmatter 没了')
-    const drift = rt.knowledge.corpusDrift()
+    const drift = await rt.knowledge.corpusDrift()
     expect(drift.changed).toEqual([docId])
     // And the follow-up sync refuses to guess: the file no longer claims this document.
     const after = await rt.knowledge.sync({ docId, dryRun: true })
@@ -59,22 +59,22 @@ describe('KnowledgeStore.corpusDrift', () => {
   })
 
   it('a stamp move is a trigger, not a verdict: an untouched BODY re-ingests nothing', async () => {
-    rt.knowledge.corpusDrift()
+    await rt.knowledge.corpusDrift()
     const later = new Date(Date.now() + 5_000)
     utimesSync(file, later, later) // mtime moves, content identical (what `touch` does)
-    expect(rt.knowledge.corpusDrift().changed).toEqual([docId])
+    expect((await rt.knowledge.corpusDrift()).changed).toEqual([docId])
     // The judgement is the body hash, so the sync that follows finds nothing stale.
     expect(await rt.knowledge.sync({ docId })).toMatchObject({ stale: [], reingested: 0 })
   })
 
-  it('reports a vanished file, and a new file as a corpus-level change', () => {
-    rt.knowledge.corpusDrift()
+  it('reports a vanished file, and a new file as a corpus-level change', async () => {
+    await rt.knowledge.corpusDrift()
     unlinkSync(file)
-    expect(rt.knowledge.corpusDrift().missing).toEqual([docId])
+    expect((await rt.knowledge.corpusDrift()).missing).toEqual([docId])
 
-    rt.knowledge.corpusDrift() // re-seed with the file gone
+    await rt.knowledge.corpusDrift() // re-seed with the file gone
     writeFileSync(join(dir, 'knowledge', 'docs', 'design', 'spec', '手放的文件.md'), '正文')
-    expect(rt.knowledge.corpusDrift().fileSetChanged).toBe(true)
+    expect((await rt.knowledge.corpusDrift()).fileSetChanged).toBe(true)
   })
 
   it('a single-document sync does not walk the tree for orphans', async () => {

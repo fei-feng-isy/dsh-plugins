@@ -59,7 +59,7 @@ import {
 } from './coldResume.js'
 import { resolveExecutorSession, type SessionQueryLike } from './executorSession.js'
 import { createLogger, type MissionLogger } from './log.js'
-import { NAMESPACE, SNAPSHOT_WIRE_VERSION } from './wire.js'
+import { NAMESPACE, ROW_CORRECTIONS_MAX, SNAPSHOT_WIRE_VERSION } from './wire.js'
 import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createTreeStore, type TreesTable } from './store.js'
 
@@ -181,12 +181,19 @@ interface NodeView {
   readonly children: readonly string[]
   readonly depth: number
   readonly title: string
+  /** Legacy: the row sends `[]` (the texts are in {@link NodeDetail.context}); an OLDER host still
+   *  sends them, which is why the field is still on the wire. Read the count, not this. */
   readonly context: readonly string[]
+  /** How many premises this mission carries. The row renders the count; the texts are in the detail. */
+  readonly contextCount: number
   /** The owner's corrections, newest last. Carried in the ROW projection (unlike `description` and
    *  the submitted result) because a row has to say the mission was steered: `title` is frozen at
    *  creation, so a corrected mission otherwise reads as "goal X, result of Y" with nothing between
-   *  them to explain the difference. The texts are few and short, and a row renders only the count. */
+   *  them to explain the difference. Bounded to the newest {@link ROW_CORRECTIONS_MAX}: a row renders
+   *  only the count, and every text is in the detail. */
   readonly corrections: readonly string[]
+  /** The owner's FULL correction count, independent of the capped array above. */
+  readonly correctionCount: number
   readonly status: string
   readonly attempts: number
   readonly createdAt: number
@@ -366,6 +373,8 @@ export class AvantfMissionHost extends TypertRemoteService {
   /** Sweep failures fold into the next warning; `undefined` means none has been logged yet. */
   private sweepFailureWarnedAt: number | undefined
   private sweepFailuresSinceWarn = 0
+  /** Own workers that settled this process; the retention pass reads it to skip empty sweeps. */
+  private workerSettlements = 0
 
   private readonly log: MissionLogger
 
@@ -887,9 +896,22 @@ export class AvantfMissionHost extends TypertRemoteService {
    *  reclaim now, not at the next sweep; the claim check comes first so foreign runs cost nothing. */
   onSubagentEnd(childSessionId: string): void {
     if (!this.isWorkerClaim(childSessionId)) return
+    // One of OUR workers settled: the automatic retention pass reads this counter to skip a sweep
+    // that has nothing new to release (see `workerSettlements`).
+    this.workerSettlements += 1
     // Settlement and binding are different records; let the sweep resolve liveness instead. A
     // failure here is reported rather than swallowed: see `reportSweepFailure`.
     void this.sweep().catch((error: unknown) => { this.reportSweepFailure(error) })
+  }
+
+  /**
+   * How many of this session's own workers have settled since start-up. Monotonic; the retention
+   * pass compares it against the value it last ran at, so a periodic sweep with no settlement does
+   * no session listing at all. A restart resets it, which is why the mount pass also runs once
+   * unconditionally.
+   */
+  get workerSettlementCount(): number {
+    return this.workerSettlements
   }
 
   /**
@@ -1631,8 +1653,13 @@ export class AvantfMissionHost extends TypertRemoteService {
           children: node.children,
           depth: node.depth,
           title: node.title,
-          context: node.context,
-          corrections: node.corrections,
+          // The row projection carries COUNTS of the premise set, not the texts: see `wire.ts`'s
+          // context rule. `context: []` is the legacy-compatibility shape (an older client still
+          // requires the field); a current client derives the badge from `contextCount`.
+          context: [],
+          contextCount: node.context.length,
+          corrections: node.corrections.slice(-ROW_CORRECTIONS_MAX),
+          correctionCount: node.corrections.length,
           status: node.status,
           attempts: node.attempts,
           createdAt: node.createdAt,

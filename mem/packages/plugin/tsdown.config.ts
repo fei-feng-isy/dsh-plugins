@@ -82,6 +82,16 @@
  * `scripts/build-plugin.mjs`) also runs against the artifact ON DISK — one
  * definition, checked both in the bundler and after the build. Both are cheap and
  * path-independent; they are the permanent regression gate.
+ *
+ * The same wrapper DISABLES the preset's client sourcemap. The preset emits one so
+ * browser devtools can map the fetched artifact back to TSX, but this package's
+ * `files` keep `lib/client.js.map` out of the tarball (and `pack-plugin` hard-fails
+ * if a map ever ships), and the built artifact IS the published one — so the map
+ * was a 667 KB local-only file and the trailing `sourceMappingURL` it justified
+ * 404'd in every consumer's devtools. Building without it removes both; mission's
+ * esbuild client ships no sourcemap either. `clientArtifactProblems` asserts the
+ * absence, so a re-enabled `sourcemap` fails the build instead of silently
+ * restoring the dangling reference.
  * Byte-for-byte CROSS-DIRECTORY reproduction cannot be proven by one build, so it
  * stays a pre-release manual step:
  *
@@ -123,6 +133,7 @@ interface LoaderContext {
 /** A tsdown config object, as far as this wrapper rewrites it. */
 interface WrappableConfig {
   readonly plugins?: unknown
+  readonly sourcemap?: boolean
 }
 
 /** The virtual-id prefixes the preset's three CSS loaders prepend. */
@@ -234,7 +245,12 @@ function artifactAssertionPlugin(): unknown {
   }
 }
 
-/** Wrap one config's plugins, appending the artifact assertion to the client config. */
+/**
+ * Wrap one config: make the CSS virtual ids path-relative, append the artifact
+ * assertion to the client config, and drop the client sourcemap (see the file
+ * header — the map is never published, so neither it nor its reference belongs in
+ * the artifact).
+ */
 function portableConfig(
   config: WrappableConfig,
   isolation: { assertInput(id: string): void },
@@ -247,7 +263,7 @@ function portableConfig(
     return typeof name === 'string' && CSS_PLUGIN_NAMES.has(name)
   })
   return isClient && Array.isArray(plugins)
-    ? { ...config, plugins: [...plugins, artifactAssertionPlugin()] }
+    ? { ...config, sourcemap: false, plugins: [...plugins, artifactAssertionPlugin()] }
     : { ...config, plugins }
 }
 

@@ -8,7 +8,7 @@
  */
 import type { DocumentChunk } from '@avantf/mem-contract'
 import type { Db } from '../port.js'
-import { batches } from '../chunk.js'
+import { batches, inList } from '../chunk.js'
 import { contentHash } from '../hash.js'
 
 /** One chunk to persist, in document order (`idx` is the position, not the array index). */
@@ -88,11 +88,11 @@ export class ChunksDao {
   texts(ids: readonly number[]): { chunk_id: number; text: string }[] {
     const out: { chunk_id: number; text: string }[] = []
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       out.push(
         ...this.db
           .prepare<{ chunk_id: number; text: string }>(`SELECT chunk_id, text FROM doc_chunks WHERE chunk_id IN (${placeholders})`)
-          .all(...batch),
+          .all(...values),
       )
     }
     return out
@@ -150,10 +150,10 @@ export class ChunksDao {
   /** Record which extraction rules produced a chunk's entity rows (see `ENTITY_EXTRACTOR_VERSION`). */
   setEntitiesVersion(ids: readonly number[], version: number): void {
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       this.db
         .prepare(`UPDATE doc_chunks SET entities_version = ? WHERE chunk_id IN (${placeholders})`)
-        .run(version, ...batch)
+        .run(version, ...values)
     }
   }
 
@@ -196,10 +196,10 @@ export class ChunksDao {
   entityBags(ids: readonly number[]): Map<number, string[]> {
     const out = new Map<number, string[]>()
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       const rows = this.db
         .prepare<{ chunk_id: number; name: string }>(`SELECT chunk_id, name FROM chunk_entities WHERE chunk_id IN (${placeholders})`)
-        .all(...batch)
+        .all(...values)
       for (const r of rows) {
         const list = out.get(r.chunk_id)
         if (list) list.push(r.name)
@@ -213,7 +213,7 @@ export class ChunksDao {
   hits(ids: readonly number[]): ChunkHitRow[] {
     const out: ChunkHitRow[] = []
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       // `domain`/`source` come from the owning `documents` row — the only place that knows
       // them for certain (`source_ref` is a lossy encoding of the same pair). The two
       // timestamps are the DOCUMENT's: a chunk has no clock of its own, and a re-ingest
@@ -227,7 +227,7 @@ export class ChunksDao {
              FROM doc_chunks dc JOIN documents d ON d.doc_id = dc.doc_id
              WHERE dc.chunk_id IN (${placeholders})`,
           )
-          .all(...batch),
+          .all(...values),
       )
     }
     return out
@@ -237,7 +237,7 @@ export class ChunksDao {
   meta(ids: readonly number[]): { chunk_id: number; domain: string; source: string }[] {
     const out: { chunk_id: number; domain: string; source: string }[] = []
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       out.push(
         ...this.db
           .prepare<{ chunk_id: number; domain: string; source: string }>(
@@ -245,7 +245,7 @@ export class ChunksDao {
              FROM doc_chunks dc JOIN documents d ON d.doc_id = dc.doc_id
              WHERE dc.chunk_id IN (${placeholders})`,
           )
-          .all(...batch),
+          .all(...values),
       )
     }
     return out
@@ -290,7 +290,7 @@ export class ChunksDao {
     if (limit <= 0) return []
     const out = new Set<number>()
     for (const batch of batches(names)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       const rows = this.db
         .prepare<{ chunk_id: number }>(
           // Ordered by the ACTUAL Jaccard, not by the shared count — see the memory store's
@@ -310,7 +310,7 @@ export class ChunksDao {
             ORDER BY (CAST(shared AS REAL) / (total + ? - shared)) DESC, ce.chunk_id ASC
             LIMIT ?`,
         )
-        .all(...batch, domain ?? null, domain ?? null, source ?? null, source ?? null, batch.length, limit)
+        .all(...values, domain ?? null, domain ?? null, source ?? null, source ?? null, batch.length, limit)
       for (const r of rows) out.add(r.chunk_id)
     }
     return [...out]

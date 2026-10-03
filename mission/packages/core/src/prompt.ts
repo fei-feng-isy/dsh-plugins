@@ -16,13 +16,64 @@ export function isTroubled(nodes: readonly NodeRecord[]): boolean {
   return nodes.some((node) => !TERMINAL.has(node.status) && isTroubledNode(node))
 }
 
+/**
+ * The prompt's size guardrails. The tail is rewritten on every dispatch and everything here is paid
+ * for in model tokens, so each of these bounds one axis that could grow without limit:
+ *
+ *  - {@link chainLine} rendered EVERY correction of EVERY ancestor (a correction is written on the
+ *    root, so one long-lived root steered repeatedly made every descendant carry all of them);
+ *  - {@link analysisSection} rendered every note an executor had ever appended;
+ *  - {@link childrenBlock} rendered every terminal child's conclusion. Per-child size is already
+ *    bounded by the engine (`CAPACITY.maxInlineResultChars`, longer results are spilled with a
+ *    pointer), but the COUNT is not: `children` accumulates across re-decompositions, and 50
+ *    children × the 2 KB inline cap was a measured ~100 KB (~50k tokens) aggregate prompt.
+ *
+ * What the model still sees after a bound bites is stated IN the prompt at each site, so a judge can
+ * tell "this child said nothing" from "this child's text was summarized here".
+ */
+export const PROMPT_LIMITS = {
+  /** Corrections rendered per mission-chain ancestor (the NEWEST ones; the rest are counted). */
+  chainCorrections: 2,
+  chainCorrectionChars: 200,
+  /** Corrections rendered verbatim on the node being executed (the newest ones; the rest counted). */
+  currentCorrections: 10,
+  /** `note_mission` notes rendered (the newest ones; the rest counted). */
+  analysisNotes: 8,
+  analysisNoteChars: 400,
+  /** Terminal children whose conclusion is rendered in full — the newest ones. Older children still
+   *  list id, title, status and the head of their conclusion. The count is what accumulates across
+   *  re-decompositions, so this is the bound that stops a 50-child aggregate from growing without end. */
+  childrenBody: 10,
+  /** Safety clip on one child's conclusion; equal to the engine's inline cap, so a well-formed record
+   *  is never actually cut (an older/foreign record could exceed it). */
+  childBodyChars: 2000,
+  /** How much of an older child's conclusion survives in the compact form. */
+  childExcerptChars: 120,
+} as const
+
+/** `text` cut to `max` characters, with a visible marker so a reader knows it was cut. */
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…`
+}
+
 /** The basic facts a mission-chain entry carries — deliberately not the full content; a correction is rendered here as well as on its own node because corrections are written on the ROOT, and the chain is the only channel that reaches every dispatch. */
 function chainLine(node: NodeRecord): string {
-  const reason = node.context.length > 0 ? ` — ${node.context[0]}` : ''
+  const reason = node.context.length > 0 ? ` — ${clip(node.context[0], PROMPT_LIMITS.chainCorrectionChars)}` : ''
   const corrections = node.corrections.length > 0
-    ? ` ｜ 纠偏：${node.corrections.join('；')}`
+    ? ` ｜ 纠偏：${renderCorrections(node.corrections, PROMPT_LIMITS.chainCorrections)}`
     : ''
   return `- [${node.id}] ${node.title}${reason}${corrections}`
+}
+
+/**
+ * Corrections as one inline clause: the NEWEST `max` texts, each clipped, with the number of older
+ * ones counted rather than dropped silently. See {@link PROMPT_LIMITS} for why this is bounded.
+ */
+function renderCorrections(all: readonly string[], max: number): string {
+  const shown = all.slice(-max)
+  const omitted = all.length - shown.length
+  const text = shown.map((correction) => clip(correction, PROMPT_LIMITS.chainCorrectionChars)).join('；')
+  return omitted > 0 ? `${text}（另有 ${String(omitted)} 条较早的纠偏未展开）` : text
 }
 
 /** The full block for the node being executed right now. `corrections` is what this dispatch may
@@ -40,7 +91,10 @@ function currentNodeBlock(node: NodeRecord, corrections: readonly string[]): str
   }
   if (corrections.length > 0) {
     lines.push('纠偏:')
-    for (const correction of corrections) lines.push(`  - ${correction}`)
+    const shown = corrections.slice(-PROMPT_LIMITS.currentCorrections)
+    const omitted = corrections.length - shown.length
+    if (omitted > 0) lines.push(`  （较早的 ${String(omitted)} 条未展开，下面是最近 ${String(shown.length)} 条）`)
+    for (const correction of shown) lines.push(`  - ${clip(correction, PROMPT_LIMITS.analysisNoteChars)}`)
   }
   analysisSection(node, lines)
   // Say how many FAILED EXECUTIONS remain, not how many times this node was dispatched: `attempts` counts every dispatch, including successful aggregate/convergence rounds. Silence when nothing has failed, so a first dispatch is not invited to pace itself against a clock it cannot see.
@@ -53,11 +107,14 @@ function currentNodeBlock(node: NodeRecord, corrections: readonly string[]): str
   return lines.join('\n')
 }
 
-/** The earlier rounds' own analysis, crossing the boundary between the session that attempted the node and the FRESH session that later judges it; it rides inside the 「本任务」 block, before the children results, because it is a premise of reading them, and it is absent when no notes were recorded. */
+/** The earlier rounds' own analysis, crossing the boundary between the session that attempted the node and the FRESH session that later judges it; it rides inside the 「本任务」 block, before the children results, because it is a premise of reading them, and it is absent when no notes were recorded. Bounded (newest {@link PROMPT_LIMITS.analysisNotes}); the omitted count is stated so nothing reads as missing. */
 function analysisSection(node: NodeRecord, lines: string[]): void {
   if (node.analysisNotes.length === 0) return
   lines.push('执行本任务时写下的分析（由上一次执行本任务的执行者记录）：')
-  for (const note of node.analysisNotes) lines.push(`  - ${note}`)
+  const shown = node.analysisNotes.slice(-PROMPT_LIMITS.analysisNotes)
+  const omitted = node.analysisNotes.length - shown.length
+  if (omitted > 0) lines.push(`  （较早的 ${String(omitted)} 条未展开，下面是最近 ${String(shown.length)} 条）`)
+  for (const note of shown) lines.push(`  - ${clip(note, PROMPT_LIMITS.analysisNoteChars)}`)
 }
 
 /**
@@ -68,16 +125,34 @@ export function spillPointer(node: NodeRecord): string {
   return node.resultHint === null ? node.resultRef : `${node.resultRef} — ${node.resultHint}`
 }
 
-/** Children conclusions, used only when the node is an aggregate. */
+/**
+ * Children conclusions, used only when the node is an aggregate.
+ *
+ * BOUNDED BY COUNT, not by cutting conclusions. The newest {@link PROMPT_LIMITS.childrenBody} children
+ * render their conclusion in full (id, title, status, and — when the result was spilled — its
+ * pointer); older children still render their id, title, status and the HEAD of their conclusion, so
+ * the judge can see that they exist and what they roughly said. The header names how many were
+ * compacted. A length clip is only a safety net for a record that predates the engine's inline cap.
+ */
 function childrenBlock(view: DispatchView): string {
   const lines: string[] = ['子任务结果：']
-  for (const child of view.children) {
-    const body = child.hasResult ? (child.result ?? '（空结果）') : '（未提交结果）'
+  const all = view.children
+  // `children` is in decomposition order (oldest first), so the newest ones are the tail.
+  const compact = Math.max(0, all.length - PROMPT_LIMITS.childrenBody)
+  if (compact > 0) {
+    lines.push(
+      `（共 ${String(all.length)} 个子任务结论：最早的 ${String(compact)} 个只列了开头，`
+      + `最近 ${String(all.length - compact)} 个完整列出。）`,
+    )
+  }
+  all.forEach((child, index) => {
     const pointer = spillPointer(child)
     const ref = pointer === '' ? '' : `\n  完整结果：${pointer}`
+    const raw = child.hasResult ? (child.result ?? '（空结果）') : '（未提交结果）'
+    const body = index < compact ? clip(raw, PROMPT_LIMITS.childExcerptChars) : clip(raw, PROMPT_LIMITS.childBodyChars)
     // The status is part of the fact: a cancelled child and a child that simply never wrote a result read identically otherwise, and the judge has to tell them apart.
     lines.push(`- [${child.id}] ${child.title}（${statusLabel(child.status)}）：${body}${ref}`)
-  }
+  })
   return lines.join('\n')
 }
 

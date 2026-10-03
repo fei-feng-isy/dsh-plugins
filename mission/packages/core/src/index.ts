@@ -64,7 +64,7 @@ export type {
 } from './dispatch.js'
 export { computeContinuationDelta, isMaterialChange, nodeFingerprint } from './continuation.js'
 export type { ContinuationDelta } from './continuation.js'
-export { buildWorkerPrompt, buildProgressLine, isTroubled, spillPointer, waitedLabel } from './prompt.js'
+export { buildWorkerPrompt, buildProgressLine, isTroubled, PROMPT_LIMITS, spillPointer, waitedLabel } from './prompt.js'
 export type { WorkerPromptOptions } from './prompt.js'
 // Trouble vocabulary: the state machine words its refusals with `statusLabel`, and engine + host
 // share `isTroubledNode` across four channels — neither is a rendering concern (see the module note).

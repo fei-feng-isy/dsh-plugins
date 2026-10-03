@@ -5,6 +5,23 @@ All notable changes to `avantf-mem` are documented here.
 ## [Unreleased]
 
 ## [0.4.0] - 2026-10-01
+### Fixed（性能复审 §1.3：client 产物不再悬空引用未随包的 sourcemap）
+- **`lib/client.js` 尾部不再有 `//# sourceMappingURL=client.js.map`**：`files` 一直把 `lib/client.js.map` 挡在 tarball 之外（这是家族口径——base 的 `6332b4c` 已把 JS map 移出发布物，mission 的 esbuild client 也不带 map），但构建出来的 `client.js` 仍带那行引用，消费者 devtools 每次加载都 404 一次。两种修法里选**去掉引用**（与既有发布口径一致），做法是在 `packages/plugin/tsdown.config.ts` 对 client 配置 `sourcemap: false`——map 本就不随包，本地保留它只留下 667,833 B 的孤儿文件与那行悬空引用；`lib/client.js` **275,004 → 274,969 B**，二进制其余部分逐字节不变。
+- **防回归断言**：`scripts/client-portable.mjs` 的 `clientArtifactProblems` 新增"产物不得引用未随包的 sourcemap"一条，既在打包器内（`tsdown.config.ts` 的 `writeBundle`）也在构建后（`scripts/assert-client-portable.mjs`，接在 `build-plugin.mjs`）执行；实测把 `sourcemap` 临时改回 `true`，两道门都变红并给出修复指引。`scripts/pack-plugin.mjs` 的白名单继续把任何重新出现的 `lib/client.js.map` 当 STRAY 硬失败。
+
+### Fixed（性能复审 §7.5/§7.7/§7.8/§7.9 mem 侧：启动窗口两条回流马 + 单店二遍复用向量 + drift/sync 分批让出 + IN 键空间）
+- **挂载期 entity sweep 挂到预热门之后**（`packages/plugin/src/index.ts` 首触发经 `awaitStartupGate`）：`reindexEntities` 用 nodejieba 打标（字典解析 ~1.2 s 同步），原先在 mount 即跑，`ENTITY_EXTRACTOR_VERSION` bump 后的升级首启若存在陈旧行，会把 §20.14 挪出启动窗口的同步解析从另一个入口拉回来。现在与 tokenizer 预热走**同一道门**（宿主 readiness + 一次 idle；失败/挂死的 boot 仍照常开门），且开门后复查 `rt.closed` 与 fiber 存活，避免卸载后空跑。门本身由 `awaitStartupGate` 单元测试钉住。
+- **挂载期 full sync 分批让出事件循环**（`packages/core/src/store/knowledge.ts` + `store/doc_files.ts` + `store/common.ts`）：`sync({})` 原先对每篇 `read`+`sha256`（`state()`）再 `scan()` 第二遍全读，整段同步。现在两趟都走 `forEachYielding`（每 200 篇 `setImmediate` 让出），`DocFiles.scan` 改 async 递归 `readdir`。本机 10k 篇实测：最长事件循环阻塞 **646 ms → 40–43 ms**，整趟墙钟 645 → 616 ms（`reingested=0` 对照）。
+- **drift 全树 walk 异步化**（`KnowledgeStore.corpusDrift` 改 `async`，逐篇 `stamp` 分批让出；`reconcile.ts` 改 await 并在 await 后复查 stop）：10k 篇每趟最长阻塞 **122 ms → 36–39 ms**，墙钟基本不变（节流 2 s + 尾随语义与卸载边界不变，`reconcile.spec.ts` 同步更新）。
+- **单店宽松二遍复用第一遍的 queryVector**（`store/hybrid.ts` 新增 `HybridContext.onQueryVector`，`memory.ts`/`knowledge.ts` 的 `semanticPath` 在编码后回传）：单店 `search` 的第二遍原先重编码 query（热模型 ~4 ms）；`kb_query` 那条已正确的跨库路径不受影响。新增 `hybrid.spec.ts` 用例断言两遍只调一次 encode。
+- **`IN (…)` 宽度向上取整到固定档位**（`db/chunk.ts` 的 `inList`，24 处 DAO 站点改用它）：占位符文本 + 绑定参数都按档位（8/16/…/512）固定，多出的参数用**重复最后一个值**填充（`IN` 里重复无害），键空间从"每站点上千宽度"塌缩为每站点 ≤7 个；Jaccard 分母、`HAVING COUNT`、`batch.length` 等语义参数仍用真实宽度。`sqlite_adapter.spec.ts` 钉住 1..500 宽度 → 7 个文本且结果不变。
+- 未做（超出本任务范围）：**P14 `readCapped` 流式落盘与 4 GiB 上限**在 `base/plugin-base/src/net.ts` + `providers/model.ts`，属 base 树，未在本轮改动，建议单独开 base 车（见性能复审 §7.8）。
+
+### Fixed（FTS 腿计划翻转：`facts` 加 `NOT INDEXED` 钉死 FTS 驱动，另加计划门禁与 bench 对照组）
+- **新装首会话的检索会慢 1–2 个数量级**：`facts.ftsSearch`（`packages/core/src/db/dao/facts.ts`）在 `sqlite_stat1` 缺 `facts` 统计时被规划成 `facts` 覆盖索引（`idx_facts_status_category`）驱动、**每行重跑一次外部内容 MATCH**（EXPLAIN 内侧 `SCAN f VIRTUAL TABLE INDEX 0:=M1`）。空库开库时 `PRAGMA optimize` 不写统计，所以新装后的整个首会话都在坏窗口里，而语料恰在该会话增长——官方 bench 因"seed 后重开"而看不见它。修法：给 JOIN 的 `facts` 加 **`NOT INDEXED`**，计划与统计无关地恒为 FTS 驱动（结果集不变，`fact_id` 是 INTEGER PRIMARY KEY、rowid 点查仍可用；同 §19 `page()` 的 `INDEXED BY` 先例）。本机 n=1000 合成语料选择性查询实测主腿 **574 → 4.6 ms**，hint 形状（同一语句、`LIMIT 1`）**568 → 1.9 ms**；`memory.lexicalProbe` 同病、同一处改动覆盖，`knowledge` 侧 `chunks.ftsSearch` 形状不同、不翻。**没有**采用"开库时 `ANALYZE facts`"：空库开库判据为假，而有行时 `PRAGMA optimize` 本就会写统计，那条修法覆盖不到真正的窗口（理由与实测写在 DESIGN §20.21 ①）。
+- **两条门禁**：`packages/core/test/fts_plan.spec.ts` 用首会话形状（空库开库→seed→不重开）EXPLAIN 从 DAO 导入的 `FTS_SEARCH_SQL`，断言计划里不得出现内侧 `… INDEX 0:=M1`、且 ANALYZE 前后一致（去掉 `NOT INDEXED` 即变红）；`scripts/bench-memory.mjs` 增 `no_reopen` 对照组（播种 runtime 关闭前测 FTS 腿 + `fts_inner_scan` 布尔），让坏窗口能被脚本看见。
+- 同批口径与基线：DESIGN §11 补"`add` 的成本 = O(实体 hub 大小)，§11 的'与规模无关'只对索引点查成立、对候选集不成立"；bench 基线在 **node:sqlite（SQLite 3.51.3）+ 本机**上重冻（2k：search 12.65 / add 4.16 ms；10k：search 52.9 / add 12.0 ms，命令与环境见 DESIGN §20.21 ③）。
+
 ### Changed（接口 v3：提示词文件前缀改由 base 校验）
 - **`PromptFiles` 构造点传 `namespace: 'mem'`**（`packages/plugin/src/prompt.ts` 新增 `PROMPT_NAMESPACE`，`packages/plugin/src/index.ts` 构造时传入）：base 接口 v3 新增该字段，会校验每个提示词 `file` 都是**裸文件名**且以 `mem-` 开头，不满足就告警并退回内置默认、不碰盘——`mem-*` / `mission-*` 前缀从此由 base 校验，杜绝静默接管别的插件的用户文件。三份文件本就合规，**读取行为逐字节不变**（新增 spec 在真实目录上对比传/不传 namespace 的结果），字段可选、base 缺席或只到 v1/v2 的降级路径不变；构建 bake 随 base 升到 `interfaceVersion: 3`。
 

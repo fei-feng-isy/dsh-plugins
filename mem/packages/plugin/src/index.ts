@@ -26,6 +26,7 @@ import { defineTool, type GenericCallView, type ParameterSchemaSpec } from '@dee
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import {
+  awaitStartupGate,
   buildRuntime,
   dispatchToolKey,
   provisionToolchainAsync,
@@ -636,7 +637,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   // FIRST trigger is here, at mount — not on the first beat. A rule change used to reach old facts
   // only after `heartbeat_minutes` (60 by default), and never at all when that was 0.
-  sweepEntities()
+  //
+  // It runs BEHIND the same startup gate the tokenizer warm uses (host readiness + one idle turn):
+  // `reindexEntities` tags stale rows through nodejieba, whose dictionary parse is ~1.2 s of
+  // SYNCHRONOUS main-thread mission, so firing it at mount put that parse back inside the boot
+  // window §20.14 moved the tokenizer warm out of. The waits are not preconditions (a failed or
+  // hung boot still resolves them — see `awaitStartupGate`), and the heartbeat triggers below need
+  // no gate: by then the host has long been up.
+  void awaitStartupGate({ ...(waitFor === undefined ? {} : { waitFor }), deferTokenizerUntilIdle: true })
+    .then(() => {
+      // The gate can outlive a short-lived mount (a reload lands inside it): the runtime's databases
+      // are closed by `stop`, so a sweep fired then would only log "database is not open". Same
+      // unmount discipline as the reconciler's stop rule, checked against BOTH the fiber and the
+      // runtime's own lifetime (a harness may shut the service down without disposing the fiber).
+      if (!rt.closed && stillActive(ctx)) sweepEntities()
+    })
+    .catch((error: unknown) => {
+      logger.warn(`entity sweep gate failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
 
   // Trust heartbeat: the active-day clock advances on presence, and the tick performs
   // the settle/forget/idle/purge sweeps (TRUST_MODEL.md §5). `0` = startup pass only.

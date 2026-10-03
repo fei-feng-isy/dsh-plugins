@@ -12,6 +12,7 @@ import { MissionTreeView } from './MissionTreeView.js'
 import {
   POLL_INTERVAL_MS,
   REFRESH_COALESCE_MS,
+  STREAM_KEEPALIVE_MS,
   STREAM_REOPEN_MS,
   cleanFinishedWork,
   coalesce,
@@ -27,8 +28,7 @@ import {
   type MissionRemote,
 } from './api.js'
 import type { MissionSnapshot, MissionSnapshotState, WorkerSessionTarget } from './contract.js'
-import { chatNodeCount, isRunning, queuedCount, type SeatChatView, type SeatSessionView } from './seat.js'
-
+import { isRunning, queuedCount, type SeatSessionView } from './seat.js'
 /** Cordis plugin name; matches the host half. */
 export const name = 'avantf-mission'
 
@@ -67,10 +67,14 @@ interface ClientContext {
   }
 }
 
-/** Structural for the same reason as {@link ClientContext}; only the two "something happened" values matter. */
+/**
+ * Structural for the same reason as {@link ClientContext}; only the session's own "something
+ * happened" values matter. The seat's CHAT hook is deliberately not declared any more: the mission
+ * tree is not a function of how many messages the conversation holds, and subscribing to it made
+ * every chat activity re-read and re-render the whole tree (see `sessionRevision`).
+ */
 interface SeatProps {
   readonly sessionId: SessionId
-  readonly useChat: <T>(select: (chat: SeatChatView) => T) => T
   readonly useSession: <T>(select: (session: SeatSessionView) => T) => T
 }
 
@@ -101,6 +105,9 @@ interface SnapshotDeps {
   readonly mounted: Promise<void>
   /** Timer fallback, used only when the host exposes no change stream. */
   readonly schedule: (refresh: () => void) => () => void
+  /** Slow unconditional re-read while the change stream is up, so a silently dead stream cannot leave
+   *  the panel stale forever (see `STREAM_KEEPALIVE_MS`). */
+  readonly keepalive: (refresh: () => void) => () => void
   readonly revision: string
   readonly log: (level: 'log' | 'error', message: string) => void
   /** Record the host's reported `wire` revision (see `wire.ts`), so a later click can refuse to call
@@ -119,7 +126,7 @@ type RefreshLink = 'pending' | 'stream' | 'timer'
  * like "the refresh feature was never built".
  */
 function useSnapshotFor(deps: SnapshotDeps): MissionSnapshotState {
-  const { sessionId, getRemote, mounted, schedule, revision, log, noteWire } = deps
+  const { sessionId, getRemote, mounted, schedule, keepalive, revision, log, noteWire } = deps
   const [data, setData] = useState<MissionSnapshot | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(false)
@@ -229,6 +236,10 @@ function useSnapshotFor(deps: SnapshotDeps): MissionSnapshotState {
     return schedule(() => { void refresh() })
   }, [link, schedule, refresh])
 
+  // The keepalive runs in EVERY link state, including a healthy-looking stream: it is the only bound
+  // on "the stream is open but has stopped delivering". Cheap by construction (one read per 30 s).
+  useEffect(() => keepalive(() => { void refresh() }), [keepalive, refresh])
+
   return { data, loading, error, refresh }
 }
 
@@ -283,6 +294,9 @@ export function apply(ctx: ClientContext): void {
   // host-composition row and is not mounted here, so the lookup happens at USE time.
   const schedule = (refresh: () => void): (() => void) =>
     startPolling(refresh, POLL_INTERVAL_MS, ctx.get('timer') as Partial<IntervalTimer> | undefined)
+  // The unconditional stream keepalive: the same platform-timer lookup, at a much slower cadence.
+  const keepalive = (refresh: () => void): (() => void) =>
+    startPolling(refresh, STREAM_KEEPALIVE_MS, ctx.get('timer') as Partial<IntervalTimer> | undefined)
   const hasHostTimers = typeof setInterval === 'function' && typeof clearInterval === 'function'
   log(
     'log',
@@ -309,10 +323,10 @@ export function apply(ctx: ClientContext): void {
       : undefined
   }
 
-  // The seat's session hooks are the refresh trigger (see `sessionRevision`). `useChat` is
-  // in the installed runtime's catalog but not the checkout's composed type, so it is read
-  // structurally and guarded; whether the seat hands it over cannot change during a mount,
-  // which keeps the conditional hook call stable across renders.
+  // The seat's session hooks are the refresh trigger (see `sessionRevision`). The seat's chat hook is
+  // deliberately NOT read any more: folding the chat node count into the revision made every message
+  // re-read and re-render the whole tree, and the mission tree is not a function of chat length. The
+  // stream carries mission changes, and the keepalive bounds staleness if it goes quiet.
   //
   // Every field is read through `seat.ts`, never off the snapshot directly: these are the HOST's
   // structures, and a selector that throws in the render body blanks the whole panel silently
@@ -320,10 +334,7 @@ export function apply(ctx: ClientContext): void {
   function useSeatRevision(seat: SeatProps): string {
     const queued = seat.useSession((session) => queuedCount(session))
     const running = seat.useSession((session) => isRunning(session))
-    const chatNodes = typeof seat.useChat === 'function'
-      ? seat.useChat((chat) => chatNodeCount(chat))
-      : -1
-    return sessionRevision({ chatNodes, queued, running })
+    return sessionRevision({ queued, running })
   }
 
   const View = (props: { sessionId: SessionId }): ReactNode => {
@@ -338,6 +349,7 @@ export function apply(ctx: ClientContext): void {
         getRemote,
         mounted: mounted.promise,
         schedule,
+        keepalive,
         revision,
         log,
         noteWire,

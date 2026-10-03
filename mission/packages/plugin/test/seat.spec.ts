@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { chatNodeCount, isRunning, queuedCount } from '../src/client/seat.js'
+import { isRunning, queuedCount } from '../src/client/seat.js'
 
 const clientDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'client')
 
@@ -21,8 +21,6 @@ describe('seat field readers', () => {
     expect(queuedCount({ running: true })).toBe(-1)
     expect(queuedCount(undefined)).toBe(-1)
     expect(queuedCount({})).toBe(-1)
-    expect(chatNodeCount({})).toBe(-1)
-    expect(chatNodeCount(undefined)).toBe(-1)
     expect(isRunning({})).toBe(false)
     expect(isRunning(undefined)).toBe(false)
   })
@@ -30,14 +28,12 @@ describe('seat field readers', () => {
   it('reports the real values when the fields are there', () => {
     expect(queuedCount({ queue: ['a', 'b', 'c'], running: true })).toBe(3)
     expect(queuedCount({ queue: [], running: false })).toBe(0)
-    expect(chatNodeCount({ order: ['x', 'y'] })).toBe(2)
     expect(isRunning({ running: true })).toBe(true)
     expect(isRunning({ running: false })).toBe(false)
   })
 
   it('treats a wrong-typed field as absent rather than trusting it', () => {
     expect(queuedCount({ queue: 'nope' } as never)).toBe(-1)
-    expect(chatNodeCount({ order: 7 } as never)).toBe(-1)
     expect(isRunning({ running: 'yes' } as never)).toBe(false)
   })
 

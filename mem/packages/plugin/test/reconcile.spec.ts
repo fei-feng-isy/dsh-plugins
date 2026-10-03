@@ -31,7 +31,7 @@ function corpusDouble(options: { drift?: () => { changed: number[]; missing: num
         synced.push(o)
         if (synced.length === 1 && options.gate !== undefined) await options.gate
       },
-      corpusDrift: () => {
+      corpusDrift: async () => {
         driftCalls.push('drift')
         return options.drift?.() ?? { changed: [], missing: [], fileSetChanged: false }
       },
@@ -70,6 +70,9 @@ describe('the corpus reconciler', () => {
     const reconciler = createCorpusReconciler({ corpus, minIntervalMs: 0, onError: () => { throw new Error('unexpected') } })
 
     const pass = reconciler.request(false)
+    // `corpusDrift()` is async (it yields inside the walk), so the first `sync` lands one microtask
+    // later — flush it before asserting.
+    await Promise.resolve()
     expect(synced).toEqual([{ docId: 1 }])
     reconciler.stop()
     gate.resolve()
@@ -88,6 +91,7 @@ describe('the corpus reconciler', () => {
     const reconciler = createCorpusReconciler({ corpus, minIntervalMs: 0, onError: () => { throw new Error('unexpected') } })
 
     const pass = reconciler.request(false)
+    await Promise.resolve()
     expect(synced).toEqual([{}])
     reconciler.stop()
     gate.resolve()
@@ -136,7 +140,7 @@ describe('the corpus reconciler', () => {
     const reconciler = createCorpusReconciler({
       corpus: {
         sync: async () => { throw new Error('database is closed') },
-        corpusDrift: () => ({ changed: [], missing: [], fileSetChanged: false }),
+        corpusDrift: async () => ({ changed: [], missing: [], fileSetChanged: false }),
       },
       minIntervalMs: 0,
       onError: (error) => { errors.push(error) },

@@ -6,7 +6,7 @@
  * the store ends up holding business rules only and no SQL. See DESIGN §19.
  */
 import type { Db } from '../port.js'
-import { batches } from '../chunk.js'
+import { batches, inList } from '../chunk.js'
 import { ENTITY_EXTRACTOR_VERSION } from '../../entities/extract.js'
 
 /**
@@ -29,6 +29,43 @@ export const FACT_COLUMNS_NO_BLOB = `fact_id, content, category, tags, trust_sco
     supersedes_id, entities_version, conflict_checked, archived_at, archive_reason, ttl_days,
     mirror_source, mirror_target, created_at, updated_at`
 
+/**
+ * The FTS leg's exact SQL, exported so the plan guard (`test/fts_plan.spec.ts`) and the bench
+ * control group EXPLAIN the production text itself instead of a copy that can silently drift.
+ *
+ * `NOT INDEXED` on the `facts` join is LOAD-BEARING, not decoration — this query is the one place
+ * where a healthy-looking covering index (`idx_facts_status_category (status, category)`) is the
+ * WRONG drive. Without planner statistics SQLite cannot know that `MATCH` is the selective access
+ * path, so it drives from `facts` and RE-RUNS the whole external-content MATCH once per row:
+ *
+ *   bad : SEARCH fa USING COVERING INDEX idx_facts_status_category (status=?)
+ *         | SCAN f VIRTUAL TABLE INDEX 0:=M1        <- the inner `=M1`
+ *   good: SCAN f VIRTUAL TABLE INDEX 0:M1
+ *         | SEARCH fa USING INTEGER PRIMARY KEY (rowid=?)
+ *
+ * Measured on the synthetic corpus at n=1000 (selective query, ~10 hits) in the fresh-session
+ * shape: 574 ms → 4.6 ms for the leg; the hint's `LIMIT 1` shape is the SAME statement, 568 ms
+ * → 1.9 ms.
+ *
+ * Why the missing statistics are not a startup-only blip: the open tick's `PRAGMA optimize` writes
+ * no stats for an EMPTY database, so on a fresh install the whole first session runs without them
+ * while the corpus grows in it; the next tick (≤60 min heartbeat) or a restart is what writes them.
+ * `bench-memory` used to hide this because it seeds, then REOPENS the runtime (whose open tick
+ * analyzes). Hence "ANALYZE facts at open when `sqlite_stat1` lacks a `facts` row and `facts` has
+ * rows" does NOT close the window either: at open the fresh database has zero rows (the guard is
+ * false), and once rows exist the next optimize is up to an hour away. `NOT INDEXED` pins the
+ * FTS-driven plan independently of `sqlite_stat1`, so there is no window at all. It cannot change
+ * results — only the join order — because the rowid join to `facts` is an INTEGER PRIMARY KEY
+ * lookup (still available under `NOT INDEXED`), and `status`/`category` stay residual filters on
+ * that one joined row, exactly as in the good plan above. Same spirit as §19 `page()`'s
+ * `INDEXED BY`, which pins the plan against `PRAGMA optimize` flipping it back.
+ */
+export const FTS_SEARCH_SQL = `SELECT f.rowid AS id, bm25(facts_fts) AS rank FROM facts_fts f
+         JOIN facts fa NOT INDEXED ON fa.fact_id = f.rowid
+         WHERE facts_fts MATCH ? AND fa.status = 'active' AND (? IS NULL OR fa.category = ?)
+         ORDER BY rank ASC
+         LIMIT ?`
+
 export class FactsDao {
   constructor(private readonly db: Db) {}
 
@@ -41,10 +78,10 @@ export class FactsDao {
   activeIds(ids: readonly number[]): number[] {
     const out: number[] = []
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       const rows = this.db
         .prepare<{ fact_id: number }>(`SELECT fact_id FROM facts WHERE status = 'active' AND fact_id IN (${placeholders})`)
-        .all(...batch)
+        .all(...values)
       for (const row of rows) out.push(row.fact_id)
     }
     return out
@@ -95,20 +132,20 @@ export class FactsDao {
    */
   rowsByIds(ids: readonly number[]): Record<string, unknown>[] {
     if (!ids.length) return []
-    const placeholders = ids.map(() => '?').join(',')
+    const { placeholders, values } = inList(ids)
     return this.db
       .prepare<Record<string, unknown>>(`SELECT ${FACT_COLUMNS_NO_BLOB} FROM facts WHERE fact_id IN (${placeholders})`)
-      .all(...ids)
+      .all(...values)
   }
 
   /** `fact_id → content` for a hit set (never N+1). */
   textsByIds(ids: readonly number[]): Map<number, string> {
     const out = new Map<number, string>()
     if (!ids.length) return out
-    const placeholders = ids.map(() => '?').join(',')
+    const { placeholders, values } = inList(ids)
     const rows = this.db
       .prepare<{ fact_id: number; content: string }>(`SELECT fact_id, content FROM facts WHERE fact_id IN (${placeholders})`)
-      .all(...ids)
+      .all(...values)
     for (const row of rows) out.set(row.fact_id, row.content)
     return out
   }
@@ -117,12 +154,12 @@ export class FactsDao {
   timesByIds(ids: readonly number[]): Map<number, { created_at: string; updated_at: string | null }> {
     const out = new Map<number, { created_at: string; updated_at: string | null }>()
     if (!ids.length) return out
-    const placeholders = ids.map(() => '?').join(',')
+    const { placeholders, values } = inList(ids)
     const rows = this.db
       .prepare<{ fact_id: number; created_at: string | null; updated_at: string | null }>(
         `SELECT fact_id, created_at, updated_at FROM facts WHERE fact_id IN (${placeholders})`,
       )
-      .all(...ids)
+      .all(...values)
     for (const row of rows) {
       out.set(row.fact_id, {
         created_at: row.created_at === null ? '' : String(row.created_at),
@@ -247,10 +284,10 @@ export class FactsDao {
   setEntitiesVersion(ids: readonly number[], version: number): number {
     let changes = 0
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       changes += this.db
         .prepare(`UPDATE facts SET entities_version = ? WHERE fact_id IN (${placeholders})`)
-        .run(version, ...batch).changes
+        .run(version, ...values).changes
     }
     return changes
   }
@@ -319,10 +356,10 @@ export class FactsDao {
   markConflictChecked(ids: readonly number[]): number {
     let changes = 0
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       changes += this.db
         .prepare(`UPDATE facts SET conflict_checked = 1 WHERE fact_id IN (${placeholders})`)
-        .run(...batch).changes
+        .run(...values).changes
     }
     return changes
   }
@@ -339,10 +376,10 @@ export class FactsDao {
   requeueConflictCheck(ids: readonly number[]): number {
     let changes = 0
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       changes += this.db
         .prepare(`UPDATE facts SET conflict_checked = 0 WHERE fact_id IN (${placeholders})`)
-        .run(...batch).changes
+        .run(...values).changes
     }
     return changes
   }
@@ -642,10 +679,10 @@ export class FactsDao {
   clearVectors(ids: readonly number[]): number {
     let changes = 0
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       changes += this.db
         .prepare(`UPDATE facts SET semantic_vector = NULL, embedding_model = NULL, conflict_checked = 0 WHERE fact_id IN (${placeholders})`)
-        .run(...batch).changes
+        .run(...values).changes
     }
     return changes
   }
@@ -691,7 +728,7 @@ export class FactsDao {
     if (!ids.length) return []
     const out: { fact_id: number; hrr_vector: Uint8Array }[] = []
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       out.push(
         ...this.db
           .prepare<{ fact_id: number; hrr_vector: Uint8Array }>(
@@ -699,7 +736,7 @@ export class FactsDao {
               WHERE fact_id IN (${placeholders}) AND status = 'active' AND hrr_vector IS NOT NULL
                 AND (? IS NULL OR category = ?)`,
           )
-          .all(...batch, category ?? null, category ?? null),
+          .all(...values, category ?? null, category ?? null),
       )
     }
     return out
@@ -708,12 +745,12 @@ export class FactsDao {
   /** ACTIVE subset of `ids` in one category (`null` = any) — the semantic leg's filter. */
   activeIdsIn(ids: readonly number[], category?: string): number[] {
     if (!ids.length) return []
-    const placeholders = ids.map(() => '?').join(',')
+    const { placeholders, values } = inList(ids)
     return this.db
       .prepare<{ fact_id: number }>(
         `SELECT fact_id FROM facts WHERE fact_id IN (${placeholders}) AND status = 'active' AND (? IS NULL OR category = ?)`,
       )
-      .all(...ids, category ?? null, category ?? null)
+      .all(...values, category ?? null, category ?? null)
       .map((row) => row.fact_id)
   }
 
@@ -722,10 +759,10 @@ export class FactsDao {
   /** `retrieval_count` + the "last used" clock (spec §2.5), batched. */
   touchUsage(ids: readonly number[]): void {
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       this.db
         .prepare(`UPDATE facts SET retrieval_count = retrieval_count + 1, last_retrieved_at = CURRENT_TIMESTAMP WHERE fact_id IN (${placeholders})`)
-        .run(...batch)
+        .run(...values)
     }
   }
 
@@ -750,17 +787,13 @@ export class FactsDao {
    * FTS5 leg over the external-content `facts_fts`.
    *
    * `bm25()` is negative (more negative = better), so the caller negates; a JOIN back to
-   * `facts` keeps archived rows and other categories out of the leg.
+   * `facts` keeps archived rows and other categories out of the leg — and `NOT INDEXED` keeps
+   * that JOIN from becoming the drive (see {@link FTS_SEARCH_SQL}, which carries the plans and
+   * measurements).
    */
   ftsSearch(ftsQuery: string, category?: string, limit?: number): { id: number; rank: number }[] {
     return this.db
-      .prepare<{ id: number; rank: number }>(
-        `SELECT f.rowid AS id, bm25(facts_fts) AS rank FROM facts_fts f
-         JOIN facts fa ON fa.fact_id = f.rowid
-         WHERE facts_fts MATCH ? AND fa.status = 'active' AND (? IS NULL OR fa.category = ?)
-         ORDER BY rank ASC
-         LIMIT ?`,
-      )
+      .prepare<{ id: number; rank: number }>(FTS_SEARCH_SQL)
       .all(ftsQuery, category ?? null, category ?? null, limit ?? -1)
   }
 

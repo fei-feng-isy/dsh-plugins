@@ -535,7 +535,7 @@ describe('model-cache：requiredFiles 与镜像失败语义', () => {
     declare(created, item({ spec: { repo: REPO, files: ['config.json'] } }))
 
     const report = await created.ensure()
-    // The declared 5 GiB content-length crosses the 4 GiB cap: TERMINAL. Every mirror serves the same
+    // The declared 5 GiB content-length crosses the 2 GiB cap: TERMINAL. Every mirror serves the same
     // oversized object, so the second mirror is never asked for the body.
     expect(report.entries[0]).toMatchObject({ action: 'failed', code: 'fetch/too-large' })
     expect(live.some(url => url.includes('/resolve/'))).toBe(false)

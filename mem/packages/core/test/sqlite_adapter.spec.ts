@@ -23,6 +23,7 @@
 import { describe, it, expect } from 'vitest'
 import { describeSqlite, openSqlite, probeModule, sqliteProbe, type NodeSqliteModule } from '../src/db/sqlite.js'
 import { buildFtsQuery, resolveFtsTokenizer } from '../src/db/tokenizer.js'
+import { inList } from '../src/db/chunk.js'
 import type { Db } from '../src/db/port.js'
 
 /** One in-memory database with a four-column table, closed by the caller's `finally`. */
@@ -229,5 +230,49 @@ describe('the startup description', () => {
     } finally {
       db.close()
     }
+  })
+})
+
+/**
+ * The `IN (…)` ladder (`db/chunk.ts`). The cache key is the statement TEXT, so exact per-arity
+ * placeholders turned the key space into one entry per data-dependent width and the 2000-entry cache
+ * cleared wholesale, throwing away the hot literal statements (performance review §7.9 / P10).
+ */
+describe('inList: the IN placeholder ladder', () => {
+  it('collapses every width up to the batch cap onto a handful of texts', () => {
+    const texts = new Set<string>()
+    for (let n = 1; n <= 500; n += 1) {
+      const list = inList(Array.from({ length: n }, (_unused, i) => i + 1))
+      texts.add(list.placeholders)
+      // The bound-parameter count matches the placeholders — that is what makes the text reusable.
+      expect(list.values.length).toBe(list.placeholders.split(',').length)
+    }
+    // Rungs 8/16/32/64/128/256/512: 7 texts for 500 distinct widths.
+    expect(texts.size).toBe(7)
+    expect(inList([1]).placeholders).toBe(inList(Array.from({ length: 8 }, (_u, i) => i)).placeholders)
+    expect(inList([]).placeholders).toBe('NULL')
+    expect(inList([]).values).toEqual([])
+    // Padding repeats the LAST value, so the set of matched rows is unchanged.
+    expect(inList([7, 9]).values).toEqual([7, 9, 9, 9, 9, 9, 9, 9])
+  })
+
+  it('matches exactly the real values, duplicates and all', () => {
+    withDb((db) => {
+      db.exec("INSERT INTO t (label, n) VALUES ('a', 1); INSERT INTO t (label, n) VALUES ('b', 2); INSERT INTO t (label, n) VALUES ('c', 3)")
+      const list = inList([1, 3])
+      const rows = db
+        .prepare<{ id: number }>(`SELECT id FROM t WHERE id IN (${list.placeholders}) ORDER BY id`)
+        .all(...list.values)
+        .map((row) => row.id)
+      expect(rows).toEqual([1, 3])
+      // The same statement text serves a shorter list on the same rung — and matches only its value.
+      const shorter = inList([2])
+      expect(shorter.placeholders).toBe(list.placeholders)
+      const only = db
+        .prepare<{ id: number }>(`SELECT id FROM t WHERE id IN (${shorter.placeholders}) ORDER BY id`)
+        .all(...shorter.values)
+        .map((row) => row.id)
+      expect(only).toEqual([2])
+    })
   })
 })

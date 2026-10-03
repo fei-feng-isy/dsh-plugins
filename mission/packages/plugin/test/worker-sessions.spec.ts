@@ -166,6 +166,29 @@ describe('cleaning in one pass', () => {
     expect(sessionDirFor(root, WORKER)).toBeUndefined()
   })
 
+  it('takes a caller-supplied corpus instead of re-listing, and measures only what it releases', async () => {
+    // The automatic pass lists sessions ONCE for every owner and hands the same corpus down; this is
+    // the seam that makes that possible (one `listSessions` per sweep, not one per owner).
+    const root = sessionRoot([WORKER])
+    let lists = 0
+    const fake: WorkerSessionDeps = {
+      list: () => { lists += 1; return Promise.resolve([]) },
+      archive: () => Promise.resolve(),
+      isLive: () => false,
+      sessionsRoot: root,
+      projectionCacheRoot: join(root, 'projcache'),
+    }
+    const result = await cleanWorkers(fake, OWNER, () => false, {
+      all: [stored(WORKER)],
+      measureBytes: false,
+    })
+    expect(lists).toBe(0)
+    // The candidate was measured LAZILY, right before removal: the freed bytes are still correct even
+    // though the listing skipped the walk.
+    expect(result.cleaned).toEqual([{ id: WORKER, freed: 2048, archivedNow: true }])
+    expect(sessionDirFor(root, WORKER)).toBeUndefined()
+  })
+
   it('keeps the record when archiving fails, instead of releasing it anyway', async () => {
     const root = sessionRoot([WORKER])
     const failing: WorkerSessionDeps = {

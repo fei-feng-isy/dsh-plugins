@@ -44,8 +44,8 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 300_000
  * Combine the caller's `AbortSignal` with a timeout signal.
  *
  * `timeoutMs` (or, when omitted, the item's `policy.timeoutMs`) is the item's per-request budget;
- * an undeclared value keeps the 300 s default. `0` means NO timeout — the escape hatch a 4 GiB model
- * needs on a link slower than 14 MB/s, which the fixed default could never finish. `ctx.signal`
+ * an undeclared value keeps the 300 s default. `0` means NO timeout — the escape hatch a 2 GiB model
+ * needs on a link slower than ~7 MB/s, which the fixed default could never finish. `ctx.signal`
  * (shutdown/caller abort) still applies in every case.
  */
 export function signalFor(ctx: ProviderContext, timeoutMs?: number): AbortSignal {
@@ -59,7 +59,47 @@ export function signalFor(ctx: ProviderContext, timeoutMs?: number): AbortSignal
 }
 
 /**
- * Read a response body with a hard byte cap.
+ * Bodies at or below this size are assembled in memory exactly as before; a larger body is handed to
+ * a caller-supplied {@link BodySpill} instead, so the peak cost of a download stops tracking the file
+ * size. The threshold is the ONLY switch, which keeps the common path (a packument, a tarball, a small
+ * model file) on the untouched, simplest code while a multi-GB model — the case measured at roughly 2×
+ * its size in RSS — streams one chunk at a time.
+ *
+ * 64 MiB is a deliberate middle: every ordinary body stays in memory, and when one does not, the
+ * in-memory cost is already bounded by `2 × spillAtBytes` (the chunks plus the joined copy) regardless
+ * of how large the body turns out to be.
+ */
+export const SPILL_THRESHOLD_BYTES = 64 * 1024 * 1024
+
+/**
+ * Where a body that outgrew the in-memory budget goes instead of a `Uint8Array`.
+ *
+ * `readCappedOrSpill` writes each chunk in arrival order (the prefix that was already buffered is
+ * replayed first) and then calls EXACTLY ONE of `finish` (the body ended and its length checked out) or
+ * `abort` (any failure, including the cap being crossed or a declared/actual mismatch). A sink must
+ * therefore never assume `finish` follows `write`: the reader can reject mid-body.
+ */
+export interface BodySpill<T> {
+  /** Append one chunk; awaiting it may apply backpressure. */
+  write(chunk: Uint8Array): Promise<void>
+  /** The body is complete and length-checked; flush it and produce the caller's result. */
+  finish(total: number): Promise<T>
+  /** Discard everything written so far. Must be safe to call after `finish` failed, and must not throw. */
+  abort(): Promise<void>
+}
+
+/** Options of {@link readCappedOrSpill}. */
+export interface CappedReadOptions<T> {
+  /** Hard cap; defaults to {@link DEFAULT_MAX_BYTES}. */
+  readonly maxBytes?: number
+  /** Defaults to {@link SPILL_THRESHOLD_BYTES}. */
+  readonly spillAtBytes?: number
+  /** Absent ⇒ the whole body is assembled in memory, whatever its size (the historical path). */
+  readonly spill?: () => Promise<BodySpill<T>>
+}
+
+/**
+ * Read a response body with a hard byte cap, optionally spilling a large body to a caller's sink.
  *
  * Two failures that used to share `fetch/failed` are deliberately DIFFERENT codes, because a caller
  * has to treat them differently:
@@ -70,13 +110,23 @@ export function signalFor(ctx: ProviderContext, timeoutMs?: number): AbortSignal
  *   - the declared length does not match what was read → `fetch/failed`, a TRANSPORT failure: that is
  *     a truncated download, exactly the shape that should try the next candidate source.
  *
- * `docs/DESIGN.md` §6 states the same invariant; `providers/model.ts` and `downloadBytes` below are the
- * two places that branch on it.
+ * Without a `spill` this is exactly the historical `readCapped`: same codes, same messages, same
+ * single up-front `Uint8Array`. With one, the body crosses `spillAtBytes` and from then on every chunk
+ * goes straight to the sink — the buffered prefix is replayed once and dropped — so peak memory is one
+ * chunk, not the whole file. `docs/DESIGN.md` §6 states the same invariant; `providers/model.ts` and
+ * `downloadBytes` below are the two places that branch on it.
  */
-export async function readCapped(
+export function readCappedOrSpill(response: Response, options?: { readonly maxBytes?: number }): Promise<Uint8Array>
+export function readCappedOrSpill<T>(
   response: Response,
-  maxBytes: number = DEFAULT_MAX_BYTES,
-): Promise<Uint8Array> {
+  options: CappedReadOptions<T> & { readonly spill: () => Promise<BodySpill<T>> },
+): Promise<Uint8Array | T>
+export async function readCappedOrSpill<T>(
+  response: Response,
+  options: CappedReadOptions<T> = {},
+): Promise<Uint8Array | T> {
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
+  const spillAtBytes = options.spillAtBytes ?? SPILL_THRESHOLD_BYTES
   const declared = Number(response.headers.get('content-length') ?? Number.NaN)
   if (Number.isFinite(declared) && declared > maxBytes) {
     throw new ProvisionError('fetch/too-large', `响应声明 ${String(declared)} 字节，超过上限 ${String(maxBytes)}`)
@@ -95,27 +145,56 @@ export async function readCapped(
   const reader = body.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (value === undefined) continue
-    total += value.byteLength
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined)
-      throw new ProvisionError('fetch/too-large', `响应超过上限 ${String(maxBytes)} 字节（已读 ${String(total)}）`)
+  let spill: BodySpill<T> | undefined
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value === undefined) continue
+      total += value.byteLength
+      if (total > maxBytes) {
+        throw new ProvisionError('fetch/too-large', `响应超过上限 ${String(maxBytes)} 字节（已读 ${String(total)}）`)
+      }
+      // The body has outgrown the in-memory budget: hand the buffered prefix to the sink and never
+      // assemble the whole thing again.
+      if (spill === undefined && options.spill !== undefined && total > spillAtBytes) {
+        spill = await options.spill()
+        for (const buffered of chunks) await spill.write(buffered)
+        chunks.length = 0
+      }
+      if (spill === undefined) chunks.push(value)
+      else await spill.write(value)
     }
-    chunks.push(value)
+    if (Number.isFinite(declared) && declared !== total) {
+      throw new ProvisionError('fetch/failed', `响应声明 ${String(declared)} 字节，实际收到 ${String(total)} 字节`)
+    }
+    if (spill !== undefined) return await spill.finish(total)
+    const bytes = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return bytes
+  } catch (error) {
+    await reader.cancel().catch(() => undefined)
+    if (spill !== undefined) await spill.abort().catch(() => undefined)
+    throw error
   }
-  if (Number.isFinite(declared) && declared !== total) {
-    throw new ProvisionError('fetch/failed', `响应声明 ${String(declared)} 字节，实际收到 ${String(total)} 字节`)
-  }
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
+}
+
+/**
+ * {@link readCappedOrSpill} without a sink: the entire body is assembled in memory.
+ *
+ * This is the frozen historical behavior — used by everything that NEEDS the bytes in hand (a
+ * `JSON.parse`, an archive digest, an in-memory extract). A caller that lands a file on disk should
+ * pass a `spill` so a large body never becomes two copies of itself in the heap.
+ */
+export async function readCapped(
+  response: Response,
+  maxBytes: number = DEFAULT_MAX_BYTES,
+): Promise<Uint8Array> {
+  return readCappedOrSpill(response, { maxBytes })
 }
 
 /** `{url}` templates → concrete URLs, official source first. */

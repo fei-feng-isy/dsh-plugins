@@ -8,7 +8,7 @@
  * folded once it has finished — that folding is the tree, not the detail.
  * @module @avantf/dsh-mission/client/MissionTreeView
  */
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type {
   ExecutorSessionLookup,
@@ -116,9 +116,12 @@ interface RowActions {
  * The nodes one node depends on, read from the PARENT's `children` and not by matching
  * `parentId`: a reused prerequisite keeps the parent it was born under, so filtering by
  * `parentId` renders it as a leaf — a node that looks like it is waiting for nothing.
+ *
+ * `byId` is built ONCE per tree by {@link Tree} (`useMemo`), not per row: rebuilding the whole
+ * tree's map inside every row is O(N²) map insertions per frame, and the panel re-reads on every
+ * engine change. Lookups are O(1).
  */
-function childrenOf(nodes: readonly MissionNodeView[], parent: MissionNodeView): readonly MissionNodeView[] {
-  const byId = new Map(nodes.map((node) => [node.id, node]))
+function childrenOf(byId: ReadonlyMap<string, MissionNodeView>, parent: MissionNodeView): readonly MissionNodeView[] {
   return parent.children
     .map((id) => byId.get(id))
     .filter((node): node is MissionNodeView => node !== undefined)
@@ -800,9 +803,59 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessio
   )
 }
 
-function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, actions }: {
+/**
+ * Whether two rows are the same PICTURE, field by field. A snapshot refresh hands every row a NEW
+ * object (the payload is parsed afresh), so React's identity memo would never hold; this compares what
+ * the row actually renders instead. Everything the row reads is listed here, and the two arrays are
+ * compared by content because the parser allocates new ones each frame.
+ */
+function sameNode(a: MissionNodeView, b: MissionNodeView): boolean {
+  return a === b || (
+    a.id === b.id
+    && a.parentId === b.parentId
+    && a.depth === b.depth
+    && a.title === b.title
+    && a.status === b.status
+    && a.attempts === b.attempts
+    && a.hasResult === b.hasResult
+    && a.resultRef === b.resultRef
+    && a.workerSessionId === b.workerSessionId
+    && a.workerLive === b.workerLive
+    && a.weight === b.weight
+    && (a.contextCount ?? a.context.length) === (b.contextCount ?? b.context.length)
+    && (a.correctionCount ?? a.corrections.length) === (b.correctionCount ?? b.corrections.length)
+    && a.corrections.length === b.corrections.length
+    && a.corrections.every((text, index) => text === b.corrections[index])
+    && a.children.length === b.children.length
+    && a.children.every((id, index) => id === b.children[index])
+    && sameWaiting(a.waitingFor, b.waitingFor)
+  )
+}
+
+/** Two waiting-for markers render identically, or not. Small and flat by construction. */
+function sameWaiting(a: MissionNodeView['waitingFor'], b: MissionNodeView['waitingFor']): boolean {
+  if (a === b) return true
+  if (a === null || a === undefined || b === null || b === undefined) return false
+  return a.reason === b.reason && a.resource === b.resource && a.needed === b.needed
+    && a.available === b.available && a.unit === b.unit
+}
+
+/** Two ancestor sets hold the same ids. Sets are rebuilt per render, so identity never holds. */
+function sameAncestors(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a === b) return true
+  if (a.size !== b.size) return false
+  for (const id of a) if (!b.has(id)) return false
+  return true
+}
+
+/**
+ * One row of a tree. `memo` because a frame re-reads the whole snapshot: without it every row
+ * re-renders on every engine change even when its own picture is unchanged.
+ */
+const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestors = NO_ANCESTORS, actions }: {
   node: MissionNodeView
-  nodes: readonly MissionNodeView[]
+  /** The tree's id→node index, built once by {@link Tree}: `childrenOf` must not rebuild it per row. */
+  byId: ReadonlyMap<string, MissionNodeView>
   depth: number
   /** The parent that listed this node; absent for a tree's root. */
   viaParentId?: string
@@ -818,7 +871,7 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
 }): ReactNode {
   const { openId, onOpenDetail } = actions
   // A child already on this path is a cycle, not a dependency: it stops here instead of descending.
-  const children = childrenOf(nodes, node).filter((child) => !ancestors.has(child.id))
+  const children = childrenOf(byId, node).filter((child) => !ancestors.has(child.id))
   // Listed here as a prerequisite: marked so a repeated row does not read as a duplicate.
   const reused = viaParentId !== undefined && node.parentId !== viaParentId
   // The default follows the node: open while its mission is in play, folded once it finished.
@@ -833,6 +886,11 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
   // Why this mission is queued (skipped by an admission gate), or `undefined` when it is not. Being
   // skipped is normal queuing, so this renders as a marker, never as a warning.
   const waiting = waitingLabel(node.waitingFor)
+  // The row carries COUNTS, not the texts (see `wire.ts`): a current host sends the counts, an older
+  // one still sends the arrays, and the longer of the two is the truth in either case.
+  const contextCount = Math.max(node.contextCount ?? 0, node.context.length)
+  const corrections = node.corrections
+  const correctionCount = Math.max(node.correctionCount ?? 0, corrections.length)
 
   return (
     <div className="avwf-node">
@@ -864,13 +922,16 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
         {/* A collapsed row has to say the mission was steered — its title is the goal as created, and
             without this a corrected mission reads as a title that does not match its own result. The
             texts ride in the tooltip; the detail dialog's 「纠偏」 section lists them in full. */}
-        {node.corrections.length > 0
+        {correctionCount > 0
           ? (
             <span
               className="avwf-meta avwf-corrected"
-              title={`已纠偏 ${String(node.corrections.length)} 次：\n${node.corrections.join('\n')}`}
+              title={`已纠偏 ${String(correctionCount)} 次：\n${corrections.join('\n')}`
+                + (correctionCount > corrections.length
+                  ? `\n（这里只列最新 ${String(corrections.length)} 条，全部在详情里）`
+                  : '')}
             >
-              已纠偏 {node.corrections.length} 次
+              已纠偏 {correctionCount} 次
             </span>
           )
           : null}
@@ -885,9 +946,9 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
         {node.resultRef !== null ? <span className="avwf-meta" title={node.resultRef}>结果已落盘</span> : null}
         <span className="avwf-meta avwf-detail-hint">详情</span>
       </div>
-      {node.context.length > 0 ? (
+      {contextCount > 0 ? (
         <div className="avwf-context" style={{ paddingLeft: `${String(depth * 14 + 30)}px` }}>
-          {node.context.join(' · ')}
+          背景 {contextCount} 条（详情里可见）
         </div>
       ) : null}
       {expanded && expandable
@@ -895,7 +956,7 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
           <NodeRow
             key={child.id}
             node={child}
-            nodes={nodes}
+            byId={byId}
             depth={depth + 1}
             viaParentId={node.id}
             ancestors={new Set([...ancestors, node.id])}
@@ -905,7 +966,13 @@ function NodeRow({ node, nodes, depth, viaParentId, ancestors = NO_ANCESTORS, ac
         : null}
     </div>
   )
-}
+}, (prev, next) =>
+  prev.depth === next.depth
+  && prev.viaParentId === next.viaParentId
+  && prev.byId === next.byId
+  && prev.actions === next.actions
+  && sameAncestors(prev.ancestors ?? NO_ANCESTORS, next.ancestors ?? NO_ANCESTORS)
+  && sameNode(prev.node, next.node))
 
 /**
  * One whole tree, with its own action. The delete button is here and not on the rows
@@ -935,6 +1002,9 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession,
   // A refused `openSession` on THIS tree's root id, shown beside the id it came from. Per tree, so a
   // stale session on one tree does not print an error on all of them.
   const [workerFailure, setWorkerFailure] = useState<string | undefined>(undefined)
+  // The tree's id→node index, built ONCE per tree object instead of once per row. Every row used to
+  // rebuild it inside `childrenOf`, which is O(N²) map insertions for a single tree on every frame.
+  const byId = useMemo(() => new Map(tree.nodes.map((node) => [node.id, node])), [tree.nodes])
 
   // An armed button must not stay armed, or a later click deletes a whole tree unconfirmed.
   useEffect(() => {
@@ -983,7 +1053,7 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession,
       </header>
       {root === undefined
         ? <div className="avwf-empty">根节点缺失</div>
-        : <NodeRow node={root} nodes={tree.nodes} depth={0} actions={actions} />}
+        : <NodeRow node={root} byId={byId} depth={0} actions={actions} />}
     </section>
   )
 }
@@ -1126,8 +1196,10 @@ export function MissionTreeView({
     overscan: VIRTUAL_OVERSCAN,
   })
 
-  const openDetail = (nodeId: string): void => { setOpenId(nodeId) }
-  const actions: RowActions = { openId, onOpenDetail: openDetail }
+  // Stable identities matter for the row memo: a fresh `actions` object (or callback) on every render
+  // would invalidate every `NodeRow` even when nothing it renders changed.
+  const openDetail = useCallback((nodeId: string): void => { setOpenId(nodeId) }, [])
+  const actions: RowActions = useMemo(() => ({ openId, onOpenDetail: openDetail }), [openId, openDetail])
   // Only CLOSED trees (finish_mission) are batch-clean candidates; an un-retired tree is skipped and
   // reported by the host. Counting here is for the button's label and its enabled/disabled state.
   const finishedCount = trees.filter((tree) => tree.closedAt !== null).length

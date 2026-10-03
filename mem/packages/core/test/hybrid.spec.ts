@@ -242,4 +242,36 @@ describe('hybridSearch', () => {
     expect(result.used_tokens).toBe(0)
     expect(result.hits).toHaveLength(2)
   })
+
+  it('hands the relaxed retry the vector the strict pass encoded (P8)', async () => {
+    // The single-store `search` path gets no `queryVector` from its caller, so both passes used to
+    // call `semantic.encode` — the retry paid the model (~4 ms on a warm one) for a vector it
+    // already had. A store publishes through `ctx.onQueryVector`; the retry must reuse it.
+    const vectors: Array<Float32Array | undefined> = []
+    let encodes = 0
+    const encode = async (): Promise<Float32Array> => {
+      encodes += 1
+      return new Float32Array([0.25, 0.5, 0.75, 1])
+    }
+    let pass = 0
+    const result = await hybridSearch(deps((ctx) => {
+      pass += 1
+      const thisPass = pass
+      vectors.push(ctx.queryVector)
+      // A Promise leg, exactly how a store's async semantic leg behaves: reuse the handed vector,
+      // otherwise encode once and publish it for the next pass.
+      return [(async (): Promise<HybridLeg> => {
+        const vec = ctx.queryVector ?? await encode()
+        ctx.onQueryVector?.(vec)
+        // Strict pass: nothing survives PLUS a floor drop — the one shape that triggers the retry.
+        return thisPass === 1
+          ? { weight: 1, scores: new Map(), leg: 'jaccard', droppedByFloor: 3 }
+          : { weight: 1, scores: new Map([[1, 0.9]]), leg: 'jaccard', droppedByFloor: 0 }
+      })()]
+    }), { query: '查询' })
+    expect(result.relaxed).toBe(true)
+    expect(encodes).toBe(1)
+    expect(vectors[0]).toBeUndefined()
+    expect(vectors[1]).toEqual(new Float32Array([0.25, 0.5, 0.75, 1]))
+  })
 })

@@ -16,7 +16,11 @@
  *   - the `window.__ModuleLoader__.load(...)` handoff, the plugin-owned style
  *     injection, the `data-plugin-css` dedup key and the CSS Modules class map
  *     must all still be there, and every class-map value must appear in the CSS
- *     text injected next to it.
+ *     text injected next to it;
+ *   - the artifact may not reference a source map: the client config builds
+ *     without one (the map is not in the published tarball, so its trailing
+ *     `sourceMappingURL` would 404 in a consumer's devtools), and a re-enabled
+ *     `sourcemap` must fail here rather than silently restore that reference.
  *
  * It is deliberately general: it scans for the roots derived from this script's
  * own location and for the class map the style injector itself emits — no file
@@ -55,4 +59,4 @@ if (problems.length > 0) {
   console.error('assert-client-portable: FAILED')
   process.exit(1)
 }
-console.log(`assert-client-portable: ok — lib/client.js is path-independent (no build root, relative CSS ids, class map ↔ injected CSS)`)
+console.log(`assert-client-portable: ok — lib/client.js is path-independent (no build root, relative CSS ids, class map ↔ injected CSS, no unshipped map reference)`)

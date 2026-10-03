@@ -70,6 +70,22 @@ for (const tarball of tarballs) {
     check(listing.includes(entry), `${tarball}: missing ${entry}`)
   }
 
+  // Publish-artifact size gate: the tarball must carry NO JS source map.
+  //
+  // `dist` is built with `sourceMap: true` on purpose — local dev/debugging wants the maps — and they
+  // are dropped from the PUBLISHED artifact by the `!dist/**/*.js.map` entries in package.json#files
+  // (the same mechanism the two plugins use; both already ship zero `.js.map`). The assertion is made
+  // on the tarball rather than on the tsconfig/`files` pair because only the tarball proves what a
+  // consumer actually gets. What it defends against:
+  //   - the maps are the biggest avoidable chunk of the artifact — 34 files, 272,560 B of the 845,992 B
+  //     unpacked (≈32%; 331,930 B ≈ 39% together with the `.d.ts` maps), and
+  //   - their `sources` point at `../src/**`, which does NOT ship (`files: ["dist"]`), so a consumer
+  //     can never resolve them: they buy nothing while costing the download.
+  // A silent regression (tsconfig or `files` edited) is exactly the thing this line catches.
+  const jsMaps = listing.split('\n').filter(entry => /^package\/dist\/.*\.js\.map$/.test(entry))
+  const jsMapBytes = jsMaps.reduce((sum, entry) => sum + (spawnSync('tar', ['-xzOf', join(outDir, tarball), entry]).stdout?.length ?? 0), 0)
+  check(jsMaps.length === 0, `${tarball}: ships ${String(jsMaps.length)} JS source map(s) (${String(jsMapBytes)} bytes); keep the "!dist/**/*.js.map" negation in package.json#files`)
+
   const contents = spawnSync('tar', ['-xzOf', join(outDir, tarball), 'package/package.json'], { encoding: 'utf8' }).stdout ?? ''
   for (const protocol of ['workspace:', 'catalog:', 'link:', 'file:']) {
     check(!contents.includes(`"${protocol}`) && !contents.includes(`: "${protocol}`), `${tarball}: still declares ${protocol}`)

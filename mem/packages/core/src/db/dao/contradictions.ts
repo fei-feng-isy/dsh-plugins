@@ -8,7 +8,7 @@
  */
 import { MAX_REPORTED_CONFLICTS, type ContradictionRecord } from '@avantf/mem-contract'
 import type { Db } from '../port.js'
-import { batches } from '../chunk.js'
+import { batches, inList } from '../chunk.js'
 
 export interface ConflictPair {
   /** Row id of the pair — the handle `contradict_resolve` takes. */
@@ -150,7 +150,7 @@ export class ContradictionsDao {
     if (ids.length === 0) return 0
     let changes = 0
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       changes += this.db
         .prepare(
           `UPDATE contradiction_log
@@ -158,7 +158,7 @@ export class ContradictionsDao {
                   resolved_by = 'auto'
             WHERE resolved = 0 AND fact_a IN (${placeholders})`,
         )
-        .run(resolution, ...batch).changes
+        .run(resolution, ...values).changes
       changes += this.db
         .prepare(
           `UPDATE contradiction_log
@@ -166,7 +166,7 @@ export class ContradictionsDao {
                   resolved_by = 'auto'
             WHERE resolved = 0 AND fact_b IN (${placeholders})`,
         )
-        .run(resolution, ...batch).changes
+        .run(resolution, ...values).changes
     }
     return changes
   }

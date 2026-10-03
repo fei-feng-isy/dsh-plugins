@@ -7,7 +7,7 @@
  * contradiction detection (see `db/chunk.ts`).
  */
 import type { Db } from '../port.js'
-import { batches } from '../chunk.js'
+import { batches, inList } from '../chunk.js'
 
 export class EntitiesDao {
   constructor(private readonly db: Db) {}
@@ -58,14 +58,14 @@ export class EntitiesDao {
     if (!ids.length) return out
     for (const id of ids) out.set(id, [])
     for (const batch of batches(ids)) {
-      const placeholders = batch.map(() => '?').join(',')
+      const { placeholders, values } = inList(batch)
       const rows = this.db
         .prepare<{ fact_id: number; name: string }>(
           `SELECT fe.fact_id AS fact_id, e.name AS name FROM fact_entities fe
            JOIN entities e ON e.entity_id = fe.entity_id
            WHERE fe.fact_id IN (${placeholders})`,
         )
-        .all(...batch)
+        .all(...values)
       for (const row of rows) out.get(row.fact_id)?.push(row.name)
     }
     return out
@@ -121,7 +121,8 @@ export class EntitiesDao {
   /** Active facts linked to ALL of `names` (AND-join, `reason` leg). */
   activeFactsForAllEntities(names: readonly string[]): number[] {
     if (!names.length) return []
-    const placeholders = names.map(() => '?').join(',')
+    // `values` is padded to the ladder rung; the HAVING count must use the REAL number of names.
+    const { placeholders, values } = inList(names)
     return this.db
       .prepare<{ fact_id: number }>(
         `SELECT fe.fact_id AS fact_id FROM fact_entities fe
@@ -130,7 +131,7 @@ export class EntitiesDao {
           WHERE e.name IN (${placeholders}) AND fa.status = 'active'
           GROUP BY fe.fact_id HAVING COUNT(DISTINCT e.name) = ?`,
       )
-      .all(...names, names.length)
+      .all(...values, names.length)
       .map((row) => row.fact_id)
   }
 
@@ -151,7 +152,8 @@ export class EntitiesDao {
    */
   candidateFactsForAnyEntity(names: readonly string[], category: string | undefined, limit: number): number[] {
     if (!names.length || limit <= 0) return []
-    const placeholders = names.map(() => '?').join(',')
+    // The Jaccard denominator (`total + |q| - shared`) takes the REAL query width, not the rung.
+    const { placeholders, values } = inList(names)
     return this.db
       .prepare<{ id: number }>(
         `SELECT fa.fact_id AS id, COUNT(*) AS shared,
@@ -164,7 +166,7 @@ export class EntitiesDao {
           ORDER BY (CAST(shared AS REAL) / (total + ? - shared)) DESC, fa.fact_id ASC
           LIMIT ?`,
       )
-      .all(...names, category ?? null, category ?? null, names.length, limit)
+      .all(...values, category ?? null, category ?? null, names.length, limit)
       .map((row) => row.id)
   }
 }

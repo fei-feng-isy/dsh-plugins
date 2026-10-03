@@ -7,6 +7,7 @@
  * copy of it kept somewhere else.
  */
 import type { Db } from '../port.js'
+import { inList } from '../chunk.js'
 
 interface TripleRow {
   subj: string
@@ -25,6 +26,9 @@ interface TripleRow {
  * status per candidate row: 0.18 ms, and it does not depend on planner statistics.
  */
 export function polarityLookupSql(predCount: number): string {
+  // NOT routed through `inList`: this builder returns SQL text only, so the caller cannot bind the
+  // padded values. `predCount` is a fixed predicate list from the config (not data), so its width is
+  // already a single cache key.
   const placeholders = Array.from({ length: predCount }, () => '?').join(',')
   return `SELECT DISTINCT t.fact_id AS fact_id
             FROM triples t
@@ -112,9 +116,9 @@ export class TriplesDao {
    */
   activeFactsBySubject(subjs: readonly string[], secondPred?: string): number[] {
     if (!subjs.length) return []
-    const placeholders = subjs.map(() => '?').join(',')
+    const { placeholders, values } = inList(subjs)
     const secondClause = secondPred ? 'AND t.pred = ?' : ''
-    const params = secondPred ? [...subjs, secondPred] : [...subjs]
+    const params = secondPred ? [...values, secondPred] : [...values]
     return this.db
       .prepare<{ fact_id: number }>(
         `SELECT DISTINCT t.fact_id AS fact_id FROM triples t

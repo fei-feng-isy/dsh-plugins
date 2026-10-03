@@ -7,7 +7,7 @@
  * invites a worker to wait instead of finishing.
  */
 import { describe, expect, it } from 'vitest'
-import { buildProgressLine, buildWorkerPrompt, CAPACITY, isTroubled, isTroubledNode, waitedLabel, type ContinuationDelta, type DispatchView, type NodeRecord } from '../src/index.js'
+import { buildProgressLine, buildWorkerPrompt, CAPACITY, isTroubled, isTroubledNode, PROMPT_LIMITS, waitedLabel, type ContinuationDelta, type DispatchView, type NodeRecord } from '../src/index.js'
 
 function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
   return {
@@ -595,5 +595,56 @@ describe('the vocabulary the model reads', () => {
       }),
       'progress line',
     )
+  })
+})
+
+/**
+ * The size guardrails (P11). The tail is rebuilt on every dispatch and paid for in model tokens; these
+ * pin that the three unbounded axes (an ancestor's corrections, the analysis notes, the child count of
+ * an aggregate) are bounded, and that what a bound drops is COUNTED in the prompt rather than silently
+ * missing.
+ */
+describe('the prompt size guardrails', () => {
+  it('renders only the newest corrections of a chain ancestor, and counts the rest', () => {
+    const corrections = Array.from({ length: PROMPT_LIMITS.chainCorrections + 4 }, (_, i) => `纠偏 ${String(i)}`)
+    const prompt = buildWorkerPrompt(view({
+      node: node({ id: 'leaf', depth: 3, parentId: 'm' }),
+      chain: [node({ id: 'r', title: 'Root', context: ['why'], corrections })],
+    }))
+    // The newest survive; the older ones are counted, not silently dropped.
+    expect(prompt).toContain(`纠偏 ${String(corrections.length - 1)}`)
+    expect(prompt).not.toContain('纠偏 0')
+    expect(prompt).toContain(`另有 ${String(corrections.length - PROMPT_LIMITS.chainCorrections)} 条较早的纠偏未展开`)
+  })
+
+  it('renders only the newest analysis notes, and says how many were left out', () => {
+    const analysisNotes = Array.from({ length: PROMPT_LIMITS.analysisNotes + 3 }, (_, i) => `note ${String(i)}`)
+    const prompt = buildWorkerPrompt(view({ node: node({ attempts: 2, analysisNotes }) }))
+    expect(prompt).toContain(`note ${String(analysisNotes.length - 1)}`)
+    expect(prompt).not.toContain('note 0')
+    expect(prompt).toContain(`较早的 ${String(analysisNotes.length - PROMPT_LIMITS.analysisNotes)} 条未展开`)
+  })
+
+  it('bounds an aggregate prompt by count while still naming every child', () => {
+    // The measured worst case: 50 terminal children, each at the engine's inline cap.
+    const count = 50
+    const body = 'x'.repeat(CAPACITY.maxInlineResultChars)
+    const children = Array.from({ length: count }, (_, i) => node({
+      id: `c${String(i).padStart(4, '0')}`,
+      title: `child ${String(i)}`,
+      status: 'done',
+      hasResult: true,
+      result: body,
+    }))
+    const prompt = buildWorkerPrompt(view({
+      node: node({ status: 'running', children: children.map((child) => child.id) }),
+      children,
+    }))
+    // Every child is still named with id/title/status: nothing silently disappears.
+    for (const child of children) expect(prompt).toContain(`[${child.id}]`)
+    // Compaction is announced, and the whole prompt stays far below the unbounded ~100 KB.
+    expect(prompt).toContain(`共 ${String(count)} 个子任务结论`)
+    expect(prompt.length).toBeLessThan(PROMPT_LIMITS.childrenBody * CAPACITY.maxInlineResultChars
+      + count * PROMPT_LIMITS.childExcerptChars + 4_000)
   })
 })

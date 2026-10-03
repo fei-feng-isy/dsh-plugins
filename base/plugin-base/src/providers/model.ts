@@ -3,12 +3,16 @@
  * @module providers/model
  */
 import { createHash } from 'node:crypto'
+import { once } from 'node:events'
+import { createWriteStream } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
+import { finished } from 'node:stream/promises'
 import { ProvisionError } from '../errors.js'
 import { ATOMIC_TEMP_PREFIX, exists, sweepAtomicTemps } from '../fs.js'
 import { isInside, lockPath } from '../layout.js'
 import { defaultLock } from '../lock.js'
-import { METADATA_MAX_BYTES, fetchImplOf, readCapped, signalFor } from '../net.js'
+import { METADATA_MAX_BYTES, SPILL_THRESHOLD_BYTES, fetchImplOf, readCapped, readCappedOrSpill, signalFor } from '../net.js'
+import type { BodySpill } from '../net.js'
 import type {
   InstallContext,
   ProbeResult,
@@ -24,8 +28,22 @@ import type {
 export const MODEL_CACHE_KIND = 'model-cache'
 const DEFAULT_ENDPOINT = 'https://huggingface.co'
 const DEFAULT_REVISION = 'main'
-/** Maximum bytes read for a single model file. */
-const MAX_MODEL_BYTES = 4 * 1024 * 1024 * 1024
+/**
+ * Maximum bytes read for a single model file.
+ *
+ * 2 GiB, not the old 4 GiB. The cap is the number of bytes the MEMORY path would have to hold TWICE
+ * (the received chunks plus the joined copy), so it bounds the worst-case spike directly; the measured
+ * ~2× peak for a body of this size is ~4 GiB, which a 16 GB machine survives and a 4 GiB cap does not.
+ * 2 GiB is also still far above what the framework is for: a real `bge-small` is ~90 MB and even a
+ * multi-billion-parameter checkpoint is a handful of files well under this. Anything larger wants a
+ * different transport, not a bigger heap.
+ *
+ * (The review's "4 GiB is exactly Node's `kMaxLength`" does NOT reproduce on the target runtime:
+ * Node 22.23.2 / linux-x64 reports `buffer.constants.MAX_LENGTH` 2^53−1 and allocates a 4 GiB
+ * `Uint8Array` fine. The rejection boundary is a legitimate design choice here, not a crash we are
+ * ducking — see the report accompanying this change.)
+ */
+export const MAX_MODEL_BYTES = 2 * 1024 * 1024 * 1024
 /** How long the placement lock waits before reporting `lock/timeout`. */
 const LOCK_TIMEOUT_MS = 15_000
 /**
@@ -44,6 +62,9 @@ const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/
 
 /** Monotonic per-process sequence for the same-directory link temps. */
 let linkSequence = 0
+
+/** Monotonic per-process sequence for the same-directory spill temps. */
+let spillSequence = 0
 
 /** How an item's files are placed under `target.root`.
  *  @stable */
@@ -280,16 +301,75 @@ async function listFiles(ctx: ProviderContext, spec: ModelCacheSpec): Promise<re
   throw new ProvisionError('fetch/failed', `无法列出 ${spec.repo} 的文件：${problems.join('; ')}`)
 }
 
+/** One file landed under `blobs`: its content-addressed path, digest and byte size. */
+interface LandedFile {
+  readonly blob: string
+  readonly digest: string
+  readonly size: number
+}
+
 /**
- * Download one file, trying each endpoint in order.
+ * A {@link BodySpill} that streams one response into `<blobs>/.atomic-spill-*` while hashing it, then
+ * renames the temp onto its content-addressed name. Peak memory is a single chunk: the bytes are
+ * never all resident at once, on either side of the write.
  *
- * `readCapped` reports the two fetch failure shapes with different codes precisely so this branch can
- * be exact instead of collapsing them, because they mean different things here:
+ * The write itself goes through `node:fs` (`createWriteStream`) because {@link ProvisionFs} has no
+ * streaming writer and this change must not move the interface generation; the temp name carries
+ * {@link ATOMIC_TEMP_PREFIX}, so {@link sweepAtomicTemps} reaps a crashed writer's leftovers, and the
+ * final placement still uses the fs seam (`stat` / `rm` / `rename`).
+ */
+async function openBlobSpill(fs: ProvisionFs, blobs: string): Promise<BodySpill<LandedFile>> {
+  const temp = join(blobs, `${ATOMIC_TEMP_PREFIX}spill-${String(process.pid)}-${String((spillSequence += 1))}`)
+  await fs.rm(temp).catch(() => undefined)
+  const out = createWriteStream(temp)
+  const hash = createHash('sha256')
+  let failure: Error | undefined
+  // A permanent listener: without one, an open/write error would be an unhandled 'error' event.
+  out.on('error', (error: Error) => { failure = error })
+  return {
+    async write(chunk) {
+      if (failure !== undefined) throw failure
+      hash.update(chunk)
+      if (!out.write(chunk)) await once(out, 'drain')
+    },
+    async finish(total) {
+      if (failure !== undefined) throw failure
+      out.end()
+      await finished(out)
+      const digest = hash.digest('hex')
+      const blob = join(blobs, digest)
+      const info = await fs.stat(blob)
+      if (info?.isDirectory === true) await fs.rm(blob, { recursive: true })
+      // Content-addressed: a complete blob of the same size is already the right bytes.
+      if (info !== undefined && !info.isDirectory && info.size === total) {
+        await fs.rm(temp).catch(() => undefined)
+      } else {
+        await fs.rename(temp, blob)
+      }
+      return { blob, digest, size: total }
+    },
+    async abort() {
+      out.destroy()
+      await fs.rm(temp).catch(() => undefined)
+    },
+  }
+}
+
+/**
+ * Download one file, trying each endpoint in order, and land it under `blobs`.
+ *
+ * Below {@link SPILL_THRESHOLD_BYTES} this is the historical path unchanged: read the whole body,
+ * digest it, `atomicWrite` the blob. Above it the body streams through {@link openBlobSpill} to a
+ * same-directory temp and is renamed into place, so a multi-GB model costs one chunk of heap instead
+ * of two copies of itself.
+ *
+ * `readCappedOrSpill` reports the two fetch failure shapes with different codes precisely so this
+ * branch can be exact instead of collapsing them, because they mean different things here:
  *
  *   - `fetch/too-large` — the body crosses the hard byte cap. TERMINAL: every mirror serves the same
  *     oversized object, so the remaining endpoints are not tried.
  *   - `fetch/failed` — a truncated body whose declared length did not match. A TRANSPORT failure that
- *     falls through to the next endpoint. This is the case that matters most here: this is the 4 GiB
+ *     falls through to the next endpoint. This is the case that matters most here: this is the largest
  *     model path, the largest thing the framework downloads, and a slow/flaky mirror that truncates
  *     must not permanently fail the item.
  *
@@ -297,13 +377,15 @@ async function listFiles(ctx: ProviderContext, spec: ModelCacheSpec): Promise<re
  * `verifyFlat` sha256-checks the landed snapshot and raises `verify/failed`, which the provisioner does
  * not retry (another mirror cannot make wrong bytes right).
  */
-async function downloadFile(
+async function landFile(
   ctx: ProviderContext,
   endpoints: readonly string[],
   repo: string,
   sha: string,
   file: string,
-): Promise<Uint8Array> {
+  blobs: string,
+  limits: { readonly maxBytes: number; readonly spillAtBytes: number },
+): Promise<LandedFile> {
   const problems: string[] = []
   for (const endpoint of endpoints) {
     const url = `${endpoint}/${repo}/resolve/${sha}/${file}`
@@ -313,7 +395,16 @@ async function downloadFile(
         problems.push(`${url} → HTTP ${String(response.status)}`)
         continue
       }
-      return await readCapped(response, MAX_MODEL_BYTES)
+      const landed = await readCappedOrSpill(response, {
+        maxBytes: limits.maxBytes,
+        spillAtBytes: limits.spillAtBytes,
+        spill: () => openBlobSpill(ctx.fs, blobs),
+      })
+      if (!(landed instanceof Uint8Array)) return landed
+      const digest = sha256Hex(landed)
+      const blob = join(blobs, digest)
+      await writeBlob(ctx.fs, blob, landed)
+      return { blob, digest, size: landed.byteLength }
     } catch (error) {
       if (error instanceof ProvisionError && error.code === 'fetch/too-large') throw error
       problems.push(`${url} → ${error instanceof Error ? error.message : String(error)}`)
@@ -389,7 +480,9 @@ async function withLock<T>(ctx: ProviderContext, mission: () => Promise<T>): Pro
 /**
  * Make `destination` resolve to `blob`: keep an existing link that already resolves to the blob,
  * else place a fresh temp symlink and rename it over the destination. When links are unsupported,
- * atomically write the blob's bytes. A destination that is a directory is cleared first.
+ * copy through a same-directory temp and rename it over the destination — the blob is never held in
+ * memory and is never read twice (a GiB-scale model used to be read whole, then written). A
+ * destination that is a directory is cleared first.
  */
 async function linkOrWrite(fs: ProvisionFs, blob: string, destination: string): Promise<void> {
   const parent = dirname(destination)
@@ -411,7 +504,15 @@ async function linkOrWrite(fs: ProvisionFs, blob: string, destination: string): 
       await fs.rm(temp).catch(() => undefined)
     }
   }
-  await fs.atomicWrite(destination, await fs.readFile(blob))
+  const temp = join(parent, `${ATOMIC_TEMP_PREFIX}copy-${String(process.pid)}-${String((linkSequence += 1))}`)
+  await fs.rm(temp).catch(() => undefined)
+  try {
+    await fs.copyFile(blob, temp)
+    await fs.rename(temp, destination)
+  } catch (error) {
+    await fs.rm(temp).catch(() => undefined)
+    throw error
+  }
 }
 
 /** Write `bytes` to a content-addressed `blob`, repairing a missing, directory or wrong-sized blob. */
@@ -517,9 +618,23 @@ async function verifyFlat(ctx: ProviderContext, item: ProvisionItem, spec: Model
   }
 }
 
+/** The options of {@link modelCacheProvider}; the byte limits are injectable so tests can exercise the
+ *  spill boundary without multi-hundred-MB bodies. `@experimental` */
+export interface ModelCacheProviderOptions {
+  readonly id?: string
+  /** Hard per-file byte cap; default {@link MAX_MODEL_BYTES} (2 GiB). */
+  readonly maxBytes?: number
+  /** Body size above which a file streams to disk; default {@link SPILL_THRESHOLD_BYTES} (64 MiB). */
+  readonly spillAtBytes?: number
+}
+
 /** Build the built-in model-cache provider. */
-export function modelCacheProvider(options: { readonly id?: string } = {}): Provider {
+export function modelCacheProvider(options: ModelCacheProviderOptions = {}): Provider {
   const id = options.id ?? '@avantf/dsh-plugin-base/model-cache'
+  const limits = {
+    maxBytes: options.maxBytes ?? MAX_MODEL_BYTES,
+    spillAtBytes: options.spillAtBytes ?? SPILL_THRESHOLD_BYTES,
+  }
   return {
     id,
     kinds: [MODEL_CACHE_KIND],
@@ -570,18 +685,15 @@ export function modelCacheProvider(options: { readonly id?: string } = {}): Prov
         await ctx.fs.mkdir(blobs)
         const placements: Placement[] = []
         for (const file of files) {
-          const bytes = await downloadFile(ctx, endpoints, spec.repo, sha, file)
-          ctx.onProgress?.({ key: `${MODEL_CACHE_KIND}+${spec.repo}`, phase: 'download', loaded: bytes.byteLength, total: bytes.byteLength })
-          const digest = sha256Hex(bytes)
-          const blob = join(blobs, digest)
-          // Content-addressed blobs are written atomically.
-          await writeBlob(ctx.fs, blob, bytes)
-          placements.push({ file, blob, digest })
+          const landed = await landFile(ctx, endpoints, spec.repo, sha, file, blobs, limits)
+          ctx.onProgress?.({ key: `${MODEL_CACHE_KIND}+${spec.repo}`, phase: 'download', loaded: landed.size, total: landed.size })
+          placements.push({ file, blob: landed.blob, digest: landed.digest })
         }
         // Placement and the completion marker are one critical section.
         await withLock(ctx, async () => {
           for (const placement of placements) await linkOrWrite(ctx.fs, placement.blob, fileUnder(dataDir, placement.file))
           await sweepAtomicTemps(ctx.fs, sidecar)
+          await sweepAtomicTemps(ctx.fs, blobs)
           await ctx.fs.atomicWrite(
             join(sidecar, RECORD_FILE),
             encodeRecord({
@@ -604,18 +716,15 @@ export function modelCacheProvider(options: { readonly id?: string } = {}): Prov
       await ctx.fs.mkdir(snapshot)
       const placements: Placement[] = []
       for (const file of files) {
-        const bytes = await downloadFile(ctx, endpoints, spec.repo, sha, file)
-        ctx.onProgress?.({ key: `${MODEL_CACHE_KIND}+${spec.repo}`, phase: 'download', loaded: bytes.byteLength, total: bytes.byteLength })
-        const digest = sha256Hex(bytes)
-        const blob = join(blobs, digest)
-        // Content-addressed blobs are written atomically.
-        await writeBlob(ctx.fs, blob, bytes)
-        placements.push({ file, blob, digest })
+        const landed = await landFile(ctx, endpoints, spec.repo, sha, file, blobs, limits)
+        ctx.onProgress?.({ key: `${MODEL_CACHE_KIND}+${spec.repo}`, phase: 'download', loaded: landed.size, total: landed.size })
+        placements.push({ file, blob: landed.blob, digest: landed.digest })
       }
       // Snapshot links and the ref marker are one critical section.
       await withLock(ctx, async () => {
         for (const placement of placements) await linkOrWrite(ctx.fs, placement.blob, fileUnder(snapshot, placement.file))
         await sweepAtomicTemps(ctx.fs, join(root, 'refs'))
+        await sweepAtomicTemps(ctx.fs, blobs)
         await ctx.fs.mkdir(join(root, 'refs'))
         await ctx.fs.atomicWrite(join(root, 'refs', revision), new TextEncoder().encode(sha))
       })

@@ -71,7 +71,9 @@ export interface WarmOptions {
   /**
    * Wait for an idle event loop before loading nodejieba (the host-boot path). Off for the CLI,
    * which calls `warmModels` inline: there the process is already idle and the gate would only add
-   * its quiet window to every command.
+   * its quiet window to every command. The name is tokenizer-shaped for history, but the gate is the
+   * general "do not run synchronous startup mission during the boot burst" one — the plugin's
+   * mount-time entity sweep passes the same flag through {@link awaitStartupGate}.
    */
   deferTokenizerUntilIdle?: boolean
 }
@@ -133,6 +135,31 @@ export async function warmSemantic(rt: AvantfRuntime, reportFinal = true): Promi
 }
 
 /**
+ * Wait out the startup gate — the host readiness signal (bounded by {@link WAIT_FOR_HOST_MS}) and,
+ * when asked, one quiet turn of the event loop.
+ *
+ * Extracted so there is exactly ONE definition of "a job that must not run inside the host's boot
+ * window". The tokenizer warm below uses it, and so does the plugin's mount-time entity sweep:
+ * `reindexEntities` tags stale rows through nodejieba, whose dictionary parse is the same ~1.2 s
+ * SYNCHRONOUS mission the warm defers, so a sweep fired at mount (before this) could pull that parse
+ * back into the startup window through a second door (performance review §7.5 / P5).
+ *
+ * The waits are NOT preconditions: a host whose boot failed still resolves them, and a host whose
+ * boot hung is bounded here rather than trusted (see {@link WarmOptions.waitForCapMs}).
+ *
+ * @param options - the same options the tokenizer warm takes (the idle gate is opt-in).
+ * @returns how long the idle gate waited (ms), or `0` when it was not requested.
+ */
+export async function awaitStartupGate(options: WarmOptions = {}): Promise<number> {
+  if (options.waitFor !== undefined) {
+    const cap = options.waitForCapMs ?? WAIT_FOR_HOST_MS
+    await Promise.race([options.waitFor.catch(() => undefined), delay(cap)])
+  }
+  if (options.deferTokenizerUntilIdle !== true) return 0
+  return await whenEventLoopIdle()
+}
+
+/**
  * Warm ONLY the tokenizer, after the host-readiness signal and (when asked) an idle event loop.
  *
  * nodejieba loads its dictionary lazily on the FIRST `tag()` (measured ~950 ms, after which a call
@@ -145,16 +172,11 @@ export async function warmSemantic(rt: AvantfRuntime, reportFinal = true): Promi
  */
 export async function warmTokenizer(rt: AvantfRuntime, options: WarmOptions = {}): Promise<void> {
   if (options.waitFor !== undefined) {
-    // A host whose boot FAILED must still get a warmed tokenizer: the signal is a synchronization
-    // point, not a precondition. A host whose boot HUNG must not block the warm forever either —
-    // the host does not bound this promise (its URL print waits on the same one), so we do.
     rt.logger.info('model bootstrap: tokenizer warm waits for the host readiness signal')
-    const cap = options.waitForCapMs ?? WAIT_FOR_HOST_MS
-    await Promise.race([options.waitFor.catch(() => undefined), delay(cap)])
   }
-  if (options.deferTokenizerUntilIdle === true) {
-    const waited = await whenEventLoopIdle()
-    if (waited >= 200) rt.logger.info(`model bootstrap: tokenizer warm waited ${waited}ms for an idle event loop`)
+  const waited = await awaitStartupGate(options)
+  if (options.deferTokenizerUntilIdle === true && waited >= 200) {
+    rt.logger.info(`model bootstrap: tokenizer warm waited ${waited}ms for an idle event loop`)
   }
   const jiebaStarted = Date.now()
   if (await jiebaAvailable()) {

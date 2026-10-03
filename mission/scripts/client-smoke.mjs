@@ -54,7 +54,19 @@ const requireStub = (name) => {
   // React is only touched when a component renders, which this smoke does not do;
   // a minimal namespace is enough for the module body to evaluate.
   if (name === 'react' || name === 'react/jsx-runtime') {
-    return { createElement: () => null, jsx: () => null, jsxs: () => null, Fragment: null, useState: () => [undefined, () => undefined], useCallback: (fn) => fn, useEffect: () => undefined }
+    // `memo` is evaluated at MODULE scope (wrapping a component), so the stand-in must carry it even
+    // though nothing renders here; the hooks below are only reached during a render, which this smoke
+    // does not do. Kept in one object so a new module-scope react API fails loudly here, not in the app.
+    return {
+      createElement: () => null, jsx: () => null, jsxs: () => null, Fragment: null,
+      memo: (component) => component,
+      useState: () => [undefined, () => undefined],
+      useRef: () => ({ current: undefined }),
+      useId: () => 'id',
+      useMemo: (fn) => fn(),
+      useCallback: (fn) => fn,
+      useEffect: () => undefined,
+    }
   }
   // `react-dom` arrives through the virtualizer, which flushes measurements with
   // `flushSync`. It is in the shell's platform module list, so at runtime the real

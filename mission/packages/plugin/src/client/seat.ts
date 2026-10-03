@@ -21,11 +21,6 @@ export interface SeatSessionView {
   readonly running?: boolean
 }
 
-/** What this plugin reads off the seat's chat snapshot. */
-export interface SeatChatView {
-  readonly order?: readonly string[]
-}
-
 /** How many prompts the session has queued, or -1 when the running dsh exposes no queue. */
 export function queuedCount(session: SeatSessionView | undefined): number {
   return Array.isArray(session?.queue) ? session.queue.length : -1
@@ -34,9 +29,4 @@ export function queuedCount(session: SeatSessionView | undefined): number {
 /** Whether the session is running; an absent (or non-boolean) field reads as "not running". */
 export function isRunning(session: SeatSessionView | undefined): boolean {
   return session?.running === true
-}
-
-/** How many chat nodes the seat holds, or -1 when it exposes no order. */
-export function chatNodeCount(chat: SeatChatView | undefined): number {
-  return Array.isArray(chat?.order) ? chat.order.length : -1
 }

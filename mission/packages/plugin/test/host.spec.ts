@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { RefusalCode } from '@avantf/mission-core'
 import { agent, callTool, executorFor, mount, noteAndSplit } from './mount.js'
 import type { TreeDocument } from '../src/domain.js'
-import { clientContribution, SNAPSHOT_WIRE_VERSION } from '../src/wire.js'
+import { clientContribution, ROW_CORRECTIONS_MAX, SNAPSHOT_WIRE_VERSION } from '../src/wire.js'
 import { WORKER_TOOL_DENY } from '../src/faces.js'
 
 /** A mission unit: the child session the engine reserved for one node. */
@@ -786,9 +786,31 @@ describe('the snapshot the 任务 view reads', () => {
     expect(node?.status).toBe('running')
     expect(node?.parentId).toBeNull()
     expect(node?.depth).toBe(1)
-    expect(node?.context).toEqual(['because'])
+    // The row projection carries the premise COUNT, not the premises: the texts live in the detail
+    // dialog, and every node in a tree would otherwise re-send them on every frame. `context: []` is
+    // the legacy shape an older client still requires.
+    expect(node?.context).toEqual([])
+    expect(node?.contextCount).toBe(1)
     expect(node?.attempts).toBe(1)
     expect(node?.hasResult).toBe(false)
+  })
+
+  it('caps the corrections a row carries but reports the full count', async () => {
+    // The row marks a steered mission from `correctionCount`; only the newest few texts ride along, so
+    // a root the owner corrected many times cannot make every frame carry all of them.
+    const mounted = await mount()
+    const root = await createTree(mounted, 'Steered')
+    await mounted.flush()
+    for (let index = 0; index < ROW_CORRECTIONS_MAX + 3; index++) {
+      await callTool(mounted, 'adjust_mission', { root_id: root, adjustment: `correction ${String(index)}` }, mounted.owner)
+    }
+    const node = (await mounted.host.snapshot({ sessionId: mounted.owner.id })).trees[0]?.nodes[0]
+    expect(node?.correctionCount).toBe(ROW_CORRECTIONS_MAX + 3)
+    expect(node?.corrections).toHaveLength(ROW_CORRECTIONS_MAX)
+    // The newest survive the cap; the detail dialog is where all of them are read.
+    expect(node?.corrections.at(-1)).toBe(`correction ${String(ROW_CORRECTIONS_MAX + 2)}`)
+    const detail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
+    expect(detail.node?.corrections).toHaveLength(ROW_CORRECTIONS_MAX + 3)
   })
 
   it('returns nothing for an unknown or missing session', async () => {

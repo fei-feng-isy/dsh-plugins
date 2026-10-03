@@ -17,6 +17,12 @@
  * What it measures per size: candidate fan-out per leg (the mechanism), retrieval latencies,
  * write latencies, the lifecycle tick / maintenance, and process RSS + DB size.
  *
+ * It also measures a CONTROL GROUP the first version was missing: the FTS leg inside the runtime
+ * that SEEDED, before it is reopened (`no_reopen`). The main measurement reopens the store, and the
+ * open tick's `PRAGMA optimize` writes planner statistics — which is exactly what hid the P1 plan
+ * flip of `docs/review/2026-10-03-performance-review.md` §1.2. The control's `fts_inner_scan` flag
+ * and `fts_selective` p50 are the bad-window signal; see {@link measureFirstSession}.
+ *
  * Usage:
  *   node scripts/bench-memory.mjs [--mode db|vec|both] [--sizes 2000,10000]
  *                                 [--iterations 20] [--dim 512]
@@ -41,6 +47,10 @@ const { vectorSpaceId } = await import(join(repo, 'packages/core/lib/db/vectors.
 const { readClock } = await import(join(repo, 'packages/core/lib/lifecycle/presence.js'))
 const { extractEntities } = await import(join(repo, 'packages/core/lib/entities/extract.js'))
 const { encodeHrrEntityVector, hrrToBytes } = await import(join(repo, 'packages/core/lib/hrr/encode.js'))
+// The FTS leg's production SQL text + tokenizer: the control group EXPLAINs and times the real
+// statement rather than a copy, so it cannot drift away from what the store actually runs.
+const { FTS_SEARCH_SQL } = await import(join(repo, 'packages/core/lib/db/dao/facts.js'))
+const { buildFtsQuery, resolveFtsTokenizer } = await import(join(repo, 'packages/core/lib/db/tokenizer.js'))
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`)
@@ -150,6 +160,46 @@ function seed(rt, n, withVectors, spaceId) {
   tx.immediate()
 }
 
+/**
+ * CONTROL GROUP: the FTS leg as it behaves in the runtime that SEEDED, before it is reopened.
+ *
+ * The main measurement below reopens the store, and that open tick's `PRAGMA optimize` writes the
+ * `sqlite_stat1` rows for `facts` — which is precisely what hid the P1 plan flip: with statistics
+ * the planner drives from `facts_fts` (`SCAN f VIRTUAL TABLE INDEX 0:M1`); without them it drives
+ * from `idx_facts_status_category` and re-runs the MATCH per row (inner `INDEX 0:=M1`). A fresh
+ * install's first session is in the second shape while its corpus grows, so the bench has to be
+ * able to SEE it. `fts_inner_scan` is the assertion-in-benchmark: it must stay `false`.
+ */
+function measureFirstSession(rt) {
+  const fts = buildFtsQuery(QUERIES.selective, resolveFtsTokenizer())
+  const params = [fts, null, null, -1]
+  const plan = (p) =>
+    rt.db.prepare(`EXPLAIN QUERY PLAN ${FTS_SEARCH_SQL}`).all(...p).map((r) => r.detail).join(' | ')
+  const stat1Facts = (() => {
+    try {
+      return rt.db.prepare("SELECT count(*) AS c FROM sqlite_stat1 WHERE tbl = 'facts'").get().c
+    } catch {
+      return 0
+    }
+  })()
+  const stmt = rt.db.prepare(FTS_SEARCH_SQL)
+  stmt.all(...params) // warm the statement cache
+  const xs = []
+  for (let i = 0; i < 10; i++) {
+    const s = performance.now()
+    stmt.all(...params)
+    xs.push(performance.now() - s)
+  }
+  const planMain = plan(params)
+  return {
+    stat1_facts: stat1Facts,
+    fts_inner_scan: /INDEX 0:=M1/.test(planMain),
+    fts_selective: stat(xs),
+    plan_main: planMain,
+    plan_hint: plan([fts, null, null, 1]),
+  }
+}
+
 async function runMode(mode) {
   const withVectors = mode === 'vec'
   const rows = []
@@ -161,12 +211,16 @@ async function runMode(mode) {
     const spaceId = vectorSpaceId(stub.name, 'bench', DIM)
 
     let seedMs = 0
+    let noReopen = null
     if (!reused) {
       const rt0 = buildRuntime({ dataHome: home, semantic: stub, logger: quiet })
       rt0.benchEncode = stub._enc
       const t0 = performance.now()
       seed(rt0, n, withVectors, spaceId)
       seedMs = round(performance.now() - t0)
+      // FIRST-SESSION control, before `rt0.shutdown()`: this runtime opened on an EMPTY database,
+      // so its open tick wrote no statistics — measure the FTS leg here, not only after the reopen.
+      noReopen = measureFirstSession(rt0)
       rt0.shutdown()
     }
 
@@ -219,6 +273,9 @@ async function runMode(mode) {
       reused,
       seed_ms: seedMs,
       startup_ms: startupMs,
+      // The first-session control (see `measureFirstSession`): the bad-window signal the reopen
+      // below erases. `null` when `--data-home` reused a store (nothing was seeded here).
+      no_reopen: noReopen,
       fanout,
       search_selective: stat(await timeIt(() => search(QUERIES.selective), ITER)),
       search_common: stat(await timeIt(() => search(QUERIES.common), ITER)),
@@ -275,6 +332,13 @@ async function runMode(mode) {
       + `probe=${String(row.probe_hrr.p50).padStart(9)}ms  add=${String(row.remember_add.p50).padStart(8)}ms  `
       + `update=${String(row.remember_update.p50).padStart(9)}ms  startup=${String(row.startup_ms).padStart(9)}ms  rss=${row.rss_mb}MB`,
     )
+    if (row.no_reopen) {
+      const c = row.no_reopen
+      console.log(
+        `           control(seed, NO reopen): stat1_facts=${c.stat1_facts}  `
+        + `fts_inner_scan=${c.fts_inner_scan}  fts_selective p50=${String(c.fts_selective.p50).padStart(8)}ms`,
+      )
+    }
   }
   return rows
 }
@@ -306,6 +370,9 @@ const report = {
     'through to fusion (4x the pool). FTS scoring over the match set is FTS5-internal and is NOT',
     'bounded by that cap — only the rows that cross into JS are.',
     'Rows carry an 8 KB hrr_vector, like production, so page/row-width effects are included.',
+    '`no_reopen` is the first-session CONTROL: FTS measured in the seeding runtime, before the',
+    'reopen whose open tick writes stats. `fts_inner_scan` must be false and its p50 must track',
+    '`search_selective`; a gap means the FTS plan flipped (review 2026-10-03 §1.2).',
   ],
 }
 console.log('\n' + JSON.stringify(report.note, null, 2))

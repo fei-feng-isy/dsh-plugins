@@ -3,7 +3,11 @@
  * (`storage-domain` refuses a second open), which is why the plugin owns the handle.
  * @module @avantf/dsh-mission/domain
  */
-import { z } from 'zod'
+// Namespace import, not `import { z }`: the zod entry re-exports `locales` as a namespace, and a
+// named import of `z` makes esbuild materialise that whole namespace into the browser bundle
+// (64 locale files, ~264 KB minified). The namespace form lets the locales be tree-shaken; the
+// schemas and wire shapes are byte-for-byte unchanged.
+import * as z from 'zod'
 import { domainTable, defineDomain } from '@deepseek-ai/dsh-storage-domain'
 import type { TreeDocument as TreeDocumentShape } from '@avantf/mission-core'
 

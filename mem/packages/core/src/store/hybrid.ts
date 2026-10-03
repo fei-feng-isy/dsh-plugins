@@ -115,6 +115,15 @@ export interface HybridContext {
   weights: RetrievalWeights
   /** A query vector the caller already encoded (the cross-store router encodes once for both stores). */
   queryVector?: Float32Array
+  /**
+   * Called by a store when it ENCODED this query itself (rather than reusing {@link queryVector}),
+   * so a retry pass can hand the same vector back instead of paying the model again.
+   *
+   * The single-store `search` path is the one that needs this: its caller supplies no vector, and the
+   * relaxed retry below re-ran the whole pass — including `semantic.encode(query)`. The cross-store
+   * router already passes a vector, so it is unaffected (performance review §7.7 / P8).
+   */
+  onQueryVector?(vec: Float32Array): void
 }
 
 /** What a store supplies. Generic in `H`, the caller-facing hit shape. */
@@ -280,11 +289,25 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
   const termCount = relevanceTerms(query).length
 
   /**
+   * The query vector in force, ACROSS both passes.
+   *
+   * The single-store path is handed no vector by its caller (only the cross-store router encodes
+   * once), so before this the relaxed retry re-encoded the same query — ~4 ms on a warm model, paid
+   * every time the strict pass emptied with floor drops. A store publishes what it encoded through
+   * {@link HybridContext.onQueryVector}, and the retry below reuses it. A caller-supplied vector
+   * (cross-store) is already here and is passed through unchanged.
+   */
+  let passVector = plan.queryVector
+
+  /**
    * One full pass under ONE floor profile: legs → fuse → live filter → rerank → slice → budget.
    *
    * `onReturn` (the store's reinforcement) is deliberately NOT called here: the strict pass is a
    * probe whenever a relaxed pass may follow, and reinforcing text the caller never receives is
    * exactly the defect `onReturn`'s doc calls out. The chosen pass is delivered by the caller below.
+   *
+   * `passVector` is read at call time and updated through `onQueryVector` while the pass runs, so the
+   * relaxed retry starts with whatever the strict pass encoded (see the variable's own comment).
    */
   const runPass = async (profile: FloorProfile, relaxLegs?: readonly FloorLeg[]): Promise<{ hits: Budgeted<H>[]; used_tokens: number; floors: RetrievalFloors; dropped_by_floor: RetrievalFloorDrops; capped: number }> => {
     // Resolved per pass and handed to the legs: the degraded relaxation of `min_fts_terms` must be
@@ -302,7 +325,8 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
       semAvail,
       weights,
       floors,
-      ...(plan.queryVector === undefined ? {} : { queryVector: plan.queryVector }),
+      ...(passVector === undefined ? {} : { queryVector: passVector }),
+      onQueryVector: (vec) => { passVector = vec },
     })
     let capped = 0
     for (const leg of legs) if (leg.capped === true) capped += 1

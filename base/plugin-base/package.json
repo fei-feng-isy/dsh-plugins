@@ -45,7 +45,9 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/*.js.map",
+    "!dist/**/*.js.map"
   ],
   "sideEffects": false,
   "peerDependencies": {

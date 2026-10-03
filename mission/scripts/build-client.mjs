@@ -58,6 +58,11 @@ const result = spawnSync(
     '--platform=browser',
     '--target=es2022',
     '--jsx=automatic',
+    // Minified: the browser reads this file on every page load and the host's client assembly
+    // re-processes it. Measured 899 KB → 534 KB (uncompressed) on 2026-10-03, then 535 KB → 171 KB
+    // once zod's locale namespace was tree-shaken (namespace imports in src/wire.ts / src/domain.ts;
+    // the assertion below keeps it that way) — see `docs/review/2026-10-03-performance-review.md` §7.2.
+    '--minify',
     `--outfile=${bundlePath}`,
     // A metafile, not a hand-written mirror: it names every file that went INTO the bundle, which is
     // the only way to see a shell module that should have been external but was inlined instead.
@@ -101,6 +106,42 @@ if (inlined.length > 0) {
   for (const input of inlined.slice(0, 10)) console.error(`  ${input}`)
   console.error('  add the package(s) they belong to to EXTERNAL in this script (a second React or slot')
   console.error('  registry breaks the running app in ways the smoke cannot catch)')
+  process.exit(1)
+}
+
+// ── zod's locale files must stay tree-shaken OUT of the browser bundle ───────
+// WHY THIS ASSERTION EXISTS: zod's entry point re-exports `locales` as a namespace. A NAMED import
+// (`import { z } from 'zod'`) made esbuild materialise all of them — measured 2026-10-03, 64 locale
+// files = 264 KB minified = 49% of a 535 KB bundle (95 zod inputs in total). A NAMESPACE import
+// (`import * as z from 'zod'`, the form in `src/domain.ts` / `src/wire.ts`) lets them be tree-shaken:
+// 171 KB, one locale input. The default English locale (`en.js`, ~2.7 KB) is a real dependency of
+// zod's error messages, so it is the only one allowed. Without this check a later zod or esbuild
+// upgrade could silently restore the other 63 and nothing else in the build would notice — the bundle
+// would just be 3× again.
+//
+// It reads the PER-OUTPUT `inputs`, not the top-level `meta.inputs`: the latter is every file esbuild
+// SCANNED, including ones it then shook to zero bytes (a locale that is tree-shaken out still appears
+// there). The output's `inputs` (with `bytesInOutput`) is what actually made it into the artifact.
+const outputs = Object.values(meta.outputs ?? {})
+const bundleInputs = outputs.length > 0
+  ? Object.assign({}, ...outputs.map((output) => output.inputs ?? {}))
+  : (meta.inputs ?? {})
+const ZOD_LOCALE = /(?:^|\/)zod\/v\d+\/locales\/([^/]+)\.js$/u
+const DEFAULT_ZOD_LOCALES = new Set(['en'])
+const localeInputs = Object.keys(bundleInputs)
+  .map((input) => input.replace(/\\/gu, '/'))
+  .map((input) => [input, ZOD_LOCALE.exec(input)])
+  .filter(([, match]) => match !== null)
+const extraLocales = localeInputs.filter(([, match]) => !DEFAULT_ZOD_LOCALES.has(match[1]))
+if (extraLocales.length > 0) {
+  console.error('build-client: zod locale files were INLINED into the browser bundle:')
+  for (const [input] of extraLocales.slice(0, 10)) console.error(`  ${input}`)
+  console.error(`  ${String(extraLocales.length)} non-default locale file(s); only en.js is expected.`)
+  console.error('  why this matters: the full locale set is ~264 KB of the ~535 KB bundle — a 3× regression')
+  console.error('  on every page load. It is pulled in by a NAMED `import { z } from \'zod\'`; the import')
+  console.error('  in src/domain.ts and src/wire.ts must stay `import * as z from \'zod\'` (namespace).')
+  console.error('  if zod/esbuild just changed its layout, re-run esbuild with --metafile and inspect the')
+  console.error('  inputs before relaxing this assertion.')
   process.exit(1)
 }
 

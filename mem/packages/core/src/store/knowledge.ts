@@ -37,7 +37,7 @@ import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsT
 import { probeTerms, type LexicalProbe } from './lexical.js'
 import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
 import { hybridSearch, RetrievalInputError, type HybridContext, type HybridDeps, type HybridLeg, type HybridResult } from './hybrid.js'
-import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportForeignVectors, vectorSpaceOf } from './common.js'
+import { evictVectors as evictVectorsOf, forEachYielding, normalizeWrite, normalizeWrites, reportForeignVectors, vectorSpaceOf } from './common.js'
 import { ENTITY_EXTRACTOR_VERSION, extractEntities } from '../entities/extract.js'
 import {
   assertFetchableUrl,
@@ -1089,8 +1089,14 @@ export class KnowledgeStore {
    * document. A stamp is a TRIGGER, not a judgement: the caller re-ingests through `sync`, which
    * hashes the body and decides. The first call only seeds the baseline and reports nothing —
    * use `sync` once at startup if a process may have been down while the corpus changed.
+   *
+   * ASYNC because one `stat` per document is exactly the cost that has to leave the event loop to
+   * something else once in a while: at 10k documents the walk blocked the host for >0.1 s per trip
+   * (measured — performance review §7.5 / P7), and this runs after every tool result behind a 2 s
+   * throttle. The baseline is still taken ATOMICALLY at the end, so a caller sees the same
+   * all-or-nothing update as before.
    */
-  corpusDrift(): { changed: number[]; missing: number[]; fileSetChanged: boolean } {
+  async corpusDrift(): Promise<{ changed: number[]; missing: number[]; fileSetChanged: boolean }> {
     const paths = this.docFiles.listPaths()
     const fileSet = paths.join('\n')
     const previous = this.corpusStamps
@@ -1098,7 +1104,7 @@ export class KnowledgeStore {
     const stamps = new Map<string, string>()
     const changed: number[] = []
     const missing: number[] = []
-    for (const doc of this.docs.list()) {
+    await forEachYielding(this.docs.list(), (doc) => {
       // `basePath`, never `pathFor`: `pathFor` resolves a collision by READING the file's
       // frontmatter, so a file whose frontmatter was destroyed (a whole-file overwrite by an
       // editor or a `write` tool) makes it answer with a different, non-existent path — and the
@@ -1109,11 +1115,11 @@ export class KnowledgeStore {
       if (stamp === null) {
         // Only a CHANGE is reported: a file that was never there is not news.
         if (previous?.has(path) === true) missing.push(doc.doc_id)
-        continue
+        return
       }
       stamps.set(path, stamp)
       if (previous !== null && previous.get(path) !== stamp) changed.push(doc.doc_id)
-    }
+    })
     this.corpusStamps = stamps
     this.corpusFileSet = fileSet
     return { changed, missing, fileSetChanged: previousSet !== null && previousSet !== fileSet }
@@ -1171,7 +1177,11 @@ export class KnowledgeStore {
     const docs = opts.docId === undefined ? all : all.filter(doc => doc.doc_id === opts.docId)
     const stale: KbDocFile[] = []
     const missing: KbDocFile[] = []
-    for (const doc of docs) {
+    // BATCHED: `state()` reads and hashes each document's body, so this loop is one full synchronous
+    // pass over the corpus. Yielding every `YIELD_BATCH` items keeps the mount-time `sync({})` from
+    // blocking the host's event loop for the whole pass (performance review §7.5 / P6); the order of
+    // `stale`/`missing` is unchanged, so the report is byte-identical.
+    await forEachYielding(docs, (doc) => {
       const state = this.docFiles.state(doc.doc_id, doc.domain, doc.source, doc.title)
       const entry: KbDocFile = {
         doc_id: doc.doc_id,
@@ -1182,14 +1192,15 @@ export class KnowledgeStore {
       }
       if (state.missing) missing.push(entry)
       else if (state.stale) stale.push(entry)
-    }
+    })
     // A single-document reconcile has no business walking the whole tree: `orphans` is a
     // corpus-level answer, and that walk is exactly the cost the per-document path exists to avoid.
     const known = new Set(all.map(doc => doc.doc_id))
+    // The orphan scan is a SECOND full read of the tree (one `read` per managed file); it is the
+    // other half of the same blocking pass, and `scan()` now yields inside itself.
     const orphans = opts.docId !== undefined
       ? []
-      : this.docFiles
-          .scan()
+      : (await this.docFiles.scan())
           .filter(file => file.doc_id === undefined || !known.has(file.doc_id))
           .map(file => file.path)
           .sort()
@@ -1205,14 +1216,15 @@ export class KnowledgeStore {
       const base = this.docFiles.basePath(doc.domain, doc.source, doc.title)
       baseCounts.set(base, (baseCounts.get(base) ?? 0) + 1)
     }
-    const unclaimed: KbUnclaimedFile[] = missing.flatMap((entry) => {
+    const unclaimed: KbUnclaimedFile[] = []
+    await forEachYielding(missing, (entry) => {
       const doc = docs.find(candidate => candidate.doc_id === entry.doc_id)
-      if (doc === undefined) return []
+      if (doc === undefined) return
       const base = this.docFiles.basePath(doc.domain, doc.source, doc.title)
-      if ((baseCounts.get(base) ?? 0) !== 1) return []
+      if ((baseCounts.get(base) ?? 0) !== 1) return
       const parsed = this.docFiles.read(base)
-      if (parsed === null || parsed.meta.doc_id !== undefined || parsed.body.trim() === '') return []
-      return [{ doc_id: doc.doc_id, title: doc.title, path: base }]
+      if (parsed === null || parsed.meta.doc_id !== undefined || parsed.body.trim() === '') return
+      unclaimed.push({ doc_id: doc.doc_id, title: doc.title, path: base })
     })
     if (opts.dryRun === true) {
       return { checked: docs.length, stale, missing, orphans, unclaimed, reingested: 0, adopted: 0, dry_run: true }
@@ -1407,7 +1419,7 @@ export class KnowledgeStore {
       // The semantic leg is capped by the pool size, not by `legCap`, so it is not flagged: comparing
       // it against `legCap` would report a trim that did not happen.
       ctx.semAvail
-        ? this.semanticPath(ctx.query, ctx.overFetch, opts, ctx.queryVector)
+        ? this.semanticPath(ctx.query, ctx.overFetch, opts, ctx.queryVector, ctx.onQueryVector)
             .then((raw) => {
               const floored = applyScoreFloor(raw, ctx.floors.semantic)
               return { weight: ctx.weights.semantic, scores: floored.scores, leg: 'semantic' as const, droppedByFloor: floored.dropped } satisfies HybridLeg
@@ -1430,13 +1442,16 @@ export class KnowledgeStore {
 
   /**
    * Semantic leg. `queryVector` short-circuits the encode when the caller already
-   * encoded this exact query (the cross-store router does, for both stores at once).
+   * encoded this exact query (the cross-store router does, for both stores at once); `onVector`
+   * publishes the vector this leg actually used, so the relaxed retry pass can reuse it instead of
+   * re-encoding (performance review §7.7 / P8).
    */
   private async semanticPath(
     query: string,
     k: number,
     opts?: { domain?: string; source?: string },
     queryVector?: Float32Array,
+    onVector?: (vec: Float32Array) => void,
   ): Promise<Map<number, number>> {
     const vec = queryVector ?? await this.semantic.encode(query)
     // A caller-supplied vector is trusted to come from this backend (see the option's doc), but the
@@ -1447,6 +1462,7 @@ export class KnowledgeStore {
     if (vec.length !== this.vstore.dim) {
       throw new RetrievalInputError(`queryVector 维度不符：${vec.length} != ${this.vstore.dim}`)
     }
+    onVector?.(vec)
     const topk = this.vstore.topk(vec, Math.max(50, k))
     if (!topk.length) return new Map()
     if (!opts?.domain && !opts?.source) return new Map(topk.map((t) => [t.id, t.score]))
