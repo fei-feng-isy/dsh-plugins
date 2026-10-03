@@ -204,7 +204,24 @@ export interface NodeRecord {
    * `DOMAIN_VERSION` stays 1. */
   readonly analysisAuthor: string | null
   readonly status: NodeStatus
+  /** When this node was ACCEPTED into the tree (entered `ready`). The scheduling semantics are the
+   * reason this is not "when it started": capacity is a DISPATCH gate, not an admission gate (see
+   * `@avantf/mission-core/dispatch`), so a node can sit here for a long time waiting for room or for
+   * its unit. {@link dispatchedAt} minus this is the queue time. */
   readonly createdAt: number
+  /** When this node was dispatched for the FIRST time — the moment an executor was bound to it (the
+   * first transition into `running`, via `dispatch`/`adoptParked`/`adoptContinuation`). `null` means
+   * "never its turn yet": still queued for capacity or for a unit. Immutable after the first write, so
+   * a reclaim, a retry or a re-dispatch never rewrites it; a record written before this field existed
+   * loads as `null` (= never dispatched, the honest reading). Persisted, `DOMAIN_VERSION` stays 1. */
+  readonly dispatchedAt: number | null
+  /** When this node entered a TERMINAL status (`done`/`failed`). `null` means "still in play" — ready,
+   * blocked, running or interrupted. Terminal is final, so this is written exactly once, by whichever
+   * path ends the node (`submitResult`, `failExhausted`, `cancelSubworks`, `cancelTree`); a node that
+   * is cancelled before ever running carries an `endedAt` with a `null` `dispatchedAt`. A record
+   * written before this field existed loads as `null` (= still in play). Persisted, `DOMAIN_VERSION`
+   * stays 1. */
+  readonly endedAt: number | null
   readonly depth: number
   /** Durable binding to the worker session id, persisted so a hot reload can tell "someone is
    * still on this"; the agent's existence is always resolved live, never asserted from here. */

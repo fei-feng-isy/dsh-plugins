@@ -65,6 +65,16 @@ DSH（DeepSeek Harness）的**任务树引擎**插件：`@avantf/dsh-mission`。
 - 所有自动释放动作都是 **best-effort**：失败只记 WARN，绝不影响挂载与命令结果；live worker 不做任何
   中断。
 
+## 任务时间戳（你会看到什么）
+
+每个任务节点记**受理 / 第一次派发 / 结束**三个时刻，派生**排队时长 / 执行时长 / 总时长**。
+`list_missions`、`mission_result`、`/mission`、任务面板、以及任务结束时给属主的运行时通知都显示同一句
+人类可读的时间（本地时区 `MM-DD HH:MM` + 相对时长），例如
+`派发 10-03 17:21（排队 45s） → 结束 10-03 17:23（耗时 2m10s）`；还没派发的显示 `等待中（受理 …）`。
+旧记录缺字段显示 `—`。字段语义、打点位置与兼容性见设计文档 §2.1.1，
+用户视角的完整说明见发布 README（[`packages/plugin/README.md`](packages/plugin/README.md)）的
+「你会看到什么：时间」。
+
 ## 依赖的 DSH 既有能力
 
 不自建，直接用：子 agent 生成（`ctx.subagents`，continuable + 预留 child id）、宿主 KV（`ctx.storageDomain`）、提示词注册表（运行时上下文）、`agent/pre-step`（唤醒与过滤）、`ctx.agents`（活性）、`ctx.sessionQuery`（owner 存亡判据）、`ctx.spillStore`（超长结果）、`ctx.interval`（兜底扫描）。

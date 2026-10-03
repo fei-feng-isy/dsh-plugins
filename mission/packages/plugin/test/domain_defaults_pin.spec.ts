@@ -130,6 +130,10 @@ const NODE_DEFAULTS: Record<string, unknown> = {
   unit: null,
   weight: 1,
   roundMs: null,
+  // The two dispatch clocks. A record written before them reads as "never dispatched" / "still in
+  // play" — `null`, never `undefined`, because `endedAt !== null` is the "is this over" test.
+  dispatchedAt: null,
+  endedAt: null,
   lastWorkerId: null,
   executorSessionId: null,
   correctionsDeliveredUpTo: 0,

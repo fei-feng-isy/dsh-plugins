@@ -64,6 +64,10 @@ export type {
 } from './dispatch.js'
 export { computeContinuationDelta, isMaterialChange, nodeFingerprint } from './continuation.js'
 export type { ContinuationDelta } from './continuation.js'
+// Derived timing: the arithmetic over a node's three instants (`createdAt`/`dispatchedAt`/`endedAt`),
+// shared so the tool answers, the panel's host half and the tests cannot disagree about a duration.
+export { queueMs, runMs, totalMs } from './timing.js'
+export type { NodeTiming } from './timing.js'
 export { buildWorkerPrompt, buildProgressLine, isTroubled, PROMPT_LIMITS, spillPointer, waitedLabel } from './prompt.js'
 export type { WorkerPromptOptions } from './prompt.js'
 // Trouble vocabulary: the state machine words its refusals with `statusLabel`, and engine + host

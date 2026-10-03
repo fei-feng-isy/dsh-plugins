@@ -236,8 +236,10 @@ function asBaseline(value: unknown): DispatchBaseline | null {
  * `corrections`/`analysisNotes`/`analysisAttempt`/`failures`/`spawnFailures`/`parkedWorker`/
  * `progressAt`/`stalls`/`stalledNotifiedAt`/`resultHint`. They are defaults the durable side
  * (`domain.ts`) also encodes, and core must be able to eat a BARE record — the state machine does
- * arithmetic on counters, and `undefined` there is `NaN`, not "nothing yet". The two encodings are
- * held to one answer by the plugin's `test/domain_defaults_pin.spec.ts`, over every durable field
+ * arithmetic on counters, and `undefined` there is `NaN`, not "nothing yet". The two dispatch
+ * timestamps join them: `dispatchedAt`/`endedAt` read as `null` (= never dispatched / still in play),
+ * so an old row renders 「—」 instead of a fabricated instant or a `NaN` duration. The two encodings
+ * are held to one answer by the plugin's `test/domain_defaults_pin.spec.ts`, over every durable field
  * the schema defaults, so a field can no longer be added on one side only.
  *
  * Returns the SAME object when nothing changed, so opening a current document does not churn it.
@@ -254,6 +256,8 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     roundMs?: unknown
     hungCount?: unknown
     analysisAuthor?: unknown
+    dispatchedAt?: unknown
+    endedAt?: unknown
   }
   const lastWorkerId = legacy.lastWorkerId ?? null
   // A record written before the display handle existed reads as "no executor to open"; the durable
@@ -289,6 +293,13 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   // A record written before note authorship existed reads as `null` = "author unknown", which sends
   // the delta down its generation-comparison fallback — exactly the previous build's judgement.
   const analysisAuthor = typeof legacy.analysisAuthor === 'string' ? legacy.analysisAuthor : null
+  // A record written before the dispatch clock existed reads as "never dispatched" (`null`), which is
+  // what every reader means by it. A dirty value (a string, a `NaN`) reads the same way rather than
+  // being coerced into a time nobody recorded. `endedAt` mirrors it: a missing value means "still in
+  // play". Both use the stored-timestamp reader, so the two encodings cannot drift from the durable
+  // side's `.default(null).catch(null)`.
+  const dispatchedAt = storedTimeOrNull(legacy.dispatchedAt)
+  const endedAt = storedTimeOrNull(legacy.endedAt)
   // The remaining durable fields whose default the DURABLE side also encodes (`domain.ts`). Each is
   // the conservative reading of "this record predates the field", and the point of repeating them
   // here is that core must be able to eat a BARE record — a store that never ran the zod schema
@@ -324,6 +335,8 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     && roundMs === node.roundMs
     && hungCount === node.hungCount
     && analysisAuthor === node.analysisAuthor
+    && dispatchedAt === node.dispatchedAt
+    && endedAt === node.endedAt
     && corrections === node.corrections
     && analysisNotes === node.analysisNotes
     && analysisAttempt === node.analysisAttempt
@@ -349,6 +362,8 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     roundMs,
     hungCount,
     analysisAuthor,
+    dispatchedAt,
+    endedAt,
     corrections,
     analysisNotes,
     analysisAttempt,
@@ -776,6 +791,9 @@ export class MissionTree {
         parkedWorker: null,
         // The display handle: kept after this dispatch ends, unlike `claimedBy`.
         executorSessionId: workerId,
+        // FIRST dispatch wins: a parked adoption only ever runs on a node that already ran (it parked
+        // itself by decomposing), but the `??` keeps the invariant true even for a hand-built record.
+        dispatchedAt: node.dispatchedAt ?? at,
       })
       await this.flush(state.tree.rootId)
       return accept({
@@ -857,6 +875,8 @@ export class MissionTree {
         lastWorkerId: null,
         // Last attempt wins: the continuation replaces the previous executor as the one to open.
         executorSessionId: workerId,
+        // The continuation is a re-dispatch of a node that already ran, so this never moves the clock.
+        dispatchedAt: node.dispatchedAt ?? at,
       })
       await this.flush(state.tree.rootId)
       return accept({
@@ -1060,6 +1080,10 @@ export class MissionTree {
       analysisAuthor: null,
       status: 'ready',
       createdAt: input.now,
+      // A brand-new node has never been dispatched and is not terminal. Both clocks start empty and
+      // are filled by the first dispatch and the terminal transition respectively.
+      dispatchedAt: null,
+      endedAt: null,
       depth: input.depth,
       claimedBy: null,
       claimedAt: 0,
@@ -1141,6 +1165,9 @@ export class MissionTree {
         parkedWorker: null,
         // The display handle: last attempt wins, and it survives this attempt's terminal state.
         executorSessionId: claimId,
+        // The FIRST dispatch of this node stops its queue clock; later dispatches leave it alone, so
+        // "排队 = dispatchedAt − createdAt" keeps meaning the one wait before the first run.
+        dispatchedAt: node.dispatchedAt ?? at,
       })
       await this.flush(state.tree.rootId)
       return accept({
@@ -1165,6 +1192,9 @@ export class MissionTree {
       result: node.result ?? reason,
       // Terminal: a parked address is spent either way.
       parkedWorker: null,
+      // Entering a terminal status is what stops the mission's clock. `dispatchedAt` is left alone:
+      // a node that failed before ever running keeps its `null` and is reported as never dispatched.
+      endedAt: this.deps.now(),
     })
     await this.flush(state.tree.rootId)
     return refuse('not-dispatchable', `任务 ${node.id} ${reason}，标记为失败`)
@@ -1582,6 +1612,8 @@ export class MissionTree {
         resultHint: hint,
         resultReadAt: null,
         claimedBy: null,
+        // `done` is terminal: stamp the end of the mission's life, exactly as `failExhausted` does.
+        endedAt: this.deps.now(),
       })
       const parentReady = this.recomputeAncestors(state, updated.id)
       await this.flush(state.tree.rootId)
@@ -1688,6 +1720,9 @@ export class MissionTree {
           claimedBy: null,
           // Terminal: a parked address on a cancelled node is spent.
           parkedWorker: null,
+          // Cancellation is one of the paths into a terminal status, so it stops the clock too. The
+          // node may never have been dispatched; that is what `dispatchedAt: null` keeps saying.
+          endedAt: now,
           updatedAt: now,
         }
         next.set(id, updated)
@@ -1777,6 +1812,8 @@ export class MissionTree {
           claimedBy: null,
           // The whole tree is voided: no session is waiting to converge on anything.
           parkedWorker: null,
+          // Same terminal clock as `cancelSubworks`: a cancelled node's life ends here.
+          endedAt: now,
           updatedAt: now,
         }
         next.set(id, updated)

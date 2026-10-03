@@ -85,6 +85,14 @@ export const nodeSchema = z.object({
   analysisAuthor: z.string().nullable().default(null).catch(null),
   status: z.enum(['blocked', 'ready', 'running', 'interrupted', 'done', 'failed']),
   createdAt: z.number(),
+  // Optional-with-default, both of them, for the same reason and with the same reading as core's
+  // `normalizeLoaded`: a document written before the dispatch clock existed reads as "never
+  // dispatched", and one written before the terminal clock as "still in play". `.catch(null)` degrades
+  // a dirty value (a hand-edited string, a `NaN`) to the same `null` rather than failing the whole
+  // document open over a field that only decides what a row shows — a fabricated instant would be
+  // worse than 「—」, because `endedAt` is what every reader tests to decide "is this over".
+  dispatchedAt: z.number().nullable().default(null).catch(null),
+  endedAt: z.number().nullable().default(null).catch(null),
   depth: z.number(),
   claimedBy: z.string().nullable(),
   claimedAt: z.number(),

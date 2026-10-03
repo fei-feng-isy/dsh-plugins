@@ -278,6 +278,8 @@ describe('outbound: the worker prompt boundary', () => {
       analysisAuthor: null,
       status: 'running',
       createdAt: 1,
+      dispatchedAt: null,
+      endedAt: null,
       depth: 1,
       claimedBy: 'mission-1',
       claimedAt: 1,

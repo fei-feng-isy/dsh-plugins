@@ -41,6 +41,12 @@ export interface MissionNodeView {
   readonly status: string
   readonly attempts: number
   readonly createdAt: number
+  /** When this node was FIRST dispatched, or `null` while it is still queued. Optional because an
+   *  older host does not send it, and absence reads exactly like `null` (= never dispatched). */
+  readonly dispatchedAt?: number | null
+  /** When this node reached a terminal status, or `null` while it is still in play. Optional for the
+   *  same reason as {@link dispatchedAt}. */
+  readonly endedAt?: number | null
   readonly hasResult: boolean
   readonly resultRef: string | null
   /** The session that ran this node LAST, or `null` when none ever did. Carried in the ROW
@@ -105,6 +111,15 @@ export interface MissionNodeDetailView {
   readonly status: string
   readonly attempts: number
   readonly depth: number
+  /** When this node was accepted into the tree. Optional: an older host does not send it, and the
+   *  dialog's timing line then prints 「受理 —」 rather than invented epoch time. */
+  readonly createdAt?: number | null
+  /** When this node was FIRST dispatched, or `null` while it is still queued. The detail dialog shows
+   *  the full 受理/派发/结束 line; the row shows the compact form. Optional for the same reason as the
+   *  row projection's copy. */
+  readonly dispatchedAt?: number | null
+  /** When this node reached a terminal status, or `null` while it is still in play. */
+  readonly endedAt?: number | null
   /** The mission's own submitted result, or null while it has not submitted one. */
   readonly result: string | null
   /** Where an oversized result was spilled, so the reader can still open it. */

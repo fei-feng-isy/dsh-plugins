@@ -145,6 +145,13 @@ const nodeSchema = z.object({
   status: z.string(),
   attempts: z.number(),
   createdAt: z.number(),
+  // Optional-with-default, like `workerSessionId`: an OLDER host omits both, and "never dispatched" /
+  // "still in play" is the honest reading of that payload — the row then carries no timing marker and
+  // the dialog prints 「—」, never a fabricated instant. Declared EXPLICITLY because a `strict` codec
+  // drops keys it does not name, so a field the host added and this schema forgot would vanish between
+  // the two halves.
+  dispatchedAt: z.number().nullable().default(null),
+  endedAt: z.number().nullable().default(null),
   hasResult: z.boolean(),
   resultRef: z.string().nullable(),
   // The LAST session that ran this node — what the node-id entry opens. DECLARED here on purpose: a
@@ -287,6 +294,13 @@ const detailNodeSchema = z.object({
   status: z.string(),
   attempts: z.number(),
   depth: z.number(),
+  /** When the node was accepted; optional so an older host that does not send it reads as 「—」 rather
+   *  than as the epoch. */
+  createdAt: z.number().optional(),
+  /** When this node was FIRST dispatched / when it reached a terminal status; `null` (or, from an
+   *  older host, absent via the default) means "never dispatched" / "still in play". */
+  dispatchedAt: z.number().nullable().default(null),
+  endedAt: z.number().nullable().default(null),
   /** Submitted conclusion, when there is one (inline; a long one is truncated). */
   result: z.string().nullable(),
   /** Where a spilled full result lives, already joined with its retrieval hint. */

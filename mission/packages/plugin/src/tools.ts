@@ -16,6 +16,7 @@ import {
 } from '@deepseek-ai/dsh-tools'
 import { CAPACITY, spillPointer, statusLabel, type Refusal, type WellFormedSource } from '@avantf/mission-core'
 import type { AvantfMissionHost } from './host.js'
+import { describeTiming } from './timeFormat.js'
 
 /** The one result shape every tool returns, surfaced as the terminal text block. */
 interface MissionToolResult {
@@ -479,12 +480,18 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       const waiting = host.waitingForOf(node.id)
       return {
         ok: true,
-        summary: `[${node.id}] ${node.title} — ${node.status}${corrections}\n\n${body}${pointer}`,
+        // The timing sits on the HEADER line, next to the status it qualifies: a reader who asked for
+        // one mission's result gets "when did it run" without opening the panel. The full instants
+        // (not just the durations) are carried in `data` so a caller can reuse them.
+        summary: `[${node.id}] ${node.title} — ${node.status} ｜ ${describeTiming(node)}${corrections}\n\n${body}${pointer}`,
         data: {
           node_id: node.id,
           title: node.title,
           status: node.status,
           weight: node.weight,
+          created_at: node.createdAt,
+          dispatched_at: node.dispatchedAt,
+          ended_at: node.endedAt,
           // Carried even though a result read is terminal-only (so this is `null` in practice): the
           // projection is the node's, and a consumer must not have to know which reader filled it.
           waiting_for: waiting === null ? null : {
@@ -524,7 +531,11 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       const lines = missions.map((mission) => {
         const closed = mission.closed ? ' [已归档]' : ''
         const troubled = mission.troubled ? '（反复出过问题）' : ''
-        return `[${mission.tree.rootId}] ${statusLabel(mission.root?.status)} — ${mission.root?.title ?? '（根任务缺失）'}${closed}${troubled}`
+        // The root's timing, in the same one-line vocabulary the panel and `/mission` use: the owner
+        // asked "when did it start and when did it end" after a long run, and `list_missions` is where
+        // they look first. Omitted only when the root record is missing.
+        const timing = mission.root === undefined ? '' : ` ｜ ${describeTiming(mission.root)}`
+        return `[${mission.tree.rootId}] ${statusLabel(mission.root?.status)} — ${mission.root?.title ?? '（根任务缺失）'}${closed}${troubled}${timing}`
       })
       return Promise.resolve({
         ok: true,

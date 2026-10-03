@@ -64,7 +64,9 @@ node {
   last_worker_id: string | null      // 被中断的会话 id —— 冷唤醒的句柄（§3.2.2）
   dispatch_baseline: Baseline | null // 这次 prompt 给会话看过什么；冷唤醒用它算差量（§3.2.2 / §9.2.2）
   status        : NodeStatus
-  created_at    : number            // 跨树公平排序用（最老优先）
+  created_at    : number            // 受理/进入 ready 的时刻（跨树公平排序用：最老优先）
+  dispatched_at : number | null     // 第一次派出执行者的时刻；null = 还没轮到（等容量 / 等 unit）
+  ended_at      : number | null     // 进入终态的时刻；null = 仍在进行（§2.1.1）
   depth         : number            // 根为 1
   claimed_by    : string | null     // 持有者 session id —— 持久
   claimed_at    : number            // 超时兜底用
@@ -84,6 +86,45 @@ node {
 `owner_session_id` 只在树记录上：**归属建根的 agent，其他 agent 不可见**（§8.1）；它也是"master 被销毁则销毁树"的判据来源（§8.6）。
 
 `claimed_by` / `claimed_at` 也**写进 KV**（跨引擎代际的绑定记忆），但它们的用途是**被解析**：引擎每次分派前用 `claimed_by` 去查那个 agent 还在不在，活性由查询决定、不由这两个字段自己断言。见 §3.2。
+
+### 2.1.1 三个时间戳与派生时长（2026-10-03）
+
+用户原话："经过长时间跑任务，都不知道任务是什么时候开始什么时候结束的"。所以节点上记**三个时刻**，
+再派生三个时长；四个显示面（`list_missions` / `mission_result` / `/mission` / 任务面板）+ 运行时通知
+都用同一套措辞。
+
+| 字段 | 语义 | 打点位置 |
+|---|---|---|
+| `created_at`（已有） | **受理**：进入 `ready` 的时刻。调度语义是"**容量是派发闸门、不是受理闸门**"（§9.2.1），所以节点可能在这里等很久 | `createRoot` / `decompose` 建节点时 |
+| `dispatched_at`（新） | **第一次**为该节点启动执行者（第一次进入 `running`）。`null` = 还没轮到（等容量 / 等 unit） | `dispatch` / `adoptParked` / `adoptContinuation`；写 `node.dispatchedAt ?? at`，所以回收、重派、续跑都**不会**改写它 |
+| `ended_at`（新） | 进入**终态**（`done` / `failed`）的时刻。`null` = 仍在进行 | `submitResult`（done）、`failExhausted` / `cancelSubworks` / `cancelTree`（failed） |
+
+派生量（`core/src/timing.ts`，唯一的算术处）：
+
+- **排队时长** = `dispatched_at − created_at`；未派发 → `null`（这一等还没结束，不编一个数）；
+- **执行时长** = `ended_at − dispatched_at`；未结束、或从没派发过 → `null`；
+- **总时长** = `ended_at − created_at`；未结束 → `null`（"取消前从没跑过"也有总时长——它确实在树里待过）。
+
+一律**钳到 `>= 0`**：时钟倒退时报 `0`，不报一个负时长。
+
+**显示**（本地时区、人类可读，`MM-DD HH:MM` + 相对时长，绝不裸 ISO；文案中文）：
+
+- 未派发 → `等待中（受理 10-03 17:20）`；
+- 已派发未结束 → `派发 10-03 17:21（排队 45s） → 进行中`；
+- 已结束 → `派发 10-03 17:21（排队 45s） → 结束 10-03 17:23（耗时 2m10s）`；
+- 排队中被取消（`ended_at` 有、`dispatched_at` 无）→ `等待中（受理 …，结束 …，未派发）`，明说这段时长**不是**执行；
+- 缺失的字段（旧记录 / 旧宿主）显示 `—`，绝不显示 1970 或 `NaN`。
+
+面板行上是**紧凑**形式（终态 `耗时 3m`、已派发未结束 `起 10-03 17:21`），完整三时刻
+（`受理 … ｜ 派发 … ｜ 结束 …`）放详情弹窗；运行时通知（§6.5）在「任务 XXXX 已结束（已完成）」
+后面补上同一句，这正是用户的原痛点。
+
+**兼容性**：两个字段都是**可选 + 默认 `null`**，`DOMAIN_VERSION` 保持 1（§9.4 的 backward-readable 规则），
+**不动 `SNAPSHOT_WIRE_VERSION`**（新增可选字段不是新增 Remote 方法——wire 版本只跟方法集走）。两道默认值
+编码（`domain.ts` 的 zod `.default(null).catch(null)` 与 core 的 `normalizeLoaded`）由
+`domain_defaults_pin.spec.ts` **从 schema shape 自动派生**的字段表逐字段钉死，所以旧记录读出来一定是
+`null` 而**不是 `undefined`**（`ended_at !== null` 是"是否结束"的判据，`undefined` 会让旧记录被读成
+"已结束"）。旧客户端收到新字段只是多两个未知键（zod object 默认丢弃），新客户端对旧宿主缺字段显示 `—`。
 
 ### 2.2 状态机
 

@@ -165,6 +165,44 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 - **不带 owner 分析**：斜杠命令没有"分析"可带，就不编一个；根节点的 `context` 为空，第一个执行者收到的 prompt 如实反映这一点；
 - 被拒绝时（例如子 agent 会话不能建树）返回 `error` 结果并带上稳定 code，而不是抛异常。
 
+## 任务时间戳（“什么时候开始、什么时候结束”）
+
+节点上记三个时刻（语义与打点见设计文档 §2.1.1）：`createdAt`（受理，进入 `ready`）、
+`dispatchedAt`（**第一次**派出执行者，进入 `running`；回收 / 重派 / 续跑都不改写）、
+`endedAt`（进入终态）。派生三个时长（`packages/core/src/timing.ts`：`queueMs` / `runMs` /
+`totalMs`，都钳到 `>= 0`），格式化在 **`timeFormat.ts` 一个模块**里，宿主半边与浏览器半边共用
+（客户端 bundle 不能 import `mission-core`，所以它是一份**无依赖**的纯函数，而不是客户端自己抄一份）。
+
+四个显示面 + 运行时通知，用的是同一句话：
+
+```
+等待中（受理 10-03 17:20）                                            # 还没派发
+派发 10-03 17:21（排队 45s） → 进行中                                   # 已派发、未结束
+派发 10-03 17:21（排队 45s） → 结束 10-03 17:23（耗时 2m10s）            # 已结束
+等待中（受理 …，结束 …，未派发）                                        # 排队中被取消
+```
+
+| 显示面 | 位置 | 形态 |
+|---|---|---|
+| `list_missions` | `tools.ts` | 每个任务行尾 ` ｜ 派发 … → 结束 …` |
+| `mission_result` | `tools.ts` | 头部状态行 ` ｜ 派发 … → 结束 …`；`data` 另带 `created_at` / `dispatched_at` / `ended_at` |
+| `/mission` | `host.ts` `describe()` | 列表行尾同一句 |
+| 任务面板 | `client/MissionTreeView.tsx` | 行上紧凑（`耗时 3m` / `起 10-03 17:21`）；弹窗标题下一行完整三时刻 `受理 … ｜ 派发 … ｜ 结束 …` |
+| 运行时通知 | `host.ts` `notifyOwner()` | `任务 <id> 已结束（已完成）：派发 … → 结束 …` —— 这正是"跑完不知道什么时候结束"的原痛点 |
+
+时间用**本地时区** `MM-DD HH:MM` + 相对时长（`45s` / `2m10s` / `1h5m` / `2d3h`），**不打印裸 ISO**；
+文案中文（命令面板是中文界面）。旧记录 / 旧宿主缺字段时显示 `—`（`timingDetail`）或干脆不显示行上标记
+（`timingBadge`），**绝不报错、也不显示 1970**。
+
+**兼容性怎么证的**：两个字段在 `domain.ts` 里是 `.nullable().default(null).catch(null)`，
+`DOMAIN_VERSION` 仍为 1；core 的 `normalizeLoaded` 也覆盖它们（`storedTimeOrNull`），所以
+**裸记录路径**（store 直接给 core，不经 zod）同样读到 `null`。`test/domain_defaults_pin.spec.ts`
+的字段表**从 `nodeSchema.shape` 派生**：新增带默认字段若不写进表就会让断言红——本字段就是被它
+自动收进断言的。插件测试 `test/timing.spec.ts` 另有"旧记录缺字段 → `null` + 面板显示 `—`"的用例。
+字段进 wire 的 `nodeSchema` / `detailNodeSchema` 时是**可选 + `default(null)`**：旧客户端收到新字段
+不会炸（zod object 默认丢弃未知键），新客户端对旧宿主的缺字段显示 `—`。**未动
+`SNAPSHOT_WIRE_VERSION`**：按既有规则它只跟 Remote **方法集**走，新增可选字段不 bump。
+
 ## 日志
 
 插件**自己带一个日志出口**（`src/log.ts`），每一行都写两处：可见的一处走 stderr（宿主侧）或浏览器 console（客户端侧），另一处镜像进 `ctx.logger`。

@@ -142,6 +142,10 @@ export async function sealedTree(workerId: string): Promise<SealedTree> {
       delete node['lastWorkerId']
       delete node['correctionsDeliveredUpTo']
       delete node['dispatchBaseline']
+      // The two dispatch clocks shipped later still: a document from before them has neither, and the
+      // whole point of this fixture is to make "absent" a real property of the record.
+      delete node['dispatchedAt']
+      delete node['endedAt']
     }
     return clone as unknown as TreeDocument
   }
@@ -185,6 +189,8 @@ export function asLegacy(document: TreeDocument): TreeDocument {
     delete node['lastWorkerId']
     delete node['correctionsDeliveredUpTo']
     delete node['dispatchBaseline']
+    delete node['dispatchedAt']
+    delete node['endedAt']
   }
   return clone as unknown as TreeDocument
 }

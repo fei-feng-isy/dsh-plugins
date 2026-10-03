@@ -36,6 +36,8 @@ function node(overrides: Partial<NodeRecord> = {}): NodeRecord {
     analysisAuthor: null,
     status: 'running',
     createdAt: 0,
+    dispatchedAt: null,
+    endedAt: null,
     depth: 1,
     claimedBy: 'mission-1',
     claimedAt: 1_000,

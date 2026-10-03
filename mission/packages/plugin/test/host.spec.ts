@@ -934,6 +934,7 @@ describe('resolving a historical executor on click', () => {
           context: [], corrections: [], correctionsDeliveredUpTo: 0, analysisNotes: [], analysisAttempt: 0,
           analysisAuthor: null,
           status: 'done', createdAt: at, depth: 1, claimedBy: null, claimedAt: at, attempts: 1,
+          dispatchedAt: at, endedAt: at + 500,
           failures: 0, spawnFailures: 0, parkedWorker: null, lastWorkerId: null, dispatchBaseline: null,
           progressAt: at, activityAt: at + 500, stalls: 0, hungCount: 0, stalledNotifiedAt: null,
           result: 'done', hasResult: true, resultReadAt: null, resultRef: null, resultHint: null,
@@ -943,8 +944,11 @@ describe('resolving a historical executor on click', () => {
     }
     // ABSENT, not merely null: `seedDocuments` bypasses the domain schema on purpose, so this is the
     // one place a record an earlier build wrote can be modelled exactly (the schema's
-    // `nullable().default(null)` is what `domain.spec.ts` pins).
+    // `nullable().default(null)` is what `domain.spec.ts` pins). The two dispatch clocks belong to
+    // that same vintage: an earlier build wrote neither.
     delete (document.nodes[rootId] as unknown as Record<string, unknown>)['executorSessionId']
+    delete (document.nodes[rootId] as unknown as Record<string, unknown>)['dispatchedAt']
+    delete (document.nodes[rootId] as unknown as Record<string, unknown>)['endedAt']
     return document
   }
 

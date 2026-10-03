@@ -19,6 +19,7 @@ import type {
   WorkerSessionTarget,
 } from './contract.js'
 import { INSTALL_STYLES } from './styles.js'
+import { timingBadge, timingDetail } from '../timeFormat.js'
 
 /** Statuses that mean "this mission is over" — a tree whose root reached one is deletable. */
 const TERMINAL: readonly string[] = ['done', 'failed']
@@ -782,6 +783,10 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessio
                         {STATUS_LABEL[ready.node.status] ?? ready.node.status}
                       </span>
                       <span>第 {ready.node.attempts} 次派发 · 深度 {ready.node.depth}</span>
+                      {/* The FULL timing line lives here, not on the row: three instants separated by
+                          「｜」 need the width of a dialog, and 「—」 is the honest reading of an instant
+                          an older record never recorded. */}
+                      <span className="avwf-dialog-head-time">{timingDetail(ready.node)}</span>
                     </>
                   )}
               </div>
@@ -817,6 +822,8 @@ function sameNode(a: MissionNodeView, b: MissionNodeView): boolean {
     && a.title === b.title
     && a.status === b.status
     && a.attempts === b.attempts
+    && a.dispatchedAt === b.dispatchedAt
+    && a.endedAt === b.endedAt
     && a.hasResult === b.hasResult
     && a.resultRef === b.resultRef
     && a.workerSessionId === b.workerSessionId
@@ -891,6 +898,9 @@ const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestor
   const contextCount = Math.max(node.contextCount ?? 0, node.context.length)
   const corrections = node.corrections
   const correctionCount = Math.max(node.correctionCount ?? 0, corrections.length)
+  // The compact timing marker (or `undefined` when the row already says it all). `timingBadge` reads
+  // the numeric instants, tolerating an older host whose payload omits them.
+  const rowTiming = timingBadge(node)
 
   return (
     <div className="avwf-node">
@@ -943,6 +953,10 @@ const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestor
           ? <span className="avwf-meta" title={`这个任务按 ${String(node.weight)} 核参与整机容量分配`}>约占 {node.weight} 核</span>
           : null}
         {node.attempts > 1 ? <span className="avwf-meta">第 {node.attempts} 次</span> : null}
+        {/* Compact timing: a finished mission shows how long it took, a running one when it started.
+            The full 受理/派发/结束 line is in the detail dialog — a row is a line, and the whole point
+            of the compact form is not to break it. */}
+        {rowTiming === undefined ? null : <span className="avwf-meta avwf-timing" title="在详情里看完整时间">{rowTiming}</span>}
         {node.resultRef !== null ? <span className="avwf-meta" title={node.resultRef}>结果已落盘</span> : null}
         <span className="avwf-meta avwf-detail-hint">详情</span>
       </div>

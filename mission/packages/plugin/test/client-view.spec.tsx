@@ -63,6 +63,10 @@ function snapshot(
   ): MissionNodeView => ({
     id, parentId, children, title, context: [], corrections: ownCorrections, status, attempts, depth,
     createdAt: depth, hasResult: status === 'done', resultRef: null, workerSessionId: null,
+    // A node that never entered `running` has no dispatch clock; a terminal one has both. Derived from
+    // the status so a fixture case does not have to name the instants, and deterministic (no clock).
+    dispatchedAt: status === 'ready' || status === 'blocked' ? null : depth * 1_000,
+    endedAt: status === 'done' || status === 'failed' ? depth * 1_000 + 500 : null,
   })
   return {
     trees: [{
@@ -83,6 +87,7 @@ function detail(overrides: Partial<MissionNodeDetail['node']> = {}, children: Mi
     node: {
       id: 'r1', rootId: 'r1', title: 'Ship it', description: '把迁移发出去', context: ['prod 已冻结', '回滚脚本在这'],
       analysisNotes: [], analysisAttempt: 0, corrections: [], status: 'running', attempts: 1, depth: 1,
+      createdAt: 1_000, dispatchedAt: 1_500, endedAt: null,
       result: null, resultPointer: null, workerSessionId: null,
       ...overrides,
     },
@@ -751,6 +756,74 @@ function history(count: number): MissionSnapshot {
     })),
   }
 }
+
+describe('mission timing in the panel', () => {
+  it('puts a compact duration on a finished row and the start clock on a running one', () => {
+    // Real render, not the formatter: the row must actually carry the marker. Two snapshots because a
+    // settled row folds its children — the finished and the running markers never share one frame.
+    const render = (data: MissionSnapshot): string => renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+      />,
+    )
+    const finished = render(snapshot({ root: 'done' }))
+    expect(finished).toContain('avwf-timing')
+    // The root finished: 500 ms of execution, rendered coarse.
+    expect(finished).toContain('耗时 1s')
+
+    const running = render(snapshot({ root: 'running' }))
+    // The root is running: WHEN it started, in local MM-DD HH:MM — never a bare ISO string.
+    expect(running).toMatch(/起 \d{2}-\d{2} \d{2}:\d{2}/)
+  })
+
+  it('leaves a never-dispatched row without a timing marker', () => {
+    const data: MissionSnapshot = {
+      trees: [{
+        rootId: 'r1',
+        closedAt: null,
+        nodes: [{
+          id: 'r1', parentId: null, children: [], title: 'queued', context: [], corrections: [],
+          status: 'ready', attempts: 0, depth: 1, createdAt: 1, hasResult: false, resultRef: null,
+          workerSessionId: null, dispatchedAt: null, endedAt: null,
+        }],
+      }],
+    }
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+      />,
+    )
+    // A queue marker is the 排队中 badge, not a timing one; inventing a duration would be the bug.
+    expect(html).not.toContain('avwf-timing')
+  })
+
+  it('spells out 受理 / 派发 / 结束 in the detail dialog', () => {
+    const html = dialog({ nodeId: 'r1', status: 'ready', detail: detail({ status: 'done', endedAt: 4_000 }) })
+    expect(html).toContain('avwf-dialog-head-time')
+    expect(html).toContain('受理 ')
+    expect(html).toContain('派发 ')
+    expect(html).toContain('结束 ')
+    expect(html).toMatch(/受理 \d{2}-\d{2} \d{2}:\d{2} ｜ 派发 \d{2}-\d{2} \d{2}:\d{2} ｜ 结束 \d{2}-\d{2} \d{2}:\d{2}/)
+  })
+
+  it('renders 「—」 for a record that predates the instants', () => {
+    // The old-record path: absent fields (an older host omits them) must not print epoch time.
+    const html = dialog({
+      nodeId: 'r1',
+      status: 'ready',
+      detail: detail({ createdAt: null, dispatchedAt: null, endedAt: null }),
+    })
+    expect(html).toContain('受理 — ｜ 派发 — ｜ 结束 —')
+  })
+})
 
 describe('MissionTreeView', () => {
   /** Render the view against a stub snapshot hook. */

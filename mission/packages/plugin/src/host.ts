@@ -52,6 +52,7 @@ import {
   type WellFormedSource,
 } from '@avantf/mission-core'
 import { workDomain, TREES_TABLE } from './domain.js'
+import { describeTiming } from './timeFormat.js'
 import {
   resumeWorker as runResumeWorker,
   wakeParkedWorkers as runWakeParkedWorkers,
@@ -197,6 +198,13 @@ interface NodeView {
   readonly status: string
   readonly attempts: number
   readonly createdAt: number
+  /** When this node was FIRST dispatched, or `null` while it is still queued (see
+   *  `@avantf/mission-core`'s `NodeRecord.dispatchedAt`). Carried in the ROW projection: the row's
+   *  compact timing marker is derived from it, and an older host omitting it reads as `null`. */
+  readonly dispatchedAt: number | null
+  /** When this node entered a terminal status, or `null` while it is still in play. Carried in the
+   *  ROW projection for the same reason as {@link dispatchedAt}. */
+  readonly endedAt: number | null
   readonly hasResult: boolean
   readonly resultRef: string | null
   /** The session that ran this node LAST, or `null` when none ever did (see `workerSessionIdOf`). */
@@ -230,6 +238,14 @@ export interface NodeDetail {
   readonly status: string
   readonly attempts: number
   readonly depth: number
+  /** When this node was accepted into the tree. Carried in the detail projection (not the row) because
+   *  the dialog's full timing line is the only place the 受理 instant is shown. */
+  readonly createdAt: number
+  /** When this node was FIRST dispatched, or `null` while it is still queued. The detail dialog shows
+   *  it beside `createdAt`/`endedAt`; the row carries the compact form. */
+  readonly dispatchedAt: number | null
+  /** When this node entered a terminal status, or `null` while it is still in play. */
+  readonly endedAt: number | null
   /** The submitted conclusion, when there is one (inline; a long one is truncated). */
   readonly result: string | null
   /** Where a spilled full result lives, joined with its retrieval hint. */
@@ -1390,6 +1406,9 @@ export class AvantfMissionHost extends TypertRemoteService {
         status: node.status,
         attempts: node.attempts,
         depth: node.depth,
+        createdAt: node.createdAt,
+        dispatchedAt: node.dispatchedAt,
+        endedAt: node.endedAt,
         result: node.result,
         resultPointer: node.resultRef === null ? null : spillPointer(node),
         workerSessionId: workerSessionIdOf(node),
@@ -1663,6 +1682,8 @@ export class AvantfMissionHost extends TypertRemoteService {
           status: node.status,
           attempts: node.attempts,
           createdAt: node.createdAt,
+          dispatchedAt: node.dispatchedAt,
+          endedAt: node.endedAt,
           hasResult: node.hasResult,
           resultRef: node.resultRef,
           workerSessionId: workerSessionIdOf(node),
@@ -1699,8 +1720,12 @@ export class AvantfMissionHost extends TypertRemoteService {
       // panel's detail or through `mission_result`, both of which carry the corrections themselves.
       const correctionCount = mission.root?.corrections.length ?? 0
       const corrected = correctionCount === 0 ? '' : ` ｜ 已纠偏 ${String(correctionCount)} 次`
+      // When the root started and ended (or that it is still waiting/running), so `/mission` answers
+      // the owner's "when did this thing actually run?" without opening anything. Omitted only when
+      // the root record is missing, where there is nothing honest to print.
+      const timing = mission.root === undefined ? '' : ` ｜ ${describeTiming(mission.root)}`
       lines.push(
-        `- [${mission.tree.rootId}] ${mission.root?.title ?? '（根任务缺失）'} — ${statusLabel(mission.root?.status)}${closed}（${counts}）${corrected}`,
+        `- [${mission.tree.rootId}] ${mission.root?.title ?? '（根任务缺失）'} — ${statusLabel(mission.root?.status)}${closed}（${counts}）${corrected}${timing}`,
       )
     }
     return lines.join('\n')
@@ -2044,11 +2069,19 @@ export class AvantfMissionHost extends TypertRemoteService {
     return undefined
   }
 
-  /** Wake the owner: the message carries a signal only, the guidance layer supplying the content. */
+  /** Wake the owner: the message carries a signal only, the guidance layer supplying the content.
+   *
+   *  The timing rides along because this is the one message the owner reads at the moment a mission
+   *  ends, and a long run's whole question is "when did it start, and how long did it take?" — the
+   *  answer is already on the record by the time the engine reports a terminal root, so demanding a
+   *  separate `/mission` read would be pure friction. `describeTiming` also prints 等待中/进行中, but a
+   *  terminal root always has a concrete 派发→结束 pair. */
   private notifyOwner(rootId: string, reason: string): void {
+    const node = this.tree?.node(rootId)
+    const timing = node === undefined ? '' : `：${describeTiming(node)}`
     this.deliverToOwner(
       rootId,
-      `任务 ${rootId} 已结束（${statusLabel(reason)}）。`,
+      `任务 ${rootId} 已结束（${statusLabel(reason)}）${timing}。`,
       `root ${rootId} reached ${reason}`,
     )
   }

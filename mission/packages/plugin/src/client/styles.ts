@@ -60,6 +60,10 @@ const CSS = `
    A status colour as TEXT does not survive both themes (light-theme green is 2.3:1). */
 .avwf-badge { flex: 0 0 auto; padding: 0 6px; border-radius: 9px; font-size: 11px; color: var(--dsw-alias-label-primary); background: color-mix(in srgb, var(--avwf-status, currentColor) 18%, transparent); }
 .avwf-meta { flex: 0 0 auto; color: var(--dsw-alias-label-secondary); font-size: 11px; }
+/* Timing is digits: tabular figures keep a column of rows from jittering as durations tick over, and
+   the row marker is deliberately the same .avwf-meta weight as every other small label so it does not
+   compete with the status badge. */
+.avwf-timing { font-variant-numeric: tabular-nums; }
 /* A queued mission: same bordered label as the reused/corrected tags, because being deferred by an
    admission gate is a NORMAL queuing fact, not a status — it must not wear a status hue. */
 .avwf-waiting { border: 0.5px dashed color-mix(in srgb, currentColor 45%, transparent); border-radius: 3px; padding: 0 3px; }
@@ -147,6 +151,9 @@ const CSS = `
 .avwf-dialog-head-title { margin: 0; font-size: 17px; line-height: 1.45; font-weight: 600; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
 .avwf-dialog-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--dsw-alias-label-secondary); }
 .avwf-dialog-head-id { font-family: ui-monospace, monospace; }
+/* The full 受理/派发/结束 line: it wraps onto its own line inside the flex meta row rather than
+   squeezing the id/status/attempts beside it, because it is three instants wide by construction. */
+.avwf-dialog-head-time { flex-basis: 100%; font-variant-numeric: tabular-nums; }
 .avwf-dialog-head-meta .avwf-badge { font-size: 12px; }
 .avwf-dialog-close { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: none; border-radius: 30px; background: transparent; cursor: pointer; font: inherit; font-size: 16px; color: var(--dsw-alias-label-primary); }
 .avwf-dialog-close:hover { background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 6%, transparent)); }
