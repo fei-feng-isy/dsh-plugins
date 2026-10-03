@@ -141,6 +141,11 @@ patch。`workspace:*` 指到的私有包，版本只在 `pnpm pack` 那一刻临
   也不要指向**不随包发布**的仓库文档（`docs/DESIGN.md`、`docs/INTERFACE.md`、`INSTALL.md` 等）。
 - 计数按实测写（工具个数、提示词段数）；发布文档里出现过期数字属于缺陷。
 
+**CHANGELOG 的取材范围**（2026-10-03 用户定）：只写**用户可观察的插件行为**（对外 API / CLI / 模型工具 / 面板 / 发布面 /
+升级行为）。**仓库内部与开发流程不进 CHANGELOG** —— 门禁脚本、CI job、检查档位（`check:fast`/`check:release`）、
+审查文档、测试基建、重构与死代码清理都不算插件功能，用户看不见它们（`docs/CLOSURE-TIERS.md`、`RELEASING.md`
+这类属于开发文档，也不进）。判据一句话：**用户装了这个包之后，行为会不会变？**
+
 ## 构建与门禁
 
 ```bash
