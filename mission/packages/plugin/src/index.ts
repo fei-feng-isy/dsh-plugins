@@ -878,6 +878,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     return lines
   }
 
+  /**
+   * The pointer appended when a caller asked the WRONG scope: `archive` releases worker SESSION
+   * records, while the records `finish_mission` closed are TASK TREES — the `missions` scope. The
+   * user-facing failure this fixes: `/clean archive all` answers "没有可清理的 mission 会话" while
+   * dozens of closed trees sit one command away, and the natural reading is that the command is
+   * broken rather than that the wrong layer was asked. ABSENT when the session has no closed tree,
+   * so an empty answer stays byte-for-byte what it was for a session that never rooted one.
+   */
+  const closedTreePointer = (sessionId: string): string | undefined => {
+    const closed = host.finishedTreeIds(sessionId).length
+    return closed === 0 ? undefined : `另有 ${String(closed)} 棵已关闭的任务树可清理：/clean missions all`
+  }
+
+  /** {@link closedTreePointer} as the reply's last section, never mutating the caller's array. */
+  const withClosedTreePointer = (sessionId: string, lines: readonly string[]): string[] => {
+    const pointer = closedTreePointer(sessionId)
+    return pointer === undefined ? [...lines] : [...lines, pointer]
+  }
+
   /** The `orphans` scope as a read-only listing, grouped by the reason each probe came back with. */
   const orphanScopeLines = (orphans: readonly OrphanTreeReport[]): string[] => {
     const groups = new Map<string, OrphanTreeReport[]>()
@@ -959,7 +978,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (result.archived.length === 0) {
         return {
           kind: 'success',
-          text: `没有需要归档的 mission 会话（已归档或仍在运行 ${String(result.skipped.length)} 个）。`,
+          text: withClosedTreePointer(agent.id, [
+            `没有需要归档的 mission 会话（已归档或仍在运行 ${String(result.skipped.length)} 个）。`,
+          ]).join('\n'),
         }
       }
       log.info(`/archive from ${agent.id}: ${String(result.archived.length)} session(s)`)
@@ -979,7 +1000,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // The three scopes are the command's whole grammar, so the description names all of them and
     // states the rule that is easy to get wrong: no argument only LISTS; deleting needs a scope AND
     // a target.
-    description: '清理 worker 会话记录、已完成任务或孤儿记录：archive 作用域清理本会话已完成的 worker 会话记录'
+    description: '清理 worker 会话记录、已完成任务或孤儿记录：archive 清的是会话记录，missions 清的是任务记录，'
+      + '两层互相独立：archive 作用域清理本会话已完成的 worker 会话记录'
       + '（先归档、再释放、最后取消归档，三步一趟完成；运行中的永不触碰）；'
       + 'missions 作用域删除本会话已关闭（finish_mission 收尾）的已完成任务记录，只删任务记录、不动 worker 会话记录，用 all 一次清掉；'
       + 'orphans 作用域针对 owner 会话已不存在或不可观测的孤儿记录。'
@@ -1005,6 +1027,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           + `${String(orphans.length)} orphan tree(s), ${String(ghosts.length)} ghost archive marker(s), `
           + `${String(finished.length)} closed tree(s)`,
         )
+        // ONE cross-scope notice, and only when the archive scope is EMPTY while another scope has
+        // content: the overview already names every non-empty scope's own command, so the notice is
+        // owed to whoever came looking for the empty one — the "cleaned the wrong object" trap this
+        // command's grammar makes easy. A session with records everywhere gets no extra line (the
+        // missions-empty direction is redundant for the same reason: its section is simply absent).
+        const archiveEmpty = workers.length === 0 && ghosts.length === 0
+        const crossScope = archiveEmpty && (finished.length > 0 || orphans.length > 0)
+          ? '本会话没有可清理的 worker 会话记录（archive 作用域）；'
+            + [
+                finished.length > 0 ? `${String(finished.length)} 棵已关闭的任务树用 /clean missions all` : '',
+                orphans.length > 0 ? `${String(orphans.length)} 棵孤儿任务树用 /clean orphans all` : '',
+              ].filter((part) => part !== '').join('；')
+            + '。'
+          : undefined
         return {
           kind: 'success',
           text: [
@@ -1017,6 +1053,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
             // Absent rather than empty when there is nothing to say: an "orphans: 0" section is noise.
             ...(finished.length === 0 ? [] : ['', '本会话任务树（missions 作用域）：', ...missionsListLines(finished, ongoing)]),
             ...(orphans.length === 0 ? [] : ['', ...orphanScopeLines(orphans)]),
+            ...(crossScope === undefined ? [] : ['', crossScope]),
           ].join('\n'),
         }
       }
@@ -1084,7 +1121,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const archived = archivedIds()
         const ghosts = await listedGhosts(archived)
         if (workers.length === 0 && ghosts.length === 0) {
-          return { kind: 'success', text: '本会话没有 mission 会话记录。' }
+          return {
+            kind: 'success',
+            text: withClosedTreePointer(agent.id, ['本会话没有 mission 会话记录。']).join('\n'),
+          }
         }
         return {
           kind: 'success',
@@ -1108,8 +1148,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         if (result.cleaned.length === 0 && result.refused.length === 0) {
           return {
             kind: 'success',
-            text: ['没有可清理的 mission 会话。', ...cleanupScopeLines(result), ...ghostScopeLines(ghosts),
-              ...purgeScopeLines(purged)].join('\n'),
+            text: withClosedTreePointer(agent.id, ['没有可清理的 mission 会话。', ...cleanupScopeLines(result),
+              ...ghostScopeLines(ghosts), ...purgeScopeLines(purged)]).join('\n'),
           }
         }
         log.info(
@@ -1157,7 +1197,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (named.running.includes(target)) {
         return { kind: 'error', text: `${target} 还在运行，不能清理。` }
       }
-      return { kind: 'error', text: `${target} 不是本会话的 mission 会话（用 /clean archive 看清单）。` }
+      return {
+        kind: 'error',
+        text: withClosedTreePointer(agent.id, [
+          `${target} 不是本会话的 mission 会话（用 /clean archive 看清单）。`,
+        ]).join('\n'),
+      }
     },
   })
 

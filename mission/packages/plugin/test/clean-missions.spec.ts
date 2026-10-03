@@ -197,3 +197,119 @@ describe('the cleanFinished remote (④)', () => {
     expect(await mounted.host.cleanFinished({ sessionId: '' })).toEqual({ deleted: [], skipped: [] })
   })
 })
+
+/**
+ * The misleading feedback this suite exists to stop repeating: `/clean archive` answers for the
+ * SESSION-record layer, so an operator with only closed TASK TREES used to read "没有可清理的
+ * mission 会话" as "the command is broken". The pointer names the scope that actually has something,
+ * with the real count, and is absent when it would be a lie.
+ */
+describe('the cross-scope pointer for a wrong-object cleanup', () => {
+  const WORKER = 'mission-aaaa1111'
+
+  /** Register one settled worker record as `sessionQuery.listSessions()` reports it. */
+  function listWorker(mounted: Mounted): void {
+    mounted.listedSessions.push({
+      header: { id: WORKER, origin: 'subagent', delegationDepth: 1, parentSession: mounted.owner.id },
+      live: false,
+    })
+  }
+
+  it('points /clean archive all at the closed trees, with the right count (①)', async () => {
+    const mounted = await mount({ workspaceRegistry: true })
+    const first = await createTree(mounted, 'closed one')
+    await mounted.flush()
+    const second = await createTree(mounted, 'closed two')
+    await mounted.flush()
+    await closeTree(mounted, first)
+    await closeTree(mounted, second)
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('没有可清理的 mission 会话')
+    expect(result.text).toContain('另有 2 棵已关闭的任务树可清理：/clean missions all')
+    // The pointer names the command; it does not run it, and it does not touch the trees.
+    expect(treeAlive(mounted, first)).toBe(true)
+    expect(treeAlive(mounted, second)).toBe(true)
+  })
+
+  it('adds no pointer at all when the session has no closed tree (②)', async () => {
+    const mounted = await mount({ workspaceRegistry: true })
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('没有可清理的 mission 会话')
+    expect(result.text).not.toContain('另有')
+  })
+
+  it('counts only this session\'s closed trees', async () => {
+    const mounted = await mount({ sessions: ['session-other'], workspaceRegistry: true })
+    const other = mounted.makeOwner('session-other')
+    const foreign = await createTree(mounted, 'theirs', other)
+    await mounted.flush()
+    await closeTree(mounted, foreign, other)
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.text).not.toContain('/clean missions all')
+    expect(treeAlive(mounted, foreign)).toBe(true)
+  })
+
+  it('applies to the named form, which is where a bare tree root id lands (④)', async () => {
+    const mounted = await mount({ workspaceRegistry: true })
+    const root = await createTree(mounted, 'closed')
+    await mounted.flush()
+    await closeTree(mounted, root)
+
+    // A tree root id is bare hex, so it can only ever be a wrong-object attempt at this scope.
+    const result = await mounted.runCommand('clean', `archive ${root}`)
+    expect(result.kind).toBe('error')
+    expect(result.text).toContain('不是本会话的 mission 会话')
+    expect(result.text).toContain('另有 1 棵已关闭的任务树可清理：/clean missions all')
+  })
+
+  it('appends the same pointer to the bare /clean archive listing and to /archive', async () => {
+    const mounted = await mount({ workspaceRegistry: true })
+    const root = await createTree(mounted, 'closed')
+    await mounted.flush()
+    await closeTree(mounted, root)
+
+    const listed = await mounted.runCommand('clean', 'archive')
+    expect(listed.kind).toBe('success')
+    expect(listed.text).toContain('本会话没有 mission 会话记录。')
+    expect(listed.text).toContain('另有 1 棵已关闭的任务树可清理：/clean missions all')
+
+    const archived = await mounted.runCommand('archive', '')
+    expect(archived.kind).toBe('success')
+    expect(archived.text).toContain('没有需要归档的 mission 会话')
+    expect(archived.text).toContain('另有 1 棵已关闭的任务树可清理：/clean missions all')
+  })
+
+  it('lists both scopes and names each command when both have content (③)', async () => {
+    const mounted = await mount({ workspaceRegistry: true })
+    listWorker(mounted)
+    const root = await createTree(mounted, 'closed')
+    await mounted.flush()
+    await closeTree(mounted, root)
+
+    const result = await mounted.runCommand('clean', '')
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('archive 作用域')
+    expect(result.text).toContain(WORKER)
+    expect(result.text).toContain('本会话任务树（missions 作用域）')
+    expect(result.text).toContain('/clean archive all')
+    expect(result.text).toContain('/clean missions all')
+    // Neither scope is empty, so no "what you were looking for is empty" notice is owed.
+    expect(result.text).not.toContain('本会话没有可清理的 worker 会话记录（archive 作用域）')
+  })
+
+  it('points the archive-empty overview at the closed trees', async () => {
+    const mounted = await mount()
+    const root = await createTree(mounted, 'closed')
+    await mounted.flush()
+    await closeTree(mounted, root)
+
+    const result = await mounted.runCommand('clean', '')
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('本会话没有可清理的 worker 会话记录（archive 作用域）')
+    expect(result.text).toContain('1 棵已关闭的任务树用 /clean missions all')
+  })
+})
