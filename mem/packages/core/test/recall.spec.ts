@@ -6,6 +6,7 @@ import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import { buildFtsQuery } from '../src/db/tokenizer.js'
 import { extractEntities } from '../src/entities/extract.js'
 import { encodeHrrEntityVector, hrrToBytes } from '../src/hrr/index.js'
+import { ENTITY_UNION_CAP } from '../src/store/entity_leg.js'
 import type { RecallRequest } from '@avantf/mem-contract'
 import { resetRetrievalHealth, retrievalHealth, retrievalHealthSummary } from '@avantf/mem-retrieval'
 
@@ -132,15 +133,15 @@ describe('admin.vectors_*', () => {
     expect(factsDao.ftsSearch(ftsQuery).length).toBeGreaterThan(5)
 
     const entitiesDao = (rt.memory as unknown as {
-      entities: { candidateFactsForAnyEntity: (n: string[], c: string | undefined, l: number) => number[] }
+      entities: { candidateFactsForAnyEntity: (n: string[], c: string | undefined, l: number, w: number, cap: number) => number[] }
     }).entities
     // Use the names the tagger ACTUALLY extracts from this corpus. The first version of this test
     // passed `'缓存失效策略'` — a string that is not an entity of any fact — so the method returned
     // `[]` and `length <= 7` could not fail whatever the SQL did.
     const names = (await extractEntities('缓存失效策略的调整')).map((e) => e.name)
     expect(names.length, 'the corpus must yield entities for this to test anything').toBeGreaterThan(0)
-    expect(entitiesDao.candidateFactsForAnyEntity(names, undefined, 1000).length).toBeGreaterThan(5)
-    expect(entitiesDao.candidateFactsForAnyEntity(names, undefined, 3)).toHaveLength(3)
+    expect(entitiesDao.candidateFactsForAnyEntity(names, undefined, 1000, names.length, ENTITY_UNION_CAP).length).toBeGreaterThan(5)
+    expect(entitiesDao.candidateFactsForAnyEntity(names, undefined, 3, names.length, ENTITY_UNION_CAP)).toHaveLength(3)
   })
 
   it('keeps the highest-Jaccard candidates when the corpus EXCEEDS the leg cap', async () => {
@@ -160,9 +161,10 @@ describe('admin.vectors_*', () => {
     }
     const t = '2026-01-01 00:00:00'
     const seed = rt.db.transaction(() => {
-      // `best` shares ONE query entity and has no other entity at all ⇒ Jaccard 1/2 = 0.5, which is
-      // the maximum here. The fillers share TWO entities but carry noise ⇒ 2/union < 0.5, so a
-      // shared-count ordering ranks all 259 of them above `best` and a cap of 200 drops it.
+      // `best` shares ONE query anchor and has no other entity at all ⇒ 1/(2 + 0) = 0.5, the
+      // maximum here. The fillers share TWO anchors but carry noise, which the saturating union caps
+      // at 3 ⇒ 2/(2 + 3) = 0.4 < 0.5. A shared-count-only ordering would rank all 259 fillers above
+      // `best` and a cap of 200 would drop it (measured: the ratio ordering keeps it).
       const best = Number(insFact.run('alpha 核心记录', 'b', 0, 'active', t, t).lastInsertRowid)
       insLink.run(best, eid('alpha'))
       for (let i = 0; i < 259; i++) {
@@ -176,12 +178,12 @@ describe('admin.vectors_*', () => {
     const best = seed()
 
     const entitiesDao = (rt.memory as unknown as {
-      entities: { candidateFactsForAnyEntity: (n: string[], c: string | undefined, l: number) => number[] }
+      entities: { candidateFactsForAnyEntity: (n: string[], c: string | undefined, l: number, w: number, cap: number) => number[] }
     }).entities
-    const all = entitiesDao.candidateFactsForAnyEntity(['alpha', 'beta'], undefined, 10_000)
+    const all = entitiesDao.candidateFactsForAnyEntity(['alpha', 'beta'], undefined, 10_000, 2, ENTITY_UNION_CAP)
     expect(all.length).toBe(260) // every fact shares an entity — the cap is what bounds the leg
 
-    const capped = entitiesDao.candidateFactsForAnyEntity(['alpha', 'beta'], undefined, 200)
+    const capped = entitiesDao.candidateFactsForAnyEntity(['alpha', 'beta'], undefined, 200, 2, ENTITY_UNION_CAP)
     expect(capped).toHaveLength(200)
     expect(capped[0]).toBe(best) // ordered by the ratio, so the best candidate survives the cap
     expect(capped).toContain(best)
@@ -273,7 +275,7 @@ describe('leg cap differential', () => {
 
   /**
    * The HRR probe is the ONE leg whose cap is not ordered by that leg's own score (its candidate
-   * set comes from `candidateFactsForAnyEntity`, ordered by exact Jaccard; the fallback takes the
+   * set comes from `candidateFactsForAnyEntity`, ordered by the entity-leg score; the fallback takes the
    * `cap` most RECENT facts). So it is the leg that makes the "a trimmed tail cannot rescale a
    * survivor" claim conditional, which is exactly how DESIGN §20.17 and `fusion.ts` now scope it —
    * and this test is the store-level half of that boundary (`fusion.spec.ts` pins the arithmetic).

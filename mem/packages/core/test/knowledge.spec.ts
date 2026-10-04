@@ -1186,19 +1186,29 @@ describe('the entity leg caps the union of its name batches', () => {
       expect(ids.length).toBeGreaterThan(2)
 
       const internals = local.knowledge as unknown as {
-        chunks: { candidatesByEntityNames(names: readonly string[], d: string | undefined, s: string | undefined, limit: number): number[] }
+        chunks: {
+          candidatesByEntityNames(names: readonly string[], d: string | undefined, s: string | undefined, limit: number, w: number, cap: number): number[]
+          docFrequency(names: readonly string[]): Map<string, number>
+        }
         jaccardPath(query: string, d: string | undefined, s: string | undefined, cap: number): Promise<Map<number, number>>
       }
       const dao = internals.chunks.candidatesByEntityNames.bind(internals.chunks)
+      const df = internals.chunks.docFrequency.bind(internals.chunks)
       // Simulate the union of two batches. Reaching one for real needs >500 names extracted from a
       // single query — a fixture nobody would maintain, and the DAO's own per-batch `LIMIT` is what
       // makes the overshoot possible, not anything the store controls.
+      //
+      // `docFrequency` is stubbed to the rare value the anchor filter needs: every chunk in this
+      // fixture names 李娜, so a real frequency would be corpus-wide and the leg would correctly go
+      // silent (that behaviour is pinned by `test/entity_leg.spec.ts`); this case is about the cap.
       internals.chunks.candidatesByEntityNames = () => ids
+      internals.chunks.docFrequency = () => new Map([['李娜', 1]])
       try {
         const scores = await internals.jaccardPath('李娜', undefined, undefined, 2)
         expect(scores.size).toBe(2) // `size === cap` now truthfully means "this leg was trimmed"
       } finally {
         internals.chunks.candidatesByEntityNames = dao
+        internals.chunks.docFrequency = df
       }
     } finally {
       local.shutdown()

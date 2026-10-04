@@ -34,8 +34,9 @@ import { documentText, type DocumentText } from './document_text.js'
 import { classifySource, listTextFiles } from './source_picker.js'
 import { bytesToFloat32, float32ToBytes, isPreFingerprintSpace, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
-import { probeTerms, type LexicalProbe } from './lexical.js'
+import { probeTerms, substringTerms, type LexicalProbe } from './lexical.js'
 import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
+import { anchoredOverlap, ENTITY_UNION_CAP, selectAnchors } from './entity_leg.js'
 import { hybridSearch, RetrievalInputError, type HybridContext, type HybridDeps, type HybridLeg, type HybridResult } from './hybrid.js'
 import { evictVectors as evictVectorsOf, forEachYielding, normalizeWrite, normalizeWrites, reportStaleVectors, vectorSpaceOf } from './common.js'
 import { ENTITY_EXTRACTOR_VERSION, extractEntities } from '../entities/extract.js'
@@ -1510,34 +1511,46 @@ export class KnowledgeStore {
 
   private ftsPath(query: string, domain: string | undefined, source: string | undefined, cap: number): Map<number, number> {
     const ftsQuery = buildFtsQuery(query, this.ftsTokenizer)
-    if (!ftsQuery) return new Map()
-    const rows = this.chunks.ftsSearch(ftsQuery, domain, source, cap)
-    // FTS5 bm25() is negative (more negative = better match); negate so higher = better.
-    return new Map(rows.map((r) => [r.id, -r.rank]))
+    if (ftsQuery) {
+      const rows = this.chunks.ftsSearch(ftsQuery, domain, source, cap)
+      // FTS5 bm25() is negative (more negative = better match); negate so higher = better.
+      return new Map(rows.map((r) => [r.id, -r.rank]))
+    }
+    // The short-query fallback — `MemoryStore.ftsPath` carries the why; the predicate is the same
+    // shared one (`db/tokenizer.ts#likeSubstring`).
+    const terms = substringTerms(query)
+    if (terms.length === 0) return new Map()
+    const rows = this.chunks.ftsSubstringSearch(terms, domain, source, cap)
+    return new Map(rows.map((r) => [r.id, r.rank]))
   }
 
-  /** Entity overlap against entities extracted AT INGEST time (chunk_entities) — no corpus scan. */
+  /**
+   * Entity overlap against entities extracted AT INGEST time (chunk_entities) — no corpus scan.
+   *
+   * Same metric as the memory store's sibling (`store/entity_leg.ts` carries the measurement and
+   * the reasoning): anchored Jaccard with a saturating union over the query's rare entities, so a
+   * wide chunk cannot dilute the denominator and a corpus-wide word cannot drag the whole knowledge
+   * base in.
+   */
   private async jaccardPath(query: string, domain: string | undefined, source: string | undefined, cap: number): Promise<Map<number, number>> {
-    const qEntities = new Set((await extractEntities(query)).map((e) => e.name))
-    if (qEntities.size === 0) return new Map()
-    const candIds = this.chunks.candidatesByEntityNames([...qEntities], domain, source, cap)
+    const qEntities = [...new Set((await extractEntities(query)).map((e) => e.name))]
+    if (qEntities.length === 0) return new Map()
+    const anchors = selectAnchors(qEntities, this.chunks.docFrequency(qEntities), this.chunks.count())
+    if (anchors.length === 0) return new Map()
+    const candIds = this.chunks.candidatesByEntityNames(anchors, domain, source, cap, qEntities.length, ENTITY_UNION_CAP)
     if (!candIds.length) return new Map()
     const stored = this.chunks.entityBags(candIds)
     const out = new Map<number, number>()
     for (const id of candIds) {
-      const factSet = new Set(stored.get(id) ?? [])
-      const union = new Set([...qEntities, ...factSet])
-      if (union.size === 0) continue
-      const overlap = [...qEntities].filter((e) => factSet.has(e)).length
-      const jaccard = overlap / union.size
-      if (jaccard > 0) out.set(id, jaccard)
+      const score = anchoredOverlap(anchors, qEntities.length, new Set(stored.get(id) ?? []))
+      if (score > 0) out.set(id, score)
     }
     // Truncate the UNION, not just each name-batch: `candidatesByEntityNames` limits per batch and
     // unions, so it can hand back more than `cap` ids. Two consequences, both fixed here. The leg was
     // handing `fuse` a candidate set unbounded by `cap` (the very thing the cap exists to bound), and
     // `size === legCap` — the only observable "this leg was cut" signal (DESIGN §20.17) — reported NOT
     // capped for exactly the legs that overshot, i.e. the heavily-trimmed ones. Sorting by the real
-    // jaccard (the DB ordered each batch, but a union of per-batch tops is not a top-N) and slicing
+    // score (the DB ordered each batch, but a union of per-batch tops is not a top-N) and slicing
     // keeps the best `cap`, so this flag means what the FTS leg's flag means.
     if (out.size <= cap) return out
     return new Map([...out].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, cap))

@@ -5,9 +5,9 @@
  * MAXIMUM, so every leg's head is 1.0 by construction and the fused number is only comparable
  * WITHIN one query. A cutoff on the fused score would therefore mean a different thing per query
  * (and would move whenever a leg's head changed). The legs' raw numbers do have an absolute scale —
- * cosine for the semantic leg, the Jaccard ratio for the entity leg, "distinct query terms hit" for
- * FTS — so that is where the floors live. The side benefit is that flooring a leg's tail cannot
- * move its maximum, so the cap-invariance §20.17 relies on is untouched.
+ * cosine for the semantic leg, anchored Jaccard for the entity leg (`store/entity_leg.ts`),
+ * "distinct query terms hit" for FTS — so that is where the floors live. The side benefit is that
+ * flooring a leg's tail cannot move its maximum, so the cap-invariance §20.17 relies on is untouched.
  *
  * THREE FLOORS, ONE SHAPE. `min_semantic_similarity` / `min_fts_terms` / `min_jaccard`; each `0`
  * means "this leg is not gated", and a candidate EQUAL to its floor is KEPT (only strictly-lower
@@ -49,19 +49,30 @@
  * of its own is bounded instead: it costs one extra query, only when the strict answer was empty,
  * and it can still report "nothing relevant" for a genuinely unrelated question.
  *
- * FTS REACHABILITY. `min_fts_terms` counts distinct query terms a row hits, but a query can only
- * produce so many terms (`relevanceTerms`: latin words ≥5 chars + CJK 3-grams) — a 3-character CJK
- * query yields exactly ONE trigram, so a configured bar of 2 is unreachable and that leg is empty
- * for it by construction. The effective bar is therefore `min(configured, termCount)`, and
- * `termCount` is that of the text being GRADED — with 方案 A's augmentation the original and the
- * rewrite are different texts with different counts, so each resolves its own bar
- * (`store/hybrid.ts`). Resolving the rewrite from the original's count is the defect that let a
- * single incidental trigram pass a bar it could not reach (2026-10-04).
+ * FTS REACHABILITY, AND THE SHORT-QUERY FALLBACK. `min_fts_terms` counts distinct query terms a row
+ * hits, but a query can only produce so many terms — a 3-character CJK query yields exactly ONE
+ * trigram, so a configured bar of 2 is unreachable and that leg is empty for it by construction. The
+ * effective bar is therefore `min(configured, termCount)`, and `termCount` is that of the text being
+ * GRADED — with 方案 A's augmentation the original and the rewrite are different texts with
+ * different counts, so each resolves its own bar (`store/hybrid.ts`). Resolving the rewrite from the
+ * original's count is the defect that let a single incidental trigram pass a bar it could not reach
+ * (2026-10-04).
+ *
+ * That clamp still leaves the shape with NO term at all: a 2-char CJK query (`buildFtsQuery` returns
+ * `null` — the trigram index holds no term under three characters, measured on the live store). The
+ * term set is therefore {@link gradedTerms}: when the query yields no index-expressible term, the
+ * 2-char CJK runs themselves become the terms, and the legs search/grade them as SUBSTRINGS
+ * (`content LIKE '%…%'`, the finer predicate an FTS5 trigram table still exposes; see
+ * `store/lexical.ts`). The clamp stays the same rule and stays honest — one substring term is
+ * `min(configured, 1)`, and {@link applyTermFloor} re-derives it from the query it is grading, so
+ * the reported number is the applied number. The guard against the noise a 2-char term invites is
+ * the term itself: the row must CONTAIN the run contiguously (not merely share a trigram), and a
+ * multi-run query must contain `min(configured, runs)` of them.
  *
  * @module store/floors
  */
 import type { FloorProfile, RetrievalFloorDrops, RetrievalFloors } from '@avantf/mem-contract'
-import { relevanceTerms } from './lexical.js'
+import { gradedTerms } from './lexical.js'
 
 /** The retriever knobs the floors read (a structural type so tests can pass a literal). */
 export interface FloorConfig {
@@ -90,16 +101,20 @@ export type FloorLeg = 'semantic' | 'fts' | 'jaccard'
  *  - fts: NOT a constant — {@link looseTermFloor}, half the query's distinct terms with a floor of
  *    1. `1` here is the "no terms to scale by" baseline (the previously constant value); a query
  *    that cannot produce terms is not graded at all, and one that produces a single term (every
- *    3-char CJK query) is already graded against that one term by the reachability clamp.
- *  - jaccard **0.15** (positive — the previous `0` was the ungated hole this closes). Measured, not
- *    guessed, on two corpora: (a) the live store, 64 active facts, the common-entity questions a
- *    real user asks about this repo ("插件怎么安装" / "任务怎么拆分" / "知识库在哪里" …) put their
- *    TOP non-answering entity candidate at Jaccard 0.0909 and most at 0.02–0.07, so 0.15 removes that
- *    whole tail; (b) the gold-labelled 35-query eval set, where the LOWEST Jaccard any answering pair
- *    reached is 0.25 (「老王喜欢什么风格」) — a bottom line above 0.25 starts dropping gold pairs,
- *    while 0.15 filters none. The entity leg cannot fully separate the two classes on short queries
- *    (a one-entity query against a one-entity fact is 1.0 by construction, and non-gold pairs reach
- *    0.667), so this is deliberately a "no incidental small overlap" line, not a relevance classifier.
+ *    3-char CJK query, and every 2-char one through the substring fallback) is already graded
+ *    against that one term by the reachability clamp.
+ *  - jaccard **0.15** (positive — the previous `0` was the ungated hole this closes). The metric was
+ *    recalibrated on 2026-10-04 (`store/entity_leg.ts`): the leg still scores a Jaccard ratio, but
+ *    over the query's ANCHOR entities and with the fact's extra-entity term SATURATED at
+ *    `ENTITY_UNION_CAP`. 0.15 on that unit means "shares at least one discriminative entity" for any
+ *    query with up to six anchors (`1/6 = 0.167 > 0.15`), i.e. the bottom line that cannot be lowered
+ *    to "any incidental overlap" without admitting a length-dependent fraction. The old Jaccard
+ *    calibration, kept for the record: (a) on the live store the top non-answering candidate for
+ *    common-entity questions sat at 0.0909 and most at 0.02–0.07; (b) the lowest Jaccard any
+ *    answering pair on the gold 35-query set reached was 0.25. The entity leg cannot separate the
+ *    classes on short queries by itself, so this is deliberately a "no incidental small overlap"
+ *    line, not a relevance classifier — see `store/entity_leg.ts` for why the fact's own width was
+ *    saturated rather than used as the separator.
  */
 export const LOOSE_FLOORS: RetrievalFloors = { semantic: 0.4, fts: 1, jaccard: 0.15 }
 
@@ -128,10 +143,10 @@ export function emptyFloorDrops(): RetrievalFloorDrops {
  * The FTS bar actually applied to a query carrying `termCount` distinct terms.
  *
  * A query cannot be graded against more terms than it has (see the module comment: a 3-char CJK
- * query has one trigram), so the configured bar is CLAMPED to the reachable maximum. `termCount`
- * `0`/omitted leaves the value alone — such a query is not graded at all by {@link applyTermFloor},
- * and changing the REPORTED value there would misdescribe what the caller is reading. `0` stays `0`
- * (the operator's off switch).
+ * query has one trigram, and a 2-char one has one substring term), so the configured bar is CLAMPED
+ * to the reachable maximum. `termCount` `0`/omitted leaves the value alone — such a query is not
+ * graded at all by {@link applyTermFloor}, and changing the REPORTED value there would misdescribe
+ * what the caller is reading. `0` stays `0` (the operator's off switch).
  *
  * This is the ONE place the clamp lives; `resolveFloors` (what the result reports / a run is handed)
  * and `applyTermFloor` (what the leg does) both call it, so the number a run reads is the number its
@@ -150,7 +165,7 @@ export interface FloorResolution {
   /** `loose` lowers each configured floor (see {@link LOOSE_FLOORS}); absent means `strict`. */
   profile?: FloorProfile
   /**
-   * The distinct term count of the text being GRADED (`relevanceTerms(text).length`), for the FTS
+   * The distinct term count of the text being GRADED (`gradedTerms(text).length`), for the FTS
    * clamp. It must describe the query the legs will actually run on: under 方案 A's augmentation the
    * rewrite is a DIFFERENT text with its own term count, and resolving both runs from the original's
    * count is the defect that let one incidental trigram through (see `store/hybrid.ts`). Callers with
@@ -240,7 +255,9 @@ export function applyScoreFloor(
  *
  * Substring containment, case-insensitively: FTS5's trigram tokenizer matches a quoted phrase by
  * consecutive trigrams and is ASCII-case-insensitive, which is the same predicate as "the term
- * occurs in the text". `relevanceTerms` lowercases its latin words, so the comparison has to.
+ * occurs in the text" — and the 2-char fallback terms ARE substrings by construction
+ * (`store/lexical.ts`), so one predicate covers both. `relevanceTerms` lowercases its latin words,
+ * so the comparison has to.
  */
 export function countMatchedTerms(text: string, terms: readonly string[]): number {
   if (text === '') return 0
@@ -253,10 +270,13 @@ export function countMatchedTerms(text: string, terms: readonly string[]): numbe
 /**
  * Apply the per-row FTS floor to one FTS leg's scores.
  *
- * The terms come from `relevanceTerms(query)` (latin words ≥ 5 chars + every CJK 3-gram) — the same
- * tokenisation the conditional-hint probe uses, so "relevant enough" means one thing in this repo.
- * A query with NO such term is not graded at all: there is nothing to count, and dropping every row
- * on a technicality would turn a 3–4 char latin query (`buildFtsQuery` still emits it) into silence.
+ * The terms come from `gradedTerms(query)` — latin words ≥ 5 chars + every CJK 3-gram, and (only
+ * when the query produces no such term) the 2-char CJK runs as substrings. The indexed terms are
+ * the same tokenisation the conditional-hint probe uses, so "relevant enough" means one thing in
+ * this repo; the fallback exists because the hint path may stay silent while the LEG must not
+ * (`store/lexical.ts`). A query with NO such term is not graded at all: there is nothing to count,
+ * and dropping every row on a technicality would turn a 3–4 char latin query (`buildFtsQuery` still
+ * emits it) into silence.
  *
  * The bar itself is {@link effectiveTermFloor}: a query that can only produce one term (a 3-char CJK
  * query is one trigram) is measured against that one term, not against a configured 2 it could never
@@ -269,7 +289,7 @@ export function applyTermFloor(
   floor: number,
 ): { scores: Map<number, number>; dropped: number } {
   if (!(floor > 0) || scores.size === 0) return { scores, dropped: 0 }
-  const terms = relevanceTerms(query)
+  const terms = gradedTerms(query)
   if (terms.length === 0) return { scores, dropped: 0 }
   const effective = effectiveTermFloor(floor, terms.length)
   const out = new Map<number, number>()

@@ -301,6 +301,20 @@ describe('zh relations eval (degraded FTS+entity path + 1 semantic-live self-que
     // The aggregate CANNOT see `relaxed`, which is why the SENTINEL test asserts that property
     // separately — and why the mutation blocks there (table off; floors raised) are what keep this
     // fixture from being green-by-construction.
+    //
+    // RE-VERIFIED, STILL UNCHANGED, for the 2-char CJK substring fallback (`store/lexical.ts`
+    // §THE SHORT-CJK FALLBACK): all seven numbers below are bit-identical, and a per-query diff of
+    // the actual ids (fallback on/off, all four mode×profile arms) shows ZERO moved queries —
+    // `scripts/bench-short-query.mjs --json` is that diff. The honest reading is NOT "the fallback is
+    // a no-op"; it is that THIS SET CANNOT SEE IT: its two-char cases sit on 3-fact corpora where the
+    // entity leg already supplies the answer (Jaccard of a 1-entity query against a 3-entity fact is
+    // ≈1/3, far above the 0.2 floor), which is exactly why the shape was invisible here before too.
+    // What the fallback changes is the REAL-SIZED store, where the entity bag is ~31 wide and the
+    // Jaccard is ≈1/31: measured there, 2-char queries whose top-1 contains the term go 3/5 → 5/5
+    // (semantic live) and 2/5 → 5/5 (semantic down) under `floors: 'strict'` — the numbers and the
+    // before/after table are in `docs/SHORT_QUERY_FTS_REACHABILITY.md`. The reachability rules
+    // themselves (clamp, per-row grading on substring terms) are pinned by `test/lexical.spec.ts` and
+    // `test/floors.spec.ts`, and this spec's PINNED-GAP successor asserts the leg directly.
     expect(report.summary).toEqual({
       n_queries: 41,
       mean_precision_at_k: 0.6300813008130081,
@@ -450,21 +464,25 @@ describe('zh relations eval (degraded FTS+entity path + 1 semantic-live self-que
     }
   })
 
-  it('PINNED GAP: a 2-char term the tagger calls a VERB reaches no leg at all', async () => {
+  it('2-char CJK reachability: the lexical fallback serves the terms no tag or trigram can', async () => {
     // Review §4.4, and the reason the set above was extended. `buildFtsQuery` drops any CJK token
-    // shorter than 3 characters (a trigram index has nothing to match), so a 2-char query has no
-    // FTS leg; what is left is the entity leg, which only sees tags worth keeping.
+    // shorter than 3 characters (a trigram index has nothing to match) — still true, asserted right
+    // below — and the entity leg only sees tags worth keeping. This test USED to pin the resulting
+    // hole ("a 2-char verb-tagged term reaches no leg at all"); the hole is now closed at the lexical
+    // layer (`store/lexical.ts#substringTerms` → `content LIKE '%…%'`, the finer predicate an FTS5
+    // trigram table still exposes; no index can serve it, so it is an O(corpus) scan, bounded by the
+    // leg cap and guarded per row by `applyTermFloor`). The test moved deliberately, and it keeps
+    // both halves of the record: the MATCH builder is still unable to express the query, and the leg
+    // now answers anyway.
     //
-    // MEASURED, and it corrects an earlier reading of this gap: the terms that go missing are not
+    // MEASURED, and it corrects an earlier reading of the gap: the terms that went missing are not
     // "unknown to the tagger" — `缓存` is tagged `v` (a verb), and so are 维护/负责/加入/离开/审核/
     // 发布/值班. `风控` is `x`, which IS accepted (`ENTITY_EXTRA`), which is why the eval's 风控
-    // query missions. So the gap is precisely "a term the tagger classifies as a verb", and the
+    // query missions. So the old gap was precisely "a term the tagger classifies as a verb", and the
     // obvious extraction-layer fix — accept bare multi-char CJK runs — would admit EVERY verb and
-    // pollute the entity leg (and the Jaccard denominators it feeds). The honest fixes are at the
-    // lexical layer instead: a `LIKE '%…%'` fallback (no index can serve a 2-char trigram query, so
-    // it is an O(corpus) scan per query) or a bigram index maintained on write. Both are
-    // recall-semantics decisions of their own; this test pins the gap so it stays visible and so
-    // that touching the retrieval legs has to move this line deliberately.
+    // pollute the entity leg (and the Jaccard denominators it feeds). That is why the fix is lexical
+    // and why the route above (a bigram index maintained on write) is still the alternative a future
+    // round may prefer if the scan ever shows up in a profile.
     expect(buildFtsQuery('缓存')).toBeNull()
     expect(buildFtsQuery('李娜')).toBeNull()
 
@@ -473,10 +491,16 @@ describe('zh relations eval (degraded FTS+entity path + 1 semantic-live self-que
     try {
       await rt.remember({ action: 'add', content: '缓存策略改为写穿' })
       await rt.remember({ action: 'add', content: '李娜负责支付网关' })
-      const missed = await rt.recall({ action: 'search', query: '缓存' })
-      expect((missed as { hits: unknown[] }).hits, 'the 2-char untagged term is invisible').toHaveLength(0)
+      // The verb-tagged 2-char term is now reachable, and the row it reaches is the one that CONTAINS
+      // it — the precision guard (`applyTermFloor` on the substring term) is what keeps this from
+      // being "any row at all": an unrelated 2-char query still comes back empty.
+      const served = await rt.recall({ action: 'search', query: '缓存' })
+      expect((served as { hits: { text: string }[] }).hits.map((h) => h.text), 'the 2-char verb term is served').toEqual(['缓存策略改为写穿'])
+      expect(((await rt.recall({ action: 'search', query: '量子' })) as { hits: unknown[] }).hits, 'an unrelated 2-char query stays empty').toHaveLength(0)
       const found = await rt.recall({ action: 'search', query: '李娜' })
-      expect((found as { hits: unknown[] }).hits.length, 'the 2-char NAME is served by the entity leg').toBeGreaterThan(0)
+      expect((found as { hits: unknown[] }).hits.length, 'the 2-char NAME is served too').toBeGreaterThan(0)
+      // The floor is the reachability-clamped one (one substring term), reported as applied.
+      expect((served as RecallResult).floors?.fts).toBe(1)
     } finally {
       rt.shutdown()
       rmSync(dir, { recursive: true, force: true })

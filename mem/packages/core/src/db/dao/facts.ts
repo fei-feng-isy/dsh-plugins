@@ -7,6 +7,7 @@
  */
 import type { Db } from '../port.js'
 import { batches, inList } from '../chunk.js'
+import { likeSubstring } from '../tokenizer.js'
 import { ENTITY_EXTRACTOR_VERSION } from '../../entities/extract.js'
 
 /**
@@ -811,6 +812,31 @@ export class FactsDao {
     return this.db
       .prepare<{ id: number; rank: number }>(FTS_SEARCH_SQL)
       .all(ftsQuery, category ?? null, category ?? null, limit ?? -1)
+  }
+
+  /**
+   * The SHORT-QUERY fallback leg: rows whose `content` contains at least one of the terms as a
+   * contiguous substring, scored by how many it contains.
+   *
+   * Reached only when `buildFtsQuery` produced nothing (a 2-char CJK query — see
+   * `db/tokenizer.ts#likeSubstring` and `store/lexical.ts`), so it cannot move an indexed query.
+   * `rank` is the number of distinct terms the row contains, which is the same quantity
+   * `applyTermFloor` grades with; ties break on ascending id, matching `fuse`'s own tie rule, so a
+   * single-term query (all ranks 1) has a deterministic order. `ORDER BY rank` must read the SELECT
+   * alias, so the LIKE expressions are built once and bound twice — same fragment, same order.
+   */
+  ftsSubstringSearch(terms: readonly string[], category?: string, limit?: number): { id: number; rank: number }[] {
+    const { any, count, params } = likeSubstring('fa.content', terms)
+    if (params.length === 0) return []
+    return this.db
+      .prepare<{ id: number; rank: number }>(
+        `SELECT fa.fact_id AS id, ${count} AS rank
+           FROM facts fa
+          WHERE fa.status = 'active' AND (? IS NULL OR fa.category = ?) AND (${any})
+          ORDER BY rank DESC, fa.fact_id ASC
+          LIMIT ?`,
+      )
+      .all(...params, category ?? null, category ?? null, ...params, limit ?? -1)
   }
 
   // ─── lifecycle tick (DESIGN §TRUST_MODEL §4) ─────────────────────────────

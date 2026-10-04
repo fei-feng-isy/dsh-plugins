@@ -16,6 +16,7 @@ import {
   MAX_FTS_PHRASES,
   buildFtsQuery,
   detectFtsTokenizer,
+  likeSubstring,
   reportFtsTokenizerDrift,
   trigramAvailable,
 } from '../src/db/tokenizer.js'
@@ -145,7 +146,49 @@ describe('buildFtsQuery is bounded', () => {
 
   it('leaves a normal query alone', () => {
     // Three-plus characters per CJK term: shorter runs are skipped by the trigram branch on purpose
-    // (an n-gram table cannot match them — the PINNED GAP recorded in `eval_zh.spec.ts`).
+    // (an n-gram table cannot match them — see `store/lexical.ts#substringTerms` for the leg-side
+    // fallback, which is deliberately NOT this builder's business).
     expect(buildFtsQuery('老王头 喜欢她', 'trigram')).toBe('"老王头" OR "喜欢她"')
+  })
+})
+
+describe('likeSubstring (the short-query fallback predicate)', () => {
+  it('builds one escaped LIKE per term and a same-order count expression', () => {
+    // A 2-char CJK term cannot be expressed by the trigram index at all (measured: every term in
+    // `facts_fts` is 3 characters), so the leg falls back to the substring predicate the FTS5 trigram
+    // TABLE still exposes. The terms are the CALLER's text, so `%`/`_`/`\` must be escaped or a
+    // literal query silently becomes a wildcard.
+    const built = likeSubstring('fa.content', ['李娜', '100%', 'a_b', 'c\\d'])
+    expect(built.params).toEqual(['%李娜%', '%100\\%%', '%a\\_b%', '%c\\\\d%'])
+    expect(built.any).toBe(
+      "fa.content LIKE ? ESCAPE '\\' OR fa.content LIKE ? ESCAPE '\\' OR fa.content LIKE ? ESCAPE '\\' OR fa.content LIKE ? ESCAPE '\\'",
+    )
+    // `count` is the relevance score (`ranks` the number of terms a row contains) — parenthesised, or
+    // `a LIKE ? + b LIKE ?` would bind the `+` to the pattern.
+    expect(built.count.split(' + ')).toHaveLength(4)
+    expect(built.count.startsWith("(fa.content LIKE ? ESCAPE '\\')")).toBe(true)
+  })
+
+  it('drops empty terms so a caller never gets a match-everything pattern', () => {
+    const built = likeSubstring('dc.text', ['', '网关'])
+    expect(built.params).toEqual(['%网关%'])
+    expect(built.any.split(' OR ')).toHaveLength(1)
+  })
+
+  it('the predicate actually matches through SQLite with escaping intact', () => {
+    const db = dbWith('t', "CREATE VIRTUAL TABLE t USING fts5(text, tokenize='trigram')")
+    try {
+      db.prepare('INSERT INTO t(text) VALUES (?)').run('李娜负责支付网关')
+      db.prepare('INSERT INTO t(text) VALUES (?)').run('100% 的进度')
+      const { any, params } = likeSubstring('text', ['李娜'])
+      expect(db.prepare(`SELECT rowid FROM t WHERE ${any}`).all(...params)).toHaveLength(1)
+      const pct = likeSubstring('text', ['100%'])
+      expect(db.prepare(`SELECT rowid FROM t WHERE ${pct.any}`).all(...pct.params)).toHaveLength(1)
+      // The escaped `%` is a literal: a pattern that would match everything does not.
+      const lit = likeSubstring('text', ['999%'])
+      expect(db.prepare(`SELECT rowid FROM t WHERE ${lit.any}`).all(...lit.params)).toHaveLength(0)
+    } finally {
+      db.close()
+    }
   })
 })

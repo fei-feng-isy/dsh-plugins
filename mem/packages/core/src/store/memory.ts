@@ -36,8 +36,9 @@ import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, report
 import type { Db } from '../db/conn.js'
 import { bytesToFloat32, float32ToBytes, isPreFingerprintSpace, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
-import { probeTerms, type LexicalProbe } from './lexical.js'
+import { probeTerms, substringTerms, type LexicalProbe } from './lexical.js'
 import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
+import { anchoredOverlap, ENTITY_UNION_CAP, selectAnchors } from './entity_leg.js'
 import {
   ENTITY_EXTRACTOR_VERSION,
   entitiesFromTokens,
@@ -1359,9 +1360,17 @@ export class MemoryStore {
     // Entities and the entity-sharing candidate set are computed ONCE and shared: the Jaccard and
     // HRR legs are two views of the same information (an HRR bundle IS a bundle of entity atoms),
     // and before this the probe extracted the same query twice and read the corpus twice.
+    //
+    // The candidate set is built from the query's ANCHOR entities only (`store/entity_leg.ts`): a
+    // corpus-wide word is not evidence (it would admit every fact that mentions it), and the score
+    // the leg computes is exactly what the SQL ordered by, so the cap keeps the right rows. The HRR probe still bundles ALL query entities — the atoms are what its phase
+    // vector is built from, and narrowing that bundle would be a second, unrelated change.
     const qEntities = Array.from(new Set((await extractEntities(ctx.query)).map((e) => e.name)))
-    const candidates = qEntities.length > 0
-      ? this.entities.candidateFactsForAnyEntity(qEntities, input.category, ctx.legCap)
+    const anchors = qEntities.length > 0
+      ? selectAnchors(qEntities, this.entities.activeDocFrequency(qEntities), this.facts.countActive())
+      : []
+    const candidates = anchors.length > 0
+      ? this.entities.candidateFactsForAnyEntity(anchors, input.category, ctx.legCap, qEntities.length, ENTITY_UNION_CAP)
       : []
     /**
      * Wrap one leg's raw scores. `capped` must be measured on the RAW set (before the relevance
@@ -1380,10 +1389,10 @@ export class MemoryStore {
     // scores 0 terms and is dropped, which the live filter would have done anyway.
     const ftsRaw = this.ftsPath(ctx.query, input.category, ctx.legCap)
     const ftsFloored = applyTermFloor(ftsRaw, this.loadTexts([...ftsRaw.keys()]), ctx.query, ctx.floors.fts)
-    // Jaccard floor: applied to the shared candidate set, then the survivors are what the HRR probe
+    // Entity floor: applied to the shared candidate set, then the survivors are what the HRR probe
     // scores — an HRR bundle IS a bundle of entity atoms, so a candidate the entity floor rejected
     // has no business in the probe either.
-    const jaccardRaw = this.jaccardPath(qEntities, candidates)
+    const jaccardRaw = this.jaccardPath(anchors, qEntities.length, candidates)
     const jaccardFloored = applyScoreFloor(jaccardRaw, ctx.floors.jaccard)
     const jaccardLeg = { ...leg(jaccardFloored.scores, ctx.weights.jaccard, jaccardRaw), leg: 'jaccard' as const, droppedByFloor: jaccardFloored.dropped }
     const legs: (HybridLeg | Promise<HybridLeg>)[] = [
@@ -1659,31 +1668,45 @@ export class MemoryStore {
 
   private ftsPath(query: string, category: string | undefined, cap: number): Map<number, number> {
     const ftsQuery = buildFtsQuery(query, this.ftsTokenizer)
-    if (!ftsQuery) return new Map()
-    // ORDER BY bm25 + LIMIT: FTS5 still scores every match internally, but only the best `cap`
-    // rows cross into JS — which is what the old code paid for (33k rows through min-max + sort).
-    const rows = this.facts.ftsSearch(ftsQuery, category, cap)
-    // FTS5 bm25() is negative (more negative = better match); negate so higher = better.
-    return new Map(rows.map((r) => [r.id, -r.rank]))
+    if (ftsQuery) {
+      // ORDER BY bm25 + LIMIT: FTS5 still scores every match internally, but only the best `cap`
+      // rows cross into JS — which is what the old code paid for (33k rows through min-max + sort).
+      const rows = this.facts.ftsSearch(ftsQuery, category, cap)
+      // FTS5 bm25() is negative (more negative = better match); negate so higher = better.
+      return new Map(rows.map((r) => [r.id, -r.rank]))
+    }
+    // THE SHORT-QUERY FALLBACK. `null` here means the query carries no term the trigram index can
+    // express (measured: every term in `facts_fts` is 3 characters), which used to leave this leg
+    // empty by construction — the 2-char CJK shape. `substringTerms` is the one finer predicate the
+    // FTS5 trigram TABLE still answers (`LIKE '%…%'`), bounded by `cap`; the accuracy guard is the
+    // per-row floor in `applyTermFloor`, which requires the row to CONTAIN the run. `rank` counts
+    // the terms the row contains, so higher is better like the bm25 branch above.
+    const terms = substringTerms(query)
+    if (terms.length === 0) return new Map()
+    const rows = this.facts.ftsSubstringSearch(terms, category, cap)
+    return new Map(rows.map((r) => [r.id, r.rank]))
   }
 
   /**
-   * Jaccard leg over the precomputed candidate set (see `search`): the candidates are the facts
-   * sharing at least one query entity, pre-ranked by how many they share and already capped.
+   * Entity leg over the precomputed candidate set (see `searchLegs`): the candidates are the facts
+   * sharing at least one ANCHOR query entity, pre-ranked by how many they share and already capped.
+   *
+   * The score is anchored Jaccard with a saturating union —
+   * `|anchors ∩ F| / (queryWidth + min(|F \ anchors|, ENTITY_UNION_CAP))`; `store/entity_leg.ts`
+   * carries why the old `|Q ∩ F| / |Q ∪ F|` was structurally unreachable for short queries, and why
+   * the generic-word filter keeps the wider denominator from dragging the corpus in. The fact set is
+   * read per candidate and the score is recomputed here even though the DAO ordered by it, so one
+   * formula stays in charge (the DAO's `total` tie-break only orders equal scores).
    */
-  private jaccardPath(entityNames: string[], candidates: number[]): Map<number, number> {
-    const qEntities = new Set(entityNames)
-    if (qEntities.size === 0 || candidates.length === 0) return new Map()
+  private jaccardPath(anchors: readonly string[], queryWidth: number, candidates: number[]): Map<number, number> {
+    if (anchors.length === 0 || candidates.length === 0) return new Map()
     const bags = this.entityBags(candidates)
 
     const out = new Map<number, number>()
     for (const id of candidates) {
       const factEntities = new Set(bags.get(id) ?? [])
-      const union = new Set([...qEntities, ...factEntities])
-      if (union.size === 0) continue
-      const overlap = [...qEntities].filter((e) => factEntities.has(e)).length
-      const jaccard = overlap / union.size
-      if (jaccard > 0) out.set(id, jaccard)
+      const score = anchoredOverlap(anchors, queryWidth, factEntities)
+      if (score > 0) out.set(id, score)
     }
     return out
   }

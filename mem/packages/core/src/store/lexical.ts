@@ -25,6 +25,20 @@
  * `matched >= 2`, with the margin between 2 and 1 rather than a tuned threshold inside a
  * continuum. A single-word query (`cgroup`) scores 1 and stays silent on purpose: one term is not
  * evidence.
+ *
+ * THE SHORT-CJK FALLBACK (and why the hint probe does NOT use it). The trigram index has no term
+ * shorter than three characters — measured on the live store: `fts5vocab` over `facts_fts` holds
+ * 27906 distinct terms and EVERY one is 3 characters (and a 2-char `MATCH` returns nothing, even as
+ * a prefix query). So a 2-char CJK query produces no FTS term at all and that leg is empty by
+ * construction. The FTS LEG therefore falls back to the one finer predicate the FTS5 trigram TABLE
+ * does expose: `content LIKE '%…%'`, which matches a 2-char run by scanning (no index can serve a
+ * 2-char pattern). See {@link substringTerms} / {@link gradedTerms}.
+ *
+ * The conditional-hint probe deliberately keeps the index-expressible terms only: it is
+ * SYNCHRONOUS and runs on every step's prompt assembly, so it must stay a bounded number of
+ * `LIMIT 1` index lookups — an O(corpus) scan per 2-char term would put a full scan on the prompt
+ * path. Behaviour is unchanged there: a 2-char query scored 0 matched terms before and still does
+ * (`{terms: 0, matched: 0}`), so the hint stays silent exactly as it did.
  */
 
 /** How many of an input's terms a store holds. `terms === 0` means the input had nothing to test. */
@@ -67,6 +81,50 @@ export function relevanceTerms(text: string, cap = MAX_TERMS): string[] {
     for (let i = 0; i + 3 <= run.length; i++) terms.add(run.slice(i, i + 3))
   }
   return [...terms].slice(0, cap)
+}
+
+/** A CJK run of exactly this length is what the substring fallback serves (see {@link substringTerms}). */
+const SUBSTRING_RUN = 2
+
+/**
+ * The terms the FTS leg falls back to when the trigram index can express NONE of the query.
+ *
+ * A 2-char CJK run IS the finer granularity the FTS5 trigram TABLE can still answer — not as an
+ * indexed token (the vocabulary holds 3-character terms only, measured; a 2-char `MATCH`, quoted or
+ * prefixed, returns zero rows) but as the substring predicate FTS5 exposes on a trigram table
+ * (`content LIKE '%…%'`, which falls back to a scan for patterns under three characters). One-char
+ * runs are deliberately NOT included: a single character is not evidence (the same reason
+ * {@link looksRelevant} needs two terms), and it would make the leg match a large share of any
+ * corpus. Latin runs are not included either — `buildFtsQuery` already admits latin tokens from
+ * three characters, and the module's own floor (5, `MIN_LATIN`) is a separate, measured decision.
+ *
+ * PRECISION GUARD. The fallback is graded by the SAME per-row floor as the indexed path and by the
+ * reachability clamp: for a single 2-char term the effective bar is 1, and the term is a substring,
+ * so "the row contains the query's characters CONTIGUOUSLY" is what admits it — not "shares one
+ * incidental trigram". A two-run query ('李娜 张伟') produces two substring terms and is judged
+ * against `min(configured, 2)`, i.e. both runs must occur in the row.
+ */
+export function substringTerms(text: string, cap = MAX_TERMS): string[] {
+  const terms = new Set<string>()
+  for (const run of text.match(CJK_RUN_RE) ?? []) {
+    if (run.length === SUBSTRING_RUN) terms.add(run)
+  }
+  return [...terms].slice(0, cap)
+}
+
+/**
+ * The term set the FTS leg is SEARCHED and GRADED with — the one definition of "the query's terms"
+ * for that leg (`store/floors.ts` grades with it, `store/hybrid.ts` resolves the reachability clamp
+ * from it, and the stores build their MATCH / substring probe from it).
+ *
+ * The fallback is whole-query, not per run: any text that yields even one index-expressible term is
+ * returned UNCHANGED from {@link relevanceTerms}. That is what keeps every long query bit-identical
+ * (a mixed text like `缓存失效 李娜` keeps only its trigrams, exactly as before) and confines the
+ * new behaviour to the shape that had NO leg at all.
+ */
+export function gradedTerms(text: string, cap = MAX_TERMS): string[] {
+  const indexed = relevanceTerms(text, cap)
+  return indexed.length > 0 ? indexed : substringTerms(text, cap)
 }
 
 /**

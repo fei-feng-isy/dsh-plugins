@@ -44,7 +44,7 @@ import {
   resolveFloors,
   totalFloorDrops,
 } from '../src/store/floors.js'
-import { relevanceTerms } from '../src/store/lexical.js'
+import { gradedTerms, relevanceTerms, substringTerms } from '../src/store/lexical.js'
 import type { HybridResult } from '../src/store/hybrid.js'
 import { allowAnyDomain } from './helpers.js'
 
@@ -59,6 +59,17 @@ function unitWithCos(cos: number, index: number): Float32Array {
 }
 
 const DEFAULT_VEC = unitWithCos(0, 1)
+
+/**
+ * A ~300-char note with the live store's length shape and NO 2-char query term in it. The live store
+ * is 80 active facts at a median 313 characters, and the short-query leg is a corpus scan — so the
+ * fixture has to include the long tail it must NOT drag in (DESIGN §20.21 / the "分布敏感" rule).
+ */
+const LONG_NOTE =
+  '生产环境的部署流程已经冻结：发布窗口定在每周三凌晨，回滚脚本必须先在预发环境演练通过，演练记录由值班同学签字确认后才允许合并。'
+  + '监控面板聚合节点存活、队列积压与连接池占用三项指标，任一指标连续五分钟越过阈值就触发告警，告警会同时推送到值班群与工单系统。'
+  + '归档任务每天凌晨启动，把超过保留期的会话记录搬到冷存储，冷存储的读取路径单独限流，防止批量回放把在线查询拖慢。'
+  + '容量评审每月一次，按最近四周的峰值水位留出两成余量，新增依赖必须在上线前补齐演练与回滚预案，否则不予放行。'
 
 /** A deterministic in-memory embedder: known texts map to known cosines, everything else to `e1`. */
 function fakeSemantic(vectors: Record<string, Float32Array>): {
@@ -228,6 +239,35 @@ describe('store/floors (pure)', () => {
     expect(floored.dropped).toBe(1)
     // A query with two terms keeps the configured bar.
     expect(applyTermFloor(new Map([[1, -1]]), new Map([[1, 'gateway only']]), 'write gateway', 2).dropped).toBe(1)
+  })
+
+  it('applyTermFloor: a 2-char CJK query is graded against its SUBSTRING term (the short-query fallback)', () => {
+    // The shape with NO index-expressible term at all: `relevanceTerms` is empty and `buildFtsQuery`
+    // returns null, so before the fallback this leg could not even be reached. The fallback term is a
+    // contiguous SUBSTRING, which is the precision guard: a row that merely shares a trigram with the
+    // query is dropped by the same per-row floor, and the clamp makes the bar `min(configured, 1)`.
+    expect(relevanceTerms('李娜')).toEqual([])
+    expect(gradedTerms('李娜')).toEqual(['李娜'])
+    expect(effectiveTermFloor(2, gradedTerms('李娜').length)).toBe(1)
+    const scores = new Map([[1, 1], [2, 1], [3, 1]])
+    const texts = new Map([
+      [1, '李娜负责支付网关'],
+      [2, '李 娜 之间隔着别的字'], // both characters, not contiguous → still dropped
+      [3, '完全无关'],
+    ])
+    const floored = applyTermFloor(scores, texts, '李娜', 2)
+    expect([...floored.scores.keys()]).toEqual([1])
+    expect(floored.dropped).toBe(2)
+    // Two 2-char runs are TWO terms: the configured bar of 2 survives the clamp and both must occur.
+    expect(gradedTerms('李娜 张伟')).toEqual(['李娜', '张伟'])
+    const both = applyTermFloor(
+      new Map([[1, 1], [2, 1]]),
+      new Map([[1, '李娜和张伟'], [2, '只有李娜']]),
+      '李娜 张伟',
+      2,
+    )
+    expect([...both.scores.keys()]).toEqual([1])
+    expect(both.dropped).toBe(1)
   })
 
   it('mergeFloorDrops/totalFloorDrops sum per leg and tolerate absent reports', () => {
@@ -447,41 +487,44 @@ describe('the floors through BOTH stores', () => {
 
   it('memory: the loose floors are a BOUNDED relaxation — weak FTS/entity evidence still comes back empty', async () => {
     // THE N12 DEFECT. The old relaxed profile was `{semantic:0.40, fts:1, jaccard:0}`: a `jaccard: 0`
-    // leg is ungated, and because each leg is normalized by its OWN maximum, "any small Jaccard" (or
+    // leg is ungated, and because each leg is normalized by its OWN maximum, "any small overlap" (or
     // any single shared trigram) became that leg's head and was returned on a weak query.
     // The query sits on its own semantic axis (cos 0 against every fact), so the semantic leg cannot
     // smuggle either row into the pool through a zero-weight contribution.
-    const fake = fakeSemantic({ 'alpha gamma delta': unitWithCos(1, 1) })
+    const fake = fakeSemantic({ 'alpha gamma delta epsilon': unitWithCos(1, 1) })
     const rt = buildRuntime({ dataHome: dir, semantic: fake.backend })
     try {
-      // Both rows hit exactly ONE of the query's three FTS terms ('alpha'; 'gamma'/'delta' are absent),
-      // so the FTS leg drops both. The entity leg separates them: sharing 「alpha」 with a 5-entity row
-      // is J = 1/7 ≈ 0.143, with a 4-entity row J = 1/6 ≈ 0.167. The relaxed 0.15 sits between them —
-      // above the measured incidental-overlap band (live store: unrelated common-entity queries top out
-      // at 0.0909) and below the lowest gold pair on the labelled eval set (0.25).
+      // Both rows hit exactly ONE of the query's four FTS terms ('alpha'; the other three are
+      // absent), so the FTS leg drops both. The entity leg separates them — this is the metric's
+      // own shape (`store/entity_leg.ts`): the score is the Jaccard ratio over the query's anchor
+      // entities with the fact's extra-entity term SATURATED at 3, so `|A| = 1`, `queryWidth = 4`,
+      // and a fact with 2 extra entities scores `1/(4+2) = 0.1667` while one with 4 (capped to 3)
+      // scores `1/(4+3) = 0.1429`. The relaxed 0.15 sits BETWEEN them: it admits the narrower row
+      // and still rejects the wider one. (Widths past the cap score the same by construction, which
+      // is why the fixture separates them BELOW it.)
       await rt.remember({ action: 'add', content: 'alpha zulu yankee whiskey xray' })
-      await rt.remember({ action: 'add', content: 'alpha zulu yankee whiskey' })
+      await rt.remember({ action: 'add', content: 'alpha zulu yankee' })
       setWeights(rt, { semantic: 0, fts: 1, jaccard: 1 })
       setFloors(rt, { semantic: 0.5, fts: 2, jaccard: 0.2 })
 
-      const strict = await memSearch(rt, 'alpha gamma delta', 5, 'strict')
+      const strict = await memSearch(rt, 'alpha gamma delta epsilon', 5, 'strict')
       expect(strict.hits).toHaveLength(0)
       expect(strict.dropped_by_floor?.fts).toBe(2) // one matched term < the configured 2
-      expect(strict.dropped_by_floor?.jaccard).toBe(2) // 0.143 and 0.167 are both below 0.2
+      expect(strict.dropped_by_floor?.jaccard).toBe(2) // 0.1667 and 0.1429 are both below 0.2
 
-      // The default policy retries once, but only down to the POSITIVE bottom lines: the 0.143 row
-      // (incidental overlap only) stays out, the 0.167 row is admitted by the entity leg. `floors.fts`
-      // is 2, not 1: the relaxed FTS bar is half of three terms — a single shared trigram is not enough.
-      const auto = await memSearch(rt, 'alpha gamma delta', 5)
+      // The default policy retries once, but only down to the POSITIVE bottom lines: the 0.1429 row
+      // (incidental overlap only) stays out, the 0.1667 row is admitted by the entity leg. `floors.fts`
+      // is 2, not 1: the relaxed FTS bar is half of four terms — a single shared trigram is not enough.
+      const auto = await memSearch(rt, 'alpha gamma delta epsilon', 5)
       expect(auto.relaxed).toBe(true)
       expect(auto.floors).toEqual({ semantic: 0.4, fts: 2, jaccard: 0.15 })
-      expect(textsOf(auto.hits)).toEqual(['alpha zulu yankee whiskey'])
+      expect(textsOf(auto.hits)).toEqual(['alpha zulu yankee'])
 
       // The explicit entry walks the SAME bottom lines — no backdoor, and no extra noise.
-      const loose = await memSearch(rt, 'alpha gamma delta', 5, 'loose')
+      const loose = await memSearch(rt, 'alpha gamma delta epsilon', 5, 'loose')
       expect(loose.relaxed).toBeUndefined()
       expect(loose.floors).toEqual(auto.floors)
-      expect(textsOf(loose.hits)).toEqual(['alpha zulu yankee whiskey'])
+      expect(textsOf(loose.hits)).toEqual(['alpha zulu yankee'])
     } finally {
       rt.shutdown()
     }
@@ -625,6 +668,65 @@ describe('the floors through BOTH stores', () => {
       const floored = await memSearch(rt, 'zzzzz', 5)
       expect(floored.hits).toHaveLength(0)
       expect(floored.dropped_by_floor?.semantic).toBe(1)
+    } finally {
+      rt.shutdown()
+    }
+  })
+
+  it('memory: a 2-char CJK query reaches its fact when the other legs are empty (the three-legs-empty shape)', async () => {
+    // The real-store shape this task fixes: a wide entity bag makes Jaccard ≈ 1/31, so `min_jaccard`
+    // drops the entity leg; the semantic leg is down; and `buildFtsQuery` returns null for a 2-char
+    // query. All three legs empty — measured on the live store as `缓存:v` and as the 2-char queries
+    // that returned nothing under `floors: 'strict'`. The fallback is ISOLATED here: the queries sit
+    // on their OWN orthogonal axes (cosine 0 against every fact), the other two weights are 0 and the
+    // entity floor is unreachable, so the substring leg is the only way this query can answer. The
+    // long note is the corpus tail it must not drag in.
+    const fake = fakeSemantic({ 冯飞: unitWithCos(0, 2), 量子: unitWithCos(0, 3), 支付网关: unitWithCos(0, 4) })
+    const rt = buildRuntime({ dataHome: dir, semantic: fake.backend })
+    try {
+      const answer = '冯飞负责支付网关的部署'
+      await rt.remember({ action: 'add', content: answer })
+      await rt.remember({ action: 'add', content: LONG_NOTE })
+      setWeights(rt, { semantic: 0, fts: 1, jaccard: 0 })
+      setFloors(rt, { semantic: 0.5, fts: 2, jaccard: 1 })
+
+      // The semantic leg is LIVE here (the fake is available), so the reachability clamp (2 → 1) is
+      // what makes the leg answer — not the degraded relaxation of `min_fts_terms`.
+      const live = await memSearch(rt, '冯飞', 5, 'strict')
+      expect(textsOf(live.hits)).toEqual([answer])
+      expect(live.floors?.fts, 'the reported bar is the applied one (clamped to the one substring term)').toBe(1)
+      expect(live.dropped_by_floor?.fts).toBe(0)
+      // An unrelated 2-char query does not pull the corpus in.
+      expect((await memSearch(rt, '量子', 5, 'strict')).hits).toHaveLength(0)
+      // A ≥3-char query is untouched: it goes through MATCH with its own trigrams.
+      expect(textsOf((await memSearch(rt, '支付网关', 5, 'strict')).hits)).toEqual([answer])
+
+      // Degraded window (semantic down): same answer. `floors.fts` is 1 here for BOTH reasons, which
+      // is why the reported number has to come from the same resolution the leg used.
+      fake.setAvailable(false)
+      const degraded = await memSearch(rt, '冯飞', 5, 'strict')
+      expect(degraded.degraded).toBe(true)
+      expect(textsOf(degraded.hits)).toEqual([answer])
+      expect(degraded.floors?.fts).toBe(1)
+    } finally {
+      rt.shutdown()
+    }
+  })
+
+  it('knowledge: the same 2-char fallback reaches the chunk that CONTAINS the term', async () => {
+    // Same isolation as the memory case above (queries on their own semantic axes).
+    const fake = fakeSemantic({ 冯飞: unitWithCos(0, 2), 量子: unitWithCos(0, 3) })
+    const rt = buildRuntime({ dataHome: dir, semantic: fake.backend })
+    try {
+      await ingest(rt, '冯飞负责支付网关的部署', 'a-网关.md')
+      await ingest(rt, LONG_NOTE, 'b-长笔记.md')
+      setWeights(rt, { semantic: 0, fts: 1, jaccard: 0 })
+      setFloors(rt, { semantic: 0.5, fts: 2, jaccard: 1 })
+
+      const hit = await kbSearch(rt, '冯飞', 5, 'strict')
+      expect(hit.hits.map((h) => h.text).join('')).toContain('冯飞负责支付网关')
+      expect(hit.result.floors?.fts).toBe(1)
+      expect((await kbSearch(rt, '量子', 5, 'strict')).hits).toHaveLength(0)
     } finally {
       rt.shutdown()
     }

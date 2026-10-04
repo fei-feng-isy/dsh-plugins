@@ -172,13 +172,16 @@ describe('hybridSearch', () => {
   })
 
   it('reports the effective floors and per-leg floor drops, and counts them in health', async () => {
+    // The query produces TWO index-expressible terms (查询词 / 询词元), so the configured FTS bar is
+    // reachable and is reported as configured. The one-term case (a 2-char CJK query, now a single
+    // substring term) is pinned right below.
     const result = await hybridSearch(deps(() => [
       { ...leg({ 1: 0.9 }), leg: 'semantic', droppedByFloor: 2 },
       { ...leg({ 2: 0.5 }), leg: 'fts', droppedByFloor: 1 },
       { ...leg({ 3: 0.4 }), leg: 'jaccard', droppedByFloor: 0 },
       // The HRR probe shares the Jaccard floor and is attributed separately without double-counting.
       { ...leg({ 4: 0.1 }), leg: 'hrr' },
-    ]), { query: '查询' })
+    ]), { query: '查询词元' })
     expect(result.floors).toEqual({
       semantic: config.retriever.min_semantic_similarity,
       fts: config.retriever.min_fts_terms,
@@ -186,6 +189,14 @@ describe('hybridSearch', () => {
     })
     expect(result.dropped_by_floor).toEqual({ semantic: 2, fts: 1, jaccard: 0, hrr: 0 })
     expect(retrievalHealth().candidates_dropped_by_floor).toBe(3)
+  })
+
+  it('reports the SHORT-QUERY clamp: a 2-char CJK query is graded against its ONE substring term', async () => {
+    // The reported `floors` are what the legs were handed, so a query that can only produce one term
+    // must report 1 — reporting the configured 2 would claim a bar the FTS leg could not have applied
+    // (and, before the substring fallback, a bar that described a leg which was empty by construction).
+    const result = await hybridSearch(deps(() => [{ ...leg({ 1: 0.9 }), leg: 'fts' }]), { query: '查询' })
+    expect(result.floors?.fts).toBe(1)
   })
 
   it('relaxes the FTS floor to 1 when the semantic backend is down (0 stays off)', async () => {

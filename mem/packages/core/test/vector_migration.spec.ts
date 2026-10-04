@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import { float32ToBytes } from '../src/db/vectors.js'
+import { jiebaAvailable } from '../src/entities/extract.js'
 import type { AvantfLogger } from '@avantf/mem-contract'
 import type { SemanticBackend, SemanticRepresentation } from '@avantf/mem-retrieval'
 
@@ -91,6 +92,17 @@ class NeverWarmSemantic implements SemanticBackend {
 }
 
 const FACT_COUNT = 80
+
+/**
+ * Pay the ONE process-global, memoized cost this file would otherwise charge to its first test:
+ * nodejieba parses its dictionary lazily on `load()` (measured 1.1–2.1 s) and every later caller
+ * reuses that promise (`entities/extract.ts`). Inside a test body it lands in the 5 s default
+ * budget, and when the whole workspace suite runs in parallel the contention on those ~1.6 s of
+ * main-thread parsing pushes the first case past it (measured 5117 ms → "Test timed out in
+ * 5000ms"). A file-level hook has its own budget, so the tests below keep the default timeout and
+ * every assertion is unchanged — the same warm-up `entities.spec.ts` does.
+ */
+beforeAll(async () => { await jiebaAvailable() })
 
 async function seed(): Promise<Fixture> {
   const dir = makeDir()

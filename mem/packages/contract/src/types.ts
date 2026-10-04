@@ -151,7 +151,7 @@ export interface RetrievalFloors {
   semantic: number
   /** Distinct-query-term floor for the FTS leg (`retriever.min_fts_terms`; 1 when degraded). */
   fts: number
-  /** Entity-overlap ratio floor (`retriever.min_jaccard`). */
+  /** Anchored query-coverage floor for the entity leg (`retriever.min_jaccard`, see `store/entity_leg.ts`). */
   jaccard: number
 }
 

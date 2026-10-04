@@ -131,8 +131,17 @@ const retrieverSchema = z.object({
    */
   min_fts_terms: z.number().int().nonnegative().default(2),
   /**
-   * Relevance floor for the entity-overlap (Jaccard) leg, as a ratio of the union (`0` = off).
-   * A score EQUAL to the floor is kept.
+   * Relevance floor for the entity leg, as a fraction of the query's ANCHOR entities covered
+   * (`0` = off). A score EQUAL to the floor is kept.
+   *
+   * The unit was recalibrated with the metric (2026-10-04): the leg still scores a Jaccard ratio,
+   * but with the fact's entity-bag width SATURATED and the query filtered to its ANCHOR entities
+   * (`store/entity_leg.ts` carries the measurement — a real fact's bag has a median of 31 names, so
+   * the old denominator made even a perfect 1-entity match ≈ 0.03 and the leg unreachable for short
+   * queries). `0.2` is the calibrated value on the new unit, and it is DERIVED, not inherited: the
+   * saturating cap is chosen so a two-entity query sharing ONE entity lands exactly on the floor
+   * (`1 / (2 + 3) = 0.2`), i.e. sharing a single discriminative entity out of two is the weakest
+   * evidence that still counts, which is what "no incidental small overlap" means here.
    */
   min_jaccard: z.number().min(0).max(1).default(0.2),
   /**

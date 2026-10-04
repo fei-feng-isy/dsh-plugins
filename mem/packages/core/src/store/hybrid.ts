@@ -40,7 +40,7 @@ import {
   type SemanticBackend,
 } from '@avantf/mem-retrieval'
 import { droppedLegs, emptyFloorDrops, resolveFloors, totalFloorDrops, type FloorLeg } from './floors.js'
-import { relevanceTerms } from './lexical.js'
+import { gradedTerms } from './lexical.js'
 import { selfQueryRewrite } from './self_query.js'
 
 /** The `limit` a caller gets when it passes nothing usable. */
@@ -81,8 +81,12 @@ export interface HybridLeg {
   capped?: boolean
   /**
    * Which floor governs this leg, for {@link HybridResult.dropped_by_floor}'s per-leg breakdown.
-   * The HRR probe shares the Jaccard floor; naming it separately keeps a narrowed candidate set
-   * attributable without double-counting the Jaccard leg's own drops.
+   * The HRR probe shares the entity (`jaccard`) floor; naming it separately keeps a narrowed
+   * candidate set attributable without double-counting the entity leg's own drops.
+   *
+   * The `jaccard` KEY is historical: the entity leg's metric is now anchored Jaccard with a
+   * saturating union, whose unit (and the `min_jaccard` floor on it) is defined in
+   * `store/entity_leg.ts` — read that before re-calibrating the knob.
    */
   leg?: keyof RetrievalFloorDrops
   /** Candidates this leg removed because they fell below its floor. */
@@ -295,8 +299,9 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
   const overFetch = Math.max(limit, plan.overFetch ?? limit * (retriever.over_fetch_factor || DEFAULT_OVER_FETCH_FACTOR))
   const legCap = legCapFor(deps.config, overFetch)
   // Computed once for both passes: the FTS bar is clamped to the terms this QUERY can produce (a
-  // 3-char CJK query has one trigram, so a configured 2 is unreachable for it).
-  const termCount = relevanceTerms(query).length
+  // 3-char CJK query has one trigram, and a 2-char one falls back to ONE substring term, so a
+  // configured 2 is unreachable for either).
+  const termCount = gradedTerms(query).length
 
   /**
    * 方案 A — the self-reference AUGMENTATION (docs/SELF_QUERY_RELEVANCE.md §4-A).
@@ -307,7 +312,7 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
    * third-person rewrite and the ORIGINAL query and the rewrite each run the full leg set.
    *
    * THE FLOOR IS RESOLVED PER RUN (0.4.2). Each run is graded by ITS OWN reachability clamp —
-   * `min(configured, relevanceTerms(variant).length)` — because a variant with MORE terms has a
+   * `min(configured, gradedTerms(variant).length)` — because a variant with MORE terms has a
    * HIGHER bar, and grading it at the original's lower bar is what let a single incidental trigram
    * from the rewrite become that leg's head. Measured on the live store: `我是谁？` yields ONE term
    * (`我是谁`) while its rewrite `用户是谁` yields TWO (`用户是` / `户是谁`), and the rewrite's
@@ -392,7 +397,7 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
       // term-count-independent, so this touches `fts` only.
       const ownFloors = isOriginal ? floors : resolveFloors(retriever, semAvail, {
         profile,
-        termCount: relevanceTerms(variant).length,
+        termCount: gradedTerms(variant).length,
         ...(relaxLegs === undefined ? {} : { relaxLegs }),
       })
       const variantFloors = ownFloors === floors

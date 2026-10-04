@@ -164,3 +164,35 @@ export function buildFtsQuery(query: string, tokenizer: FtsTokenizer = resolveFt
   const unique = [...new Set(parts)]
   return unique.slice(0, MAX_FTS_PHRASES).join(' OR ')
 }
+
+/**
+ * The `LIKE` predicate that matches `column` against every term as a contiguous SUBSTRING.
+ *
+ * This is the SHORT-QUERY FALLBACK's search primitive: the trigram index holds no term under three
+ * characters (measured on the live store: `fts5vocab` over `facts_fts` = 27906 terms, all length 3),
+ * and a 2-char `MATCH` returns zero rows — quoted or prefixed. An FTS5 trigram table does still
+ * answer a substring `LIKE`, but only by SCANNING when the pattern is shorter than three characters
+ * (SQLite documents the index as usable from three), so callers must bound the result themselves.
+ * See `store/lexical.ts` for the precision guard and why only 2-char CJK runs reach here.
+ *
+ * `ESCAPE` is not decoration: the terms are the caller's text, so a `%` or `_` in one would silently
+ * turn a literal query into a wildcard. The fragment is built once and shared by BOTH stores' DAOs,
+ * the way {@link buildFtsQuery} is — the two copies of that rule had already drifted once.
+ *
+ * @returns `any` / `count` (SQL expressions over the SAME bind order) and the patterns. `count` is
+ *   the number of terms the row contains, i.e. the fallback leg's relevance score; `any` is its
+ *   `WHERE` clause. Empty terms are dropped, so a caller never gets a `%%` that matches everything.
+ */
+export function likeSubstring(
+  column: string,
+  terms: readonly string[],
+): { any: string; count: string; params: string[] } {
+  const clean = terms.filter((term) => term.length > 0)
+  const params = clean.map((term) => `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`)
+  const one = `${column} LIKE ? ESCAPE '\\'`
+  return {
+    any: clean.map(() => one).join(' OR '),
+    count: clean.map(() => `(${one})`).join(' + '),
+    params,
+  }
+}

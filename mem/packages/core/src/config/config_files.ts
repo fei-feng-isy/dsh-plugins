@@ -53,7 +53,7 @@ export const DEFAULT_COMMON_CONFIG = `# avantf-mem 公共配置（分层第②�
 #   # 0 = 关闭该门槛；分数等于门槛保留。语义后端不可用时 min_fts_terms 的生效值放宽到 1。
 #   min_semantic_similarity: 0.5      # 语义腿余弦；0.5 只对 bge-base-zh-v1.5/768（mean pooling）标定过，换模型要重标
 #   min_fts_terms: 2                  # FTS 腿：这一行命中几个不同的查询词元（拉丁词≥5字符 + CJK 3-gram）
-#   min_jaccard: 0.2                  # 实体腿 Jaccard 比值
+#   min_jaccard: 0.2                  # 实体腿：锚点实体的 Jaccard（事实宽度饱和）；2 实体命中 1 个正好 0.2
 
 # lifecycle:
 #   purge_after_archived_days: 365    # 归档事实的物理清理窗口（活跃日）

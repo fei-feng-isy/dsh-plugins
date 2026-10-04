@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { buildRuntime, type AvantfRuntime } from '../src/index.js'
-import { looksRelevant, relevanceTerms } from '../src/store/lexical.js'
+import { gradedTerms, looksRelevant, relevanceTerms, substringTerms } from '../src/store/lexical.js'
+import { loadEvalCases } from '../src/eval/loader.js'
 import { allowAnyDomain } from './helpers.js'
 
 /**
@@ -36,6 +38,52 @@ describe('relevanceTerms', () => {
 
   it('returns nothing for input with no expressible term', () => {
     expect(relevanceTerms('a b 好')).toEqual([])
+  })
+})
+
+/**
+ * The SHORT-QUERY fallback (task E1). `relevanceTerms` is deliberately unchanged — the conditional
+ * hint still probes the index only — and the leg-side term set is `gradedTerms`, which is
+ * `relevanceTerms` verbatim unless the query has NO indexed term at all. These are the invariants
+ * that keep the labelled set stable: any query that produced a term before produces exactly the
+ * same terms now.
+ */
+describe('gradedTerms (short-CJK fallback)', () => {
+  it('substringTerms takes exactly the 2-char CJK runs — not 1-char, not latin, not 3+', () => {
+    expect(substringTerms('李娜')).toEqual(['李娜'])
+    expect(substringTerms('李娜 张伟')).toEqual(['李娜', '张伟'])
+    expect(substringTerms('李娜负责支付网关')).toEqual([]) // 6-char run: 3-grams are the index's unit
+    // A single character is not evidence (the same reason `looksRelevant` needs two terms).
+    expect(substringTerms('李')).toEqual([])
+    expect(substringTerms('ab 好')).toEqual([])
+    expect(substringTerms('李娜 李娜')).toEqual(['李娜']) // deduped
+    // A 4-char run is NOT two 2-char terms: the run length decides, not the substring search.
+    expect(substringTerms('李娜李娜')).toEqual([])
+  })
+
+  it('gradedTerms returns the INDEX terms whenever the query has any of them', () => {
+    // The fallback is whole-query, not per run: a mixed text keeps only its trigrams, so a measured
+    // query can never gain a substring term (and `applyTermFloor` can never grade it differently).
+    expect(gradedTerms('支付网关')).toEqual(relevanceTerms('支付网关'))
+    expect(gradedTerms('缓存失效 李娜')).toEqual(relevanceTerms('缓存失效 李娜'))
+    expect(gradedTerms('cgroup v2 的内存保护')).toEqual(relevanceTerms('cgroup v2 的内存保护'))
+    // No indexed term → the 2-char runs themselves; no term of either kind → nothing (not graded).
+    expect(gradedTerms('李娜')).toEqual(['李娜'])
+    expect(gradedTerms('a b 好')).toEqual([])
+  })
+
+  it('REGRESSION: every query of the frozen 41 that has an indexed term is bit-identical', () => {
+    // Machine-checked "long queries do not move": `gradedTerms(q) === relevanceTerms(q)` for every
+    // query the frozen set measures through the indexed path. The only queries that differ are the
+    // 2-char ones that had NO leg at all.
+    const here = dirname(fileURLToPath(import.meta.url))
+    const cases = loadEvalCases(join(here, 'fixtures', 'eval_zh_relations.jsonl'))
+    const queries = cases.flatMap((c) => c.queries.map((q) => q.query))
+    const changed = queries.filter((q) => JSON.stringify(gradedTerms(q)) !== JSON.stringify(relevanceTerms(q)))
+    const expectedChanged = queries.filter((q) => relevanceTerms(q).length === 0 && substringTerms(q).length > 0)
+    expect(new Set(changed)).toEqual(new Set(expectedChanged))
+    expect(changed.length, 'the frozen set has 2-char queries whose only term is the fallback').toBeGreaterThan(0)
+    expect(changed.every((q) => (q.match(/[\u4e00-\u9fff]/g) ?? []).length === 2)).toBe(true)
   })
 })
 

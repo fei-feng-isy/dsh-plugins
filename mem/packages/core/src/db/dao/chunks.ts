@@ -10,6 +10,7 @@ import type { DocumentChunk } from '@avantf/mem-contract'
 import type { Db } from '../port.js'
 import { batches, inList } from '../chunk.js'
 import { contentHash } from '../hash.js'
+import { likeSubstring } from '../tokenizer.js'
 
 /** One chunk to persist, in document order (`idx` is the position, not the array index). */
 interface ChunkInsert {
@@ -286,15 +287,16 @@ export class ChunksDao {
    * the cap makes `scores.size === legCap` — the "was this leg trimmed" signal — report the opposite
    * of the truth. (The memory store's sibling does not batch, so its single `LIMIT` is already exact.)
    */
-  candidatesByEntityNames(names: readonly string[], domain: string | undefined, source: string | undefined, limit: number): number[] {
+  candidatesByEntityNames(names: readonly string[], domain: string | undefined, source: string | undefined, limit: number, queryWidth: number, widthCap: number): number[] {
     if (limit <= 0) return []
     const out = new Set<number>()
     for (const batch of batches(names)) {
       const { placeholders, values } = inList(batch)
       const rows = this.db
         .prepare<{ chunk_id: number }>(
-          // Ordered by the ACTUAL Jaccard, not by the shared count — see the memory store's
-          // sibling for the measured case where those two disagree.
+          // Ordered by the LEG'S SCORE — see the memory store's sibling. The score is anchored
+          // Jaccard with a saturating union: `shared / (|A| + min(total - shared, widthCap))`, so a
+          // narrower chunk sharing one entity can outrank a wide one sharing two.
           `SELECT ce.chunk_id AS chunk_id, COUNT(*) AS shared,
                   (SELECT COUNT(*) FROM chunk_entities x WHERE x.chunk_id = ce.chunk_id) AS total
              FROM chunk_entities ce
@@ -307,13 +309,33 @@ export class ChunksDao {
             WHERE ce.name IN (${placeholders})
               AND (? IS NULL OR d.domain = ?) AND (? IS NULL OR d.source = ?)
             GROUP BY ce.chunk_id
-            ORDER BY (CAST(shared AS REAL) / (total + ? - shared)) DESC, ce.chunk_id ASC
+            ORDER BY (CAST(shared AS REAL) / (? + MIN(total - shared, ?))) DESC, total ASC, ce.chunk_id ASC
             LIMIT ?`,
         )
-        .all(...values, domain ?? null, domain ?? null, source ?? null, source ?? null, batch.length, limit)
+        .all(...values, domain ?? null, domain ?? null, source ?? null, source ?? null, queryWidth, widthCap, limit)
       for (const r of rows) out.add(r.chunk_id)
     }
     return [...out]
+  }
+
+  /**
+   * How many chunks carry each name — the knowledge side of the entity leg's document frequency.
+   *
+   * Mirrors `EntitiesDao.activeDocFrequency`: only the caller's query names are looked up. There is
+   * no status column to filter on (see `candidatesByEntityNames`), so "document frequency" is over
+   * all chunks, which is the population the leg ranks.
+   */
+  docFrequency(names: readonly string[]): Map<string, number> {
+    const out = new Map<string, number>()
+    if (!names.length) return out
+    const { placeholders, values } = inList(names)
+    const rows = this.db
+      .prepare<{ name: string; df: number }>(
+        `SELECT name, COUNT(*) AS df FROM chunk_entities WHERE name IN (${placeholders}) GROUP BY name`,
+      )
+      .all(...values)
+    for (const row of rows) out.set(row.name, Number(row.df))
+    return out
   }
 
   /** FTS leg (`bm25` rank; negated by the caller so higher = better). */
@@ -329,5 +351,27 @@ export class ChunksDao {
          LIMIT ?`,
       )
       .all(ftsQuery, domain ?? null, domain ?? null, source ?? null, source ?? null, limit ?? -1)
+  }
+
+  /**
+   * The knowledge store's SHORT-QUERY fallback leg — the sibling of `FactsDao.ftsSubstringSearch`
+   * (see it for the score/tie/verify notes; the predicate itself is shared through
+   * `db/tokenizer.ts#likeSubstring`). It reads `doc_chunks` directly rather than the external-content
+   * FTS table: no index can serve a two-character pattern anyway, and the `documents` join is where
+   * the domain/source filter lives.
+   */
+  ftsSubstringSearch(terms: readonly string[], domain?: string, source?: string, limit?: number): { id: number; rank: number }[] {
+    const { any, count, params } = likeSubstring('dc.text', terms)
+    if (params.length === 0) return []
+    return this.db
+      .prepare<{ id: number; rank: number }>(
+        `SELECT dc.chunk_id AS id, ${count} AS rank
+           FROM doc_chunks dc
+           JOIN documents d ON d.doc_id = dc.doc_id
+          WHERE (? IS NULL OR d.domain = ?) AND (? IS NULL OR d.source = ?) AND (${any})
+          ORDER BY rank DESC, dc.chunk_id ASC
+          LIMIT ?`,
+      )
+      .all(...params, domain ?? null, domain ?? null, source ?? null, source ?? null, ...params, limit ?? -1)
   }
 }

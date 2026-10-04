@@ -78,6 +78,33 @@ export class EntitiesDao {
   }
 
   /**
+   * How many ACTIVE facts carry each name — the entity leg's document frequency.
+   *
+   * The anchor filter (`store/entity_leg.ts`) needs it to drop corpus-wide words from a query's
+   * evidence: a name carried by ~half the store is not discriminative, and treating it as an anchor
+   * would make the entity leg drag the whole store in. Only the caller's QUERY names are looked up
+   * (a handful), so this is one indexed COUNT per name, not a corpus scan. A name absent from the
+   * map has frequency 0, i.e. no active fact carries it and it can never be shared.
+   */
+  activeDocFrequency(names: readonly string[]): Map<string, number> {
+    const out = new Map<string, number>()
+    if (!names.length) return out
+    const { placeholders, values } = inList(names)
+    const rows = this.db
+      .prepare<{ name: string; df: number }>(
+        `SELECT e.name AS name, COUNT(*) AS df
+           FROM entities e
+           JOIN fact_entities fe ON fe.entity_id = e.entity_id
+           JOIN facts fa ON fa.fact_id = fe.fact_id
+          WHERE e.name IN (${placeholders}) AND fa.status = 'active'
+          GROUP BY e.name`,
+      )
+      .all(...values)
+    for (const row of rows) out.set(row.name, Number(row.df))
+    return out
+  }
+
+  /**
    * Candidate facts for the embedding leg, narrowed by the scorer's NECESSARY conditions
    * (see {@link ContradictDetector}): at least `minShared` shared entities and at most
    * `maxEntities` of their own, both active and never the checked fact itself.
@@ -135,24 +162,25 @@ export class EntitiesDao {
       .map((row) => row.fact_id)
   }
 
-  /** Active facts sharing ANY of `names`, in one category (`jaccard` leg). */
+  /** Active facts sharing ANY of `names`, in one category (the entity leg). */
   /**
-   * Candidate facts for an entity-Jaccard query, ordered by the ACTUAL Jaccard and CAPPED.
+   * Candidate facts for an entity query, ordered by the leg's score and CAPPED.
    *
    * The cap is the whole point: this leg used to return every fact sharing ANY query entity —
    * unbounded in the corpus (measured 6600 rows for a common phrase at 33k facts, and the fusion
    * step then normalized and sorted all of them).
    *
-   * Ordering by the shared COUNT alone (the first version of this cap) was WRONG: the leg's score
-   * is `shared / union`, so a fact sharing 3 of 10 entities (0.30) outranked one sharing 2 of 2
-   * (0.67) and pushed it out of the cap — measured: dropping the higher-scoring document. The
-   * ratio is computed in SQL instead: `union = |q| + |f| - shared`, and `|f|` is one indexed COUNT
-   * per candidate (the `fact_entities` primary key covers it). The caller still recomputes the same
-   * ratio in JS for the survivors, which is cheap (<= the cap) and keeps one formula in charge.
+   * The ordering must be the leg's own score order, or the cap drops the best rows: `fuse` scales
+   * by each leg's maximum, and a survivor's scaled value is unchanged only when the ordering (and
+   * therefore the maximum) survives the trim. The leg scores anchored Jaccard with a saturating
+   * union (`store/entity_leg.ts`): `shared / (queryWidth + min(total - shared, widthCap))`, where `queryWidth` is the
+   * query's FULL entity count and `names` is its anchors. That ratio — not the raw shared count — is what this orders by, because a
+   * narrower fact sharing one entity can outrank a wide one sharing two. `total ASC` is only a
+   * deterministic tie-break among equal ratios. The caller still recomputes the score in JS for the
+   * survivors, so one formula stays in charge.
    */
-  candidateFactsForAnyEntity(names: readonly string[], category: string | undefined, limit: number): number[] {
+  candidateFactsForAnyEntity(names: readonly string[], category: string | undefined, limit: number, queryWidth: number, widthCap: number): number[] {
     if (!names.length || limit <= 0) return []
-    // The Jaccard denominator (`total + |q| - shared`) takes the REAL query width, not the rung.
     const { placeholders, values } = inList(names)
     return this.db
       .prepare<{ id: number }>(
@@ -163,10 +191,10 @@ export class EntitiesDao {
            JOIN entities e ON e.entity_id = fe.entity_id
           WHERE e.name IN (${placeholders}) AND fa.status = 'active' AND (? IS NULL OR fa.category = ?)
           GROUP BY fa.fact_id
-          ORDER BY (CAST(shared AS REAL) / (total + ? - shared)) DESC, fa.fact_id ASC
+          ORDER BY (CAST(shared AS REAL) / (? + MIN(total - shared, ?))) DESC, total ASC, fa.fact_id ASC
           LIMIT ?`,
       )
-      .all(...values, category ?? null, category ?? null, names.length, limit)
+      .all(...values, category ?? null, category ?? null, queryWidth, widthCap, limit)
       .map((row) => row.id)
   }
 }
