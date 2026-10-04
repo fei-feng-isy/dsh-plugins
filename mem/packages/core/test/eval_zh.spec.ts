@@ -7,6 +7,8 @@ import type { RecallResult } from '@avantf/mem-contract'
 import type { SemanticBackend } from '@avantf/mem-retrieval'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import { buildFtsQuery } from '../src/db/tokenizer.js'
+import { relevanceTerms } from '../src/store/lexical.js'
+import { selfQueryRewrite } from '../src/store/self_query.js'
 import { loadEvalCases } from '../src/eval/loader.js'
 import { evaluateCases } from '../src/eval/runner.js'
 
@@ -130,6 +132,46 @@ function selfQueryStub(cosines: Readonly<Record<string, readonly [number, number
 /** 冻结集里那一条语义活体的自指问句用例（唯一的 `self_query` 案例）。 */
 const SELF_QUERY_CASE_FACTS = cases.find((c) => c.tags.includes('self_query'))?.setup_facts ?? []
 const isSelfQueryCase = (facts: string[]): boolean => facts === SELF_QUERY_CASE_FACTS
+
+// ─── 自指问句哨兵 ②（0.4.2 事故）：改写三元组的**字面碰撞** ─────────────────────────────
+//
+// AGENTS.md「分布敏感 / 碰撞敏感的行为」要求 fixture 复刻真实语料的形状。真实库（80 条 active、
+// 中位 313 字符）里的失败链是：改写 `我是谁？ → 用户是谁` 产出三元组 `用户是`，一条**无关长笔记**
+// 正文里恰好含这个字面串 ⇒ 它在 FTS 腿上拿到唯一命中；身份事实（9 字符）只能靠实体腿（0.15）⇒
+// 0.3 反压 0.15 ✗。门槛本应拦住它：`用户是谁` 有 2 个词元 ⇒ `min(configured 2, 2) = 2`，而它只
+// 命中 1 个。缺陷是这一遍被按**原查询**（`我是谁？`，1 个词元）解析出的门槛 1 评分
+// （`store/hybrid.ts` 的 0.4.2 修复：每一遍按**被评分的那条文本**的词元数解析）。
+//
+// fixture 三条结构缺一不可：① 1 条 9 字符身份事实 + N 条几百字符长笔记（同真实库的长度分布）；
+// ② 其中一条含关键碎片 `用户是`；③ 反事实：把碎片打断 → 结果应回正（作为 fixture 自检）。
+const COLLISION_FACT = '用户的名字是张三。' // 9 字符：正确的身份事实
+/** 与真实库同量级的长笔记（~300 字符），本身**不含** `用户是` / `我是谁`。 */
+const COLLISION_LONG =
+  '生产环境的部署流程已经冻结：发布窗口定在每周三凌晨，回滚脚本必须先在预发环境演练通过，演练记录由值班同学签字确认后才允许合并。'
+  + '监控面板聚合节点存活、队列积压与连接池占用三项指标，任一指标连续五分钟越过阈值就触发告警，告警会同时推送到值班群与工单系统。'
+  + '数据库主从延迟的排查手册要求先看复制线程状态，再核对慢查询日志，最后比对两侧的表行数与校验和，确认无差异后才能恢复写入。'
+  + '归档任务每天凌晨启动，把超过保留期的会话记录搬到冷存储，冷存储的读取路径单独限流，防止批量回放把在线查询拖慢。'
+  + '容量评审每月一次，按最近四周的峰值水位留出两成余量，新增依赖必须在上线前补齐演练与回滚预案，否则不予放行。'
+/** 含改写三元组 `用户是` 的无关长笔记（真实库那条 375 字符 tool 笔记的形状）。 */
+const COLLISION_CARRIER = `${COLLISION_LONG}平台同时维护着一批内部工具，用户是这些工具的主要使用者，日常通过命令行完成大部分操作。`
+/** 其余 N 条长干扰项：同量级长度，且**不含**关键碎片。 */
+const COLLISION_CROWD = Array.from({ length: 24 }, (_, i) => `${COLLISION_LONG}（归档批次 ${String(i)}）`)
+
+/**
+ * 这条哨兵要的是**词法碰撞**，不是稠密相似度：所有事实的语义向量都落在门槛之下，于是判定完全发生
+ * 在 FTS / 实体腿上。这正是真实库的形状——身份事实的持久化向量来自另一个 512 维空间，当前 768 维
+ * 的语义索引直接跳过它，它只能靠实体腿进来（见 AGENTS.md 记载的这次事故）。
+ */
+function collisionStub(): SemanticBackend {
+  const zero = async (): Promise<Float32Array> => new Float32Array(SELF_QUERY_DIM)
+  return {
+    name: 'eval-collision-stub',
+    dim: SELF_QUERY_DIM,
+    encode: zero,
+    encodeBatch: async (texts: string[]) => texts.map(() => new Float32Array(SELF_QUERY_DIM)),
+    isAvailable: () => true,
+  }
+}
 
 describe('zh relations eval (degraded FTS+entity path + 1 semantic-live self-query sentinel)', () => {
   it('runs the full 41-query set and reports metrics', async () => {
@@ -352,6 +394,59 @@ describe('zh relations eval (degraded FTS+entity path + 1 semantic-live self-que
     } finally {
       rt.shutdown()
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('SENTINEL (0.4.2): 改写三元组的字面碰撞不得压过身份事实（拥挤语料 + 反事实）', async () => {
+    // 断言的是**属性**：top-1 = 短身份事实，且 `relaxed !== true`（答案来自严格档）。fixture 的形状
+    // 与反事实自检见文件头的 `COLLISION_*` 注释。把 0.4.2 的修复回退（两遍都按原查询的词元数解析
+    // 门槛）→ 载体那条长笔记以 FTS 腿的头（0.3）反压身份事实（0.15），本用例必须红。
+    const dirs: string[] = []
+    const runtimes: AvantfRuntime[] = []
+    /** 建一个「1 短 + 1 载体 + N 长」的库；`carrier` 可替换（反事实那一遍把碎片打断）。 */
+    const buildCrowd = async (carrier: string): Promise<{ rt: AvantfRuntime; correctId: number }> => {
+      const dir = mkdtempSync(join(tmpdir(), 'avantf-eval-collision-'))
+      dirs.push(dir)
+      const rt = buildRuntime({ dataHome: dir, memoryDbPath: join(dir, 'memory.db'), semantic: collisionStub() })
+      runtimes.push(rt)
+      const correctId = (await rt.remember({ action: 'add', content: COLLISION_FACT })).fact_id
+      await rt.remember({ action: 'add', content: carrier })
+      for (const text of COLLISION_CROWD) await rt.remember({ action: 'add', content: text })
+      return { rt, correctId }
+    }
+    try {
+      // fixture 自检（第一部分）：短/长不对称 + 字面碎片 + 两遍的词元数差都在。
+      expect([...COLLISION_FACT].length, '身份事实是 9 字符').toBe(9)
+      expect([...COLLISION_CARRIER].length, '载体/干扰项是几百字符的长笔记').toBeGreaterThanOrEqual(300)
+      expect(COLLISION_CARRIER, '载体含改写三元组 `用户是`').toContain('用户是')
+      expect(COLLISION_FACT, '身份事实不含碎片').not.toContain('用户是')
+      expect(COLLISION_CROWD.every((t) => !t.includes('用户是')), '普通干扰项不含碎片').toBe(true)
+      expect(selfQueryRewrite('我是谁？')).toBe('用户是谁')
+      expect(relevanceTerms('我是谁？').length, '原查询只有 1 个词元').toBe(1)
+      expect(relevanceTerms('用户是谁').length, '改写有 2 个词元').toBe(2)
+      expect(relevanceTerms('用户是谁'), '改写产出碎片 `用户是`').toContain('用户是')
+
+      const { rt, correctId } = await buildCrowd(COLLISION_CARRIER)
+      const hit = await rt.memory.search({ query: '我是谁？', limit: 3 })
+      expect(hit.hits[0]?.ref_id, 'top-1 必须是短身份事实').toBe(correctId)
+      expect(hit.relaxed === true, '必须来自严格档，不能靠放宽档兜住').toBe(false)
+      expect(hit.floors?.semantic).toBe(0.5)
+      expect(hit.floors?.fts, '对外报告的是用户自己那条查询的门槛').toBe(1)
+      expect(hit.dropped_by_floor?.fts, '改写那一遍按自己的词元数（2）丢掉了字面碰撞').toBe(1)
+
+      // 反事实（fixture 自检）：同一形状、只把碎片打断 → FTS 腿上不再有这条候选（drops 归 0）。
+      // 这条证明哨兵钉的是**字面碰撞**而不是长度；没有它，"1 短 + N 长"在健康语料上天然全绿。
+      const counter = await buildCrowd(COLLISION_CARRIER.replace('用户是', '用户 是'))
+      const c = await counter.rt.memory.search({ query: '我是谁？', limit: 3 })
+      expect(c.hits[0]?.ref_id, '反事实：碎片不在，答案仍是身份事实').toBe(counter.correctId)
+      expect(c.dropped_by_floor?.fts, '反事实：没有碎片可丢 → 说明碎片是唯一原因').toBe(0)
+
+      // 非自指对照：同一个库里无关查询仍然空（增广不能把无关问题拉进来）。
+      expect((await rt.memory.search({ query: '插件的安装方法', limit: 3 })).hits, '无关查询仍应空').toHaveLength(0)
+      expect((await rt.memory.search({ query: '缓存策略统一改为写穿', limit: 3 })).hits).toHaveLength(0)
+    } finally {
+      for (const rt of runtimes) rt.shutdown()
+      for (const d of dirs) rmSync(d, { recursive: true, force: true })
     }
   })
 

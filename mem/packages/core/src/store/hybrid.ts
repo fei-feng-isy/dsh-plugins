@@ -304,9 +304,21 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
    * The corpus writes the user in the third person and the user asks in the first, so a
    * first-person question shares no lexical term with the fact that answers it and the semantic leg
    * has to carry the whole decision. The intent table (`store/self_query.ts`) supplies ONE canonical
-   * third-person rewrite; the ORIGINAL query and the rewrite each run the full leg set, and each
-   * leg's raw scores are UNIONED (a candidate in both keeps its MAX score — this is not a second
-   * leg, so it must not double the leg's weight).
+   * third-person rewrite and the ORIGINAL query and the rewrite each run the full leg set.
+   *
+   * THE FLOOR IS RESOLVED PER RUN (0.4.2). Each run is graded by ITS OWN reachability clamp —
+   * `min(configured, relevanceTerms(variant).length)` — because a variant with MORE terms has a
+   * HIGHER bar, and grading it at the original's lower bar is what let a single incidental trigram
+   * from the rewrite become that leg's head. Measured on the live store: `我是谁？` yields ONE term
+   * (`我是谁`) while its rewrite `用户是谁` yields TWO (`用户是` / `户是谁`), and the rewrite's
+   * `用户是` is a literal substring of an unrelated long note — that note then took the FTS leg's
+   * head (weight × 1.0) and outvoted the identity fact, which the rewrite had correctly put first.
+   * `applyTermFloor` re-clamps to the query it is grading, but the clamp is one-directional
+   * (`min`): it can only LOWER an unreachable bar, never RAISE a bar inherited from another text, so
+   * the resolution has to happen per variant (see {@link resolveFloors}). Each variant's own bar is
+   * then floored at the reported one, so every run is graded at or ABOVE what the envelope says: the
+   * envelope reports the ORIGINAL query's floors (the question the user actually asked) and can never
+   * overstate the bar a run was held to.
    *
    * WHY AUGMENT, NOT REPLACE. The table is a closed cue list over a language with unbounded
    * self-reference variants, so a wrong match is inevitable. Under augmentation a false positive can
@@ -315,10 +327,16 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
    * asked. `queries.length === 1` (the overwhelming majority) leaves the run below bit-identical to
    * the pre-A path: one `deps.legs` call, same context, same vector wiring.
    *
-   * The floors are resolved ONCE from the ORIGINAL query and applied to both runs. That is what
-   * makes "never narrows" structural rather than a promise: the merged per-leg score is
-   * `max(original, rewrite) >= original`, and a floor only removes entries, so any candidate the
-   * original query cleared its floor with still clears it in the union.
+   * FLOORS, `relaxed` AND `dropped_by_floor` UNDER AUGMENTATION. The PROFILE is resolved once per
+   * pass from the ORIGINAL query and handed to both runs; only the per-variant reachability clamp
+   * above differs, and it can only raise. Every leg of every run is therefore judged by AT LEAST the
+   * numbers the result reports — the envelope can never say "strict" while a rewrite run answered from
+   * the relaxed band (the distortion this design exists to rule out). `relaxed` is decided exactly as
+   * it was: the automatic loose pass fires only when the strict pass returned NOTHING with drops, and
+   * it re-runs BOTH variants under the loosened floors. Because a leg only ever REMOVES entries, the
+   * per-leg merge of the two runs' drop counts uses `max` (summing would count the same candidate
+   * twice) and `capped` uses OR — both conservative, neither inflates the report that feeds the retry
+   * decision.
    */
   const augment = (plan.rewriteQuery ?? selfQueryRewrite)(query)
   const queries = augment !== undefined && augment !== query ? [query, augment] : [query]
@@ -352,6 +370,7 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
   const runPass = async (profile: FloorProfile, relaxLegs?: readonly FloorLeg[]): Promise<{ hits: Budgeted<H>[]; used_tokens: number; floors: RetrievalFloors; dropped_by_floor: RetrievalFloorDrops; capped: number }> => {
     // Resolved per pass and handed to the legs: the degraded relaxation of `min_fts_terms` must be
     // the same value the result reports, or a caller cannot tell which rule produced an empty answer.
+    // This resolution describes the USER's query (`termCount`) and is what the envelope reports.
     const floors = resolveFloors(retriever, semAvail, {
       profile,
       termCount,
@@ -364,6 +383,21 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
     const runs = await Promise.all(queries.map(async (variant, index) => {
       const isOriginal = index === 0
       const vector = isOriginal ? passVector : augmentVectors.get(variant)
+      // The FTS reachability clamp is per GRADED TEXT (方案 A note above): a rewrite that yields more
+      // terms than the original must be judged against its own bar, or the clamp's one-directional
+      // `min` cannot raise it. It is then floored at the REPORTED bar, so a run can only ever be
+      // STRICTER than the envelope claims — the report can never overstate what was applied. (A
+      // rewrite with FEWER terms than the original would otherwise clamp lower; the augmentation must
+      // not admit lexical evidence weaker than the user's own query requires.) Every other floor is
+      // term-count-independent, so this touches `fts` only.
+      const ownFloors = isOriginal ? floors : resolveFloors(retriever, semAvail, {
+        profile,
+        termCount: relevanceTerms(variant).length,
+        ...(relaxLegs === undefined ? {} : { relaxLegs }),
+      })
+      const variantFloors = ownFloors === floors
+        ? floors
+        : { ...ownFloors, fts: Math.max(floors.fts, ownFloors.fts) }
       return runLegs(deps, {
         query: variant,
         limit,
@@ -371,7 +405,7 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
         legCap,
         semAvail,
         weights,
-        floors,
+        floors: variantFloors,
         ...(vector === undefined ? {} : { queryVector: vector }),
         onQueryVector: (vec) => {
           if (isOriginal) passVector = vec

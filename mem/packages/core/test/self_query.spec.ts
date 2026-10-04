@@ -133,6 +133,44 @@ describe('hybridSearch augmentation (方案 A)', () => {
     expect([...calls].sort()).toEqual(['我是谁', '用户是谁'])
   })
 
+  it('grades each run by ITS OWN reachability clamp (the FTS bar cannot be inherited)', async () => {
+    // 2026-10-04 事故（AGENTS.md「分布敏感 / 碰撞敏感」）。`我是谁？` 只产出 ONE trigram，改写
+    // `用户是谁` 产出 TWO，而文档语义是「对**被评分的那条文本**取 `min(configured, termCount)`」。
+    // 两遍共用原查询解析出的门槛时，改写那一遍就被压到 1：一个只命中 `用户是` 的无关联长笔记拿到了
+    // FTS 腿的头（权重 × 1.0），反压 `改写` 自己排在第一的身份事实。这条直接钉住「每一遍用自己的
+    // 词元数」——把修复回退（两遍都传 termCount(query)）就会红。
+    config.retriever.min_fts_terms = 2
+    const seen: { query: string; fts: number }[] = []
+    const d: HybridDeps<TestHit> = {
+      ...deps(() => ({ 1: 1 })),
+      legs: async (ctx) => {
+        seen.push({ query: ctx.query, fts: ctx.floors.fts })
+        return [{ weight: 1, scores: new Map([[1, 1]]) } as HybridLeg]
+      },
+    }
+    const result = await hybridSearch(d, { query: '我是谁？', limit: 5 })
+    expect(seen.find((s) => s.query === '我是谁？')?.fts, '原查询只有 1 个词元 → 门槛 1').toBe(1)
+    expect(seen.find((s) => s.query === '用户是谁')?.fts, '改写有 2 个词元 → 门槛 2').toBe(2)
+    // 对外报告的是用户自己那条查询的门槛（改写那一遍只会更严，绝不会更松）。
+    expect(result.floors.fts).toBe(1)
+
+    // 反向：改写比原查询**更短**时，它自己的可达门槛更低（`min(configured, 2)`），但那一遍被抬到
+    // 报告门槛 — 增广不能放进比用户自己那条查询更弱的词法证据，且这样 `floors` 永不夸大已施加的门槛。
+    config.retriever.min_fts_terms = 3
+    const seen2: { query: string; fts: number }[] = []
+    const d2: HybridDeps<TestHit> = {
+      ...deps(() => ({ 1: 1 })),
+      legs: async (ctx) => {
+        seen2.push({ query: ctx.query, fts: ctx.floors.fts })
+        return [{ weight: 1, scores: new Map([[1, 1]]) } as HybridLeg]
+      },
+    }
+    const result2 = await hybridSearch(d2, { query: '我是什么人', limit: 5 })
+    expect(seen2.find((s) => s.query === '我是什么人')?.fts, '原查询 3 个词元 → 门槛 3').toBe(3)
+    expect(seen2.find((s) => s.query === '用户是谁')?.fts, '改写只有 2 个词元，但不得低于报告门槛 3').toBe(3)
+    expect(result2.floors.fts).toBe(3)
+  })
+
   it('a MISCONFIGURED table can only ADD: every hit of the raw query survives', async () => {
     const query = '插件怎么安装'
     // A deliberately wrong table: this query is not self-referential, yet the table rewrites it.

@@ -52,7 +52,11 @@
  * FTS REACHABILITY. `min_fts_terms` counts distinct query terms a row hits, but a query can only
  * produce so many terms (`relevanceTerms`: latin words ≥5 chars + CJK 3-grams) — a 3-character CJK
  * query yields exactly ONE trigram, so a configured bar of 2 is unreachable and that leg is empty
- * for it by construction. The effective bar is therefore `min(configured, termCount)`.
+ * for it by construction. The effective bar is therefore `min(configured, termCount)`, and
+ * `termCount` is that of the text being GRADED — with 方案 A's augmentation the original and the
+ * rewrite are different texts with different counts, so each resolves its own bar
+ * (`store/hybrid.ts`). Resolving the rewrite from the original's count is the defect that let a
+ * single incidental trigram pass a bar it could not reach (2026-10-04).
  *
  * @module store/floors
  */
@@ -129,9 +133,11 @@ export function emptyFloorDrops(): RetrievalFloorDrops {
  * and changing the REPORTED value there would misdescribe what the caller is reading. `0` stays `0`
  * (the operator's off switch).
  *
- * This is the ONE place the clamp lives; `resolveFloors` (what the result reports) and
- * `applyTermFloor` (what the leg does) both call it, so the number the caller reads is the number
- * the leg used.
+ * This is the ONE place the clamp lives; `resolveFloors` (what the result reports / a run is handed)
+ * and `applyTermFloor` (what the leg does) both call it, so the number a run reads is the number its
+ * leg used. It is a `min`, i.e. one-directional: it can LOWER an unreachable configured bar but never
+ * RAISE a bar inherited from another text, which is why the caller must resolve per graded text
+ * rather than reusing one text's resolution for another.
  */
 export function effectiveTermFloor(floor: number, termCount?: number): number {
   if (!(floor > 0)) return floor
@@ -143,7 +149,13 @@ export function effectiveTermFloor(floor: number, termCount?: number): number {
 export interface FloorResolution {
   /** `loose` lowers each configured floor (see {@link LOOSE_FLOORS}); absent means `strict`. */
   profile?: FloorProfile
-  /** This query's distinct term count (`relevanceTerms(query).length`), for the FTS clamp. */
+  /**
+   * The distinct term count of the text being GRADED (`relevanceTerms(text).length`), for the FTS
+   * clamp. It must describe the query the legs will actually run on: under 方案 A's augmentation the
+   * rewrite is a DIFFERENT text with its own term count, and resolving both runs from the original's
+   * count is the defect that let one incidental trigram through (see `store/hybrid.ts`). Callers with
+   * several graded texts resolve once per text.
+   */
   termCount?: number
   /**
    * Which legs a `'loose'` profile may lower, from {@link droppedLegs} of the pass that made the
