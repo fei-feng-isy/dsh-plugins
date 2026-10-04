@@ -17,7 +17,7 @@ import {
   type VectorsDiagnostic,
   type VectorsFixReport,
 } from '@avantf/mem-contract'
-import type { Reranker, SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
+import type { SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
 import {
   resetRetrievalHealth,
   restoreRetrievalHealth,
@@ -27,7 +27,6 @@ import {
 import {
   hybridSearch,
   RetrievalInputError,
-  rerankState as rerankerState,
   type HybridContext,
   type HybridDeps,
   type HybridLeg,
@@ -258,7 +257,6 @@ export class MemoryStore {
   private readonly config: Config
   private readonly semantic: SemanticBackend
   private readonly vstore: VectorStore
-  private readonly reranker: Reranker
   private readonly contradictions: ContradictDetector
   private readonly facts: FactsDao
   private readonly entities: EntitiesDao
@@ -284,7 +282,6 @@ export class MemoryStore {
     config: Config,
     semantic: SemanticBackend,
     vstore: VectorStore,
-    reranker: Reranker,
     /** The store's database path, used ONLY to name the vector index snapshot beside it. */
     dbPath?: string,
   ) {
@@ -292,7 +289,6 @@ export class MemoryStore {
     this.config = config
     this.semantic = semantic
     this.vstore = vstore
-    this.reranker = reranker
     const detectedFts = detectFtsTokenizer(db, MEMORY_FTS_TABLE)
     this.ftsTokenizer = detectedFts ?? resolveFtsTokenizer()
     // No operator-facing command rebuilds the memory FTS table (a schema migration does), so the
@@ -1320,7 +1316,6 @@ export class MemoryStore {
       kind: 'memory',
       config: this.config,
       semantic: this.semantic,
-      reranker: this.reranker,
       legs: (ctx) => this.searchLegs(input, ctx),
       texts: (ids) => this.loadTexts(ids),
       hits: (ranked, texts) => {
@@ -1350,8 +1345,8 @@ export class MemoryStore {
    * rescale the survivors. That covers the Jaccard and FTS legs. It does NOT cover the HRR leg, whose
    * candidates arrive in the JACCARD leg's order (or by recency in its fallback), so its cap can
    * remove its own highest scorer and `v / max` really does move. Accepted — the cap bounds per-query
-   * mission and the pool is reranked afterwards — but do not read these scores as comparable across
-   * different cap/over-fetch settings; see `docs/PROVENANCE_REVIEW.md` N5 for the missing differential.
+   * mission — but do not read these scores as comparable across different cap/over-fetch settings;
+   * see `docs/PROVENANCE_REVIEW.md` N5 for the missing differential.
    */
   private async searchLegs(
     input: SearchInput,
@@ -1425,16 +1420,6 @@ export class MemoryStore {
       )))
     }
     return legs
-  }
-
-  /**
-   * Whether the configured reranker is actually in use — the two flags a retrieval event
-   * carries. Exposed so the cross-store router can report ONE event for a merged query with the
-   * same honesty as a single-store search (both stores share this adapter, and the derivation lives
-   * in `store/hybrid.ts` rather than being re-spelled per store).
-   */
-  rerankState(): { used: boolean; fallback: boolean } {
-    return rerankerState(this.reranker)
   }
 
   /**

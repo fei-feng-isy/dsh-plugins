@@ -782,9 +782,7 @@ describe('ingestion boundary: file kind and size', () => {
 
 /**
  * A cross-store query encodes the query ONCE. Both legs share one backend and one model,
- * so each computing its own vector was the same 4 ms of mission done twice — and with a
- * cross-encoder reranker, per-store reranking then paid for its own pass as well (that part
- * is by design, DESIGN §7: rerank belongs to each store's retriever).
+ * so each computing its own vector was the same 4 ms of mission done twice.
  */
 describe('cross-store query encodes the query once', () => {
   it('passes one pre-encoded vector to both legs', async () => {

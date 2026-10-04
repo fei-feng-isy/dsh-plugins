@@ -8,8 +8,8 @@
   每篇文档在 `~/.avantf/knowledge/docs` 留一份**可编辑副本**，用编辑器改完即由插件在其后任一工具调用结束时自动同步回索引（「重新摄入」按钮是手动兜底）；
   **支持 PDF**（抽取文本层，含中文 CID 字体；扫描件没有文本层会明确报错），可直接摄入 **pandoc 能读的全部格式**（`.docx/.docm/.odt/.epub/.html/.htm/.xhtml/.tex/.rst/.ipynb/.csv/.tsv/.org/.rtf/.fb2/.opml/.bib/.docbook/.man/.typ`）以及 `.xlsx`（先转成 Markdown 再入库：用了哪条转换器随 `converter` 回报（带版本，如 `pandoc-3.11`）、没能带过来的内容随 `warnings` 透出），其他二进制（图片、pptx、旧版 .doc/.xls/.ppt 等）会被拒绝并说明原因；GBK/GB18030 等中文旧编码会自动解码并在结果里标出 `encoding`。pandoc 由家族底座 `@avantf/dsh-plugin-base`（内含环境初始化框架）在启动时按钉死的版本装到受管族根 `~/.avantf/env/tools/pandoc/`（国内镜像优先、官方源兜底，装不了就明确报错；无底座的 CLI/MCP 与降级路径仍用 legacy 目录 `~/.avantf/tools`）。
 - **交叉检索** — 一次查询同时覆盖记忆与文档，且分数可比（联合归一化），用于 agent 上下文。
-- **内部可插拔检索** — `SemanticBackend` / `Reranker` / `VectorStore` 可在 `retrieval-core` 内部替换（注册表 + 配置 + 优雅降级 + 自动升级），无需改动业务流程。
-- **方案 A** — 检索在本地完成（onnx `bge-base-zh-v1.5` + `bge-reranker`）；答案生成在外部（DSH / agent 模型）。
+- **内部可插拔检索** — `SemanticBackend` / `VectorStore` 可在 `retrieval-core` 内部替换（注册表 + 配置 + 优雅降级 + 自动升级），无需改动业务流程。
+- **方案 A** — 检索在本地完成（onnx `bge-base-zh-v1.5`）；答案生成在外部（DSH / agent 模型）。
 
 完整架构与路线图见 [DESIGN.md](DESIGN.md)，DSH 分步安装手册见 [docs/INSTALL.md](docs/INSTALL.md)，向量后端选型见 [docs/VECTOR_STORES.md](docs/VECTOR_STORES.md)，预装设施现状（家族底座 `@avantf/dsh-plugin-base` 的环境初始化框架接管：item 清单、受管根、legacy 降级与迁移配方）见 [docs/PROVISIONING.md](docs/PROVISIONING.md)，**自指问句（「我是谁？」）的关联性实测与方案**（第 1 期已实施：A 查询侧增广改写 / A② hint 复用同一张表 / G 仅词法标注）见 [docs/SELF_QUERY_RELEVANCE.md](docs/SELF_QUERY_RELEVANCE.md)。
 
@@ -17,7 +17,7 @@
 
 ```
 ~/.avantf/                 # 默认 data_home
-├─ config.yaml             # 公共配置（semantic / rerank / vectorStore / retriever / lifecycle）
+├─ config.yaml             # 公共配置（semantic / vectorStore / retriever / lifecycle）
 ├─ memory/
 │  ├─ memory.db            # 记忆存储 + 记忆读模型
 │  └─ config.yaml          # 记忆专属覆盖
@@ -69,7 +69,7 @@
 | M0 工作区 + 配置分层 + `~/.avantf` 布局 + 记忆 schema | ✅ |
 | M1 HRR 代数 + 确定性原子 + 实体/三元组 | ✅ |
 | M2 记忆混合检索 + 35 查询一致性测试台 | ✅（测试配置下的冻结基线 MRR 0.971，R@k 0.957） |
-| M3 本地 ONNX BGE + 重排模型（惰性降级） | ✅ |
+| M3 本地 ONNX BGE（惰性降级） | ✅ |
 | M4 5 种向量库注册表接口 + 自动升级 | ✅（local_numpy 与 hnswlib 为具体实现；`auto` 达阈值自动升级；faiss/pgvector/qdrant 是会显式告警的适配器接口） |
 | M5 生命周期 + 矛盾检测 + 去重 | ✅ |
 | M6 可插拔注册表定型 + 测试 | ✅ |
@@ -94,11 +94,11 @@
 
 ## 模型引导（镜像/自动下载）
 
-当 DSH 插件接入后，启动时**异步**加载语义 / 重排模型（不阻塞 `apply`）。**模型的下载落点与来源由家族框架决定，不再由终端用户的 `~/.avantf/configs/common.yaml` 决定**：
+当 DSH 插件接入后，启动时**异步**加载语义模型（不阻塞 `apply`）。**模型的下载落点与来源由家族框架决定，不再由终端用户的 `~/.avantf/configs/common.yaml` 决定**：
 
 - `mem:model` 是框架的 `model-cache` item，用 **`flat` 布局**落到 `<home>/models/<repo>/<file>`——正是 `@huggingface/transformers` 在其 `cacheDir` 下读的形状。默认仓库是 `Xenova/bge-base-zh-v1.5`（768 维，首次下载约 **389 MB**）。文件列表只对**默认仓库**写死运行时真正会取的四个（`config.json` / `tokenizer.json` / `tokenizer_config.json` / `onnx/model.onnx`）；改过 `semantic.local_model` 的仓库**不写列表**，交给框架按仓库自身的文件清单装，不会因为固定的四件套与仓库不符而 `failed`。运行时因此复用框架装好的那一份，不会二次下载；`buildRuntime` 在框架接管模型根时**延迟**后端构造时的预热，预热只从 `mem:model` 到达终态的回调开始，不会和框架的安装抢同一份文件。
-- 缓存目录 = 框架的族根 `<home>/models`（`~/.avantf/env/models`，由 `managedRoots` 设成内建默认）；`config.yaml` 里的 `semantic.cache_dir` / `rerank.cache_dir` 会被**忽略并告警**。运维用 `AVANTF_MEM_MODEL_CACHE` 把缓存指到别处时，运行时读那一份，`mem:model` **不再声明**——否则框架会在族根再装一份没人读的完整副本。
-- 镜像默认 `https://hf-mirror.com`，`config.yaml` 里的 `semantic.mirror` / `rerank.mirror` 同样被忽略；运维只能用环境变量逃生口（见下）。
+- 缓存目录 = 框架的族根 `<home>/models`（`~/.avantf/env/models`，由 `managedRoots` 设成内建默认）；`config.yaml` 里的 `semantic.cache_dir` 会被**忽略并告警**。运维用 `AVANTF_MEM_MODEL_CACHE` 把缓存指到别处时，运行时读那一份，`mem:model` **不再声明**——否则框架会在族根再装一份没人读的完整副本。
+- 镜像默认 `https://hf-mirror.com`，`config.yaml` 里的 `semantic.mirror` 同样被忽略；运维只能用环境变量逃生口（见下）。
 - 模型 item 拿不到时按**降级**处理：`semantic.auto_download` 打开就由运行时自己取；关闭时 item 仍会声明，但框架判为 `skipped (policy/download-disabled)`、运行时也只读磁盘，检索退回 FTS+entity，**绝不拒载**。
 
 ```yaml
@@ -106,10 +106,6 @@
 semantic:
   local_model: Xenova/bge-base-zh-v1.5   # ⚠️ transformers.js 需要 ONNX 仓库
   auto_download: true                     # 启动时自动下载（false 则只在已缓存时加载）
-rerank:
-  backend: bge_reranker               # 默认 none（不重排）；重排的唯一开关
-  local_model: Xenova/bge-reranker-base # ONNX 版重排模型（默认值）
-  auto_download: true
 ```
 
 > **ONNX 注意**：`@huggingface/transformers`（transformers.js）需要 **ONNX 模型仓库**。
@@ -122,13 +118,13 @@ rerank:
 
 镜像与落点的优先级（只剩环境变量这一层，`config.yaml` 不再是真相来源）：
 
-- 镜像：`AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`）> 默认 `https://hf-mirror.com`；环境层把它写进 `semantic.mirror` / `rerank.mirror`，因而同时喂给 `mem:model` 的 `spec.endpoint` 与适配器的 `remoteHost`。
-- 缓存目录：`AVANTF_MEM_MODEL_CACHE` > 框架族根 `~/.avantf/env/models`（无框架的 CLI/MCP 与降级路径为 `~/.avantf/env/models`）；环境层同样写进 `semantic.cache_dir` / `rerank.cache_dir`，设了它就不再声明 `mem:model`。
-- 下载总闸：`AVANTF_ENVINIT_AUTO_DOWNLOAD=0`（家族级）或 `AVANTF_MEM_AUTO_DOWNLOAD=0`（本项目）——任一为 `0` 都会经环境层落进 `semantic.auto_download` / `rerank.auto_download`，框架与运行时**同时**停手。
+- 镜像：`AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`）> 默认 `https://hf-mirror.com`；环境层把它写进 `semantic.mirror`，因而同时喂给 `mem:model` 的 `spec.endpoint` 与适配器的 `remoteHost`。
+- 缓存目录：`AVANTF_MEM_MODEL_CACHE` > 框架族根 `~/.avantf/env/models`（无框架的 CLI/MCP 与降级路径为 `~/.avantf/env/models`）；环境层同样写进 `semantic.cache_dir`，设了它就不再声明 `mem:model`。
+- 下载总闸：`AVANTF_ENVINIT_AUTO_DOWNLOAD=0`（家族级）或 `AVANTF_MEM_AUTO_DOWNLOAD=0`（本项目）——任一为 `0` 都会经环境层落进 `semantic.auto_download`，框架与运行时**同时**停手。
 
 - 模型未就绪时检索**自动降级**到 FTS + 实体 Jaccard（`isAvailable()` = false）；下载完成后自动升级到 `0.55 / 0.30 / 0.15` 三路融合。**降级不是终态**：启动预热失败后，后续检索/索引会自动重试（同一时刻只跑一次，最短间隔 30s），无需重启进程；`vectors_fix` 则会当场等待一次完整尝试。`auto_download: false` 时不重试（本地缺失是确定性的）。CLI 启动时同步预热；插件与 MCP 异步预热（MCP 先应答 `initialize`，再后台加载模型）。
 - `@huggingface/transformers` 已声明为 `@avantf/mem-retrieval` 的 **optionalDependency**，`pnpm install` 会自动装上（无需额外 `pnpm add`），由适配器动态加载；首次运行时从镜像下载 BGE 权重（默认 `Xenova/bge-base-zh-v1.5` 约 **389 MB**，之后离线可用）。即使装不上也只是语义路径降级，不会报错。
-- 重排的唯一开关是 `rerank.backend`（默认 `none`，不加载任何重排模型）；语义后端只负责嵌入。
+- 语义后端只负责嵌入；**结果重排在 0.5.0 已被整体移除**（`Reranker` 接口、`rerank.*` 配置、公开面的 `registerReranker`、`rerank_*` 健康计数与结果字段、以及 wire 版本一起变更）——旧配置里的 `rerank:` 段现在会被当作未知键告警并忽略。
 - **换嵌入表示 = 一次数据迁移**（重要）：库里持久化的向量带着**表示指纹**（`v2/backend/model/dim@池化;归一化;截断窗口;模型 revision`）。换默认模型、换维度、改 `semantic.max_input_tokens`、换池化/归一化，甚至同一模型仓库换了权重，旧向量都属于**旧坐标**，语义腿对它们不可用，检索会**静默退化成词法+实体**——看起来仍有结果，只是答错。实测：默认模型 `bge-small-zh-v1.5`（512 维）→ `bge-base-zh-v1.5`（768 维）后，本机 80 条 ACTIVE 里 **78 条**被跳过、`indexed` 只剩 **2**，修前多条查询塌成同一条无关短事实。行为：
   - **检测 + 响亮告警**：启动时若存在旧空间向量，日志打一条 WARNING（条数 + 原因 + 手动入口）；`/mem` 状态面、`avantf-mem stats`、`avantf-mem vectors`（`vectors.{stale,space_stale}`）如实暴露计数。
   - **自动自愈**：插件在启动预热之后**分批**重算（每批有界、逐批让出事件循环、不阻塞查询、可续跑、失败下轮重试）。手动入口 `avantf-mem vectors --fix`（先 `--dry-run` 预览计数；MCP/插件为 `mem_admin vectors_fix`）。

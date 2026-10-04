@@ -1,9 +1,9 @@
 /**
  * Semantic-floor A/B on the REAL library — `retriever.min_semantic_similarity` 0.50 vs 0.55.
  *
- * MEASUREMENT ONLY, same snapshot discipline as `bench-rerank-ab.mjs`: the live
- * `~/.avantf/memory/memory.db` is opened READ-ONLY, copied with `VACUUM INTO` into a temp dir, and
- * every runtime runs against that copy (the live configs are never read or written).
+ * MEASUREMENT ONLY, the live `~/.avantf/memory/memory.db` is opened READ-ONLY, copied with `VACUUM INTO`
+ * into a temp dir, and every runtime runs against that copy (the live configs are never read or
+ * written).
  *
  * WHAT IS MEASURED, and how a "cut" is established:
  *   1. the observable answer: for each query, `recall.search` at limit 5 under floors 0.50 and 0.55
@@ -64,9 +64,9 @@ const FIXTURE = join(repo, 'packages/core/test/fixtures/eval_zh_relations.jsonl'
 const quiet = { info() {}, warn() {}, error() {}, debug() {} }
 const round4 = (v) => Math.round(v * 1e4) / 1e4
 
-// The 20-query real set: the 14 from the rerank A/B plus 6 ordinary phrasings chosen from what the
-// corpus is actually about. `gold` is only declared where it is defensible (self-reference targets
-// a pinned `user_profile` row; a 2-char lookup targets the facts whose ENTITY SET holds the term).
+// The 20-query real set: 14 from the (now removed) rerank A/B plus 6 ordinary phrasings chosen from
+// what the corpus is actually about. `gold` is only declared where it is defensible (self-reference
+// targets a pinned `user_profile` row; a 2-char lookup targets the facts whose ENTITY SET holds the term).
 const QUERIES = [
   { id: 'real-self-who', q: '我是谁？', kind: 'self', gold: [4] },
   { id: 'real-self-name', q: '我叫什么', kind: 'self', gold: [4] },
@@ -178,7 +178,7 @@ if (!emb.isAvailable()) {
 
 const home = mkdtempSync(join(tmpdir(), 'avantf-threshold-home-'))
 mkdirSync(join(home, 'configs'), { recursive: true })
-writeFileSync(join(home, 'configs/common.yaml'), `semantic:\n  local_model: ${EMB_MODEL}\n  dim: ${EMB_DIM}\n  auto_download: false\nrerank:\n  backend: none\n`)
+writeFileSync(join(home, 'configs/common.yaml'), `semantic:\n  local_model: ${EMB_MODEL}\n  dim: ${EMB_DIM}\n  auto_download: false\n`)
 const rt = buildRuntime({ dataHome: home, memoryDbPath: snap, semantic: emb, logger: quiet })
 const retriever = rt.config.common.retriever
 
@@ -285,7 +285,7 @@ for (const threshold of [LO, HI]) {
       const dir = mkdtempSync(join(tmpdir(), 'avantf-threshold-eval-'))
       evalDirs.push(dir)
       mkdirSync(join(dir, 'configs'), { recursive: true })
-      writeFileSync(join(dir, 'configs/common.yaml'), `semantic:\n  local_model: ${EMB_MODEL}\n  dim: ${EMB_DIM}\n  auto_download: false\nrerank:\n  backend: none\n`)
+      writeFileSync(join(dir, 'configs/common.yaml'), `semantic:\n  local_model: ${EMB_MODEL}\n  dim: ${EMB_DIM}\n  auto_download: false\n`)
       const ert = buildRuntime({ dataHome: dir, memoryDbPath: join(dir, 'memory.db'), semantic: emb, logger: quiet })
       ert.config.common.retriever.min_semantic_similarity = threshold
       const ids = []

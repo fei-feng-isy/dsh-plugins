@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import { openMemoryDb } from '../src/db/conn.js'
 import { MemoryStore } from '../src/store/memory.js'
-import { LocalNumpyVectorStore, NoneReranker, type SemanticBackend } from '@avantf/mem-retrieval'
+import { LocalNumpyVectorStore, type SemanticBackend } from '@avantf/mem-retrieval'
 import { defaultConfig, type VectorsFixReport } from '@avantf/mem-contract'
 import { float32ToBytes } from '../src/db/vectors.js'
 import { runMaintenance } from '../src/lifecycle/maintenance.js'
@@ -824,7 +824,7 @@ describe('a vector repair re-queues the facts it just made scorable', () => {
     }
     const db = openMemoryDb(join(dir, 'memory.db'))
     const vstore = new LocalNumpyVectorStore(DIM)
-    const store = new MemoryStore(db, defaultConfig, semantic, vstore, new NoneReranker())
+    const store = new MemoryStore(db, defaultConfig, semantic, vstore)
     return { db, store, vstore, a, b, warm: (): void => { available = true } }
   }
 

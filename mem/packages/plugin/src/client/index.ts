@@ -870,7 +870,7 @@ function HealthBlock(props: { stats: StatsSummary }) {
   const kinds = Object.entries(r.by_kind)
     .map(([kind, v]) => `${kind} ${String(v.queries)} 次（空 ${String(v.zero_results)}）`)
     .join(' · ')
-  const truncated = r.embedding_truncated + r.rerank_truncated + r.output_truncated
+  const truncated = r.embedding_truncated + r.output_truncated
   return h('div', { className: css.detail },
     pendingVectors === 0
       ? null
@@ -881,12 +881,12 @@ function HealthBlock(props: { stats: StatsSummary }) {
     h('div', { className: css.status },
       `检索 ${String(r.queries)} 次 · 空结果 ${pct(r.zero_result_rate)} · 平均 ${r.avg_latency_ms.toFixed(1)}ms · 峰值 ${r.max_latency_ms.toFixed(1)}ms`),
     h('div', { className: css.meta },
-      `语义腿在线 ${pct(r.semantic_live_rate)} · 平均命中 ${String(r.avg_results_per_query)} 条${r.rerank_used > 0 ? ` · 重排 ${String(r.rerank_used)} 次` : ''}`),
+      `语义腿在线 ${pct(r.semantic_live_rate)} · 平均命中 ${String(r.avg_results_per_query)} 条`),
     kinds === '' ? null : h('div', { className: css.meta }, kinds),
     h('div', { className: css.meta },
       truncated === 0
         ? '未被任何预算截断。'
-        : `截断：嵌入 ${String(r.embedding_truncated)} · 重排 ${String(r.rerank_truncated)} · 输出 ${String(r.output_truncated)}${r.output_truncated > 0 ? '（调大 retrieval.max_output_tokens 或用 max_tokens 参数）' : ''}`),
+        : `截断：嵌入 ${String(r.embedding_truncated)} · 输出 ${String(r.output_truncated)}${r.output_truncated > 0 ? '（调大 retrieval.max_output_tokens 或用 max_tokens 参数）' : ''}`),
     r.updated_at === null ? null : h('div', { className: css.meta }, `更新于 ${r.updated_at}`),
   )
 }

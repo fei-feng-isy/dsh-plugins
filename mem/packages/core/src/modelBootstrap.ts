@@ -79,8 +79,8 @@ export interface WarmOptions {
 }
 
 /**
- * Fire-and-forget model bootstrap for DSH startup. Configures the semantic /
- * rerank model env (mirror + cache) and triggers the model download/load
+ * Fire-and-forget model bootstrap for DSH startup. Configures the semantic
+ * model env (mirror + cache) and triggers the model download/load
  * asynchronously, without blocking the plugin's `apply`. Returns the availability
  * of the semantic path once the download/load completes.
  *

@@ -243,11 +243,13 @@ export const clientContribution: TypertRemoteContribution = {
  * guarantee, stamped in the one place every method already goes through (`wireOk`/`wireErr`).
  *
  * BUMP RULE. Bump on every added/removed `@Remote` method — the number tracks the SET of methods the
- * face publishes, not the shape of one payload. Do NOT bump for a new optional FIELD: a
- * `.default(...)`-carrying schema (and the `acceptsUndefined` parameters) already absorb that across
- * the gap. When you add a method, also declare `export const <NAME>_WIRE_VERSION = <new value>`
- * beside this constant and gate the client call on it (`client/wire.ts` `hostSupports` /
- * `staleHostText`), exactly as mission's `EXECUTOR_LOOKUP_WIRE_VERSION` does.
+ * face publishes. Do NOT bump for a new optional FIELD: a `.default(...)`-carrying schema (and the
+ * `acceptsUndefined` parameters) already absorb that across the gap. DO bump for a REMOVED payload
+ * field that the other half dereferences — nothing absorbs a removal, and an old client still reading
+ * it would render garbage (see revision 2). When you add a method, also declare
+ * `export const <NAME>_WIRE_VERSION = <new value>` beside this constant and gate the client call on it
+ * (`client/wire.ts` `hostSupports` / `staleHostText`), exactly as mission's
+ * `EXECUTOR_LOOKUP_WIRE_VERSION` does.
  *
  * ABSENT MEANS OLD. An old host sends no `wire` at all; the client must treat that as "older than the
  * marker", never as a decode failure — the answer is still readable.
@@ -257,8 +259,12 @@ export const clientContribution: TypertRemoteContribution = {
  *   (remember / recall / admin / kb / query + openDoc / classifySource / browseDir / kbDomains /
  *   kbAddDomain), all of which predate the marker — so nothing is gated on revision 1; the mechanism
  *   exists for the NEXT method.
+ * - 2: the rerank capability was removed (0.5.0). This changed NO `@Remote` method, but it removed the
+ *   `rerank_used` / `rerank_fallback` / `rerank_truncated` fields from the retrieval-health payload
+ *   that `admin.stats` answers — fields the client half dereferenced. A rebuilt client talking to an
+ *   old host (or the reverse) therefore has to be reported as skew, not silently render `NaN`.
  */
-export const WIRE_VERSION = 1
+export const WIRE_VERSION = 2
 
 /**
  * The successful application envelope, with the wire revision stamped on.

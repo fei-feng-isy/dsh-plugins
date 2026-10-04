@@ -88,7 +88,7 @@ describe('config layering', () => {
   })
 
   it('takes the family managed roots as the DEFAULT layer (①), and the model keys are managed', () => {
-    // The DSH plugin points `tools.dir` / `semantic.cache_dir` / `rerank.cache_dir` at the framework's
+    // The DSH plugin points `tools.dir` / `semantic.cache_dir` at the framework's
     // family root. For TOOLS that is a new layer-① default: a value in config.yaml still wins. For the
     // MODEL landing site it is not a default at all — the managed root is authoritative, and a stale
     // `config.yaml` entry is ignored with a warning (see the next test).
@@ -100,41 +100,45 @@ describe('config layering', () => {
     const bare = loadConfig({ dataHome: dir })
     expect(bare.common.tools.dir).toBe(familyToolsDir())
     expect(bare.common.semantic.cache_dir).toBe(familyModelsDir())
-    expect(bare.common.rerank.cache_dir).toBe(familyModelsDir())
 
     const cfg = loadConfig({ dataHome: dir, managedRoots: roots })
     expect(cfg.common.tools.dir).toBe(roots.tools)
     expect(cfg.common.semantic.cache_dir).toBe(roots.models)
-    expect(cfg.common.rerank.cache_dir).toBe(roots.models)
 
     writeFileSync(join(dir, 'configs', 'common.yaml'), 'tools:\n  dir: /custom/tools\nsemantic:\n  cache_dir: /custom/models\n')
     const overridden = loadConfig({ dataHome: dir, managedRoots: roots })
     expect(overridden.common.tools.dir).toBe('/custom/tools')
     // Managed: config.yaml cannot move the model root any more.
     expect(overridden.common.semantic.cache_dir).toBe(roots.models)
-    expect(overridden.common.rerank.cache_dir).toBe(roots.models)
   })
 
   it('ignores config.yaml model cache/mirror and names the escape hatch', () => {
     const warnings: string[] = []
     writeFileSync(
       join(dir, 'configs', 'common.yaml'),
-      'semantic:\n  cache_dir: /custom/models\n  mirror: https://mirror.test\n  local_model: still/allowed\n'
-      + 'rerank:\n  cache_dir: /custom/rerank\n  mirror: https://rerank.test\n',
+      'semantic:\n  cache_dir: /custom/models\n  mirror: https://mirror.test\n  local_model: still/allowed\n',
     )
     const cfg = loadConfig({ dataHome: dir, logger: { ...defaultLogger, warn: (m: string) => { warnings.push(m) } } })
 
     expect(cfg.common.semantic.cache_dir).toBe(familyModelsDir())
     expect(cfg.common.semantic.mirror).toBe('https://hf-mirror.com')
-    expect(cfg.common.rerank.cache_dir).toBe(familyModelsDir())
-    expect(cfg.common.rerank.mirror).toBe('https://hf-mirror.com')
     // Only the managed keys are dropped; the rest of the section still merges.
     expect(cfg.common.semantic.local_model).toBe('still/allowed')
     const joined = warnings.join('\n')
     expect(joined).toContain('semantic.cache_dir')
-    expect(joined).toContain('rerank.mirror')
     expect(joined).toContain('AVANTF_MEM_MODEL_CACHE')
     expect(joined).toContain('AVANTF_MEM_MODEL_MIRROR')
+  })
+
+  it('no longer knows a `rerank` section: it is reported as an unknown key (removed in 0.5.0)', () => {
+    // The rerank capability was removed in 0.5.0 (docs/review/RETRIEVAL_RERANK_NECESSITY.md). A
+    // `rerank:` block in common.yaml used to be a silently-accepted no-op; it must now be visible as
+    // an unknown key. Re-adding the schema would make this RED.
+    const warnings: string[] = []
+    writeFileSync(join(dir, 'configs', 'common.yaml'), 'rerank:\n  backend: bge_reranker\n')
+    const cfg = loadConfig({ dataHome: dir, logger: { ...defaultLogger, warn: (m: string) => { warnings.push(m) } } })
+    expect(Object.keys(cfg.common)).not.toContain('rerank')
+    expect(warnings.join('\n')).toContain('unknown config key(s) ignored: rerank')
   })
 
   it('uses an explicit absolute db.path verbatim', () => {
@@ -157,7 +161,6 @@ describe('config layering', () => {
     try {
       const cfg = loadConfig({ dataHome: dir })
       expect(cfg.common.semantic.auto_download).toBe(false)
-      expect(cfg.common.rerank.auto_download).toBe(false)
     } finally {
       delete process.env['AVANTF_MEM_AUTO_DOWNLOAD']
     }
@@ -166,27 +169,24 @@ describe('config layering', () => {
   it('treats AVANTF_ENVINIT_AUTO_DOWNLOAD as a master gate the adapters also see', () => {
     // The family switch has to reach the RESOLVED config, not just the framework's own provisioning:
     // otherwise the framework skips `mem:model` and the runtime silently fetches the same model.
-    writeFileSync(join(dir, 'configs', 'common.yaml'), 'semantic:\n  auto_download: true\nrerank:\n  auto_download: true\n')
+    writeFileSync(join(dir, 'configs', 'common.yaml'), 'semantic:\n  auto_download: true\n')
     process.env['AVANTF_ENVINIT_AUTO_DOWNLOAD'] = '0'
     const cfg = loadConfig({ dataHome: dir })
     expect(cfg.common.semantic.auto_download).toBe(false)
-    expect(cfg.common.rerank.auto_download).toBe(false)
   })
 
-  it('applies AVANTF_MEM_MODEL_MIRROR / HF_ENDPOINT to BOTH semantic and rerank (layer ④)', () => {
-    // The plugin fills `mem:model`'s `spec.endpoint` from `semantic.mirror`, and the adapters read
+  it('applies AVANTF_MEM_MODEL_MIRROR / HF_ENDPOINT to semantic (layer ④)', () => {
+    // The plugin fills `mem:model`'s `spec.endpoint` from `semantic.mirror`, and the adapter reads
     // the same value as transformers.js' `remoteHost`; leaving it at the default while the
     // config.yaml warning names these variables is exactly the M2 defect.
     process.env['HF_ENDPOINT'] = 'https://env-mirror.test'
     const fromHf = loadConfig({ dataHome: dir })
     expect(fromHf.common.semantic.mirror).toBe('https://env-mirror.test')
-    expect(fromHf.common.rerank.mirror).toBe('https://env-mirror.test')
 
-    // The project's own variable wins over HF_ENDPOINT — the same precedence the adapters use.
+    // The project's own variable wins over HF_ENDPOINT — the same precedence the adapter uses.
     process.env['AVANTF_MEM_MODEL_MIRROR'] = 'https://project-mirror.test'
     const project = loadConfig({ dataHome: dir })
     expect(project.common.semantic.mirror).toBe('https://project-mirror.test')
-    expect(project.common.rerank.mirror).toBe('https://project-mirror.test')
   })
 
   it('applies AVANTF_MEM_MODEL_CACHE above the managed root, so the plugin can see the override', () => {
@@ -197,7 +197,6 @@ describe('config layering', () => {
     process.env['AVANTF_MEM_MODEL_CACHE'] = override
     const cfg = loadConfig({ dataHome: dir, managedRoots: roots })
     expect(cfg.common.semantic.cache_dir).toBe(override)
-    expect(cfg.common.rerank.cache_dir).toBe(override)
   })
 
   it('ignores malformed YAML instead of crashing', () => {

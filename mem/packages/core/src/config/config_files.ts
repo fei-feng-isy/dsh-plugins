@@ -35,10 +35,6 @@ export const DEFAULT_COMMON_CONFIG = `# avantf-mem 公共配置（分层第②�
 #   ⚠️ cache_dir / mirror 由家族底座 @avantf/dsh-plugin-base 管理：写在这里会被忽略并告警。
 #      缓存目录用环境变量 AVANTF_MEM_MODEL_CACHE，镜像用 AVANTF_MEM_MODEL_MIRROR（或 HF_ENDPOINT）。
 
-# rerank:                             # 重排的唯一开关；none = 不加载任何重排模型
-#   backend: none
-#   local_model: Xenova/bge-reranker-base
-
 # vectorStore:
 #   backend: auto                     # auto = 越过阈值自动从 local_numpy 迁到 hnswlib
 #   auto_thresholds:

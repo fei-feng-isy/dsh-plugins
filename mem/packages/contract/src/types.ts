@@ -303,11 +303,8 @@ export interface RetrievalHealth {
   /** Queries where the semantic leg was live / degraded (FTS+entity only). */
   semantic_live: number
   semantic_degraded: number
-  rerank_used: number
-  rerank_fallback: number
   /** Model-facing text that had to be bounded by a budget (see `retrieval-core/text_budget`). */
   embedding_truncated: number
-  rerank_truncated: number
   output_truncated: number
   /**
    * Retrieval legs that returned exactly their cap, i.e. whose tail was dropped (`retriever.leg_cap`).
@@ -333,10 +330,7 @@ export interface RetrievalHealthSummary {
   avg_latency_ms: number
   max_latency_ms: number
   semantic_live_rate: number
-  rerank_used: number
-  rerank_fallback: number
   embedding_truncated: number
-  rerank_truncated: number
   output_truncated: number
   /** Retrieval legs that returned exactly their cap (see `RetrievalHealth`). */
   legs_capped: number

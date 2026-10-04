@@ -20,7 +20,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Reranker, SemanticBackend } from '@avantf/mem-retrieval'
+import type { SemanticBackend } from '@avantf/mem-retrieval'
 import { loadConfig } from '../src/config/loader.js'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import { selfQueryRewrite, SELF_QUERY_RULES } from '../src/store/self_query.js'
@@ -43,13 +43,6 @@ const semantic: SemanticBackend = {
   encode: async () => new Float32Array(4),
   encodeBatch: async () => [],
   isAvailable: () => true,
-}
-
-/** Unavailable, so `rerankHits` is a pass-through and the fused order is what the caller sees. */
-const reranker: Reranker = {
-  name: 'none',
-  rerank: async (_query, candidates) => candidates.map((c) => c.id),
-  isAvailable: () => false,
 }
 
 describe('store/self_query (the closed intent table)', () => {
@@ -102,7 +95,6 @@ function deps(legScores: (ctx: HybridContext) => Record<number, number>): Hybrid
     kind: 'memory',
     config,
     semantic,
-    reranker,
     legs: async (ctx) => [{ weight: 1, scores: new Map(Object.entries(legScores(ctx)).map(([k, v]) => [Number(k), v])) } as HybridLeg],
     texts: (ids) => new Map(ids.map((id) => [id, `文本 ${String(id)}`])),
     hits: (ranked, texts) => ranked.map((h) => ({ id: h.id, text: texts.get(h.id) ?? '', score: h.score })),

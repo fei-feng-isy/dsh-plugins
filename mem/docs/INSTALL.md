@@ -162,7 +162,7 @@ semantic:
 >
 > 语义路径拿不到时检索**自动降级为 FTS + 实体 Jaccard**，功能仍可用（只是没有语义召回），绝不拒载。
 
-> `semantic.cache_dir` / `semantic.mirror`（以及 `rerank` 的同名键）在 `config.yaml` 里**已不再生效**：
+> `semantic.cache_dir` / `semantic.mirror` 在 `config.yaml` 里**已不再生效**：
 > 框架接管了模型的落点与来源，这两个键会被忽略并打一条告警。落点固定是框架族根
 > `<home>/models`（默认 `~/.avantf/env/models`）；镜像用运维环境变量
 > `AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`）覆盖，缓存目录用 `AVANTF_MEM_MODEL_CACHE` 覆盖。
@@ -184,7 +184,7 @@ semantic:
   会**优雅降级**为 FTS + 实体检索（功能可用，只是没有语义召回）。
 - 启动日志会直接打印降级原因，便于确认。
 - 优先级：环境变量 `AVANTF_MEM_MODEL_MIRROR` / `HF_ENDPOINT` > 默认镜像；环境层④ 把它写进
-  `semantic.mirror` / `rerank.mirror`，因而同时喂给 `mem:model` 的 `spec.endpoint` 与适配器（`config.yaml`
+  `semantic.mirror`，因而同时喂给 `mem:model` 的 `spec.endpoint` 与适配器（`config.yaml`
   不再参与）。
 
 ---

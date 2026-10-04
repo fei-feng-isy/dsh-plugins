@@ -158,8 +158,6 @@ function mergeConfig(base: Record<string, unknown>, override: Record<string, unk
 const MANAGED_MODEL_KEYS: readonly (readonly [section: string, key: string])[] = [
   ['semantic', 'cache_dir'],
   ['semantic', 'mirror'],
-  ['rerank', 'cache_dir'],
-  ['rerank', 'mirror'],
 ]
 
 /** Remove {@link MANAGED_MODEL_KEYS} from a parsed common YAML, warning once about each. */
@@ -194,10 +192,6 @@ function stripManagedModelKeys(raw: Record<string, unknown>, source: string, log
  *   - `AVANTF_MEM_MODEL_CACHE` — where the runtime reads and writes models. It lands here so the
  *     plugin can see that the runtime's cache is NOT the framework root and skip declaring
  *     `mem:model` (declaring it would install a second, never-read copy under `<home>/models`).
- *
- * The mirror/cache overrides are applied to `semantic` AND `rerank`: the two adapters share one
- * transformers.js process-global `env`, and pretending they could have different cache dirs is how
- * one of them silently overwrites the other (`applyModelEnv`).
  */
 function applyEnvLayer(common: Config): Config {
   let next = common
@@ -206,7 +200,6 @@ function applyEnvLayer(common: Config): Config {
     next = {
       ...next,
       semantic: { ...next.semantic, auto_download: autoDownload },
-      rerank: { ...next.rerank, auto_download: autoDownload },
     }
   }
   const mirror = process.env['AVANTF_MEM_MODEL_MIRROR'] || process.env['HF_ENDPOINT']
@@ -214,7 +207,6 @@ function applyEnvLayer(common: Config): Config {
     next = {
       ...next,
       semantic: { ...next.semantic, mirror: mirror.trim() },
-      rerank: { ...next.rerank, mirror: mirror.trim() },
     }
   }
   const cacheDir = process.env['AVANTF_MEM_MODEL_CACHE']
@@ -222,7 +214,6 @@ function applyEnvLayer(common: Config): Config {
     next = {
       ...next,
       semantic: { ...next.semantic, cache_dir: cacheDir.trim() },
-      rerank: { ...next.rerank, cache_dir: cacheDir.trim() },
     }
   }
   return next
@@ -266,10 +257,6 @@ export function loadConfig(opts?: LoadConfigOptions): LoadedConfig {
       ...defaultConfig.semantic,
       cache_dir: defaultConfig.semantic.cache_dir === '' ? familyModelsDir() : defaultConfig.semantic.cache_dir,
     },
-    rerank: {
-      ...defaultConfig.rerank,
-      cache_dir: defaultConfig.rerank.cache_dir === '' ? familyModelsDir() : defaultConfig.rerank.cache_dir,
-    },
   }
   // The family framework's roots (when it is up) name the same two directories explicitly. Applied
   // BEFORE the file/env layers so a `config.yaml` entry or an `AVANTF_*` hatch can still override.
@@ -279,7 +266,6 @@ export function loadConfig(opts?: LoadConfigOptions): LoadedConfig {
       ...common,
       tools: managed.tools === undefined ? common.tools : { ...common.tools, dir: managed.tools },
       semantic: managed.models === undefined ? common.semantic : { ...common.semantic, cache_dir: managed.models },
-      rerank: managed.models === undefined ? common.rerank : { ...common.rerank, cache_dir: managed.models },
     }
   }
   if (opts?.dataHome) common = ConfigSchema.parse({ ...common, dataHome: opts.dataHome })

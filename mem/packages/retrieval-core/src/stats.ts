@@ -25,10 +25,7 @@ function empty(): RetrievalHealth {
     latency_ms_max: 0,
     semantic_live: 0,
     semantic_degraded: 0,
-    rerank_used: 0,
-    rerank_fallback: 0,
     embedding_truncated: 0,
-    rerank_truncated: 0,
     output_truncated: 0,
     legs_capped: 0,
     candidates_dropped_by_floor: 0,
@@ -45,8 +42,6 @@ export interface RetrievalEvent {
   results: number
   latencyMs: number
   semanticLive: boolean
-  rerankUsed?: boolean
-  rerankFallback?: boolean
   /**
    * Per-leg candidates removed by the relevance floors before fusion. The per-leg shape is what
    * makes an empty result readable ("the FTS floor cut 7 rows" vs "no leg had a candidate"); the
@@ -65,8 +60,6 @@ export function recordRetrieval(event: RetrievalEvent): void {
   if (latency > active.latency_ms_max) active.latency_ms_max = latency
   if (event.semanticLive) active.semantic_live += 1
   else active.semantic_degraded += 1
-  if (event.rerankUsed) active.rerank_used += 1
-  if (event.rerankFallback) active.rerank_fallback += 1
   const drops = event.droppedByFloor
   if (drops !== undefined) {
     const total = drops.semantic + drops.fts + drops.jaccard + drops.hrr
@@ -79,7 +72,7 @@ export function recordRetrieval(event: RetrievalEvent): void {
   active.updated_at = new Date().toISOString()
 }
 
-export type TruncationKind = 'embedding' | 'rerank' | 'output'
+export type TruncationKind = 'embedding' | 'output'
 
 /**
  * Record that a retrieval LEG returned exactly its cap, i.e. that its tail was dropped.
@@ -104,7 +97,6 @@ export function recordLegCapped(): void {
  */
 export function recordTruncation(kind: TruncationKind): void {
   if (kind === 'embedding') active.embedding_truncated += 1
-  else if (kind === 'rerank') active.rerank_truncated += 1
   else active.output_truncated += 1
   active.updated_at = new Date().toISOString()
 }
@@ -124,10 +116,7 @@ export function retrievalHealthSummary(): RetrievalHealthSummary {
     avg_latency_ms: round(h.queries === 0 ? 0 : h.latency_ms_total / h.queries, 2),
     max_latency_ms: round(h.latency_ms_max, 2),
     semantic_live_rate: div(h.semantic_live),
-    rerank_used: h.rerank_used,
-    rerank_fallback: h.rerank_fallback,
     embedding_truncated: h.embedding_truncated,
-    rerank_truncated: h.rerank_truncated,
     output_truncated: h.output_truncated,
     legs_capped: h.legs_capped,
     candidates_dropped_by_floor: h.candidates_dropped_by_floor,

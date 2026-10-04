@@ -1,9 +1,13 @@
 # 重排与语义门槛实测（本机真实库 + 冻结评测集）
 
+> **⚠️ 历史报告（重排已在 0.5.0 整体移除）。** 本文是移除决策的测量依据，保留原文不改；其中的
+> `rerank.backend` / `LocalReranker` / `bge_reranker` 等路径、配置与脚本**已不存在**。裁决与重开条件见
+> `../DESIGN.md` §5.1 与 `docs/review/RETRIEVAL_RERANK_NECESSITY.md`；`mem/scripts/bench-rerank-ab.mjs`
+> 已随功能删除，`bench-threshold-real.mjs` 保留（它是独立的语义门槛 A/B）。
+>
 > **纯测量报告**（2026-10-04）。本轮**没有改** `mem/packages/**`、**没有改**任何默认配置（`rerank.backend` 仍是
 > `none`、`min_semantic_similarity` 仍是 `0.50`）、没有提交、没有改版本号/CHANGELOG。
-> 两个可复现脚本：[`mem/scripts/bench-rerank-ab.mjs`](../scripts/bench-rerank-ab.mjs)、
-> [`mem/scripts/bench-threshold-real.mjs`](../scripts/bench-threshold-real.mjs)；原始 JSON 见 §6。
+> 原始 JSON 见 §6。
 
 ---
 

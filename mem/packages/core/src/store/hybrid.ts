@@ -3,18 +3,16 @@
  *
  * `MemoryStore.search` and `KnowledgeStore.search` used to carry parallel copies of this flow
  * (~80 lines each: limit normalization → weights → over-fetch → leg cap → fuse → live filter →
- * rerank → slice → output budget → health event). The legs themselves are legitimately
- * store-specific — different tables, different filters (`category` vs `domain`/`source`), and only
- * memory has the HRR probe — but the ORCHESTRATION is one algorithm, and two copies of it drifted:
+ * slice → output budget → health event). The legs themselves are legitimately store-specific —
+ * different tables, different filters (`category` vs `domain`/`source`), and only memory has the
+ * HRR probe — but the ORCHESTRATION is one algorithm, and two copies of it drifted:
  *
  *   - the `NaN` limit guard existed only in memory, so a non-finite limit reached knowledge's SQL
  *     `LIMIT` and took the whole cross-store query down with it (`Promise.all` has no per-leg catch);
  *   - `retriever.over_fetch_factor` was read only by memory, while knowledge hardcoded `limit * 3`,
  *     so one config knob silently meant two different things;
  *   - `recordLegCapped()` was called only by memory, so a capped knowledge leg was unobservable —
- *     exactly the blindness DESIGN §20.17 says the counter exists to remove;
- *   - the reranker's used/fallback flags were a helper in memory and an inline expression in
- *     knowledge.
+ *     exactly the blindness DESIGN §20.17 says the counter exists to remove.
  *
  * Fixing those one at a time would leave the next drift a matter of when. The stores now supply
  * their legs and their hit mapping; everything that can drift lives here once.
@@ -32,11 +30,9 @@ import {
   recordLegCapped,
   recordRetrieval,
   recordTruncation,
-  rerankHits,
   retrievalLogger,
   type BudgetInput,
   type Hit,
-  type Reranker,
   type SemanticBackend,
 } from '@avantf/mem-retrieval'
 import { droppedLegs, emptyFloorDrops, resolveFloors, totalFloorDrops, type FloorLeg } from './floors.js'
@@ -137,7 +133,6 @@ export interface HybridDeps<H> {
   kind: 'memory' | 'knowledge'
   config: Config
   semantic: SemanticBackend
-  reranker: Reranker
   /**
    * The legs to fuse, as promises (or values). Awaited concurrently; a rejection costs that leg
    * only. The async setup a store needs before it can build its legs — memory extracts the query's
@@ -145,7 +140,7 @@ export interface HybridDeps<H> {
    * body, before the array is returned.
    */
   legs(ctx: HybridContext): Promise<readonly (HybridLeg | Promise<HybridLeg>)[]>
-  /** Text for the fused ids: the live filter, the reranker's input, and the hit bodies. */
+  /** Text for the fused ids: the live filter and the hit bodies. */
   texts(ids: number[]): Map<number, string>
   /** Build the caller-facing hits from the ranked, live, already-sliced ids. */
   hits(ranked: readonly Hit[], texts: Map<number, string>): H[]
@@ -238,19 +233,6 @@ export function legCapFor(config: Config, overFetch: number): number {
 }
 
 /**
- * Whether the configured reranker is actually in use — the two flags a retrieval event carries.
- *
- * "Configured" is not "used": a reranker that is selected but unavailable falls back to the fused
- * order, and counting that as a rerank would make the counter lie in exactly the case it exists to
- * expose (the reference implementation leaves `rerank_fallback` unfeedable).
- */
-export function rerankState(reranker: Reranker): { used: boolean; fallback: boolean } {
-  const configured = reranker.name !== 'none'
-  const available = reranker.isAvailable()
-  return { used: configured && available, fallback: configured && !available }
-}
-
-/**
  * Bound a ranked hit list to a token budget, marking what was shortened.
  *
  * An unlimited budget returns the hits untouched: `fitToTokenBudget` would still walk every entry
@@ -273,10 +255,9 @@ export function applyOutputBudget<H extends BudgetInput>(
 /**
  * Run one hybrid search.
  *
- * The order of the last three steps is load-bearing: rerank the over-fetched pool, THEN slice to
- * `limit`, THEN apply the output budget, and only then tell the store what was returned. Slicing
- * before the rerank would rank an arbitrary subset; budgeting before the slice would spend the
- * budget on hits that are about to be dropped.
+ * The order of the last steps is load-bearing: slice the fused (over-fetched) pool to `limit`,
+ * THEN apply the output budget, and only then tell the store what was returned. Budgeting before
+ * the slice would spend the budget on hits that are about to be dropped.
  */
 export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, plan: HybridPlan): Promise<HybridResult<H>> {
   const startedAt = Date.now()
@@ -363,7 +344,7 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
   const augmentVectors = new Map<string, Float32Array>()
 
   /**
-   * One full pass under ONE floor profile: legs → fuse → live filter → rerank → slice → budget.
+   * One full pass under ONE floor profile: legs → fuse → live filter → slice → budget.
    *
    * `onReturn` (the store's reinforcement) is deliberately NOT called here: the strict pass is a
    * probe whenever a relaxed pass may follow, and reinforcing text the caller never receives is
@@ -429,7 +410,7 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
     const texts = deps.texts(fused.map((h) => h.id))
     // Drop stale candidates (purged rows, vectors lingering in the index).
     const live = fused.filter((h) => texts.has(h.id))
-    const ranked = (await rerankHits(deps.reranker, query, live, (id) => texts.get(id) ?? '')).slice(0, limit)
+    const ranked = live.slice(0, limit)
     const hits = deps.hits(ranked, texts)
     // The output budget is applied LAST: it must bound what the caller receives, and it is the only
     // place that knows how much text the whole result carries (DESIGN §20).
@@ -460,15 +441,12 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
   deps.onReturn?.(chosen.hits)
 
   if (plan.recordStats !== false) {
-    const rerank = rerankState(deps.reranker)
     recordRetrieval({
       kind: deps.kind,
       results: chosen.hits.length,
       // Covers BOTH passes: the caller waited for the whole thing.
       latencyMs: Date.now() - startedAt,
       semanticLive: semAvail,
-      rerankUsed: rerank.used,
-      rerankFallback: rerank.fallback,
       droppedByFloor: chosen.dropped_by_floor,
     })
   }

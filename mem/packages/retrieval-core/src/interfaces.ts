@@ -1,5 +1,5 @@
 /**
- * The three stable contracts the business flow depends on.
+ * The two stable contracts the business flow depends on.
  * The business flow (fusion pipeline, stores, tools, router, UI) must depend only on
  * these interfaces — never on a concrete backend. See DESIGN §5.
  */
@@ -57,17 +57,6 @@ export interface SemanticBackend {
    * coalescing with any in-flight attempt and throttling to one attempt per
    * floor. Implementations that load lazily may omit it.
    */
-  ensureWarm?(): void
-}
-
-/** Re-ranks candidate facts/chunks by query relevance. */
-export interface Reranker {
-  readonly name: string
-  rerank(query: string, candidates: { id: number; text: string }[]): Promise<number[]>
-  isAvailable(): boolean
-  /** Optional async bootstrap: configure env + download/load the model. */
-  warmUp?(): Promise<void>
-  /** Optional non-blocking retry — see {@link SemanticBackend.ensureWarm}. */
   ensureWarm?(): void
 }
 

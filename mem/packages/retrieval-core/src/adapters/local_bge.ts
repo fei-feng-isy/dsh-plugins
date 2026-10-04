@@ -338,12 +338,9 @@ async function createFeatureExtraction(model: string, env: ModelEnv): Promise<Pi
 /**
  * Apply this project's cache/mirror policy to transformers.js.
  *
- * `mod.env` is PROCESS-GLOBAL and last-writer-wins: the embedder and the reranker are two adapters
- * over ONE module, so whichever warms second decides what both see. Setting the keys from a single
- * place is what keeps the two from disagreeing — the reranker used to set `allowLocalModels` on its
- * own, which reads as a policy difference between the adapters and was really an accident of which
- * file got edited last. `allowLocalModels` is already the library default; it is stated here so the
- * policy is explicit rather than inherited, and identical for both adapters.
+ * `mod.env` is PROCESS-GLOBAL and last-writer-wins. Setting the keys from a single place is what
+ * keeps every future adapter over this module from disagreeing: `allowLocalModels` is already the
+ * library default, stated here so the policy is explicit rather than inherited.
  */
 export function applyModelEnv(mod: TransformersModule, env: ModelEnv): void {
   if (!mod.env) return

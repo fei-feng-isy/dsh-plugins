@@ -105,23 +105,26 @@ bootstrap（内联；解析底座 → 动态 import() → 校验 supportedRange�
 > `<home>/runtime/**` 这类为旧 `mem:compat` 准备的 npm 根）与更早的私有根 `<dataHome>/dsh-compat/**`
 > **都不再被任何代码读写**，可以手工删除。删它们不影响任何东西。
 
-底座装载成功后，`tools.dir` / `semantic.cache_dir` / `rerank.cache_dir` 的**内建默认层**
+底座装载成功后，`tools.dir` / `semantic.cache_dir` 的**内建默认层**
 （`RuntimeOptions.managedRoots` → `LoadConfigOptions.managedRoots`）指向族根：
 
 - `tools.dir` = `<home>/tools`
-- `semantic.cache_dir` / `rerank.cache_dir` = `<home>/models`
+- `semantic.cache_dir` = `<home>/models`
 
 **优先级**：`tools.dir` 仍是普通配置，`config.yaml` 与环境逃生口（`AVANTF_TOOLS_DIR`、
 `AVANTF_PANDOC`）照旧覆盖。**模型的落点与镜像不一样**：它们是受管项，`config.yaml` 里的
-`semantic.cache_dir` / `semantic.mirror`（以及 rerank 的同名键）会被忽略并告警，只剩环境逃生口
+`semantic.cache_dir` / `semantic.mirror` 会被忽略并告警，只剩环境逃生口
 `AVANTF_MEM_MODEL_CACHE` / `AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`）。这两个变量由**环境层④**
-写进 `semantic.cache_dir` / `semantic.mirror`（rerank 同名键一起写），所以 `rt.config` 就是真相：
+写进 `semantic.cache_dir` / `semantic.mirror`，所以 `rt.config` 就是真相：
 镜像会到 `mem:model` 的 `spec.endpoint`，缓存覆盖则让 `mem:model` 不再声明（见 §1）。
+
+> `rerank.cache_dir` / `rerank.mirror` / `rerank.auto_download` 曾是同一套机制的第二个消费者；
+> 结果重排在 0.5.0 已整体移除（`mem/DESIGN.md` §5.1），这些键不再存在。
 
 **下载总闸（两个开关，任一为 `0` 即关闭下载）**：
 
 - `AVANTF_ENVINIT_AUTO_DOWNLOAD=0` —— 家族级开关，一次关掉全家插件的 provisioning，**并且**经环境层
-  把 `semantic.auto_download` / `rerank.auto_download` 置 false，运行时自己的下载路径也一起停；
+  把 `semantic.auto_download` 置 false，运行时自己的下载路径也一起停；
 - `AVANTF_MEM_AUTO_DOWNLOAD=0` —— 本项目的开关（CLI / MCP / 测试都认它）。
 
 ## 4. `@avantf/mem-provision` 还留什么

@@ -23,7 +23,7 @@ import {
   type ReindexReport,
 } from '@avantf/mem-contract'
 import { retrievalLogger } from '@avantf/mem-retrieval'
-import type { Reranker, SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
+import type { SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
 import type { Db } from '../db/conn.js'
 import { KNOWLEDGE_SCHEMA, openKnowledgeStore } from '../db/knowledge.js'
 import { describeMigrationOutcome, wasUpgraded } from '../db/store.js'
@@ -294,7 +294,6 @@ export class KnowledgeStore {
     kbConfig: KnowledgeConfig,
     private readonly semantic: SemanticBackend,
     private readonly vstore: VectorStore,
-    private readonly reranker: Reranker,
     /** The store config file `addDomain` writes the allowlist back to (`knowledgeConfigPath(home)`). */
     private readonly domainConfigPath: string,
     private readonly logger?: AvantfLogger,
@@ -1357,20 +1356,19 @@ export class KnowledgeStore {
    * and the chunk→hit mapping.
    *
    * The limit normalization, the over-fetch factor, the leg cap, the capped-leg counter, the
-   * degraded weights, the rerank and the output budget all live there now. They used to be copied
+   * degraded weights and the output budget all live there now. They used to be copied
    * here, and every fix landed on the memory side only — a `NaN` limit reached this store's SQL and
    * took the whole cross-store query down with it, `retriever.over_fetch_factor` meant something
    * different per store, and a capped knowledge leg was invisible to the health counters.
    */
   private hybridDeps(opts?: KnowledgeSearchOptions): HybridDeps<RecallHit> {
-    // Per call: the fused rows are read ONCE — for the live filter and the reranker's text — and
+    // Per call: the fused rows are read ONCE — for the live filter — and
     // reused for the hit bodies, so a search does not query `chunks.hits` twice.
     const rowsById = new Map<number, ChunkHitRow>()
     return {
       kind: 'knowledge',
       config: this.config,
       semantic: this.semantic,
-      reranker: this.reranker,
       legs: (ctx) => this.searchLegs(opts, ctx),
       texts: (ids) => {
         rowsById.clear()

@@ -91,16 +91,14 @@ export { inject } from './inject.js'
 export { KNOWLEDGE_PROMPT_SECTION, MEMORY_PROMPT_SECTION } from './prompt.js'
 
 // The pluggable retrieval surface, re-exported on the PUBLISHED face (DESIGN §5 "可选注册新适配器"):
-// register a backend under a name, put that name in `config.<semantic|rerank|vectorStore>.backend`, and
+// register a backend under a name, put that name in `config.<semantic|vectorStore>.backend`, and
 // `buildRuntime` resolves it — the business flow never changes. Without this re-export the promise was
 // unkeepable from outside the repo: the registries live in `@avantf/mem-retrieval`, a private package
 // that is inlined into `lib/index.js` and is not on npm. These are the same registry instance
 // `buildRuntime` reads, because both are this one bundled engine.
 export {
   registerSemanticBackend,
-  registerReranker,
   registerVectorStore,
-  type Reranker,
   type SemanticBackend,
   type VectorStore,
 } from '@avantf/mem'

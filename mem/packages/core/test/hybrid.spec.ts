@@ -2,7 +2,7 @@
  * The shared retrieval orchestration (`store/hybrid.ts`).
  *
  * Both stores used to carry their own copy of this flow, and the copies drifted: the `NaN` limit
- * guard, `retriever.over_fetch_factor`, the capped-leg counter and the rerank flags each existed on
+ * guard, `retriever.over_fetch_factor` and the capped-leg counter each existed on
  * the memory side only. What is pinned here is therefore the behaviour that MUST be identical for
  * both stores — plus the leg isolation that neither had (a throwing leg used to take the whole query
  * down, because `Promise.all` has no per-leg catch on the read path).
@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetRetrievalHealth, retrievalHealth, setRetrievalLogger } from '@avantf/mem-retrieval'
-import type { Reranker, SemanticBackend } from '@avantf/mem-retrieval'
+import type { SemanticBackend } from '@avantf/mem-retrieval'
 import type { Config } from '@avantf/mem-contract'
 import { loadConfig } from '../src/config/loader.js'
 import {
@@ -35,13 +35,6 @@ const semantic: SemanticBackend = {
   encode: async () => new Float32Array(4),
   encodeBatch: async () => [],
   isAvailable: () => true,
-}
-
-/** Unavailable, so `rerankHits` is a pass-through and the fused order is what the caller sees. */
-const reranker: Reranker = {
-  name: 'none',
-  rerank: async (_query, candidates) => candidates.map((c) => c.id),
-  isAvailable: () => false,
 }
 
 let dir: string
@@ -74,7 +67,6 @@ function deps(
     kind: 'memory',
     config,
     semantic,
-    reranker,
     legs: async (ctx) => legs(ctx),
     texts: (ids) => new Map(ids.map((id) => [id, `文本 ${String(id)}`])),
     hits: (ranked, texts) => ranked.map((h) => ({ id: h.id, text: texts.get(h.id) ?? '', score: h.score })),

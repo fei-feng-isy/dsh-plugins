@@ -8,7 +8,7 @@ import { expandHome } from './env.js'
  *
  * `@avantf/dsh-plugin-base` (the family's environment framework) installs everything it manages under a
  * single root: `$AVANTF_HOME` when set, else `~/.avantf/env`. `tools` holds external binaries
- * (pandoc), `models` the downloaded embedding/rerank weights in the flat layout the transformers.js
+ * (pandoc), `models` the downloaded embedding weights in the flat layout the transformers.js
  * cache reads. The engine's built-in defaults point HERE, not at the pre-framework
  * `~/.avantf/{tools,models}`: those legacy directories are no longer a fallback anywhere, so a
  * machine that never creates them loses nothing, and no process resolves a path that only missions

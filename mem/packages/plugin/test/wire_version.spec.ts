@@ -42,9 +42,10 @@ describe('the wire revision', () => {
   it('is a positive integer, pinned so a face change is a deliberate edit', () => {
     expect(Number.isInteger(WIRE_VERSION)).toBe(true)
     expect(WIRE_VERSION).toBeGreaterThanOrEqual(1)
-    // Revision 1 is the first marker: the face is the ten methods that all predate it, so NOTHING is
-    // gated yet. Raising this number without adding/removing a descriptor is a mistake.
-    expect(WIRE_VERSION).toBe(1)
+    // Revision 2 (0.5.0) removed the rerank fields from the retrieval-health payload `admin.stats`
+    // answers — no @Remote method changed, but a removed field the other half dereferences is exactly
+    // what the marker exists to surface. Changing this number is a deliberate edit.
+    expect(WIRE_VERSION).toBe(2)
   })
 
   it('is stamped on both envelopes, success and failure alike', () => {

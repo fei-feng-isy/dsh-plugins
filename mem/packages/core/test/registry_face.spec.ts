@@ -5,7 +5,7 @@
  * is a separate failure mode:
  *
  *   1. the engine's public index (`../src/index.js`, the file the plugin re-exports and the one that
- *      becomes `lib/index.d.ts`) actually carries the three registrations;
+ *      becomes `lib/index.d.ts`) actually carries the registrations;
  *   2. registering through that face mutates the SAME registry `@avantf/mem-retrieval` resolves
  *      through — two module copies would make a successful registration silently invisible;
  *   3. the business flow (`buildRuntime`) resolves through config, so a registered name is adopted
@@ -13,20 +13,26 @@
  *
  * Uses the real packages rather than an in-test copy of the registry: `@avantf/mem-retrieval` is the
  * same workspace package the engine face re-exports from, so (2) is about module identity, not shape.
+ *
+ * THE THIRD SURFACE IS GONE. DESIGN §5 used to promise THREE registries; the rerank one was removed in
+ * 0.5.0 (docs/review/RETRIEVAL_RERANK_NECESSITY.md, 方案 B — the seam went with the adapter). The
+ * negative assertions at the bottom of this file are the regression guard: they must go RED if
+ * `registerReranker` / `resolveReranker` / the `Reranker` interface is re-introduced anywhere on the
+ * engine or retrieval face.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConfigSchema } from '@avantf/mem-contract'
-import { LocalNumpyVectorStore, resolveReranker, resolveSemantic, resolveVStore } from '@avantf/mem-retrieval'
+import * as retrievalFace from '@avantf/mem-retrieval'
+import { LocalNumpyVectorStore, resolveSemantic, resolveVStore } from '@avantf/mem-retrieval'
+import * as engineFace from '../src/index.js'
 import {
   buildRuntime,
-  registerReranker,
   registerSemanticBackend,
   registerVectorStore,
   type AvantfRuntime,
-  type Reranker,
   type SemanticBackend,
   type VectorStore,
 } from '../src/index.js'
@@ -81,9 +87,8 @@ function namedVectorStore(name: string): VectorStore {
 }
 
 describe('the registration surface on the engine public face', () => {
-  it('re-exports all three registrations', () => {
+  it('re-exports both registrations', () => {
     expect(typeof registerSemanticBackend).toBe('function')
-    expect(typeof registerReranker).toBe('function')
     expect(typeof registerVectorStore).toBe('function')
   })
 
@@ -92,16 +97,9 @@ describe('the registration surface on the engine public face', () => {
     // identity check: a second copy of the registry (a duplicated module) would still let the
     // register call succeed and then resolve to the built-in default, silently.
     registerSemanticBackend('face_identity_sem', () => fakeSemantic('face_identity_sem', []))
-    const reranker: Reranker = {
-      name: 'face_identity_rerank',
-      isAvailable: () => true,
-      rerank: async (_query, candidates) => candidates.map((c) => c.id),
-    }
-    registerReranker('face_identity_rerank', () => reranker)
     registerVectorStore('face_identity_vstore', () => namedVectorStore('face_identity_vstore'))
 
     expect(resolveSemantic(ConfigSchema.parse({ semantic: { backend: 'face_identity_sem' } })).name).toBe('face_identity_sem')
-    expect(resolveReranker(ConfigSchema.parse({ rerank: { backend: 'face_identity_rerank' } })).name).toBe('face_identity_rerank')
     expect(resolveVStore(ConfigSchema.parse({ vectorStore: { backend: 'face_identity_vstore' } })).name).toBe('face_identity_vstore')
   })
 
@@ -114,27 +112,35 @@ describe('the registration surface on the engine public face', () => {
     expect(warm).toEqual(['face_pin_sem'])
   })
 
-  it('lets buildRuntime adopt a reranker and a vector store registered through the face', async () => {
-    const reranked: string[] = []
-    const reranker: Reranker = {
-      name: 'face_pin_rerank',
-      isAvailable: () => true,
-      rerank: async (query, candidates) => { reranked.push(query); return candidates.map((c) => c.id) },
-    }
-    registerReranker('face_pin_rerank', () => reranker)
+  it('lets buildRuntime adopt a vector store registered through the face', async () => {
     registerVectorStore('face_pin_vstore', () => namedVectorStore('face_pin_vstore'))
     rt = buildRuntime({
-      dataHome: homeWith('rerank:\n  backend: face_pin_rerank\nvectorStore:\n  backend: face_pin_vstore\n'),
+      dataHome: homeWith('vectorStore:\n  backend: face_pin_vstore\n'),
     })
     // The vector-store leg is observable without a query: the diagnostic names the backend serving reads.
     expect(rt.memory.vectorsDiagnose().store).toBe('face_pin_vstore')
-    // The rerank leg only runs when a query produced candidates, so drive one: a CJK trigram query
-    // against a fact that contains it makes the FTS leg produce a hit deterministically.
-    await rt.memory.add('跨包注册面 pin：李娜负责统一网关。', 'pin')
-    await rt.memory.search({ query: '统一网关' })
-    // `reranked` non-empty IS "the registered reranker ran". Its content is pinned too, but not its
-    // length: the store may run a strict pass and then the documented auto-relax pass.
-    expect(reranked.length).toBeGreaterThan(0)
-    expect(reranked.every((query) => query === '统一网关')).toBe(true)
   })
 })
+
+describe('the rerank surface is gone (0.5.0, 方案 B)', () => {
+  // These are the deliberate NEGATIVE pins for the removal. Each one is written so that re-adding the
+  // symbol (the mutation) turns it red — that is the whole point of testing an absence.
+  it('no longer re-exports registerReranker / resolveReranker from the engine face', () => {
+    expect('registerReranker' in engineFace).toBe(false)
+    expect('resolveReranker' in engineFace).toBe(false)
+  })
+
+  it('no longer resolves a reranker from the retrieval package', () => {
+    expect('registerReranker' in retrievalFace).toBe(false)
+    expect('resolveReranker' in retrievalFace).toBe(false)
+    expect('LocalReranker' in retrievalFace).toBe(false)
+    expect('NoneReranker' in retrievalFace).toBe(false)
+    expect('rerankHits' in retrievalFace).toBe(false)
+  })
+})
+
+// The TYPE-level half of the same pin, checked by `pnpm typecheck` rather than at runtime. If the
+// `Reranker` interface is re-exported on the engine face again, the directive below becomes unused and
+// TypeScript errors — i.e. the mutation turns this red even though `import type` has no runtime form.
+// @ts-expect-error `Reranker` was removed from the published face in 0.5.0.
+import type { Reranker as _RemovedReranker } from '../src/index.js'

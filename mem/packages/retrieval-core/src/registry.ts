@@ -1,8 +1,6 @@
 import type { Config } from '@avantf/mem-contract'
-import type { Reranker, SemanticBackend, VectorStore } from './interfaces.js'
-import { NoneReranker } from './adapters/none_reranker.js'
+import type { SemanticBackend, VectorStore } from './interfaces.js'
 import { LocalBgeBackend } from './adapters/local_bge.js'
-import { LocalReranker } from './adapters/local_reranker.js'
 import { LocalNumpyVectorStore } from './adapters/local_numpy.js'
 import { HnswlibVectorStore } from './adapters/hnswlib.js'
 import { AutoVectorStore } from './adapters/auto_vstore.js'
@@ -17,7 +15,7 @@ type Factory<T> = (cfg: Config, opts?: ResolveOptions) => T
  * family framework installs the model into the managed root ASYNCHRONOUSLY, so a constructor-time
  * warm would race that install and fetch a second copy. The plugin passes `deferWarm: true` and
  * warms from the model item's `onSettled`; every other caller (CLI, MCP, tests) keeps the eager
- * constructor warm. `encode()` / `rerank()` still warm lazily, so deferring never loses the model.
+ * constructor warm. `encode()` still warms lazily, so deferring never loses the model.
  */
 export interface ResolveOptions {
   /** Skip the constructor warm; the caller warms explicitly (see `ModelEnv.deferWarm`). */
@@ -40,8 +38,8 @@ function unimplementedVStore(name: string): Factory<VectorStore> {
  * services; replacement happens inside avantf-mem by config + registry (DESIGN §5).
  * The business flow resolves backends only through these factories.
  *
- * The three `register*` functions below are the whole pluggability contract: register a name, put
- * that name in `config.<semantic|rerank|vectorStore>.backend`, and the resolver picks it up — no
+ * The two `register*` functions below are the whole pluggability contract: register a name, put
+ * that name in `config.<semantic|vectorStore>.backend`, and the resolver picks it up — no
  * business-flow change. They are re-exported on the PUBLISHED plugin face (`@avantf/dsh-mem`) so a
  * consumer OUTSIDE this repo can actually use the promise DESIGN §5 makes; see `packages/core/src/index.ts`
  * and `packages/plugin/src/index.ts`. Resolution stays a registry lookup, never duck-typing.
@@ -57,18 +55,6 @@ const semanticRegistry: Record<string, Factory<SemanticBackend>> = {
     }),
 }
 
-const rerankRegistry: Record<string, Factory<Reranker>> = {
-  bge_reranker: (cfg, opts) =>
-    new LocalReranker(cfg.rerank.local_model, {
-      mirror: cfg.rerank.mirror,
-      cacheDir: cfg.rerank.cache_dir,
-      autoDownload: cfg.rerank.auto_download,
-      maxInputTokens: cfg.rerank.max_input_tokens,
-      deferWarm: opts?.deferWarm,
-    }),
-  none: () => new NoneReranker(),
-}
-
 const vstoreRegistry: Record<string, Factory<VectorStore>> = {
   local_numpy: (cfg) => new LocalNumpyVectorStore(cfg.semantic.dim),
   hnswlib: (cfg) => new HnswlibVectorStore(cfg.semantic.dim, cfg.vectorStore.hnswlib_ef_search),
@@ -80,9 +66,6 @@ const vstoreRegistry: Record<string, Factory<VectorStore>> = {
 export function registerSemanticBackend(name: string, factory: Factory<SemanticBackend>): void {
   semanticRegistry[name] = factory
 }
-export function registerReranker(name: string, factory: Factory<Reranker>): void {
-  rerankRegistry[name] = factory
-}
 export function registerVectorStore(name: string, factory: Factory<VectorStore>): void {
   vstoreRegistry[name] = factory
 }
@@ -90,12 +73,6 @@ export function registerVectorStore(name: string, factory: Factory<VectorStore>)
 export function resolveSemantic(cfg: Config, opts?: ResolveOptions): SemanticBackend {
   const f = semanticRegistry[cfg.semantic.backend]
   if (!f) throw new Error(`未知的语义后端：${cfg.semantic.backend}`)
-  return f(cfg, opts)
-}
-
-export function resolveReranker(cfg: Config, opts?: ResolveOptions): Reranker {
-  const f = rerankRegistry[cfg.rerank.backend]
-  if (!f) throw new Error(`未知的重排后端：${cfg.rerank.backend}`)
   return f(cfg, opts)
 }
 

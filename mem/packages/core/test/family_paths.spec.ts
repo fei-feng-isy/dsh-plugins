@@ -47,6 +47,5 @@ describe('the family managed-directory convention', () => {
     // path here is what would make a compatibility symlink load-bearing again.
     expect(defaultConfig.tools.dir).toBe('')
     expect(defaultConfig.semantic.cache_dir).toBe('')
-    expect(defaultConfig.rerank.cache_dir).toBe('')
   })
 })

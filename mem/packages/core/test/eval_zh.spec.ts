@@ -514,7 +514,7 @@ describe('zh relations eval (degraded FTS+entity path + 1 semantic-live self-que
   })
 
   it('R16: ranking is identical with every fact at trust 0 and at trust 1', async () => {
-    // The second half of the frozen M0 guard: trust must not enter fusion/rerank at
+    // The second half of the frozen M0 guard: trust must not enter fusion at
     // all, so forcing the whole store to either extreme cannot reorder a single query.
     let cached: { facts: string[]; rt: AvantfRuntime } | null = null
     const dirs: string[] = []

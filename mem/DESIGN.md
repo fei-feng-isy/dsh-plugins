@@ -1,6 +1,6 @@
 # `avantf-mem` 设计文档（v2.2 定稿）
 
-> 一个 DSH 原生 Cordis 插件 + 可选 MCP 能力。**记忆（无用户隔离 + 共享单库）** 与 **文档知识库（类型/领域 → 来源两级分类）** 共用一套**内部可替换**的检索/重排底座，提供**跨记忆与文档的混合检索**，供 **agent 上下文**使用，并在 **会话视图标签条**（对话 / 轨迹 之后）提供「记忆」「知识」两个标签页。
+> 一个 DSH 原生 Cordis 插件 + 可选 MCP 能力。**记忆（无用户隔离 + 共享单库）** 与 **文档知识库（类型/领域 → 来源两级分类）** 共用一套**内部可替换**的检索底座，提供**跨记忆与文档的混合检索**，供 **agent 上下文**使用，并在 **会话视图标签条**（对话 / 轨迹 之后）提供「记忆」「知识」两个标签页。
 
 ---
 
@@ -12,7 +12,7 @@
 | 插件 id | `avantf-mem` |
 | 交付形态 | **原生 Cordis 插件（默认）** + **保留 MCP 能力**（可选独立入口） |
 | 技术 | TypeScript 原生实现（记忆 + 文档知识库 + 跨库检索） |
-| 功能范围 | 一次性全面对等：记忆（5 向量库/混合重排/生命周期/矛盾/去重）+ 文档知识库 + 跨库检索 |
+| 功能范围 | 一次性全面对等：记忆（5 向量库/混合检索/生命周期/矛盾/去重）+ 文档知识库 + 跨库检索 |
 | 模型 | **Plan A**：检索本地，生成外部（插件只做检索 + 溯源） |
 
 ## 2. 关键领域决策
@@ -24,7 +24,7 @@
 | D3 | 跨库检索 | 记忆 + 文档同一次 query，**联合归一化**保证分数可比，`kind/domain/source` 过滤 |
 | D4 | 答案生成 | **不做插件内生成**；召回上下文 + 溯源交 agent/UI 模型组织（`kb_answer` 为后置增强） |
 | D5 | 文档来源 | 工作区文件（优先）/ 上传 / 粘贴 / 外部 URI |
-| D6 | 检索/重排可替换 | **avantf-mem 内部**插件式（注册表+配置），**不是 DSH 插件、不注册 Cordis 服务**，业务流零感知 |
+| D6 | 检索可替换 | **avantf-mem 内部**插件式（注册表+配置），**不是 DSH 插件、不注册 Cordis 服务**，业务流零感知 |
 
 ## 3. 数据目录布局（`data_home` 默认 `~/.avantf`）
 
@@ -66,10 +66,10 @@
 
 配置分层（低→高覆盖）：①内建默认 → ②`.avantf/configs/common.yaml`（公共）→ ③`.avantf/configs/*.yaml`（分库覆盖）→ ④环境变量 → ⑤CLI/调用方的显式实参（`--data-home`、`buildRuntime` 的 `dataHome`）。插件 profile 里的 `config.dataHome` 算**配置值**（②），所以 `$AVANTF_HOME` 压得过它 —— 数据根的完整次序见 §3 开头。
 
-- YAML 键名与 zod schema 一致（`semantic`/`rerank`/`vectorStore`/`retriever`/`lifecycle`/`tools`，`vectorStore` 为 camelCase）；段内做一级深合并。
+- YAML 键名与 zod schema 一致（`semantic`/`vectorStore`/`retriever`/`lifecycle`/`tools`，`vectorStore` 为 camelCase）；段内做一级深合并。
 - ④环境变量：`AVANTF_HOME`、`AVANTF_MEM_DB`、`AVANTF_KNOWLEDGE_DB`、`AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`）、`AVANTF_MEM_MODEL_CACHE`、`AVANTF_MEM_AUTO_DOWNLOAD`（`0/false` 禁用一切下载——模型与外部二进制，测试与离线环境用；作为全局 kill-switch 同时作用于适配器构造与 provision 的每个安装路径，优先于显式传参）、`AVANTF_TOOLS_DIR`（受管工具目录覆盖）、`AVANTF_PANDOC`（显式指定 pandoc 可执行文件，优先于受管目录与 PATH）。
 
-- 公共配置放**共享**项（`semantic`/`rerank`/`vectorStore`/`retriever.weight_*`/`lifecycle`/`trust` 默认，以及 `tools`）——记忆与知识共用同一检索底座与嵌入模型，保证跨库分数可比；`tools`（`dir`/`mirror`/`auto_install`）之所以在**公共**层而不是知识库专属，是因为它管的是"这个进程要装的外部东西"（pandoc 二进制与启动预热的嵌入模型），两者共用同一套机制。
+- 公共配置放**共享**项（`semantic`/`vectorStore`/`retriever.weight_*`/`lifecycle`/`trust` 默认，以及 `tools`）——记忆与知识共用同一检索底座与嵌入模型，保证跨库分数可比；`tools`（`dir`/`mirror`/`auto_install`）之所以在**公共**层而不是知识库专属，是因为它管的是"这个进程要装的外部东西"（pandoc 二进制与启动预热的嵌入模型），两者共用同一套机制。
 - 分库配置放**各自**项（`db.path`、`knowledge.domains/chunk_size/chunk_overlap/source_priority`、`knowledge.ingest.*`——摄入边界属知识库专用，见 §8）。`memory.category_values` 曾在这里，但没有任何生产代码读它（改它不改变行为、设它也不改变行为），已删除；分类词表的**建议值**改由 `CATEGORY_VALUES` 在 `mem_remember` 的字段描述里对模型讲清，而不是假装是一个配置项。
 - **`db.path` 解析规则**：`~/` 展开为**用户 home**（与 `dataHome` 同规则）、绝对路径原样使用；留空则回落到数据目录下的 `memory/memory.db`、`knowledge/knowledge.db`（此时 `AVANTF_MEM_DB`/`AVANTF_KNOWLEDGE_DB` 仍可作为环境层覆盖）。`knowledge.docs.dir` 同规则，留空 = `<data_home>/knowledge/docs`（`AVANTF_KNOWLEDGE_DOCS` 可覆盖）。
 - **`knowledge.domains` 是写入侧领域清单**（DESIGN §8）：默认 `['design','api','ops','research','notes']`；显式 `[]` = 不限制；非空时还接受 `documents` 里已有的领域。清单外的**新**领域由 store 拒绝，所以"同一个领域两个名字"不能靠随手输入产生——新增领域是改这一项配置的事。
@@ -91,26 +91,40 @@
          memory.store   knowledge.store   ingestion   lifecycle   cross-router
                             │                          │
                             ▼                          ▼
-          @avantf/mem-retrieval：SemanticBackend·Reranker·VectorStore
+          @avantf/mem-retrieval：SemanticBackend·VectorStore
              (内部可替换注册表 + 配置解析 + 降级 + auto升级) + 三路融合
 ```
 
-## 5. `retrieval-core`（内部可替换检索/重排底座）
+## 5. `retrieval-core`（内部可替换检索底座）
 
 **核心原则**：插拔机制完全收在 `avantf-mem` 库内；**不落成 DSH 插件、不注册 Cordis 服务**；业务流面向稳定接口编程，永不感知具体后端。
 
 ```ts
 interface SemanticBackend { encode(t): Float32Array; encodeBatch(ts): Float32Array[]; isAvailable(): boolean; dim: number }
-interface Reranker        { rerank(q, cands): number[] }
 interface VectorStore     { add(id,vec); topk(vec,k): {id,score}[]; fetch(ids); remove(id); rebuild() }
 ```
 
-- **注册表 + 工厂**（默认适配器内置；可选注册新适配器）：`semanticRegistry{local_bge}`、`rerankRegistry{bge_reranker, none}`、`vstoreRegistry{local_numpy, hnswlib, faiss, pgvector, qdrant}` + `auto`。
-- **解析器**（*唯一*知道具体实现的地方）：按 `config.<backend>` 取注册实现；`isAvailable()===false` → 降级（`local_numpy`/`none`/降级权重）；向量库 `auto` 在数量越过 `auto_thresholds.hnswlib` 时**单调升级** `local_numpy → hnswlib`（native 绑定不可用则留在 numpy 并告警）。`auto_thresholds` 只对**有 ANN 适配器**的 backend 有意义，因此只有 `hnswlib` 一个键；曾与之并列的 `faiss` 阈值（默认 100000）没有任何生产读点（`resolveVStore` 只读 `hnswlib`），与 `memory.category_values` 同类，已删除。`faiss/pgvector/qdrant` 目前是**显式告警的适配面**（解析到 numpy）。
-- **重排的唯一开关是 `rerank.backend`**：runtime 经 `resolveReranker` 注入两个 store，检索流程只依赖 `Reranker` 接口（`none` = 跳过重排、不加载模型）。语义后端只负责嵌入，重排器加载失败不拖垮语义路径。
+- **注册表 + 工厂**（默认适配器内置；可选注册新适配器）：`semanticRegistry{local_bge}`、`vstoreRegistry{local_numpy, hnswlib, faiss, pgvector, qdrant}` + `auto`。**只有两个可注册面**——第三面（结果重排）已于 **0.5.0 整体移除**，见下。
+- **解析器**（*唯一*知道具体实现的地方）：按 `config.<backend>` 取注册实现；`isAvailable()===false` → 降级（`local_numpy`/降级权重）；向量库 `auto` 在数量越过 `auto_thresholds.hnswlib` 时**单调升级** `local_numpy → hnswlib`（native 绑定不可用则留在 numpy 并告警）。`auto_thresholds` 只对**有 ANN 适配器**的 backend 有意义，因此只有 `hnswlib` 一个键；曾与之并列的 `faiss` 阈值（默认 100000）没有任何生产读点（`resolveVStore` 只读 `hnswlib`），与 `memory.category_values` 同类，已删除。`faiss/pgvector/qdrant` 目前是**显式告警的适配面**（解析到 numpy）。
 - **切换** = 只改 `.avantf/configs/common.yaml` 的 `*.backend`。
 - **测试/嵌入方的注入口**：`buildRuntime({ semantic })` 可直接注入一个 `SemanticBackend`（跨库检索一次编码的测试就用它）。这是接缝、不是第二条插拔路径——`dim` 必须等于 `config.semantic.dim`，否则 `buildRuntime` 在打开数据库之前就报错（store 的向量库是按该 dim 建的）；同理，调用方传入的 `queryVector` 长度不符时 store 直接报错，而不是拿错位向量去打分。
 - **业务流零感知**：融合流水线、store、工具、路由器、UI 全部只依赖接口。
+
+### 5.1 为什么移除结果重排（rerank），以及重开条件（2026-10-05 裁决，0.5.0）
+
+**结论：连"缝"一起删（方案 B）** —— `Reranker` 接口、`rerankRegistry`、`resolveReranker`、`LocalReranker`/`NoneReranker` 适配器、`rerank.*` 配置、`rerank_*` 健康计数与结果字段、`@avantf/dsh-mem` 公开面上的 `registerReranker` 全部删除。依据是 `docs/review/RETRIEVAL_RERANK_NECESSITY.md` 的三条独立理由（任一条单独就够）：
+
+1. **它今天根本不工作**：shipped 的 `bge_reranker` 是完全 identity（两个互相独立的缺陷：把嵌套数组交给 `text-classification` 抛错后静默返回入参序；`num_labels:1` 无 `problem_type` 时 softmax 恒为 1.0），却照付 **1.05 GiB** 模型 + 冷启，且 `rerank_used` 计数说它在用（实测 179 次 `rerank: inference failed`、两臂 55/55 逐条相同）。
+2. **修好也是负收益**：同 run 双臂对照——冻结 41 条 top-1 **41→39**、真实库 top-3 相关 **1.82→1.64**、**p50 ≈ 17.3 s/查询**；唯一改善是 `must_exclude` **+1**。
+3. **这份语料结构上没有重排能赢的东西**（主要的一条）：逐查询 `|relevant|` 多为 **1–2** ⇒ top-3 里本来就没有第二条相关事实可提；而 top-1 已经 10/11（真实库）/41/41（冻结）。CE 唯一的真实断层（`我是谁？` 上 logit −2.72 vs ≤−6.00）已被**零延迟**的方案 A 增广改写覆盖，花 1.05 GiB + 17 s 去买一个已经有的断层不值。
+
+**重开条件**（满足**任一条**才重新评估，且三条都要先做）：
+
+1. **语料出现每查询 ≥2 条相关事实**（最可能先在 kb 侧成立：文档切块天然让一个问题对应多条相关 chunk；memory 侧是"一件事一条事实"，`|relevant|` 多为 1–2。kb 半边至今没有任何评测，重开前得先建 kb 的 gold）。
+2. **出现能在非自指查询上验证的收益**（重排只在"后面还有相关项"时才有价值；若届时 `|relevant|` 仍是 1–2，即使 CE 变快也不该开）。
+3. **有廉价且跨查询可比的打分模型**（延迟预算放宽到秒级、或打分成本与过取池大小×正文长度解耦；重开评估必须拿实测数当门槛，不要拿 17.3 s 当门槛——那是"11–25 条过取池 + 非量化 + 共享主机负载"的读数，不是 CE 的下限）。
+
+**为什么连接口/配置/导出一起删，而不是只删适配器**：留着空注册面就是留一条"设了等于没设"的配置路径（`rerank.backend` 只会解析到"未知后端"或静默 identity），而 0.5.0 是破坏性公开面变更——与其留一个永不工作的旋钮，不如删干净、把结论与重开条件写在这里。
 
 ## 6. 数据模型
 
@@ -151,7 +165,7 @@ query(kind?/domain?/source?)
 
 - **分数可比**（§20.17 口径）：两库结果**合并后在合并池上 min-max 归一化**，保证跨库分数同刻度；库内三路融合各自先做路径级归一化（自 §20.17 起是"按该腿最大值缩放"，不是 min-max）。
 - **相关性门槛在融合之前、打在每条腿的原始分上**（§20.19 / §20.20）：`retriever.min_semantic_similarity`（余弦，默认 0.5）/ `min_fts_terms`（**逐行**命中的不同查询词元数，默认 2，词元复用 `store/lexical.ts` 的 `relevanceTerms()`；生效值取 `min(配置, 本查询词元数)`，词元数 0 不判定——3 字 CJK 查询只有 1 个 trigram，配置 2 结构性不可达）/ `min_jaccard`（实体腿：**锚点实体的 Jaccard、事实宽度饱和**，默认 0.2，见 §20.19 续），三者 `0` = 关闭、**等于门槛保留**；语义后端不可用时 `min_fts_terms` 的生效值放宽到 1。**不要用融合分当门槛**：`scaleByMax` 让每条腿的头名恒为 1.0，融合分只在一次查询内可比。结果与检索事件带每腿 `dropped_by_floor` 与生效 `floors`（"结果为空"因此能区分"门槛挡掉了 N 条"和"本来就没有候选"）。**不传 `floors` 时默认策略是：严格档一条都没命中且确有条目被丢，就自动用宽松档（语义 0.40 / FTS `max(1, ⌈词元数/2⌉)` / Jaccard 0.15，三者都为正）再跑一次，且只放宽严格档真正掉过候选的那几条腿，结果置 `relaxed`；显式 `strict`/`loose` 各自关掉自动放宽 / 直接放宽，显式 `loose` 走同一套底线值（不是后门）**。换嵌入模型必须按 §20.19 重新标定。
-- **查询只编码一次**：两条腿共用同一个嵌入后端与模型（§3 公共配置），因此 `runtime.query` 先把 query 编码成向量、再把同一个向量传给两条腿（`queryVector`），而不是各腿各自 `encode` 一遍。实测跨库查询 7.57ms → 5.29ms（单次编码 3.7–4.3ms，其余为融合/reinforce 固定开销；那组 A/B 是 dim 512 上的记录。本轮在 shipped 宽度 dim 768 上实测同一条短查询编码路径——`LocalBgeBackend.encode`，生产加载路径、模型已热——p50 **19.0 ms**、min 15.2 / max 25.5 ms，所以省下的一次编码在 768 维上收益更大而不是更小）。注意**重排仍按腿进行**：`rerank` 属于各 store 的检索流程（§5），所以启用 `bge_reranker` 时一次跨库查询会跑两遍 cross-encoder 前向——这是既定形状（§7 的 ①/② 各自成链路），默认 `rerank.backend: none` 下无代价。
+- **查询只编码一次**：两条腿共用同一个嵌入后端与模型（§3 公共配置），因此 `runtime.query` 先把 query 编码成向量、再把同一个向量传给两条腿（`queryVector`），而不是各腿各自 `encode` 一遍。实测跨库查询 7.57ms → 5.29ms（单次编码 3.7–4.3ms，其余为融合/reinforce 固定开销；那组 A/B 是 dim 512 上的记录。本轮在 shipped 宽度 dim 768 上实测同一条短查询编码路径——`LocalBgeBackend.encode`，生产加载路径、模型已热——p50 **19.0 ms**、min 15.2 / max 25.5 ms，所以省下的一次编码在 768 维上收益更大而不是更小）。**结果重排已在 0.5.0 整体移除**（§5.1），跨库查询现在只有这一条编码路径，没有额外的 cross-encoder 前向。
 - **自指改写（增广，用户可观察行为）**：查询侧识别第一人称自指问句（`我是谁` / `我叫什么` / `我的名字` / `我是做什么的` / `我在哪` / `我的偏好` 及 `我叫啥` / `本人是谁` 等变体），按 `store/self_query.ts` 的**封闭意图表**产出**一个**规范第三人称改写（`用户是谁` / `用户的名字` / …）。**原查询与改写各走一遍检索，候选取并集、每条腿取两遍的较大原始分（不是相加、不加权重），原查询命中的候选绝不因改写而消失**——所以意图表的误判只可能"多召回"，不会改变用户真正问的东西。非自指查询**完全不走这一路**（`self_query.ts` 返回 `undefined` 时就是改动前的那一次 `deps.legs` 调用，逐字节一致）。代价界：只有自指问句多跑一遍三条腿、多一次改写文本的 `encode`（跨库时两条 store 各一次），其余查询成本不变。**热路径上的条件提示复用同一张表**（§12）：`runtime.relevance(text)` 在原文本词元之外，按改写文本再数一次词元（仍是同步纯字符串、不碰模型），所以 `我叫什么` 这类对第三人称事实词面零重叠的问句不再必然沉默。
 - **过滤**：`kind`（仅记忆/仅文档/全量）、`domain`（仅知识库维度；设置后记忆命中自然被过滤）、`source`（仅文档切片，读命中自带的 `domain`/`source` 字段——由拥有 `documents` 行的 store 填充，因此 domain/source 名里含 `:` 也不会错位；**不要**再从 `source_ref` 解析）；默认按分数自然混合。`quota` 配额未实现（后置）。
 - **检索统计只记"真正返回的"**：`kb_query` 为融合做的超额召回不写检索统计，router 过滤后只给最终返回的 fact 记 `retrieval_count`/`last_retrieved_at`（否则会凭空刷新 dormancy 时钟，破坏 `lifecycle.archive_after_days` 归档）。
@@ -200,7 +214,7 @@ query(kind?/domain?/source?)
 | 角色 | 模型 | 本地 | 说明 |
 |---|---|---|---|
 | 嵌入 | `Xenova/bge-base-zh-v1.5`(768 维, ONNX·transformers.js) | ✅ 本地离线 | 默认值即 ONNX 仓库（`BAAI/*` 为 PyTorch，不可用于 transformers.js）；fp32 权重约 389 MB、首次冷启约 16.6 s；换模型需同步改 `semantic.dim` 并 `reindex` |
-| 重排 | `Xenova/bge-reranker-base`(cross-encoder) | ✅ 本地离线 | `rerank.backend` 是重排唯一开关（默认 `none` 关闭） |
+| ~~重排~~ | ~~`Xenova/bge-reranker-base`(cross-encoder)~~ | — | **0.5.0 已整体移除**（§5.1）：不再有 `Reranker` 接口 / `rerank.*` 配置 / 模型要求 |
 | 生成 | **外部**（DSH/agent 或 UI 模型） | ❌ 非本地 | Plan A：插件只检索，不生成 |
 
 ## 10. 工具面（agent 上下文）
@@ -269,7 +283,7 @@ DSH 的 Typert API 已经在我们脚下动过一次（`TypertSchema { schema }`
 
 **绝不抛错**：整段环境初始化、这道门禁、以及"不加载"路径，都不抛。历史上一个抛错的 `apply` 让整个 `dsh web` 起不来——一次 `throw` 就把宿主一起带走，而这里要给的是一条日志。本插件的 `provision.ts` **对底座没有任何静态 import**：底座由内联 bootstrap 从插件自己的依赖树解析后动态 `import()`（try/catch，失败只告警），加载成功后才**构造一次** `COMPAT_SPEC` / schema 名（原来这些是模块级常量），把 `gatherEvidence` 与 `verdictOf` 组合起来跑一次；verdict 作为纯数据只交给 legacy sweep（core 只读 `load`）。`pnpm why zod` 里 core 侧那份重复的底座 peer 实例随之消失。
 
-**环境的实际来源（底座在运行时被动态装载）**：底座不再由插件自己解析 / 下载。`@avantf/dsh-plugin-base` 是插件的 **peerDependency**（peer 区间 `>=0.3.0 <1.0.0`，并在 `devDependencies` 里再声明同一条 `>=0.3.0 <1.0.0` 以便 `pnpm install` 装上）；底座本体**绝不内联**，插件也**绝不按 specifier import** 它——唯一的静态引用是内联的 `bootstrap`（`packages/plugin/src/envinit-bootstrap.{js,d.ts}`，由 `scripts/link-envinit.mjs` 从**安装副本** vendor 底座的 `dist/bootstrap.js`，经 `lib/types/` 在 `tsc` 与 `tsdown` 之间被 tsdown 内联进 `lib/index.js`），它用 `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 解析底座、动态 `import()` 并校验版本；拿不到就一条 `envinit: WARNING`，插件**照常挂载、降级**。**运行期还有第二代接口轴**：底座 `.` 上的 `checkInterface` / `readInterfaceRequirement` 是接口世代的主契约；插件 bake 自己构建时的世代，启动时用它比对，`incompatible` 走同一条降级路径（不用底座共享能力、仍挂载），`cannot-tell` 只告警（`docs/INTERFACE.md` §3）。**共享业务逻辑在运行时从底座取用**（门禁规则/探针/复查、envinit provisioner、prompt 文件层 `PromptFiles`，以及 mission 用的 `resolveDataHome`），所以修这些共享逻辑只需一次底座发布、不必重建插件产物。仍留在插件里、改它们需要发插件的是：`typert` `strict` wire codec 与端点/字段/结果符号字面量（照抄宿主约定的两三行，描述符在模块加载期就要组装），以及各插件自己的 logger 与"底座缺席时"的降级 fallback（mission `prompt.ts` 的 `resolveDataHome` 默认参数、mem 的默认提示词正文）。底座 kit 另外导出 `createPluginLogger`、`familyHome` / `familyToolsDir` / `familyModelsDir` / `expandHome` 与 Typert 符号工具，插件都可以在运行时从加载到的模块上取用；`@avantf/mem-contract` 的 `family.ts` 则是给没有 DSH 宿主的 CLI/MCP 用的镜像，由测试钉住两份一致。插件声明的资源项只剩**真正的外部制品**：`mem:pandoc`（`binary-archive`，根 `tools`，`background`，仅 `tools.auto_install` 时）＋ `mem:model`（`model-cache`，根 `models`，`background`，`flat` 布局 + 镜像 `spec.endpoint`，仅本地嵌入后端**且**运行时的 `semantic.cache_dir` 就是受管根时；默认仓库只声明运行时真正会取的四个文件，改过仓库则省略 `spec.files`，交给框架按仓库自身的清单装）。`flat` 布局把文件落到 `<home>/models/<repo>/<file>`，正是 `@huggingface/transformers@4.x` 按 `<repo>/<file>` 读取的形状，所以框架装的这一份就是运行时读的那一份，没有第二份下载；框架 0.1.2 之前它只写 hub 布局（`models--<org>--<name>/snapshots/<sha>/`），运行时永不读，模型因此曾被排除在 item 之外。族根 = `$AVANTF_HOME`，否则 `~/.avantf/env`；框架装载后 `<home>/tools` 与 `<home>/models` 成为 `tools.dir` 与 `semantic.cache_dir`/`rerank.cache_dir` 的**内建默认层**（`managedRoots`）；`tools.dir` 仍可被 `config.yaml` 与环境逃生口（`AVANTF_TOOLS_DIR` / `AVANTF_PANDOC`）覆盖，**模型的落点与镜像不再由 `config.yaml` 决定**——`semantic.cache_dir` / `semantic.mirror`（及 rerank 同名键）会被忽略并告警，只剩运维环境逃生口 `AVANTF_MEM_MODEL_CACHE` / `AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`），两者都由环境层写进 `semantic` / `rerank` 的同名键——镜像因此到得了 `mem:model` 的 `spec.endpoint`，缓存覆盖则让 `mem:model` 不再声明（否则族根会多出一份没人读的副本）。下载总闸：`AVANTF_ENVINIT_AUTO_DOWNLOAD=0`（家族）或 `AVANTF_MEM_AUTO_DOWNLOAD=0`（本项目），任一为 `0` 都经环境层落进 `semantic.auto_download` / `rerank.auto_download`，框架与运行时同时停手。昂贵资源只后台派发、绝不等待：`mem:pandoc` 失败/跳过时落回 legacy tools 目录并重置 pandoc 解析缓存；嵌入模型在该 item **到达终态后**由 `warmSemanticAsync` 预热（`warmModels` 拆成了 `warmSemantic` / `warmTokenizer` 及各自的 `*Async`）——框架接管模型根时 `buildRuntime` 给后端传 `deferWarm`，构造期不再自己开抓，先等文件落盘再让运行时去看，跳过/失败时照样预热，让 `semantic.auto_download` 决定"自己取"还是"降级"；nodejieba 分词器的预热不变（仍藏在宿主就绪信号之后）。**底座装载失败时的语义（按能力降级）**：一条 `envinit: WARNING`，然后**照常挂载**完整插件。逐项降级：prompt 文件层不可用 → 用插件自带的默认提示词正文（那些默认值本来就在插件里，不是重复）；兼容门禁不可用 → 走既有的 `compat:` WARNING 路径、门禁跳过（判定语义不变：只有**被证明**的不兼容才拒载，"无法判定"是 note，版本差异只是 warning，绝不抛错）；资源预装（pandoc 二进制 item、嵌入模型 item）不可用 → 走 legacy `@avantf/mem-provision` / legacy tools 目录（默认 `~/.avantf/tools`、`~/.avantf/models`）；tools / service / Remote / UI 各面不受影响、照常挂载。CLI 与 MCP 永远走这条 legacy 路径。**绝不因"拿不到底座"拒载，也绝不抛错**（与"无法判定 ≠ 不兼容"一致）。
+**环境的实际来源（底座在运行时被动态装载）**：底座不再由插件自己解析 / 下载。`@avantf/dsh-plugin-base` 是插件的 **peerDependency**（peer 区间 `>=0.3.0 <1.0.0`，并在 `devDependencies` 里再声明同一条 `>=0.3.0 <1.0.0` 以便 `pnpm install` 装上）；底座本体**绝不内联**，插件也**绝不按 specifier import** 它——唯一的静态引用是内联的 `bootstrap`（`packages/plugin/src/envinit-bootstrap.{js,d.ts}`，由 `scripts/link-envinit.mjs` 从**安装副本** vendor 底座的 `dist/bootstrap.js`，经 `lib/types/` 在 `tsc` 与 `tsdown` 之间被 tsdown 内联进 `lib/index.js`），它用 `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 解析底座、动态 `import()` 并校验版本；拿不到就一条 `envinit: WARNING`，插件**照常挂载、降级**。**运行期还有第二代接口轴**：底座 `.` 上的 `checkInterface` / `readInterfaceRequirement` 是接口世代的主契约；插件 bake 自己构建时的世代，启动时用它比对，`incompatible` 走同一条降级路径（不用底座共享能力、仍挂载），`cannot-tell` 只告警（`docs/INTERFACE.md` §3）。**共享业务逻辑在运行时从底座取用**（门禁规则/探针/复查、envinit provisioner、prompt 文件层 `PromptFiles`，以及 mission 用的 `resolveDataHome`），所以修这些共享逻辑只需一次底座发布、不必重建插件产物。仍留在插件里、改它们需要发插件的是：`typert` `strict` wire codec 与端点/字段/结果符号字面量（照抄宿主约定的两三行，描述符在模块加载期就要组装），以及各插件自己的 logger 与"底座缺席时"的降级 fallback（mission `prompt.ts` 的 `resolveDataHome` 默认参数、mem 的默认提示词正文）。底座 kit 另外导出 `createPluginLogger`、`familyHome` / `familyToolsDir` / `familyModelsDir` / `expandHome` 与 Typert 符号工具，插件都可以在运行时从加载到的模块上取用；`@avantf/mem-contract` 的 `family.ts` 则是给没有 DSH 宿主的 CLI/MCP 用的镜像，由测试钉住两份一致。插件声明的资源项只剩**真正的外部制品**：`mem:pandoc`（`binary-archive`，根 `tools`，`background`，仅 `tools.auto_install` 时）＋ `mem:model`（`model-cache`，根 `models`，`background`，`flat` 布局 + 镜像 `spec.endpoint`，仅本地嵌入后端**且**运行时的 `semantic.cache_dir` 就是受管根时；默认仓库只声明运行时真正会取的四个文件，改过仓库则省略 `spec.files`，交给框架按仓库自身的清单装）。`flat` 布局把文件落到 `<home>/models/<repo>/<file>`，正是 `@huggingface/transformers@4.x` 按 `<repo>/<file>` 读取的形状，所以框架装的这一份就是运行时读的那一份，没有第二份下载；框架 0.1.2 之前它只写 hub 布局（`models--<org>--<name>/snapshots/<sha>/`），运行时永不读，模型因此曾被排除在 item 之外。族根 = `$AVANTF_HOME`，否则 `~/.avantf/env`；框架装载后 `<home>/tools` 与 `<home>/models` 成为 `tools.dir` 与 `semantic.cache_dir` 的**内建默认层**（`managedRoots`）；`tools.dir` 仍可被 `config.yaml` 与环境逃生口（`AVANTF_TOOLS_DIR` / `AVANTF_PANDOC`）覆盖，**模型的落点与镜像不再由 `config.yaml` 决定**——`semantic.cache_dir` / `semantic.mirror` 会被忽略并告警，只剩运维环境逃生口 `AVANTF_MEM_MODEL_CACHE` / `AVANTF_MEM_MODEL_MIRROR`（或 `HF_ENDPOINT`），两者都由环境层写进 `semantic` 的同名键——镜像因此到得了 `mem:model` 的 `spec.endpoint`，缓存覆盖则让 `mem:model` 不再声明（否则族根会多出一份没人读的副本）。下载总闸：`AVANTF_ENVINIT_AUTO_DOWNLOAD=0`（家族）或 `AVANTF_MEM_AUTO_DOWNLOAD=0`（本项目），任一为 `0` 都经环境层落进 `semantic.auto_download`，框架与运行时同时停手。昂贵资源只后台派发、绝不等待：`mem:pandoc` 失败/跳过时落回 legacy tools 目录并重置 pandoc 解析缓存；嵌入模型在该 item **到达终态后**由 `warmSemanticAsync` 预热（`warmModels` 拆成了 `warmSemantic` / `warmTokenizer` 及各自的 `*Async`）——框架接管模型根时 `buildRuntime` 给后端传 `deferWarm`，构造期不再自己开抓，先等文件落盘再让运行时去看，跳过/失败时照样预热，让 `semantic.auto_download` 决定"自己取"还是"降级"；nodejieba 分词器的预热不变（仍藏在宿主就绪信号之后）。**底座装载失败时的语义（按能力降级）**：一条 `envinit: WARNING`，然后**照常挂载**完整插件。逐项降级：prompt 文件层不可用 → 用插件自带的默认提示词正文（那些默认值本来就在插件里，不是重复）；兼容门禁不可用 → 走既有的 `compat:` WARNING 路径、门禁跳过（判定语义不变：只有**被证明**的不兼容才拒载，"无法判定"是 note，版本差异只是 warning，绝不抛错）；资源预装（pandoc 二进制 item、嵌入模型 item）不可用 → 走 legacy `@avantf/mem-provision` / legacy tools 目录（默认 `~/.avantf/tools`、`~/.avantf/models`）；tools / service / Remote / UI 各面不受影响、照常挂载。CLI 与 MCP 永远走这条 legacy 路径。**绝不因"拿不到底座"拒载，也绝不抛错**（与"无法判定 ≠ 不兼容"一致）。
 
 **设施层面的现状另见 [docs/PROVISIONING.md](docs/PROVISIONING.md)**：item 清单、两阶段启动、受管根与下载闸、legacy 路径与"迁移已有机器"的配方都在那里；三层架构、provider 契约、发布锁与状态合并等**机制**在底座自己的 `docs/DESIGN.md`（`@avantf/dsh-plugin-base`）——本仓不复制。
 
@@ -305,7 +319,7 @@ avantf-mem/
 | M0 | workspace + `contract` + 配置分层 + `~/.avantf` 布局 + 记忆侧检索 | 目录生成、两库可建、FTS 检索冒烟 |
 | M1 | 实体/三元组 + HRR | 单测转 vitest |
 | M2 | 记忆混合检索（FTS+实体+语义） | 29 查询 P@k/MRR 对拍 |
-| M3 | ONNX BGE + bge-reranker | 维度/归一化正确 |
+| M3 | ONNX BGE（重排 0.5.0 移除） | 维度/归一化正确 |
 | M4 | 5 向量库 + auto 升级 | 各后端读写一致 |
 | M5 | 生命周期 + 矛盾 + 去重 | decay/archive/contradict 对齐 |
 | M6 | `retrieval-core` 内部可替换（注册表/降级/auto） | 切后端零改动业务流 |
@@ -323,7 +337,7 @@ avantf-mem/
 - **同数据跨语言 diff**：`tests/parity/` 同一批事实喂 Python/TS，比对 recall top-k 与三元组。
 - **DB 互换冒烟**：Python 写 → TS 读 → 再写 → Python 读。
 - **跨库用例**：记忆+文档同 query 命中、`source_ref` 溯源正确。
-- **插拔验证**：切 `semantic/vstore/rerank` 后端，业务流不改动、结果一致（允许模型质量差异）。
+- **插拔验证**：切 `semantic/vstore` 后端，业务流不改动、结果一致（允许模型质量差异）。
 
 ## 16. 风险
 
@@ -350,7 +364,7 @@ avantf-mem/
 - **兜底**：连续 `idle_calendar_days`（默认 365）日历日没被使用 → `archived('idle')`，即使活跃日攒不够也终会清理。
 - **永久保护**：`pinned` 不结算、不自动归档、`purge_skips_pinned` 不清理；退出需显式 `admin unpin`。
 - **检测队列在库里，不再在内存里（§20.16）**：`ContradictDetector.changed` 只装"等待**嵌入腿**复检"的事实，而嵌入腿在模型不可用时永远跑不了——于是队列每次写入 +1 且永不排空（实测 30 次写入 → 30 条，`contradict_check` 连跑两次仍是 30，即每次补扫都重跑整个积压），并且**随进程消失**（重启后再也拿不到那次检查）。现在队列是 `facts.conflict_checked`，`MemoryStore.checkContradictions(budget)` 有界排水，`trust_diagnose` 用 `conflict_pending` 报"落后多少"；`lifecycle.contradiction_pending_max` / `contradiction_evicted` 随之删除——不是上界被放宽，而是**不再需要上界**（队列不是内存结构），被丢弃的 id 也不再存在（这正是它要消灭的取舍）。**purge（⑤）也纳入 tick 预算**并报 `purged_deferred`——它是单步最贵的一段（老库上每删一行都有 FK 级联查找）且与他人共享同一个 `IMMEDIATE` 事务。
-- **排序无关**（D9）：trust **不参与**融合/重排，评测集基线是**精确断言**（`eval_zh.spec` 六项数值冻结）。评测集从 29 条扩到 **35 条**（性能审查 §4.4：原集里汉字数 ≤2 的查询为 0，而 `buildFtsQuery` 对 2 字 CJK 直接返回 `null`——最该被守护的形状恰好没被覆盖；新增名字类/术语类/多命中 2 字查询各若干，实测 P@k 0.477→0.567、MRR 0.931→0.943；其后融合层去掉 min-max 缩放，35 条基线**再次重冻**为 MRR 0.9714、R@k 0.9571，见 §20.17）。**2 字术语里抽取器不认识的那些仍然无腿可用**（如 `缓存`：既可被 trigram 拒绝、也不被 jieba 抽成实体），这是一条**已知缺口**并已被专门测试钉住（`eval_zh.spec.ts` 的 "PINNED GAP"）——修它要引入 LIKE/前缀回退，属于召回语义变更，不在性能审查范围内。
+- **排序无关**（D9）：trust **不参与**融合，评测集基线是**精确断言**（`eval_zh.spec` 六项数值冻结）。评测集从 29 条扩到 **35 条**（性能审查 §4.4：原集里汉字数 ≤2 的查询为 0，而 `buildFtsQuery` 对 2 字 CJK 直接返回 `null`——最该被守护的形状恰好没被覆盖；新增名字类/术语类/多命中 2 字查询各若干，实测 P@k 0.477→0.567、MRR 0.931→0.943；其后融合层去掉 min-max 缩放，35 条基线**再次重冻**为 MRR 0.9714、R@k 0.9571，见 §20.17）。**2 字术语里抽取器不认识的那些仍然无腿可用**（如 `缓存`：既可被 trigram 拒绝、也不被 jieba 抽成实体），这是一条**已知缺口**并已被专门测试钉住（`eval_zh.spec.ts` 的 "PINNED GAP"）——修它要引入 LIKE/前缀回退，属于召回语义变更，不在性能审查范围内。
 - **运维**：`mem_admin {action:'trust_diagnose'|'pin'|'unpin'}`、CLI `avantf-mem trust|pin|unpin`、「记忆」标签页的徽章 / 剩余活跃日 / 永久记忆 / 立即维护。
 - **无迁移**：facts 新列随 DDL 建库生效，改 schema 仍是删库重建（§6）。
 - **schema 升级已改为版本化迁移**（§19）：`PRAGMA user_version` + `schema_migrations` 审计，旧库按 step 逐级升级——上一行的"删库重建"作废（§11 的 open 配对唯一索引就是第一个真正的升级 step）。
@@ -409,15 +423,16 @@ avantf-mem/
 
 参考实现（OpenViking，AGPLv3）在"上下文工程"上有三处值得吸收的做法，本节记录**移植后的形态**与不做的事。所有实现均为自写，只借设计。
 
-### 20.1 输入上界（嵌入与重排）
+### 20.1 输入上界（嵌入）
 
-**问题**：transformers.js 在超过模型窗口时**静默截断**（`feature-extraction` 与 `text-classification` 都以 `truncation: true` + tokenizer 的 `model_max_length` 分词）。发版模型 `bge-base-zh-v1.5` / `bge-reranker-base` 的窗口是 512 token，而中文约 1 字 1 token——800 字的块只有前 ~510 字进入向量，无异常、无日志，且 FTS 索引的是全文，所以"释义式提问命中尾部"会漏而无人察觉。
+**问题**：transformers.js 在超过模型窗口时**静默截断**（`feature-extraction` 以 `truncation: true` + tokenizer 的 `model_max_length` 分词）。发版模型 `bge-base-zh-v1.5` 的窗口是 512 token，而中文约 1 字 1 token——800 字的块只有前 ~510 字进入向量，无异常、无日志，且 FTS 索引的是全文，所以"释义式提问命中尾部"会漏而无人察觉。
 
 **做法**：`retrieval-core/src/text_budget.ts` 提供机制（CJK 感知估算 → 在句/逗边界处截断 → 解析有效窗口），adapter 负责应用与告警：
 
 - `LocalBgeBackend.encode()` 在送模型前按 `窗口 − 2`（`[CLS]/[SEP]`）截断，超限时 `recordTruncation('embedding')` 并只告警一次；
-- `LocalReranker` 对 `[query, doc]` **成对**序列计量：文档预算是 `窗口 − query − 3`（query 永不截断，否则改变被评分的问题本身），下限 16 token；
-- 窗口来源优先**已加载 tokenizer 声明的 `model_max_length`**，其次配置，最后 512；配置 `semantic.max_input_tokens` / `rerank.max_input_tokens`（0 = auto）只能**收紧**，永不放宽。哨兵值（1e30 之类）视为未声明。
+- 窗口来源优先**已加载 tokenizer 声明的 `model_max_length`**，其次配置，最后 512；配置 `semantic.max_input_tokens`（0 = auto）只能**收紧**，永不放宽。哨兵值（1e30 之类）视为未声明。
+
+> 重排的成对预算（`窗口 − query − 3`，query 永不截断）随 `LocalReranker` 在 0.5.0 一起移除（§5.1）。
 
 **配套**：`knowledge.chunk_size` 默认从 800 改为 500 —— 由发版模型的窗口推导（512 − 2 特殊 token，留余量取整），并由 contract 测试断言 `chunk_size ≤ DEFAULT_MODEL_WINDOW_TOKENS − 2`，避免以后有人凭手感调大。`chunk_overlap` 按同一比例保持 10%。
 
@@ -459,7 +474,7 @@ avantf-mem/
 
 ### 20.5 检索健康度
 
-`retrieval-core/src/stats.ts` 的进程级计数（与 `retrievalLogger()` 同风格）：每腿的查询数/空结果/命中数/时延、语义腿在线率、重排使用与回退、三类截断（嵌入/重排/输出）。两条 store 的 `search` 记录，`mem_admin stats` 的 `retrieval` 段与设置页「检索健康度」呈现，`maintenance()` 与 runtime shutdown 落 `avantf_stats` 快照、store 打开时恢复——**不重蹈参考实现"重启即清零"的覆辙**，否则长期降级会被看成健康进程。
+`retrieval-core/src/stats.ts` 的进程级计数（与 `retrievalLogger()` 同风格）：每腿的查询数/空结果/命中数/时延、语义腿在线率、两类截断（嵌入/输出）。两条 store 的 `search` 记录，`mem_admin stats` 的 `retrieval` 段与设置页「检索健康度」呈现，`maintenance()` 与 runtime shutdown 落 `avantf_stats` 快照、store 打开时恢复——**不重蹈参考实现"重启即清零"的覆辙**，否则长期降级会被看成健康进程。（重排使用/回退计数与「重排」截断随重排在 0.5.0 移除，§5.1。）
 
 ### 20.6 向量库规模（证据而非感觉）
 
@@ -493,7 +508,7 @@ avantf-mem/
 
 ### 20.7 明确不做
 
-- **不引 LLM 进核心路径**：意图分析、摘要生成、rerank 服务都留在可选位置；核心检索在无模型时仍完整（降级到 FTS + 实体）。
+- **不引 LLM 进核心路径**：意图分析、摘要生成都留在可选位置；核心检索在无模型时仍完整（降级到 FTS + 实体）。
 - **不做自动注入**：模型面文本仍只由显式工具调用产生——`systemPrompt` 里只有一个**用法**段落（何时该记、何时该先检索，§10），不放任何保留/衰减描述。
 - **不抄服务端形态**：多租户、ACL、OAuth、加密、VFS 挂载与路径锁对嵌入式单用户是纯复杂度。
 - **AGPLv3 代码不落地**：参考实现只提供设计与数字，实现全部自写。
@@ -547,7 +562,7 @@ avantf-mem/
 
 §20.10 把"每个 action 返回什么形状"钉在了产生它的 store 方法上（`StoreResult<Store, 'method'>`），但形状本身仍然是**匿名的**——内联在 store 的返回位置，或具名却留在 `core`。于是设置页没有任何东西可 import，只能**手抄一份镜像**：`FactRow`/`FactDetail`/`DocRow`/`DocDetail`/`ContradictionRow`/`StatsRow`/`RetrievalHealthRow`/`RecallHit` 八个 interface。
 
-这不是洁癖问题，仓库里已有活的漂移：设置页的 `RetrievalHealthRow` **少了 `rerank_fallback`**，而服务端的 `RetrievalHealthSummary` 一直带着它——两侧都编译通过，那个字段永远不会被渲染出来，也没有任何东西会红（与 `css.detail` 同一类：一个从未被定义的镜像名）。
+这不是洁癖问题，仓库里已有活的漂移：设置页的 `RetrievalHealthRow` **少了 `rerank_fallback`**（该字段本身已在 0.5.0 随重排移除，见 §5.1），而当时服务端的 `RetrievalHealthSummary` 一直带着它——两侧都编译通过，那个字段永远不会被渲染出来，也没有任何东西会红（与 `css.detail` 同一类：一个从未被定义的镜像名）。
 
 现在按 AGENTS.md 的约定（"每个 UI payload 类型都从 `@avantf/mem-contract` 派生"）把 15 个形状命名入库：`KindHealth` / `RetrievalHealth` / `RetrievalHealthSummary` / `StatsSummary` / `FactPage` / `TrustDiagnostic` / `VectorsDiagnostic` / `VectorsFixReport` / `IngestResult` / `ImportResult` / `ReindexReport` / `DocumentSummary` / `DocumentRecord` / `DocumentChunk` / `DocumentDetail`。随之：
 
@@ -638,7 +653,7 @@ avantf-mem/
 
 ### 20.17 腿 cap 从"已接受的畸变"变成"可测量的不变量"
 
-**问题**：每条非语义腿有 cap（`retriever.leg_cap`，默认 0 = 派生 `max(200, 4×overFetch)`），而 `fuse` 原本按**每条腿自己返回的集合**做 min-max 归一化——被 cap 剪掉的尾巴**正是**归一化的下界，于是剪尾会**重缩放所有幸存者**并可能改变排名。旧测试把这个效应当"已接受"钉住了（"the cap is a cost bound and the pool is reranked afterwards"）。
+**问题**：每条非语义腿有 cap（`retriever.leg_cap`，默认 0 = 派生 `max(200, 4×overFetch)`），而 `fuse` 原本按**每条腿自己返回的集合**做 min-max 归一化——被 cap 剪掉的尾巴**正是**归一化的下界，于是剪尾会**重缩放所有幸存者**并可能改变排名。旧测试把这个效应当"已接受"钉住了（"the cap is a cost bound"）。
 
 **改法**：归一化改为**按该腿自身的最大值缩放**（`scaleByMax`）。对**按自身分数序交出条目**的腿，最大值必然属于 cap 删不掉的那一条，所以 `v / max` 在有无 cap 时是同一个数 ⇒ **腿的贡献对 cap 不再敏感**；幅度信息保留（rank 融合会丢掉它）。同时补了显式 tiebreak（`score` 相同按 id 升序——缩放后的分数比 min-max 更容易撞，而旧顺序是 Map 插入序），并让"每条腿分数全为 0"的退化情形仍留在池里（`s > 0` 过滤曾把它整条丢掉）。
 

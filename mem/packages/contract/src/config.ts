@@ -1,14 +1,13 @@
 import { z } from 'zod'
 
 /**
- * Input window of the SHIPPED models: `Xenova/bge-base-zh-v1.5` (embedder) and
- * `Xenova/bge-reranker-base` (reranker) both read 512 tokens. (The previous default embedder,
- * `Xenova/bge-small-zh-v1.5`, shares the same 512-token window — this constant did NOT move when
- * the embedder changed; only its vector width did, 512 → 768.)
+ * Input window of the SHIPPED model: `Xenova/bge-base-zh-v1.5` reads 512 tokens. (The previous
+ * default embedder, `Xenova/bge-small-zh-v1.5`, shares the same 512-token window — this constant
+ * did NOT move when the embedder changed; only its vector width did, 512 → 768.)
  *
- * Exported because more than one default derives from it: the embedder's fallback window, the
- * reranker's pair budget (retrieval-core), and `knowledge.chunk_size` below. transformers.js
- * truncates past the window SILENTLY, so every derivation has to agree on the number.
+ * Exported because more than one default derives from it: the embedder's fallback window and
+ * `knowledge.chunk_size` below. transformers.js truncates past the window SILENTLY, so every
+ * derivation has to agree on the number.
  */
 export const DEFAULT_MODEL_WINDOW_TOKENS = 512
 
@@ -45,20 +44,6 @@ const semanticSchema = z.object({
    * spend CPU on background re-encoding.
    */
   auto_migrate: z.boolean().default(true),
-})
-
-const rerankSchema = z.object({
-  // string (not enum) for the same reason; built-ins: `bge_reranker`, `none`.
-  backend: z.string().default('none'),
-  // ONNX port of bge-reranker-base (see semantic note above).
-  local_model: z.string().default('Xenova/bge-reranker-base'),
-  // Same knob for the cross-encoder, but the budget is shared with the QUERY: the document
-  // is bounded to `window - query - specials` (the question is never truncated).
-  max_input_tokens: maxInputTokens,
-  mirror: z.string().default('https://hf-mirror.com'),
-  // See the semantic note: empty = the family root's `models`.
-  cache_dir: z.string().default(''),
-  auto_download: z.boolean().default(true),
 })
 
 const vectorStoreSchema = z.object({
@@ -252,7 +237,6 @@ export const ConfigSchema = z.object({
     + '让既有配置继续可用（见 AGENTS.md「边界与路径」）。',
   ),
   semantic: semanticSchema.prefault({}),
-  rerank: rerankSchema.prefault({}),
   vectorStore: vectorStoreSchema.prefault({}),
   retriever: retrieverSchema.prefault({}),
   lifecycle: lifecycleSchema.prefault({}),

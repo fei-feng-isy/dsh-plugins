@@ -4,6 +4,25 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-05
+
+### Removed（结果重排能力整体移除）
+- **重排（rerank）不再是插件的一项能力**：`rerank.backend` / `rerank.local_model` / `rerank.max_input_tokens` /
+  `rerank.mirror` / `rerank.cache_dir` / `rerank.auto_download` 这些配置键全部移除——`~/.avantf/configs/common.yaml`
+  里残留的 `rerank:` 段现在会被当作**未知键告警并忽略**（此前它是一个"设了也不生效"的静默选项）。
+- **公开发布面不再导出重排接口**：`@avantf/dsh-mem` 的 `Reranker` 类型与 `registerReranker` 注册入口已删除；
+  可注册的检索面只剩 `SemanticBackend` 与 `VectorStore`。这是**破坏性公开面变更**（自定义重排器的外部消费者需改代码）。
+- **结果与诊断里不再有重排字段/计数**：`RecallResult` / `RecallHit` 与 `stats` 的 `retrieval` 段不再带 `rerank_*`
+  字段，"检索健康度"面板也不再显示重排使用/回退与重排截断。
+- **不再需要、也不会再下载重排模型**：`Xenova/bge-reranker-base`（约 1.05 GiB）不再被任何代码路径引用，
+  可以安全删除本地缓存目录 `~/.avantf/env/models/Xenova/bge-reranker-base`。
+- **wire 版本 1 → 2**：`admin.stats` 的载荷形状变了（移除了上述字段），两半版本不一致时面板会显示版本错位提示而不是渲染异常值。
+
+### 说明
+- 移除依据（三条独立理由：现状是完全 identity、修好也是负收益、这份语料的 `|relevant|` 多为 1–2 因此结构上没有重排能赢的东西）
+  与**重开条件**写在 `DESIGN.md` §5.1。默认行为不变：此前的默认就是 `rerank.backend: none`（开箱用户不受影响，
+  只是少了一个 1.05 GiB 的下载选项）。
+
 ## [0.4.2] - 2026-10-04
 
 ### Fixed（自指问句：偶然的单三元组命中不再冒充强证据）

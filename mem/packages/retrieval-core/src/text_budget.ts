@@ -1,13 +1,11 @@
 /**
- * Token budgets for every MODEL-FACING text path (embedder input, reranker pair, retrieval
- * output). See DESIGN §20.
+ * Token budgets for every MODEL-FACING text path (embedder input, retrieval output). See DESIGN §20.
  *
- * Why this exists: the shipped ONNX models have a hard input window (`bge-base-zh-v1.5` and
- * `bge-reranker-base`: 512 tokens) and transformers.js truncates SILENTLY past it —
- * `feature-extraction` and `text-classification` both tokenize with `truncation: true` and
- * default `max_length` to the tokenizer's `model_max_length`. A Chinese chunk of 800
- * characters is roughly 800 tokens, so a large tail of every chunk never reached the encoder
- * and never appeared in its vector — with no exception and no log line.
+ * Why this exists: the shipped ONNX embedder has a hard input window (512 tokens) and
+ * transformers.js truncates SILENTLY past it — `feature-extraction` tokenizes with
+ * `truncation: true` and defaults `max_length` to the tokenizer's `model_max_length`. A Chinese
+ * chunk of 800 characters is roughly 800 tokens, so a large tail of every chunk never reached the
+ * encoder and never appeared in its vector — with no exception and no log line.
  *
  * The budget itself belongs to whichever model is loaded, so this module only provides the
  * MECHANISM (estimate → truncate → resolve the effective window); adapters apply it and

@@ -98,7 +98,11 @@ describe('contract', () => {
     const cfg = ConfigSchema.parse({})
     // 0 is "auto": use the loaded model's declared window instead of a hard-coded number.
     expect(cfg.semantic.max_input_tokens).toBe(0)
-    expect(cfg.rerank.max_input_tokens).toBe(0)
+    // The rerank capability was REMOVED in 0.5.0 (docs/review/RETRIEVAL_RERANK_NECESSITY.md): `rerank`
+    // is not a config section any more, so a `rerank:` block in common.yaml is now an unknown-key
+    // warning rather than a silently-accepted no-op. Re-adding the schema makes this red.
+    expect(Object.keys(ConfigSchema.shape)).not.toContain('rerank')
+    expect(cfg).not.toHaveProperty('rerank')
   })
 
   it('exposes the remembered actions', () => {

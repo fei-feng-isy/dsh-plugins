@@ -17,7 +17,6 @@ import {
 import {
   recordRetrieval,
   resolveSemantic,
-  resolveReranker,
   resolveVStore,
   retrievalHealthSummary,
   setRetrievalLogger,
@@ -51,7 +50,7 @@ export interface RuntimeOptions {
   semantic?: SemanticBackend
   /**
    * The family framework's managed roots, as the built-in defaults for `tools.dir` and
-   * `semantic.cache_dir` / `rerank.cache_dir` (see `LoadConfigOptions.managedRoots`).
+   * `semantic.cache_dir` (see `LoadConfigOptions.managedRoots`).
    *
    * The DSH plugin passes `<family home>/tools` and `<family home>/models` while
    * `@avantf/dsh-plugin-base` owns the fetching; the CLI and the MCP server pass nothing, because they
@@ -245,7 +244,6 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
   logger.info(
     `runtime init: dataHome=${config.home} memory.db=${memDb} knowledge.db=${config.knowledge.db.path} `
     + `semantic=${config.common.semantic.backend}/${config.common.semantic.local_model} `
-    + `rerank=${config.common.rerank.backend} `
     + `vectorStore=${config.common.vectorStore.backend} `
     // Which SQLite build is answering: the whole engine runs on the runtime's own `node:sqlite`, and
     // the version travels with the host, so this is the first thing to quote when two hosts behave
@@ -267,13 +265,10 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
   // `encode()` would warm lazily too, so nothing is lost if the explicit warm never runs).
   const deferWarm = opts?.managedRoots !== undefined
   const semantic = opts?.semantic ?? resolveSemantic(config.common, { deferWarm })
-  // The reranker is resolved through the registry (rerank.backend) — the single
-  // canonical rerank switch; stores never duck-type it off the semantic backend.
-  const reranker = resolveReranker(config.common, { deferWarm })
   const vstore = resolveVStore(config.common)
   const kbVstore = resolveVStore(config.common)
-  const memory = new MemoryStore(db, config.common, semantic, vstore, reranker, memDb)
-  const knowledge = new KnowledgeStore(config.knowledge.db.path, config.common, config.knowledge, semantic, kbVstore, reranker, knowledgeConfigPath(config.home), logger)
+  const memory = new MemoryStore(db, config.common, semantic, vstore, memDb)
+  const knowledge = new KnowledgeStore(config.knowledge.db.path, config.common, config.knowledge, semantic, kbVstore, knowledgeConfigPath(config.home), logger)
   logger.info(`runtime ready in ${Date.now() - started}ms (embeddings warm asynchronously)`)
 
   /**
@@ -527,14 +522,11 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
       // The merged outcome is what the caller saw, so it is what the health counters describe:
       // `results` is the post-filter/post-budget count, and latency is the whole cross query
       // (both legs + encode + fusion), not one leg's share of it.
-      const rerank = this.memory.rerankState()
       recordRetrieval({
         kind: 'cross',
         results: result.hits.length,
         latencyMs: Date.now() - startedAt,
         semanticLive: semantic.isAvailable(),
-        rerankUsed: rerank.used,
-        rerankFallback: rerank.fallback,
         ...(result.dropped_by_floor === undefined ? {} : { droppedByFloor: result.dropped_by_floor }),
       })
       // Only the facts actually returned to the caller count as recalled (R5/R21).
