@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import { float32ToBytes } from '../src/db/vectors.js'
 import type { AvantfLogger } from '@avantf/mem-contract'
-import type { SemanticBackend } from '@avantf/mem-retrieval'
+import type { SemanticBackend, SemanticRepresentation } from '@avantf/mem-retrieval'
 
 /**
  * Changing the embedding space is a DATA MIGRATION, so the fixture must be the real shape: a store
@@ -280,6 +280,152 @@ describe('vector-space migration (changing the embedding space is a data migrati
     } finally {
       rt.shutdown()
       rmSync(fx.dir, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * The REPRESENTATION half of the same migration.
+ *
+ * A change of pooling / normalization / input window / model revision leaves vectors that still
+ * decode at the right width — they are simply in different coordinates. That was the silent gap:
+ * same `backend/model/dim`, so the store called them "already encoded" and ranked two
+ * representations against each other. The fake below therefore makes its COORDINATES depend on the
+ * declared representation (`shift`), so "the semantic leg recovers" is a real end-to-end claim and
+ * not just a counter moving.
+ */
+const REP_SHIFT = 100
+const BASE_REP: SemanticRepresentation = { pooling: 'mean', normalize: true, maxInputTokens: 0 }
+const CLS_REP: SemanticRepresentation = { ...BASE_REP, pooling: 'cls' }
+/** A same-width id in the pre-fingerprint format (`backend/model/dim`, no `v2/`). */
+const LEGACY_SAME_WIDTH = 'rep_sem/Xenova/bge-base-zh-v1.5/768'
+
+class RepSemantic implements SemanticBackend {
+  readonly name = 'rep_sem'
+  readonly dim = DIM
+  constructor(private readonly rep: SemanticRepresentation) {}
+  isAvailable(): boolean { return true }
+  ensureWarm(): void { /* always warm */ }
+  representation(): SemanticRepresentation { return this.rep }
+  private shift(): number { return this.rep.pooling === 'mean' ? 0 : REP_SHIFT }
+  private axis(text: string): number {
+    const shift = this.shift()
+    if (text.includes('潮汐') || text.includes('dusk')) return ANSWER_AXIS + shift
+    const marked = /^事实(\d+)/u.exec(text)
+    if (marked) {
+      const n = Number(marked[1])
+      return (n === ANSWER_AXIS ? ANSWER_AXIS + 1 : n) + shift
+    }
+    return ANSWER_AXIS + 2 + shift
+  }
+  async encode(text: string): Promise<Float32Array> {
+    const v = new Float32Array(DIM)
+    v[this.axis(text) % DIM] = 1
+    return v
+  }
+  async encodeBatch(texts: string[]): Promise<Float32Array[]> {
+    return Promise.all(texts.map((t) => this.encode(t)))
+  }
+}
+
+/** Persist the real-shaped corpus under one representation, then close (the "before" session). */
+async function seedUnder(rep: SemanticRepresentation): Promise<string> {
+  const dir = makeDir()
+  const rt = buildRuntime({ dataHome: dir, semantic: new RepSemantic(rep) })
+  try {
+    await rt.remember({ action: 'add', content: ANSWER })
+    for (let i = 1; i <= FACT_COUNT - 1; i++) {
+      await rt.remember({ action: 'add', content: longFact(i === ANSWER_AXIS ? FACT_COUNT + 1 : i) })
+    }
+  } finally {
+    rt.shutdown()
+  }
+  return dir
+}
+
+describe('representation fingerprint migration (pooling / normalize / window / revision)', () => {
+  it('detects a pooling-only change, warns, migrates and puts the semantic leg back in those coordinates', async () => {
+    const dir = await seedUnder(BASE_REP)
+    const logger = new CapturingLogger()
+    const rt = buildRuntime({ dataHome: dir, semantic: new RepSemantic(CLS_REP), logger })
+    try {
+      // ① detection: same width, same model, same backend — only the declared representation moved.
+      expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: FACT_COUNT })
+      expect(rt.memory.vectorsDiagnose().space_stale).toBe(FACT_COUNT)
+      const warning = logger.lines.find((l) => l.startsWith('WARN') && l.includes('OLDER embedding space'))
+      expect(warning).toBeDefined()
+      expect(warning).toContain('another model or representation')
+      // Not a legacy-format upgrade, so the one-time-format sentence must NOT be there.
+      expect(warning).not.toContain('representation fingerprint — a ONE-TIME')
+
+      // ② the failure: the query now encodes into the new coordinates, the persisted vectors are in
+      // the old ones, so the leg that could answer has nothing (no Chinese term for an English query).
+      expect(await topRef(rt, QUERY)).toBeNull()
+
+      // ③ bounded background migration, then the leg answers again
+      const outcome = await rt.memory.migrateVectors({ batchSize: 8 })
+      expect(outcome.remaining).toBe(0)
+      expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })
+      expect(rt.memory.vectorsDiagnose().indexed).toBe(FACT_COUNT)
+      expect(await topRef(rt, QUERY)).toBe(1)
+
+      // ④ no data loss
+      const contents = activeContents(rt)
+      expect(contents.length).toBe(FACT_COUNT)
+      expect(contents[0]?.content).toBe(ANSWER)
+
+      // ⑤ idempotent: nothing left to do, and the CURRENT representation is not reported stale
+      const again = await rt.memory.migrateVectors()
+      expect(again.migrated).toBe(0)
+      expect(again.remaining).toBe(0)
+      expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })
+      expect(await topRef(rt, QUERY)).toBe(1)
+    } finally {
+      rt.shutdown()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('is a NO-OP when no representation knob changed (no stale, no warning, no re-encode)', async () => {
+    const dir = await seedUnder(BASE_REP)
+    const logger = new CapturingLogger()
+    const rt = buildRuntime({ dataHome: dir, semantic: new RepSemantic(BASE_REP), logger })
+    try {
+      expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })
+      expect(logger.lines.some((l) => l.includes('OLDER embedding space'))).toBe(false)
+      const outcome = await rt.memory.migrateVectors()
+      expect(outcome.migrated).toBe(0)
+      expect(outcome.dropped).toBe(0)
+      expect(outcome.remaining).toBe(0)
+      expect(await topRef(rt, QUERY)).toBe(1)
+    } finally {
+      rt.shutdown()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('explains a PRE-FINGERPRINT library as a one-time full re-encode, not a model swap', async () => {
+    const dir = await seedUnder(BASE_REP)
+    // Age only the RECORDED identity into the old format (same width): the shape every existing
+    // library has after this upgrade, where the bytes are fine but the id predates `v2/`.
+    const first = buildRuntime({ dataHome: dir, semantic: new RepSemantic(BASE_REP) })
+    first.db.prepare('UPDATE facts SET embedding_model = ?').run(LEGACY_SAME_WIDTH)
+    first.shutdown()
+
+    const logger = new CapturingLogger()
+    const rt = buildRuntime({ dataHome: dir, semantic: new RepSemantic(BASE_REP), logger })
+    try {
+      expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: FACT_COUNT })
+      const warning = logger.lines.find((l) => l.startsWith('WARN') && l.includes('OLDER embedding space'))
+      expect(warning).toContain('representation fingerprint')
+      expect(warning).toContain('ONE-TIME full re-encode')
+      const outcome = await rt.memory.migrateVectors({ batchSize: 8 })
+      expect(outcome.remaining).toBe(0)
+      expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })
+      expect(await topRef(rt, QUERY)).toBe(1)
+    } finally {
+      rt.shutdown()
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })

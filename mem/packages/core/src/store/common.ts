@@ -12,7 +12,7 @@
  * @module store/common
  */
 import type { SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
-import { retrievalLogger } from '@avantf/mem-retrieval'
+import { representationKeyOf, retrievalLogger } from '@avantf/mem-retrieval'
 import { toWellFormedText } from '@avantf/mem-contract'
 import { vectorSpaceId } from '../db/vectors.js'
 
@@ -38,11 +38,27 @@ export function normalizeWrites(values: readonly string[]): string[] {
 /**
  * Identity of the vector space a store currently writes into.
  *
- * A change of backend, model or width makes every stored vector stale, and the point of recording
- * the identity is that such a change is DETECTED instead of silently mixing two spaces in one index.
+ * A change of backend, model, width — or of anything else that decides which coordinates a vector
+ * lives in (pooling, normalization, the input window, the model revision behind an unchanged repo
+ * name) — makes every stored vector stale. The point of recording the identity is that such a
+ * change is DETECTED instead of silently mixing two spaces in one index. The backend declares its
+ * representation (`SemanticBackend.representation`); one that does not is fingerprinted as
+ * `rep=undeclared`, which is honest rather than a claim nobody verified.
  */
 export function vectorSpaceOf(semantic: SemanticBackend, model: string): string {
-  return vectorSpaceId(semantic.name, model, semantic.dim)
+  return vectorSpaceId(semantic.name, model, semantic.dim, representationKeyOf(semantic))
+}
+
+/** The two contract counts plus the internal "predates the representation fingerprint" split. */
+export interface StaleVectorCounts {
+  stale: number
+  space_stale: number
+  /**
+   * Of {@link space_stale}, how many were written BEFORE the representation fingerprint (`v2/…`).
+   * The count is what makes the warning able to say "this is a one-time format upgrade" instead of
+   * blaming a model swap the operator never made.
+   */
+  legacy?: number
 }
 
 /**
@@ -80,14 +96,21 @@ export function evictVectors(vstore: VectorStore, ids: readonly number[]): void 
 export function reportStaleVectors(
   kind: string,
   space: string,
-  counts: { stale: number; space_stale: number },
+  counts: StaleVectorCounts,
   fix: string,
 ): void {
   const total = counts.stale + counts.space_stale
   if (total <= 0) return
+  const legacy = Math.min(counts.legacy ?? 0, counts.space_stale)
   const reasons: string[] = []
   if (counts.stale > 0) reasons.push(`${String(counts.stale)} with a width that no longer matches`)
-  if (counts.space_stale > 0) reasons.push(`${String(counts.space_stale)} written by another model`)
+  if (counts.space_stale - legacy > 0) reasons.push(`${String(counts.space_stale - legacy)} written by another model or representation`)
+  if (legacy > 0) {
+    reasons.push(
+      `${String(legacy)} written before the representation fingerprint — a ONE-TIME full re-encode of the whole library `
+      + '(seconds; measured ~11 s for 80 facts)',
+    )
+  }
   retrievalLogger().warn(
     `${kind} index: ${String(total)} persisted vector(s) belong to an OLDER embedding space than ${space} `
     + `(${reasons.join('; ')}) — the semantic leg cannot use them, so retrieval degrades to lexical+entity `

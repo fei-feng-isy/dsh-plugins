@@ -32,9 +32,9 @@ import {
   type HybridDeps,
   type HybridLeg,
 } from './hybrid.js'
-import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportStaleVectors, yieldToEventLoop, vectorSpaceOf } from './common.js'
+import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportStaleVectors, yieldToEventLoop, vectorSpaceOf, type StaleVectorCounts } from './common.js'
 import type { Db } from '../db/conn.js'
-import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
+import { bytesToFloat32, float32ToBytes, isPreFingerprintSpace, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeTerms, type LexicalProbe } from './lexical.js'
 import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
@@ -348,8 +348,12 @@ export class MemoryStore {
     return result
   }
 
-  /** Identity of the vector space this store currently writes into (`vectorSpaceId`). */
-  private vectorSpace(): string {
+  /**
+   * Identity of the vector space this store currently writes into — the REPRESENTATION fingerprint
+   * (`vectorSpaceId` + the backend's declared pooling/normalize/window/revision), not just the
+   * model name. Public so diagnostics and tests can name the space the store would record.
+   */
+  vectorSpace(): string {
     return vectorSpaceOf(this.semantic, this.config.semantic.local_model)
   }
 
@@ -375,7 +379,7 @@ export class MemoryStore {
     reportStaleVectors(
       'memory',
       space,
-      this.vectorSpaceHealth(),
+      this.vectorSpaceCounts(),
       '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`)',
     )
   }
@@ -390,18 +394,32 @@ export class MemoryStore {
    * is the read model those surfaces use instead of the full diagnose pass.
    */
   vectorSpaceHealth(): VectorSpaceHealth {
+    const c = this.vectorSpaceCounts()
+    return { stale: c.stale, space_stale: c.space_stale }
+  }
+
+  /**
+   * {@link vectorSpaceHealth} plus the internal `legacy` split (how many `space_stale` rows predate
+   * the representation fingerprint). Kept off the contract type so the public detection surface —
+   * and every existing assertion on it — is unchanged; only the warning's wording uses it.
+   */
+  private vectorSpaceCounts(): StaleVectorCounts {
     const space = this.vectorSpace()
     const expectedBytes = this.vstore.dim * 4
     let stale = 0
     let spaceStale = 0
+    let legacy = 0
     for (const row of this.facts.activeVectorSpaces()) {
       if (row.bytes !== expectedBytes) {
         stale++
         continue
       }
-      if (row.embedding_model !== space) spaceStale++
+      if (row.embedding_model !== space) {
+        spaceStale++
+        if (isPreFingerprintSpace(row.embedding_model)) legacy++
+      }
     }
-    return { stale, space_stale: spaceStale }
+    return { stale, space_stale: spaceStale, legacy }
   }
 
   async add(content: string, category?: string, ttlDays?: number): Promise<RememberResult> {

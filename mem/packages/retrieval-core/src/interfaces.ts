@@ -4,6 +4,37 @@
  * these interfaces — never on a concrete backend. See DESIGN §5.
  */
 
+/**
+ * HOW a backend turns text into a vector — the knobs that decide which coordinates a stored vector
+ * lives in, beyond `name`/`dim`.
+ *
+ * The vector-space identity used to record only `backend/model/dim`, so a change of pooling,
+ * normalization, input window or the weights behind the same repo name produced the SAME identity:
+ * new vectors were written into an index that still held the old ones and nothing detected the
+ * migration (see `db/vectors.ts` and DESIGN §20). A backend that can name these knobs declares them
+ * here and the space id carries them (see `representationKey`).
+ */
+export interface SemanticRepresentation {
+  /** Pooling strategy handed to the feature-extraction pipeline (`mean`, `cls`, …). */
+  readonly pooling: string
+  /** Whether vectors are L2-normalized by the pipeline (cosine relies on it). */
+  readonly normalize: boolean
+  /**
+   * The CONFIGURED input-token cap (`0` = auto/declared window), i.e. the truncation window the
+   * adapter bounds text to before encoding. The CONFIGURED value, not the resolved one: the
+   * resolved window depends on the loaded tokenizer, so it is unknown before warmup — and the
+   * fingerprint must be identical before and after warmup, or a store would declare its own rows
+   * stale the moment the model finished loading.
+   */
+  readonly maxInputTokens: number
+  /**
+   * Content identity of the model files (the family sidecar's revision sha), when one could be
+   * read. Absent = "could not be read" (not "known to be empty"): the fingerprint then omits it,
+   * which is the documented degradation, never an error.
+   */
+  readonly revision?: string
+}
+
 /** Encodes text into a normalized embedding vector. */
 export interface SemanticBackend {
   readonly name: string
@@ -11,6 +42,13 @@ export interface SemanticBackend {
   encode(text: string): Promise<Float32Array>
   encodeBatch(texts: string[]): Promise<Float32Array[]>
   isAvailable(): boolean
+  /**
+   * Optional declaration of the representation knobs this backend applies. The built-in
+   * `local_bge` declares them; a third-party backend that omits this is fingerprinted as
+   * `rep=undeclared` (the space id still changes with name/dim), which is honest rather than a
+   * silent claim to a representation nobody verified.
+   */
+  representation?(): SemanticRepresentation
   /** Optional async bootstrap: configure env + download/load the model. */
   warmUp?(): Promise<void>
   /**

@@ -1,7 +1,8 @@
 import { familyModelsDir } from '@avantf/mem-contract'
-import type { SemanticBackend } from '../interfaces.js'
+import type { SemanticBackend, SemanticRepresentation } from '../interfaces.js'
 import { describeError, envAutoDownload, expandHome } from '@avantf/mem-contract'
 import { retrievalLogger } from '../log.js'
+import { modelFilesPresent, readModelRevision } from '../representation.js'
 import { recordTruncation } from '../stats.js'
 import { declaredWindowOf, resolveWindow, truncateToTokens } from '../text_budget.js'
 import { WarmGate } from './warm_gate.js'
@@ -47,6 +48,18 @@ export interface ModelEnv {
    */
   maxInputTokens?: number
   /**
+   * Pooling strategy handed to the feature-extraction pipeline (`mean` by default). Part of the
+   * representation fingerprint (`representationKey`): `mean` and `cls` produce DIFFERENT
+   * coordinates from the same weights, so a change here is a data migration, not a tuning knob.
+   */
+  pooling?: string
+  /**
+   * Whether the pipeline L2-normalizes (`true` by default). Also part of the representation:
+   * an un-normalized vector ranks differently under cosine, so switching it invalidates every
+   * persisted vector exactly like a model swap does.
+   */
+  normalize?: boolean
+  /**
    * Do NOT warm in the constructor: the first `encode()` / `encodeBatch()` warms lazily.
    *
    * Set when something ELSE owns the model root and will put the files there asynchronously — the
@@ -77,7 +90,11 @@ export class LocalBgeBackend implements SemanticBackend {
   private _dimWarned = false
   private _lengthWarned = false
   private _window: number | null = null
+  /** Cached so the fingerprint cannot move while the process runs (see {@link representation}). */
+  private _representation: SemanticRepresentation | null = null
   private readonly configuredMax: number
+  private readonly pooling: string
+  private readonly normalize: boolean
   private readonly model: string
   private readonly env: ModelEnv
   private readonly pipeFactory: PipeFactory
@@ -87,6 +104,8 @@ export class LocalBgeBackend implements SemanticBackend {
     this.model = model
     this.dim = dim
     this.configuredMax = env?.maxInputTokens ?? 0
+    this.pooling = env?.pooling ?? 'mean'
+    this.normalize = env?.normalize ?? true
     this.pipeFactory = pipeFactory
     this.env = {
       mirror: process.env['AVANTF_MEM_MODEL_MIRROR'] ?? process.env['HF_ENDPOINT'] ?? env?.mirror ?? 'https://hf-mirror.com',
@@ -102,6 +121,40 @@ export class LocalBgeBackend implements SemanticBackend {
 
   isAvailable(): boolean {
     return this._available
+  }
+
+  /**
+   * The representation knobs this adapter applies, resolved ONCE per instance.
+   *
+   * Resolved once on purpose: the model revision comes from disk, and a fingerprint that changed
+   * mid-process (install settles, sidecar appears) would make the store declare the rows it just
+   * wrote stale. The cost of reading it early is bounded and honest — a process that starts BEFORE
+   * the family provisioner lands the model writes a revision-less fingerprint for that session, and
+   * the next start re-encodes once into the revision-carrying one. The alternative (reading late)
+   * would re-encode on every restart instead.
+   *
+   * A missing sidecar is reported once, as a DEGRADATION: the fingerprint then cannot see a repo
+   * whose weights were re-pushed under the same name, which is a real (narrow) blind spot and must
+   * not be mistaken for a healthy state. It never throws, and it stays quiet while the weights are
+   * not on disk yet (a fresh install in flight has nothing to fingerprint; the sidecar arrives with
+   * the weights). The resolved representation is CACHED, so the warning is one line per process.
+   */
+  representation(): SemanticRepresentation {
+    if (this._representation !== null) return this._representation
+    const read = readModelRevision(this.env.cacheDir, this.model)
+    if (read.revision === undefined && modelFilesPresent(this.env.cacheDir, this.model)) {
+      retrievalLogger().warn(
+        `semantic: no model revision for ${this.model} (${read.detail}) — the vector-space fingerprint omits it, `
+        + 'so re-pushed weights under the same repo name cannot be detected as a representation change',
+      )
+    }
+    this._representation = {
+      pooling: this.pooling,
+      normalize: this.normalize,
+      maxInputTokens: this.configuredMax,
+      ...(read.revision === undefined ? {} : { revision: read.revision }),
+    }
+    return this._representation
   }
 
   /**
@@ -189,7 +242,7 @@ export class LocalBgeBackend implements SemanticBackend {
     await this.warmUp()
     if (!this._available || !this._pipe) throw new Error('local_bge：语义后端不可用（请安装 @huggingface/transformers 并等模型下载完成）')
     const bounded = this.bound(text)
-    const out = await this._pipe(bounded.text, { pooling: 'mean', normalize: true })
+    const out = await this._pipe(bounded.text, { pooling: this.pooling, normalize: this.normalize })
     const arr = Array.from(out.data as Float32Array | number[])
     if (arr.length !== this.dim && !this._dimWarned) {
       this._dimWarned = true
@@ -242,7 +295,7 @@ export class LocalBgeBackend implements SemanticBackend {
     if (pipe === null) throw new Error('local_bge：语义后端不可用')
     const bounded = texts.map((t) => this.bound(t).text)
     try {
-      const out = await pipe(bounded, { pooling: 'mean', normalize: true })
+      const out = await pipe(bounded, { pooling: this.pooling, normalize: this.normalize })
       const flat = out.data as Float32Array | number[]
       // No shape means the pipeline answered a single text per call (an injected fake, or an older
       // binding): guessing `rows = texts.length` would slice one vector into N garbage ones. Throw

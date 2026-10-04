@@ -17,19 +17,51 @@ export function bytesToFloat32(buf: Uint8Array | null | undefined): Float32Array
 }
 
 /**
- * Identity of a VECTOR SPACE: which backend, which model, how wide.
+ * Identity of a VECTOR SPACE — the REPRESENTATION FINGERPRINT.
  *
  * Persisted beside every vector (`facts.embedding_model`, `doc_chunks.embedding_model`) so
- * "these vectors came from a different model" is detectable. It used to record only the
- * backend name, which made a same-width model swap (bge-small-zh → bge-m3, both 512d)
- * indistinguishable from "already encoded": the two spaces then shared one index and were
- * ranked against each other.
+ * "these vectors came from a different representation" is detectable. It used to record only the
+ * backend name, then `backend/model/dim`; both were blind to the rest of what decides which
+ * coordinates a vector lives in — pooling, normalization, the truncation window, and the weights
+ * behind an unchanged repo name. The space id now embeds:
+ *
+ *  - {@link VECTOR_SPACE_FORMAT}, a format version. Bumping it is a deliberate ONE-TIME full
+ *    re-encode of every existing library (the old ids simply are not equal to any new id), which
+ *    is exactly why the stale-vector warning has to explain that case instead of calling it a
+ *    model swap (see `reportStaleVectors`);
+ *  - the backend, model and width, as before;
+ *  - the backend's declared representation (`representationKey`): pooling / normalize /
+ *    max_input_tokens / model revision. The revision is omitted when the family sidecar could not
+ *    be read — a documented degradation, never a crash.
  *
  * The vector STORE is deliberately not part of the identity: numpy vs hnswlib indexes the
  * same vectors, so switching it must not trigger re-encoding (that is `reloadIndex`).
  */
-export function vectorSpaceId(backend: string, model: string, dim: number): string {
-  return `${backend}/${model}/${String(dim)}`
+export const VECTOR_SPACE_FORMAT = 2
+
+/** `v<format>/` — the prefix every current-format space id starts with (and old ids do not). */
+export const VECTOR_SPACE_FORMAT_PREFIX = `v${String(VECTOR_SPACE_FORMAT)}/`
+
+/**
+ * @param backend - the `SemanticBackend` name.
+ * @param model - the configured model id.
+ * @param dim - the configured width.
+ * @param representation - the normalized representation key (`representationKey`). Omitted by
+ *   callers with no backend in hand (benchmarks, the pure id tests); such an id is still
+ *   format-prefixed, so it can never equal a pre-fingerprint id.
+ */
+export function vectorSpaceId(backend: string, model: string, dim: number, representation?: string): string {
+  const base = `${VECTOR_SPACE_FORMAT_PREFIX}${backend}/${model}/${String(dim)}`
+  return representation === undefined || representation === '' ? base : `${base}@${representation}`
+}
+
+/**
+ * `true` when a recorded space id predates the representation fingerprint (`v2/…`), or comes from a
+ * format this build does not know. The distinction is what lets the warning explain a one-time
+ * format upgrade separately from "another model's vectors are in this index".
+ */
+export function isPreFingerprintSpace(recorded: string | null | undefined): boolean {
+  return typeof recorded === 'string' && recorded !== '' && !recorded.startsWith(VECTOR_SPACE_FORMAT_PREFIX)
 }
 
 /**

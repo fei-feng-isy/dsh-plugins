@@ -69,7 +69,8 @@ export function createVectorMigration(opts: {
     const startedAt = Date.now()
     logger.info(
       `vector migration: ${String(pending)} ACTIVE vector(s) belong to an older embedding space `
-      + `(${String(health.space_stale)} same-width other-model, ${String(health.stale)} wrong-width) — re-encoding in the background`,
+      + `(${String(health.space_stale)} same-width, another representation, ${String(health.stale)} wrong-width) — re-encoding in the background `
+      + '(a representation change — model, pooling, normalization, input window or weights — migrates the whole corpus once)',
     )
     const outcome = await rt.memory.migrateVectors({
       ...(opts.batchSize === undefined ? {} : { batchSize: opts.batchSize }),

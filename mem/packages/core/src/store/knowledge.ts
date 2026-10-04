@@ -32,7 +32,7 @@ import { DocumentsDao } from '../db/dao/documents.js'
 import { contentHash } from '../db/hash.js'
 import { documentText, type DocumentText } from './document_text.js'
 import { classifySource, listTextFiles } from './source_picker.js'
-import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
+import { bytesToFloat32, float32ToBytes, isPreFingerprintSpace, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeTerms, type LexicalProbe } from './lexical.js'
 import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
@@ -348,15 +348,19 @@ export class KnowledgeStore {
     // (recorded as a boundary in the DESIGN §20 migration note).
     let stale = 0
     let spaceStale = 0
+    let legacy = 0
     const expectedBytes = this.vstore.dim * 4
     for (const row of persisted) {
       if (!row.vec || row.vec.byteLength !== expectedBytes) {
         stale++
         continue
       }
-      if (row.embedding_model !== space) spaceStale++
+      if (row.embedding_model !== space) {
+        spaceStale++
+        if (isPreFingerprintSpace(row.embedding_model)) legacy++
+      }
     }
-    reportStaleVectors('knowledge', space, { stale, space_stale: spaceStale }, '`avantf-mem kb reindex` (MCP/plugin: `kb_reindex`)')
+    reportStaleVectors('knowledge', space, { stale, space_stale: spaceStale, legacy }, '`avantf-mem kb reindex` (MCP/plugin: `kb_reindex`)')
   }
 
   /**
@@ -928,11 +932,12 @@ export class KnowledgeStore {
   }
 
   /**
-   * Identity of the vector space this store currently writes into (DESIGN §20): a change of
-   * backend, model or width makes every stored chunk vector stale, and the whole point of
-   * recording it is that such a change is DETECTED instead of silently mixing two spaces.
+   * Identity of the vector space this store currently writes into (DESIGN §20): the representation
+   * fingerprint — backend, model, width AND the backend's declared pooling/normalization/input
+   * window/model revision — so any representation change makes stored chunk vectors stale instead
+   * of silently mixing two spaces. Public so diagnostics and tests can name the space.
    */
-  private vectorSpace(): string {
+  vectorSpace(): string {
     return vectorSpaceOf(this.semantic, this.config.semantic.local_model)
   }
 

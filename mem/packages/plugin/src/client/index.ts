@@ -876,7 +876,7 @@ function HealthBlock(props: { stats: StatsSummary }) {
       ? null
       : h('div', { className: css.status },
         `⚠ 向量空间待迁移：${String(pendingVectors)} 条 ACTIVE 向量来自旧嵌入空间`
-        + `（宽度不符 ${String(vectors?.stale ?? 0)} · 其他模型 ${String(vectors?.space_stale ?? 0)}）`
+        + `（宽度不符 ${String(vectors?.stale ?? 0)} · 其他表示 ${String(vectors?.space_stale ?? 0)}）`
         + '——语义腿对它们失效，正在后台分批重算；手动入口 `avantf-mem vectors --fix`'),
     h('div', { className: css.status },
       `检索 ${String(r.queries)} 次 · 空结果 ${pct(r.zero_result_rate)} · 平均 ${r.avg_latency_ms.toFixed(1)}ms · 峰值 ${r.max_latency_ms.toFixed(1)}ms`),

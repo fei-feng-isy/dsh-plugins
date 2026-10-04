@@ -9,7 +9,7 @@ import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import type { Db } from '../src/db/port.js'
 import { openKnowledgeDb } from '../src/db/knowledge.js'
 import { contentHash } from '../src/db/hash.js'
-import { float32ToBytes, vectorSpaceId } from '../src/db/vectors.js'
+import { float32ToBytes } from '../src/db/vectors.js'
 import { ENTITY_EXTRACTOR_VERSION } from '../src/entities/extract.js'
 import type { SemanticBackend } from '@avantf/mem-retrieval'
 import { DEFAULT_KB_SOURCE, KbUnion, type KbConflictReport, type KbRequest } from '@avantf/mem-contract'
@@ -536,10 +536,14 @@ describe('reindex is incremental and can be planned', () => {
     kbDb.close()
   })
 
-  /** The identity the store writes into `doc_chunks.embedding_model` for the current config. */
+  /**
+   * The identity the store writes into `doc_chunks.embedding_model` — read from the STORE, not
+   * recomputed from config: the fingerprint now also carries the backend's declared representation
+   * (pooling / normalization / input window / model revision), which only the adapter knows. A test
+   * that recomputed it from `backend/model/dim` would drift the moment a representation knob moves.
+   */
   function currentSpace(): string {
-    const cfg = rt.config.common.semantic
-    return vectorSpaceId(cfg.backend, cfg.local_model, cfg.dim)
+    return rt.knowledge.vectorSpace()
   }
 
   function chunkState(): { chunk_id: number; text: string; content_hash: string | null; embedding_model: string | null; entities_version: number | null }[] {

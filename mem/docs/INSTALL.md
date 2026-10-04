@@ -157,6 +157,8 @@ semantic:
 > 默认仓库 `Xenova/bge-base-zh-v1.5` 是 768 维 fp32 ONNX：**首次下载约 389 MB、首次冷启（下载 + 加载）约
 > 16.6 s**；权重落到族根后即**离线可用**（本机二次从缓存加载实测约 0.9 s）。一行 `semantic.local_model`
 > 换成别的仓库时，`semantic.dim` 必须同步改（向量库按它建，不一致会在以后表现为乱码分数），并 `reindex`。
+> 改 `semantic.max_input_tokens`（编码前的截断窗口）同样改变表示，因此同样触发一次迁移——指纹覆盖模型/宽度/
+> 窗口/池化/归一化/权重 revision 中的任何一项（见 §7.0）。
 >
 > 语义路径拿不到时检索**自动降级为 FTS + 实体 Jaccard**，功能仍可用（只是没有语义召回），绝不拒载。
 
@@ -350,23 +352,26 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
 2. （可选）`cd ~/.dsh/profiles/<PROFILE> && pnpm remove @avantf/dsh-mem @avantf/mem @avantf/mem-retrieval @avantf/mem-contract`；
 3. 数据仍在 `~/.avantf/`，需要时手动删除。
 
-### 7.0 升级后会发生什么：换默认模型 = 一次数据迁移
+### 7.0 升级后会发生什么：换嵌入表示 = 一次数据迁移
 
-库里持久化的向量带着**向量空间身份**（`backend/model/dim`）。换默认嵌入模型或改 `semantic.dim` 后，旧向量在**新空间里不可比**，语义腿会跳过它们；若不处理，检索会**静默退化成词法+实体**——仍然返回结果，只是答错。实测（2026-10-04，本机活库 80 条 ACTIVE，`bge-small-zh-v1.5` 512 维 → `bge-base-zh-v1.5` 768 维）：
+库里持久化的向量带着**表示指纹**（`v2/backend/model/dim@池化;归一化;截断窗口;模型 revision`）。换默认嵌入模型、改 `semantic.dim`、改 `semantic.max_input_tokens`、池化/归一化，甚至同一个模型仓库**换了权重**（旁车 `record.json` 里的 revision 变了），旧向量都在**新的坐标里不可比**，语义腿会跳过它们；若不处理，检索会**静默退化成词法+实体**——仍然返回结果，只是答错。实测（2026-10-04，本机活库 80 条 ACTIVE，`bge-small-zh-v1.5` 512 维 → `bge-base-zh-v1.5` 768 维）：
 
 | | `stale` | `space_stale` | `indexed` | 检索表现 |
 |---|---|---|---|---|
 | 升级后、修复前 | 78 | 0 | 2 | 语义腿对 78 条失效；多条查询塌成同一条无关短事实 |
 | 自动自愈 / `vectors --fix` 后 | 0 | 0 | 80 | `我是谁？` 回到正确 `#4`，语义型查询各自回到正确 top-1 |
 
+**指纹格式换代 = 一次性全量重编码。** 本次升级把空间 id 从 `backend/model/dim` 换成带版本前缀的表示指纹（`v2/…`），因此**每个**老库在升级后第一次启动时所有向量都会记为 `space_stale`，无论你有没有改任何旋钮。这是**预期的一次性代价**，不是错误：插件随后按同一套有界后台迁移把整库重算一遍（本机 80 条 ACTIVE 实测数秒级，见启动日志的 `vector migration: complete … in <ms>ms`）。告警文案会明确写出"written before the representation fingerprint — a ONE-TIME full re-encode"，与"换了别的模型"区分。
+
 **你会看到/不用做什么**
 
-- 启动日志会有一条**响亮 WARNING**：条数 + "属于更旧的嵌入空间" + 手动入口。这不是错误，是"需要一次迁移"。
+- 启动日志会有一条**响亮 WARNING**：条数 + "属于更旧的嵌入空间" + 原因（另一个模型/表示，或指纹格式换代）+ 手动入口。这不是错误，是"需要一次迁移"。
 - 插件会在**启动预热之后**自动分批重算（每批有界、逐批让出事件循环、不阻塞查询、重启后接着搬、失败下轮心跳重试）。迁移期间查询照常返回，只是那批尚未搬完的事实暂时只能靠词法/实体命中。
 - 状态面可见：`/mem` 的检索健康度、`avantf-mem stats` 与 `avantf-mem vectors` 都会显示 `stale`/`space_stale`。
 - 手动入口（想在迁移前先看规模，或关掉了自动迁移）：`avantf-mem vectors --dry-run` 预览计数，`avantf-mem vectors --fix` 当场重算（MCP/插件：`mem_admin vectors_fix`）。
 - **关闭自动迁移**：在 `~/.avantf/configs/common.yaml` 写 `semantic:\n  auto_migrate: false`（默认 `true`）——之后只剩告警 + 手动入口。
 - 知识库侧（`doc_chunks`）目前**只检测 + 提示**，不会自动重算：按提示跑 `avantf-mem kb reindex`（MCP/插件 `kb_reindex`）。
+- **模型 revision 读不到时只降级**：没有家族旁车（`<模型缓存根>/.envinit/models--<owner>--<name>/record.json`，例如模型由 transformers.js 自己下载）时，指纹**不含 revision**；**权重已在本地**而旁车缺失时，启动日志会有一条 `semantic: no model revision …` 的 WARNING 说明这一盲区："同名仓库换了权重"检测不到。其余旋钮照常覆盖，绝不会因此报错或拒绝打开库；模型还没装好（首次安装进行中）时不报这条——那时还没有可指纹化的东西。
 
 ---
 

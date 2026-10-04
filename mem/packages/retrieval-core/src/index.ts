@@ -1,4 +1,5 @@
 export * from './interfaces.js'
+export * from './representation.js'
 export * from './log.js'
 export * from './stats.js'
 export * from './text_budget.js'
