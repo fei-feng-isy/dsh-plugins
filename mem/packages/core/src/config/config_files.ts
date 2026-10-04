@@ -31,6 +31,7 @@ export const DEFAULT_COMMON_CONFIG = `# avantf-mem 公共配置（分层第②�
 #   local_model: Xenova/bge-base-zh-v1.5    # 必须是 ONNX 仓库
 #   dim: 768
 #   auto_download: true
+#   auto_migrate: true                # 换模型/宽度后自动分批重算旧空间的向量（默认开）；关掉只剩启动告警 + vectors --fix
 #   ⚠️ cache_dir / mirror 由家族底座 @avantf/dsh-plugin-base 管理：写在这里会被忽略并告警。
 #      缓存目录用环境变量 AVANTF_MEM_MODEL_CACHE，镜像用 AVANTF_MEM_MODEL_MIRROR（或 HF_ENDPOINT）。
 

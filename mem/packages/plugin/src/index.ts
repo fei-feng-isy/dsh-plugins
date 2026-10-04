@@ -79,6 +79,7 @@ import {
 import { parseToolsConfig, resolveToolsDir } from '@avantf/mem-provision'
 import { resetPandocResolution, setPandocProvisioning } from '@avantf/mem-convert'
 import { openDocumentPath } from './open.js'
+import { createVectorMigration } from './vectorMigration.js'
 import { browseDirectory, classifySource } from '@avantf/mem'
 import { flattenToolSpec } from './tool_schema.js'
 import { OUTPUT } from './render.js'
@@ -620,6 +621,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     })
   }
 
+  // ── bounding the "changed embedding space" repair ──────────────────────────────────────────
+  // A changed default model/width makes every persisted vector unusable by the semantic leg; the
+  // store says so LOUDLY at open (count + reason + manual entry) and this controller re-encodes them
+  // in the background, in bounded batches, behind the startup gate below — never in the boot window
+  // (§20.14), never blocking a query, and resumable because "what is stale" is re-derived from the
+  // database on every pass. `semantic.auto_migrate: false` turns the automatic half off and leaves the
+  // warning + `vectors --fix`. The store's own `migrateVectors` catches per-batch failures.
+  const vectorMigration = createVectorMigration({
+    rt,
+    logger,
+    isActive: () => stillActive(ctx),
+  })
+  // Dispose with the fiber: a reload must stop the loop at its next batch boundary instead of writing
+  // into a closed database. `isActive` is the second guard (a harness may close the runtime without
+  // disposing the fiber).
+  ctx.effect(() => () => { vectorMigration.stop() })
+
   // Derived state follows the RULES, not the write: a fact written before an extraction change
   // keeps the old entity/triple rows (and the HRR bundle derived from them) until a sweep visits
   // it. ONE bounded batch per call — the store's in-flight guard drops an overlapping call rather
@@ -644,13 +662,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // window §20.14 moved the tokenizer warm out of. The waits are not preconditions (a failed or
   // hung boot still resolves them — see `awaitStartupGate`), and the heartbeat triggers below need
   // no gate: by then the host has long been up.
+  //
+  // The vector migration rides the SAME gate, for the same reason (model warm + first ONNX batch must
+  // not be in the boot window) plus one more: the migration needs the model the gate waits for, so
+  // firing it earlier would just log "model unavailable" and retry on the next heartbeat.
   void awaitStartupGate({ ...(waitFor === undefined ? {} : { waitFor }), deferTokenizerUntilIdle: true })
     .then(() => {
       // The gate can outlive a short-lived mount (a reload lands inside it): the runtime's databases
       // are closed by `stop`, so a sweep fired then would only log "database is not open". Same
       // unmount discipline as the reconciler's stop rule, checked against BOTH the fiber and the
       // runtime's own lifetime (a harness may shut the service down without disposing the fiber).
-      if (!rt.closed && stillActive(ctx)) sweepEntities()
+      if (!rt.closed && stillActive(ctx)) {
+        sweepEntities()
+        vectorMigration.start()
+      }
     })
     .catch((error: unknown) => {
       logger.warn(`entity sweep gate failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -668,6 +693,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           logger.warn(`trust tick failed: ${error instanceof Error ? error.message : String(error)}`)
         }
         sweepEntities()
+        // Retry whatever the last migration pass could not finish (model still cold, a batch write
+        // failed). A current store is a quiet no-op, so this is cheap.
+        vectorMigration.start()
       }, heartbeatMinutes * 60_000)
       const unref = (timer as unknown as { unref?: () => void }).unref
       if (typeof unref === 'function') unref.call(timer)

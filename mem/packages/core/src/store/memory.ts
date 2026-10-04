@@ -11,6 +11,9 @@ import {
   type RecallResult,
   type RememberResult,
   type TrustDiagnostic,
+  type VectorMigrationOutcome,
+  type VectorMigrationProgress,
+  type VectorSpaceHealth,
   type VectorsDiagnostic,
   type VectorsFixReport,
 } from '@avantf/mem-contract'
@@ -29,7 +32,7 @@ import {
   type HybridDeps,
   type HybridLeg,
 } from './hybrid.js'
-import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportForeignVectors, vectorSpaceOf } from './common.js'
+import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportStaleVectors, yieldToEventLoop, vectorSpaceOf } from './common.js'
 import type { Db } from '../db/conn.js'
 import { bytesToFloat32, float32ToBytes, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
@@ -101,6 +104,17 @@ const NO_CHECK: { conflicts: DetectedContradiction[]; complete: boolean } = { co
  * until `deferred === 0` instead.
  */
 export const ENTITY_SWEEP_BATCH = 2000
+
+/**
+ * Rows one background vector-space migration slice may drop + re-encode.
+ *
+ * Small on purpose: the point of batching is that a query arriving mid-migration waits for at most
+ * one ONNX forward pass batch, not for a whole corpus. At ~30 ms per bge-base-zh encode a batch of 16
+ * is well under a second of contested model time, and the event loop is yielded between batches
+ * (`yieldToEventLoop`). The value is a default, not a promise — `migrateVectorsBatch(batchSize)` takes
+ * whatever the caller needs.
+ */
+export const DEFAULT_VECTOR_MIGRATION_BATCH = 16
 
 /** What one derived-state sweep pass did (see `MemoryStore.reindexEntities`). */
 export interface EntitySweepReport {
@@ -355,14 +369,39 @@ export class MemoryStore {
     reloadVectorIndex(this.vstore, rows, 'memory')
     // A dim-valid vector from another space is still RANKED (the reload cannot tell the
     // difference), so a silent model swap would mix two spaces in one index. Say so once per
-    // process; acting on it is `vectors_fix`'s job, because re-encoding is a real cost the
-    // operator should choose (and see the count of).
-    reportForeignVectors(
+    // process, with the count and the manual entry; acting on it is `vectors_fix`'s job for the
+    // operator path, and the bounded background migration's for the automatic one (see
+    // `migrateVectors`).
+    reportStaleVectors(
       'memory',
       space,
-      persisted.filter((r) => r.embedding_model !== space).length,
-      'mem_admin vectors_fix (dry_run=true previews the count)',
+      this.vectorSpaceHealth(),
+      '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`)',
     )
+  }
+
+  /**
+   * Cheapest possible DETECTION of "the embedding space changed under this store": counts of ACTIVE
+   * persisted vectors whose width or recorded space id no longer matches the one this store writes
+   * into. Reads blob LENGTHS only — never decodes — so the `/mem` status surface and the startup
+   * warning can afford it at any corpus size.
+   *
+   * The counts are the same two `VectorsDiagnostic` already separates (`stale` / `space_stale`); this
+   * is the read model those surfaces use instead of the full diagnose pass.
+   */
+  vectorSpaceHealth(): VectorSpaceHealth {
+    const space = this.vectorSpace()
+    const expectedBytes = this.vstore.dim * 4
+    let stale = 0
+    let spaceStale = 0
+    for (const row of this.facts.activeVectorSpaces()) {
+      if (row.bytes !== expectedBytes) {
+        stale++
+        continue
+      }
+      if (row.embedding_model !== space) spaceStale++
+    }
+    return { stale, space_stale: spaceStale }
   }
 
   async add(content: string, category?: string, ttlDays?: number): Promise<RememberResult> {
@@ -895,7 +934,7 @@ export class MemoryStore {
   }
 
   /**
-   * Repair the semantic read model:
+   * Repair the semantic read model, in ONE bounded slice or in full:
    *  (a) reload persisted, dim-valid vectors missing from the live index
    *      (restart / index loss — needs no model),
    *  (b) drop persisted vectors whose dim no longer matches `semantic.dim` so a
@@ -903,58 +942,72 @@ export class MemoryStore {
    *      throws on dim mismatch),
    *  (c) encode active facts that have no vector yet (needs the semantic backend),
    *  (d) re-encode vectors written in ANOTHER vector space (a model swap, or the one-time
-   *      adoption of a store predating the space id). Deliberately here and not at open: this is
-   *      the only path that re-encodes the whole table, so it is an explicit, counted action.
-   * `dry_run` previews every count without writing — and without loading the model, which is why
-   * the preview also reports `would_warm` (see the contract's `VectorsFixReport`).
+   *      adoption of a store predating the space id).
+   *
+   * `limit` is what makes the SAME logic usable as a background migration: at most that many rows are
+   * dropped and at most that many are re-encoded, so one call is a bounded unit of work the caller can
+   * yield between. `vectorsFix` passes no limit (the explicit operator action drains everything);
+   * `migrateVectorsBatch` passes the migration's batch size.
    */
-  async vectorsFix(dryRun = false): Promise<VectorsFixReport> {
+  private async repairVectors(opts: { dryRun: boolean; limit?: number }): Promise<{ report: VectorsFixReport; remaining: number }> {
+    const limit = opts.limit ?? Number.POSITIVE_INFINITY
     const c = this.classifyVectors()
     const loadedNow = this.semantic.isAvailable()
     let semAvailable = loadedNow
     // An explicit repair is the one call site worth *waiting* for the model: a
     // bare availability read would make `vectors_fix` a silent no-op right after
     // a failed bootstrap — the incident that motivated the retry gate.
-    if (!semAvailable && !dryRun) semAvailable = await this.warmupSemantic()
+    if (!semAvailable && !opts.dryRun) semAvailable = await this.warmupSemantic()
     // Reported for BOTH modes, and computed before the warmup: a dry run cannot know whether a
     // warmup would succeed (it must not download), so "the model is not loaded" is not the same
     // answer as "the repair cannot run" — see the contract's `VectorsFixReport`.
     const wouldWarm = !loadedNow
-    if (dryRun) {
+    // What the semantic leg still cannot use, derived from THIS pass's classification (no second
+    // full scan per batch): dropped rows leave `stale` and enter `missing`, so only `fixed` moves the
+    // sum. `reindexed` rows had usable vectors all along and are not "remaining".
+    const remainingOf = (fixed: number): number =>
+      Math.max(0, c.staleIds.length + c.spaceStaleIds.length + c.missing - fixed)
+    if (opts.dryRun) {
       return {
-        missing: c.missing,
-        stale: c.staleIds.length,
-        space_stale: c.spaceStaleIds.length,
-        unindexed: c.unindexed.length,
-        reindexed: 0,
-        dropped: 0,
-        fixed: 0,
-        semantic_available: semAvailable,
-        would_warm: wouldWarm,
-        dry_run: true,
+        report: {
+          missing: c.missing,
+          stale: c.staleIds.length,
+          space_stale: c.spaceStaleIds.length,
+          unindexed: c.unindexed.length,
+          reindexed: 0,
+          dropped: 0,
+          fixed: 0,
+          semantic_available: semAvailable,
+          would_warm: wouldWarm,
+          dry_run: true,
+        },
+        remaining: remainingOf(0),
       }
     }
 
     let reindexed = 0
-    for (const u of c.unindexed) {
+    for (const u of c.unindexed.slice(0, limit)) {
       this.vstore.add(u.id, u.vec)
       reindexed++
     }
 
     // Unusable bytes (dim mismatch) and foreign-space vectors both have to go before a re-encode
-    // can pick them up, and for the same reason: `add()` would keep ranking them otherwise.
+    // can pick them up, and for the same reason: `add()` would keep ranking them otherwise. Only the
+    // slice we are about to re-encode is dropped, so a process that dies mid-migration leaves at most
+    // one batch vector-less — and those rows are exactly the `missing` rows the next run resumes on.
     let dropped = 0
     if (semAvailable) {
-      const toDrop = [...c.staleIds, ...c.spaceStaleIds]
+      const toDrop = [...c.staleIds, ...c.spaceStaleIds].slice(0, limit)
       if (toDrop.length) {
+        const spaceStale = new Set(c.spaceStaleIds)
         dropped = this.facts.clearVectors(toDrop)
-        this.evictVectors(c.spaceStaleIds)
+        this.evictVectors(toDrop.filter((id) => spaceStale.has(id)))
       }
     }
 
     let fixed = 0
     if (semAvailable) {
-      const missingRows = this.facts.missingVectorRows()
+      const missingRows = this.facts.missingVectorRows().slice(0, limit)
       for (const m of missingRows) {
         // Every path here lands the vector through `setSemanticVector`, which re-queues the fact
         // for the conflict check (`conflict_checked = 0`) — the same rule as `clearVectors`
@@ -964,17 +1017,113 @@ export class MemoryStore {
       }
     }
     return {
-      missing: c.missing,
-      stale: c.staleIds.length,
-      space_stale: c.spaceStaleIds.length,
-      unindexed: c.unindexed.length,
-      reindexed,
-      dropped,
-      fixed,
-      semantic_available: semAvailable,
-      would_warm: wouldWarm,
-      dry_run: false,
+      report: {
+        missing: c.missing,
+        stale: c.staleIds.length,
+        space_stale: c.spaceStaleIds.length,
+        unindexed: c.unindexed.length,
+        reindexed,
+        dropped,
+        fixed,
+        semantic_available: semAvailable,
+        would_warm: wouldWarm,
+        dry_run: false,
+      },
+      remaining: remainingOf(fixed),
     }
+  }
+
+  /**
+   * The explicit, unbounded repair behind `mem_admin vectors_fix` / `avantf-mem vectors --fix`.
+   * `dry_run` previews every count without writing — and without loading the model, which is why
+   * the preview also reports `would_warm` (see the contract's `VectorsFixReport`).
+   */
+  async vectorsFix(dryRun = false): Promise<VectorsFixReport> {
+    return (await this.repairVectors({ dryRun })).report
+  }
+
+  /**
+   * ONE bounded slice of the vector-space migration: at most `batchSize` rows are dropped and
+   * re-encoded, so the caller keeps control of the event loop between slices. This is the unit the
+   * background migration ({@link migrateVectors}) and its tests drive.
+   *
+   * Resumability is a property of the DATABASE, not of this process: every slice re-derives what is
+   * stale from the persisted width/space, so a restart simply continues where the last slice stopped.
+   */
+  async migrateVectorsBatch(batchSize = DEFAULT_VECTOR_MIGRATION_BATCH): Promise<VectorMigrationProgress> {
+    const size = Math.max(1, Math.floor(batchSize))
+    const { report, remaining } = await this.repairVectors({ dryRun: false, limit: size })
+    return {
+      remaining,
+      migrated: report.fixed,
+      dropped: report.dropped,
+      reindexed: report.reindexed,
+      semantic_available: report.semantic_available,
+    }
+  }
+
+  /**
+   * Drive the bounded background migration until the store is current, the model is unavailable, or
+   * `shouldStop()` turns true (plugin unmount / process shutdown). A batch FAILURE never rejects: it is
+   * logged and reported as `remaining > 0`, which is what makes the next heartbeat a retry (the caller
+   * still owns the outer catch for a closed database, e.g. a shutdown racing the first read). Never
+   * blocks the event loop for longer than one batch.
+   *
+   * Honours `semantic.auto_migrate` (default on) — the switch exists so a host that must not spend CPU
+   * on background re-encoding can leave the loud warning and the manual entry as the only path.
+   */
+  async migrateVectors(opts: {
+    batchSize?: number
+    shouldStop?: () => boolean
+    onProgress?: (progress: VectorMigrationOutcome) => void
+  } = {}): Promise<VectorMigrationOutcome> {
+    const enabled = this.config.semantic.auto_migrate !== false
+    const snapshot = (): VectorMigrationOutcome => ({
+      enabled,
+      remaining: this.migrationRemaining(),
+      migrated: 0,
+      dropped: 0,
+      reindexed: 0,
+      semantic_available: this.semantic.isAvailable(),
+    })
+    if (!enabled) return snapshot()
+
+    let migrated = 0
+    let dropped = 0
+    let reindexed = 0
+    let last = snapshot()
+    const initial = last.remaining
+    if (initial === 0) return last
+    for (;;) {
+      if (opts.shouldStop?.() === true) break
+      let step: VectorMigrationProgress
+      try {
+        step = await this.migrateVectorsBatch(opts.batchSize)
+      } catch (error) {
+        retrievalLogger().warn(
+          `memory vector migration: batch failed (${describeError(error)}) — ${String(this.migrationRemaining())} `
+          + 'vector(s) still belong to an older embedding space; the next pass retries',
+        )
+        break
+      }
+      migrated += step.migrated
+      dropped += step.dropped
+      reindexed += step.reindexed
+      last = { ...step, enabled, migrated, dropped, reindexed }
+      opts.onProgress?.(last)
+      // No progress means the model is not available (or a write failed): stop this pass and let the
+      // caller's next heartbeat retry, instead of spinning on the same rows.
+      if (step.migrated === 0 && step.dropped === 0 && step.reindexed === 0) break
+      if (last.remaining === 0) break
+      await yieldToEventLoop()
+    }
+    return last
+  }
+
+  /** Active rows the semantic leg still cannot use (old width, old space, or no vector at all). */
+  private migrationRemaining(): number {
+    const health = this.vectorSpaceHealth()
+    return health.stale + health.space_stale + this.facts.vectorCounts().missing
   }
 
   /**

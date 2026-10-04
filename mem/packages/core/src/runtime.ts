@@ -365,7 +365,15 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
           // be reconstructed from the tables afterwards (DESIGN §20). The `satisfies` is what ties
           // this HAND-BUILT payload to the overload that promises it — a spread cannot be checked
           // by `ReturnType`.
-          return { ...this.memory.countByStatus(), retrieval: retrievalHealthSummary() } satisfies AdminStatsResult
+          //
+          // `vectors` is the same section's DETECTION half: a changed embedding space leaves the
+          // semantic leg unable to use every persisted vector, which used to be invisible outside a
+          // one-shot startup warning. Cheap (blob lengths only), so the `/mem` poll can read it.
+          return {
+            ...this.memory.countByStatus(),
+            retrieval: retrievalHealthSummary(),
+            vectors: this.memory.vectorSpaceHealth(),
+          } satisfies AdminStatsResult
         case 'list':
           return this.memory.list(req.category, req.status ?? 'active', req.limit ?? 50, req.offset ?? 0)
         case 'detail':

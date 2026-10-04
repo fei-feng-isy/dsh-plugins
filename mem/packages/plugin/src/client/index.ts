@@ -861,12 +861,23 @@ function MemoryPanel(props: { remote?: AvantfRemote }) {
 function HealthBlock(props: { stats: StatsSummary }) {
   const r = props.stats.retrieval
   if (r === undefined) return h('div', { className: css.status }, '检索健康度不可用。')
+  // The DETECTION half of "changing the embedding space is a data migration": without it, a model
+  // upgrade degraded every semantic query while this panel kept reporting a healthy retrieval rate.
+  // Optional (`undefined` against a host from before the field existed) so an older host still renders.
+  const vectors = props.stats.vectors
+  const pendingVectors = vectors === undefined ? 0 : vectors.stale + vectors.space_stale
   const pct = (v: number): string => `${String(Math.round(v * 100))}%`
   const kinds = Object.entries(r.by_kind)
     .map(([kind, v]) => `${kind} ${String(v.queries)} 次（空 ${String(v.zero_results)}）`)
     .join(' · ')
   const truncated = r.embedding_truncated + r.rerank_truncated + r.output_truncated
   return h('div', { className: css.detail },
+    pendingVectors === 0
+      ? null
+      : h('div', { className: css.status },
+        `⚠ 向量空间待迁移：${String(pendingVectors)} 条 ACTIVE 向量来自旧嵌入空间`
+        + `（宽度不符 ${String(vectors?.stale ?? 0)} · 其他模型 ${String(vectors?.space_stale ?? 0)}）`
+        + '——语义腿对它们失效，正在后台分批重算；手动入口 `avantf-mem vectors --fix`'),
     h('div', { className: css.status },
       `检索 ${String(r.queries)} 次 · 空结果 ${pct(r.zero_result_rate)} · 平均 ${r.avg_latency_ms.toFixed(1)}ms · 峰值 ${r.max_latency_ms.toFixed(1)}ms`),
     h('div', { className: css.meta },

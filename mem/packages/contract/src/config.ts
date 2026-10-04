@@ -33,6 +33,18 @@ const semanticSchema = z.object({
   // pre-framework `~/.avantf/models` is NOT a fallback anywhere any more.
   cache_dir: z.string().default(''),
   auto_download: z.boolean().default(true),
+  /**
+   * Migrate persisted vectors that belong to an OLDER vector space (a changed model or width) in a
+   * bounded background pass. Default ON: changing the embedding space IS a data migration, and
+   * without this the semantic leg silently skips every old-space vector while lexical+entity keep
+   * answering — measured on the real library after the 512→768 default-model swap, 78 of 80 ACTIVE
+   * facts became semantically unreachable with no error anywhere.
+   *
+   * Off = the loud startup warning and the manual entry (`vectors --fix` / `mem_admin vectors_fix`)
+   * stay, but nothing re-encodes on its own. Set to `false` on a metered/embedded host that must not
+   * spend CPU on background re-encoding.
+   */
+  auto_migrate: z.boolean().default(true),
 })
 
 const rerankSchema = z.object({

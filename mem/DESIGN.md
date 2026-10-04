@@ -481,6 +481,14 @@ avantf-mem/
 
 **墓碑计数必须来自图本身（实施复核 §3.6 的修复）**：图比进程活得久，所以"我有多少墓碑"不能是**本会话**的集合。实测四会话 × 100 次驱逐：live 1200 → 800 而原生图始终 1200、计数器每次都读 100，永不压实。现在计数是**推导量**（`graphElements − live`）：restore 时用 `getIdsList().length`（**包含**已删 label）播种，只有图真的新增元素时才 +1——这顺带修掉本改动自己引入的一个记帐 bug：重新添加一个已墓碑化的 id（不在 live map、但在图里）曾被当成新元素。于是第 3 个会话在**累计**死点比例越过阈值时压实，报告值与图一致。`compact()` 同时纳入 `VectorStore` 可选接口并由 `admin maintenance` 调用（"现在就清理"的语义），不再只有测试用它。
 
+**换嵌入空间 = 一次数据迁移（2026-10-04 实测；规则）**：库里持久化的 `semantic_vector` 携带**向量空间身份**（`backend/model/dim`），换默认模型、换宽度、换池化/归一化都会让旧向量**在新空间里不可比**。语义腿因此必须跳过它们——若只是静默跳过，检索就退化成"词法+实体"，看起来仍然有结果，只是**全都答错**。本机活库（80 条 ACTIVE）换默认 `bge-small-zh-v1.5/512 → bge-base-zh-v1.5/768` 的实测：**修前 `stale: 78, space_stale: 0, indexed: 2`**，78 条事实对语义腿整体失效（多条语义型改写查询全部塌成同一条无关短事实 `#19 @0.55`）；**`vectors --fix` 后 `dropped: 78, fixed: 78` → `stale: 0, indexed: 80`**，`我是谁？` 回到 `#4`（严格档），那些查询各自回到正确 top-1。规则：
+
+1. **检测 + 响亮告警**：store 打开时若 `stale + space_stale > 0`，打一条 WARNING，写清**条数**、**原因**（"属于更旧的嵌入空间"）与**手动入口**（`avantf-mem vectors --fix` / `mem_admin vectors_fix`）；`/mem` 状态面与 `mem_admin stats` / `avantf-mem stats` 的 `vectors.{stale,space_stale}`、`avantf-mem vectors` 如实暴露同一组计数。检测只读 BLOB 长度与 `embedding_model`，不解码，所以状态面可以轮询。
+2. **有界后台自愈**：插件在**预热门之后**启动迁移，分批（`DEFAULT_VECTOR_MIGRATION_BATCH = 16`，每批有界）、逐批 `yieldToEventLoop`、**不阻塞查询**、失败不致命（下轮心跳重试）、`shouldStop` 尊重卸载/`rt.closed`；"还剩多少"每次从数据库重推，所以**重启后接着搬**。开关 `semantic.auto_migrate`（默认 `true`）；关掉后只剩告警 + 手动入口。
+3. **测试必须复刻真实形状**：fixture 要在库里**先持久化旧维/旧模型向量**，再用新模型打开，断言检测、自愈后语义腿端到端命中、有界/不阻塞、不丢数据、幂等；只测"新写入的事实"会漏掉整库退化（`packages/core/test/vector_migration.spec.ts`、`packages/plugin/test/vector_migration.spec.ts`）。
+
+**已知边界（同一实测轮记录）**：自动迁移目前只覆盖 **memory** 的 `facts.semantic_vector`；knowledge 的 `doc_chunks` 只做检测 + 响亮的 `kb_reindex` 提示（它的 `kb_reindex` 还兼做 FTS/实体重建，不适合无脑后台跑）。`vectors_fix` 也**不覆盖** knowledge——两处都是手动入口。这一条在这里写明，避免下次把"knowledge 换模型后同样静默退化"当成新发现。
+
 ### 20.7 明确不做
 
 - **不引 LLM 进核心路径**：意图分析、摘要生成、rerank 服务都留在可选位置；核心检索在无模型时仍完整（降级到 FTS + 实体）。

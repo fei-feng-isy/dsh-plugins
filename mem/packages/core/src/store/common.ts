@@ -4,7 +4,7 @@
  * Small on purpose: `MemoryStore` and `KnowledgeStore` are separate stores over separate databases
  * and should stay that way (AGENTS.md). What they must NOT have is two copies of the same
  * three-line helper, because a fix then lands in one of them — which is exactly what happened to the
- * retrieval orchestration (see `store/hybrid.ts`) and to the foreign-vector-space warning below: the
+ * retrieval orchestration (see `store/hybrid.ts`) and to the stale-vector warning below: the
  * memory store checked whether its persisted vectors came from the CURRENT vector space and told the
  * operator how to fix it, while the knowledge store checked only the width, so a model swap left two
  * spaces silently mixed in one index until someone happened to run `kb_reindex`.
@@ -58,23 +58,40 @@ export function evictVectors(vstore: VectorStore, ids: readonly number[]): void 
 }
 
 /**
- * Tell the operator that persisted vectors came from ANOTHER vector space.
+ * Tell the operator that persisted vectors came from ANOTHER vector space — loudly, and with the
+ * manual remedy.
  *
- * A dim-valid vector from a different space is still RANKED — the reload cannot tell the difference
- * — so a silent model swap would mix two spaces in one index and degrade every semantic query
- * without an error anywhere. Said once per process; acting on it is the operator's choice because
- * re-encoding is a real cost (and they should see the count first).
+ * Changing the embedding space (model, width, pooling, normalization) is a DATA MIGRATION: the
+ * persisted bytes stay valid-looking but are no longer comparable with the current query vector, so
+ * the semantic leg must not serve them. Measured on the real library after the 512→768 default-model
+ * swap: 78 of 80 ACTIVE facts fell out of the semantic leg and retrieval silently degraded to
+ * lexical+entity (every probe query answered with the same unrelated short fact), with no error
+ * anywhere. The count, the reason and the ONE manual entry have to be visible at start.
+ *
+ * Both halves are reported in one message because they are one condition seen two ways: a changed
+ * WIDTH (`stale`, whose bytes cannot even be decoded into the current store) and a changed SPACE at
+ * the same width (`space_stale`, whose bytes decode but rank in another model's coordinates).
  *
  * @param kind   store label for the message (`memory` / `knowledge`)
  * @param space  the vector space the store writes into now
- * @param foreign how many persisted vectors were written in a different one
- * @param fix    the action that re-encodes them, as the operator would type it
+ * @param counts how many persisted vectors are unusable in the current space, by kind
+ * @param fix    the manual entry that re-encodes them, as the operator would type it
  */
-export function reportForeignVectors(kind: string, space: string, foreign: number, fix: string): void {
-  if (foreign <= 0) return
+export function reportStaleVectors(
+  kind: string,
+  space: string,
+  counts: { stale: number; space_stale: number },
+  fix: string,
+): void {
+  const total = counts.stale + counts.space_stale
+  if (total <= 0) return
+  const reasons: string[] = []
+  if (counts.stale > 0) reasons.push(`${String(counts.stale)} with a width that no longer matches`)
+  if (counts.space_stale > 0) reasons.push(`${String(counts.space_stale)} written by another model`)
   retrievalLogger().warn(
-    `${kind} index: ${String(foreign)} vector(s) were written in another space than ${space} — they are `
-    + `still ranked; run ${fix} to re-encode them`,
+    `${kind} index: ${String(total)} persisted vector(s) belong to an OLDER embedding space than ${space} `
+    + `(${reasons.join('; ')}) — the semantic leg cannot use them, so retrieval degrades to lexical+entity `
+    + `(this is a data migration, not a transient error); run ${fix} to re-encode them`,
   )
 }
 

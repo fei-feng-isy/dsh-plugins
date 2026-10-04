@@ -129,6 +129,10 @@ rerank:
 - 模型未就绪时检索**自动降级**到 FTS + 实体 Jaccard（`isAvailable()` = false）；下载完成后自动升级到 `0.55 / 0.30 / 0.15` 三路融合。**降级不是终态**：启动预热失败后，后续检索/索引会自动重试（同一时刻只跑一次，最短间隔 30s），无需重启进程；`vectors_fix` 则会当场等待一次完整尝试。`auto_download: false` 时不重试（本地缺失是确定性的）。CLI 启动时同步预热；插件与 MCP 异步预热（MCP 先应答 `initialize`，再后台加载模型）。
 - `@huggingface/transformers` 已声明为 `@avantf/mem-retrieval` 的 **optionalDependency**，`pnpm install` 会自动装上（无需额外 `pnpm add`），由适配器动态加载；首次运行时从镜像下载 BGE 权重（默认 `Xenova/bge-base-zh-v1.5` 约 **389 MB**，之后离线可用）。即使装不上也只是语义路径降级，不会报错。
 - 重排的唯一开关是 `rerank.backend`（默认 `none`，不加载任何重排模型）；语义后端只负责嵌入。
+- **换默认模型 / 换维度 = 一次数据迁移**（重要）：库里持久化的向量属于**旧嵌入空间**，语义腿对它们不可用，检索会**静默退化成词法+实体**——看起来仍有结果，只是答错。实测：默认模型 `bge-small-zh-v1.5`（512 维）→ `bge-base-zh-v1.5`（768 维）后，本机 80 条 ACTIVE 里 **78 条**被跳过、`indexed` 只剩 **2**，修前多条查询塌成同一条无关短事实。行为：
+  - **检测 + 响亮告警**：启动时若存在旧空间向量，日志打一条 WARNING（条数 + 原因 + 手动入口）；`/mem` 状态面、`avantf-mem stats`、`avantf-mem vectors`（`vectors.{stale,space_stale}`）如实暴露计数。
+  - **自动自愈**：插件在启动预热之后**分批**重算（每批有界、逐批让出事件循环、不阻塞查询、可续跑、失败下轮重试）。手动入口 `avantf-mem vectors --fix`（先 `--dry-run` 预览计数；MCP/插件为 `mem_admin vectors_fix`）。
+  - **关闭自动迁移**：`semantic.auto_migrate: false`（默认 `true`）；关掉后只剩告警 + 手动入口。知识库侧目前只有检测 + 手动 `kb_reindex` 提示。
 - agent 工具统一返回 `{ok:true,result}` / `{ok:false,error,violations}`（DSH 工具与 MCP server 一致）；`db.path` 里的 `~/` 展开为**用户 home**，留空则落在数据目录下。
 
 ## 自定义系统提示词

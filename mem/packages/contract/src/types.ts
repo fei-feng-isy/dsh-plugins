@@ -346,11 +346,30 @@ export interface RetrievalHealthSummary {
   by_kind: Record<string, KindHealth>
 }
 
+/**
+ * Persisted-vector health of the ACTIVE corpus, relative to the vector space the store writes into
+ * NOW — the DETECTION half of "changing the embedding space is a data migration" (DESIGN §20).
+ *
+ * Deliberately cheap: it compares the recorded width and space id only, never decoding the blobs, so
+ * the `/mem` status surface can read it on every poll without loading a whole corpus.
+ */
+export interface VectorSpaceHealth {
+  /** Active facts whose persisted vector has a different width than `semantic.dim`. */
+  stale: number
+  /** Active facts whose persisted vector is provably from another model space (same width). */
+  space_stale: number
+}
+
 /** `mem_admin stats`: store counts plus the retrieval-health counters. */
 export interface StatsSummary {
   active: number
   archived: number
   retrieval: RetrievalHealthSummary
+  /**
+   * Vector-space health, so "retrieval silently degraded after a model upgrade" is visible from the
+   * status surface instead of only from a one-shot startup warning.
+   */
+  vectors: VectorSpaceHealth
 }
 
 /** One page of facts (`mem_admin list`). */
@@ -397,9 +416,43 @@ export interface VectorsDiagnostic {
   space_stale: number
   indexed: number
   unindexed: number
+  /**
+   * Distinct recorded spaces across the WHOLE table (archived rows included), while `stale` /
+   * `space_stale` count only ACTIVE rows — an archived row legitimately keeps its old vector, so the
+   * two must not be compared directly.
+   */
   models: Record<string, number>
   /** Which backend is actually serving reads (`auto:local_numpy` → `auto:hnswlib`). */
   store: string
+}
+
+/**
+ * One BOUNDED slice of the vector-space migration (`MemoryStore.migrateVectorsBatch`).
+ *
+ * The migration is what turns "the default embedder changed" from a silent degradation into a
+ * resumable background repair: each call re-encodes at most `batchSize` rows, and the remaining
+ * count is what the next call (or the next process, after a restart) resumes from.
+ */
+export interface VectorMigrationProgress {
+  /** Active rows still not usable by the semantic leg after this slice (old width/space, or no vector). */
+  remaining: number
+  /** Rows re-encoded into the current space by this slice. */
+  migrated: number
+  /** Rows whose old-space bytes were dropped so a re-encode could replace them. */
+  dropped: number
+  /** Usable persisted vectors re-added to the live index (no model needed). */
+  reindexed: number
+  /** `false` when the model was not loaded: nothing could be encoded this slice. */
+  semantic_available: boolean
+}
+
+/**
+ * The outcome of a whole migration drive (`MemoryStore.migrateVectors`): the last slice plus
+ * cumulative counters, and whether the `semantic.auto_migrate` switch allowed any work at all.
+ */
+export interface VectorMigrationOutcome extends VectorMigrationProgress {
+  /** `false` when `semantic.auto_migrate` is off — nothing was migrated on purpose. */
+  enabled: boolean
 }
 
 /**

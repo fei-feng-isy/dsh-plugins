@@ -37,7 +37,7 @@ import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsT
 import { probeTerms, type LexicalProbe } from './lexical.js'
 import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
 import { hybridSearch, RetrievalInputError, type HybridContext, type HybridDeps, type HybridLeg, type HybridResult } from './hybrid.js'
-import { evictVectors as evictVectorsOf, forEachYielding, normalizeWrite, normalizeWrites, reportForeignVectors, vectorSpaceOf } from './common.js'
+import { evictVectors as evictVectorsOf, forEachYielding, normalizeWrite, normalizeWrites, reportStaleVectors, vectorSpaceOf } from './common.js'
 import { ENTITY_EXTRACTOR_VERSION, extractEntities } from '../entities/extract.js'
 import {
   assertFetchableUrl,
@@ -341,12 +341,22 @@ export class KnowledgeStore {
     const space = this.vectorSpace()
     const persisted = this.chunks.vectorRows()
     reloadVectorIndex(this.vstore, persisted, 'knowledge')
-    reportForeignVectors(
-      'knowledge',
-      space,
-      persisted.filter((r) => r.embedding_model !== space).length,
-      'kb_reindex (dry_run=true previews the count)',
-    )
+    // Both halves of "the embedding space changed": a width that no longer fits and a recorded space
+    // from another model (same width = still ranked, but in another model's coordinates). Reading the
+    // blob LENGTH is enough for the first and never decodes. The manual entry is `kb_reindex`; unlike
+    // memory's `vectors_fix` there is no automatic background migration for the knowledge store yet
+    // (recorded as a boundary in the DESIGN §20 migration note).
+    let stale = 0
+    let spaceStale = 0
+    const expectedBytes = this.vstore.dim * 4
+    for (const row of persisted) {
+      if (!row.vec || row.vec.byteLength !== expectedBytes) {
+        stale++
+        continue
+      }
+      if (row.embedding_model !== space) spaceStale++
+    }
+    reportStaleVectors('knowledge', space, { stale, space_stale: spaceStale }, '`avantf-mem kb reindex` (MCP/plugin: `kb_reindex`)')
   }
 
   /**

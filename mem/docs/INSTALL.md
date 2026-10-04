@@ -350,6 +350,24 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
 2. （可选）`cd ~/.dsh/profiles/<PROFILE> && pnpm remove @avantf/dsh-mem @avantf/mem @avantf/mem-retrieval @avantf/mem-contract`；
 3. 数据仍在 `~/.avantf/`，需要时手动删除。
 
+### 7.0 升级后会发生什么：换默认模型 = 一次数据迁移
+
+库里持久化的向量带着**向量空间身份**（`backend/model/dim`）。换默认嵌入模型或改 `semantic.dim` 后，旧向量在**新空间里不可比**，语义腿会跳过它们；若不处理，检索会**静默退化成词法+实体**——仍然返回结果，只是答错。实测（2026-10-04，本机活库 80 条 ACTIVE，`bge-small-zh-v1.5` 512 维 → `bge-base-zh-v1.5` 768 维）：
+
+| | `stale` | `space_stale` | `indexed` | 检索表现 |
+|---|---|---|---|---|
+| 升级后、修复前 | 78 | 0 | 2 | 语义腿对 78 条失效；多条查询塌成同一条无关短事实 |
+| 自动自愈 / `vectors --fix` 后 | 0 | 0 | 80 | `我是谁？` 回到正确 `#4`，语义型查询各自回到正确 top-1 |
+
+**你会看到/不用做什么**
+
+- 启动日志会有一条**响亮 WARNING**：条数 + "属于更旧的嵌入空间" + 手动入口。这不是错误，是"需要一次迁移"。
+- 插件会在**启动预热之后**自动分批重算（每批有界、逐批让出事件循环、不阻塞查询、重启后接着搬、失败下轮心跳重试）。迁移期间查询照常返回，只是那批尚未搬完的事实暂时只能靠词法/实体命中。
+- 状态面可见：`/mem` 的检索健康度、`avantf-mem stats` 与 `avantf-mem vectors` 都会显示 `stale`/`space_stale`。
+- 手动入口（想在迁移前先看规模，或关掉了自动迁移）：`avantf-mem vectors --dry-run` 预览计数，`avantf-mem vectors --fix` 当场重算（MCP/插件：`mem_admin vectors_fix`）。
+- **关闭自动迁移**：在 `~/.avantf/configs/common.yaml` 写 `semantic:\n  auto_migrate: false`（默认 `true`）——之后只剩告警 + 手动入口。
+- 知识库侧（`doc_chunks`）目前**只检测 + 提示**，不会自动重算：按提示跑 `avantf-mem kb reindex`（MCP/插件 `kb_reindex`）。
+
 ---
 
 ## 7.1 放宽摄入/选择器的目录范围

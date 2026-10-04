@@ -1,5 +1,4 @@
 import type { VectorStore } from '@avantf/mem-retrieval'
-import { retrievalLogger } from '@avantf/mem-retrieval'
 
 /** Little-endian Float32 ↔ BLOB helpers for persisted vectors (cross-platform stable). */
 
@@ -41,13 +40,19 @@ export function vectorSpaceId(backend: string, model: string, dim: number): stri
  * The rows come from the owning store's DAO (DESIGN §19): this helper decodes and
  * filters them, it never runs SQL itself.
  *
+ * A row whose width does not fit the store is skipped (never `add()`ed — the store
+ * would throw). The OWNING store reports that condition itself, as one actionable
+ * line with the count, the reason and the manual re-encode entry (`reportStaleVectors`),
+ * so this helper stays quiet: two warnings for one condition read as two problems.
+ *
  * @param rows - `id` (fact/chunk id) + `vec` (BLOB), as read back from the store.
- * @param label - store name used in the dim-mismatch warning.
+ * @param _label - store name; unused here (the owning store owns the warning), kept so call sites read
+ *                 as "which store is reloading".
  */
 export function reloadVectorIndex(
   vstore: VectorStore,
   rows: readonly { id: number; vec: Uint8Array | null }[],
-  label: string,
+  _label: string,
 ): { loaded: number; skipped: number } {
   const entries: { id: number; vec: Float32Array }[] = []
   let skipped = 0
@@ -55,11 +60,6 @@ export function reloadVectorIndex(
     const vec = bytesToFloat32(r.vec)
     if (vec && vec.length === vstore.dim) entries.push({ id: r.id, vec })
     else skipped++
-  }
-  if (skipped > 0) {
-    // Dim mismatch (e.g. semantic.dim changed since these vectors were written):
-    // skip them — vectors_fix / reindex re-encode with the current model.
-    retrievalLogger().warn(`${label} index reload: skipped ${skipped} vector(s) with dim != ${vstore.dim}`)
   }
   vstore.rebuild(entries)
   return { loaded: entries.length, skipped }

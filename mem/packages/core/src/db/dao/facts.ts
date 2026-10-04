@@ -180,6 +180,22 @@ export class FactsDao {
   }
 
   /**
+   * Width + recorded space of every ACTIVE persisted vector, WITHOUT reading the bytes.
+   *
+   * `length(blob)` is the byte count, so `bytes / 4` is the float width — enough to detect a
+   * changed `semantic.dim` without decoding a corpus. This is the cheap detection the startup
+   * warning and the `/mem` status surface read (see `MemoryStore.vectorSpaceHealth`).
+   */
+  activeVectorSpaces(): { fact_id: number; bytes: number; embedding_model: string | null }[] {
+    return this.db
+      .prepare<{ fact_id: number; bytes: number; embedding_model: string | null }>(
+        `SELECT fact_id, length(semantic_vector) AS bytes, embedding_model FROM facts
+          WHERE semantic_vector IS NOT NULL AND status = 'active'`,
+      )
+      .all()
+  }
+
+  /**
    * Facts per archive reason — the trust diagnostics breakdown. One grouped scan rather than
    * a count per reason, because the reasons are few but the table is not.
    */
