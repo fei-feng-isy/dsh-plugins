@@ -3,6 +3,7 @@ import {
   AdminUnion,
   CONTRADICTION_RESOLUTIONS,
   DEFAULT_KB_SOURCE,
+  DEGRADED_LEG_NOTE,
   FACT_STATUSES,
   KbUnion,
   QUERY_KINDS,
@@ -135,6 +136,17 @@ function assertNoKbConflict(result: unknown): void {
   throw new Error(`${String(record.error ?? 'kb 写入冲突')}（确要覆盖请加 --overwrite）`)
 }
 
+/**
+ * 方案 G: a recall/query result already carries `degraded`, but a bare JSON flag is easy to miss.
+ * Print the matching sentence on STDERR — stdout stays pure JSON, so `avantf-mem search … | jq`
+ * keeps working. No new field is invented; the flag alone decides.
+ */
+function printDegradedLegNote(result: unknown): void {
+  if (result === null || typeof result !== 'object') return
+  if ((result as { degraded?: unknown }).degraded !== true) return
+  console.error(DEGRADED_LEG_NOTE)
+}
+
 async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv
   const sub = rest[0]
@@ -153,7 +165,9 @@ async function main(): Promise<void> {
       const req: Record<string, unknown> = { action: cmd, [spec.field]: text, limit: numFlag(rest, '--limit') }
       if (spec.category) req['category'] = parseFlag(rest, '--category')
       if (spec.budget === true) req['max_tokens'] = numFlag(rest, '--max-tokens', true) // 0 = no budget
-      console.log(JSON.stringify(await rt.recall(validated(RecallUnion, req)), null, 2))
+      const result = await rt.recall(validated(RecallUnion, req))
+      console.log(JSON.stringify(result, null, 2))
+      printDegradedLegNote(result)
       return
     }
 
@@ -397,14 +411,16 @@ async function main(): Promise<void> {
         const q = posTokens(rest).join(' ')
         if (!q) throw new Error('usage: avantf-mem query <q> [--kind fact|doc_chunk|all] [--domain X] [--source Y] [--limit N]')
         const kind = enumFlag(rest, '--kind', QUERY_KINDS)
-        console.log(JSON.stringify(await rt.query(validated(QueryUnion, {
+        const result = await rt.query(validated(QueryUnion, {
           query: q,
           kind,
           domain: parseFlag(rest, '--domain'),
           source: parseFlag(rest, '--source'),
           limit: numFlag(rest, '--limit') ?? 10,
           max_tokens: numFlag(rest, '--max-tokens', true), // 0 = no budget
-        })), null, 2))
+        }))
+        console.log(JSON.stringify(result, null, 2))
+        printDegradedLegNote(result)
         break
       }
 

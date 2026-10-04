@@ -17,6 +17,7 @@
     "pack:plugin": "node scripts/pack-plugin.mjs",
     "release:check": "node scripts/release-check.mjs",
     "bench:vstore": "node scripts/bench-vstore.mjs",
+    "bench:floors": "node scripts/bench-floors.mjs",
     "bench:memory": "node scripts/bench-memory.mjs",
     "bench:ingest": "node scripts/bench-ingest.mjs",
     "bench:indexes": "node scripts/bench-indexes.mjs",

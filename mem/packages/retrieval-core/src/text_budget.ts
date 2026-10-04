@@ -2,7 +2,7 @@
  * Token budgets for every MODEL-FACING text path (embedder input, reranker pair, retrieval
  * output). See DESIGN §20.
  *
- * Why this exists: the shipped ONNX models have a hard input window (`bge-small-zh-v1.5` and
+ * Why this exists: the shipped ONNX models have a hard input window (`bge-base-zh-v1.5` and
  * `bge-reranker-base`: 512 tokens) and transformers.js truncates SILENTLY past it —
  * `feature-extraction` and `text-classification` both tokenize with `truncation: true` and
  * default `max_length` to the tokenizer's `model_max_length`. A Chinese chunk of 800

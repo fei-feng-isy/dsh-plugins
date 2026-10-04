@@ -48,7 +48,7 @@ import { relevanceTerms } from '../src/store/lexical.js'
 import type { HybridResult } from '../src/store/hybrid.js'
 import { allowAnyDomain } from './helpers.js'
 
-const DIM = 512
+const DIM = 768
 
 /** A unit vector whose dot product with `e0` is exactly `cos`. */
 function unitWithCos(cos: number, index: number): Float32Array {
@@ -355,6 +355,12 @@ describe('the floors through BOTH stores', () => {
     // scores 0.444 against it, while the four unrelated samples top out at 0.384. The fake embedder
     // puts the fact on e0 and each query on its OWN orthogonal axis, so the dot products are the
     // measured cosines.
+    //
+    // 方案 A REPLACES THIS QUERY'S OUTCOME ON PURPOSE (`我是谁` → `用户是谁`), so the band is measured
+    // with the intent table OFF (`NO_REWRITE`): the floors did not change, and the pre-A behaviour of
+    // the raw query is still the thing this case pins. A's own effect is pinned in
+    // `self_query.spec.ts` and the frozen eval sentinel.
+    const NO_REWRITE = (): string | undefined => undefined
     const fact = '用户的名字是冯飞。'
     const fake = fakeSemantic({
       [fact]: unitWithCos(1, 1),
@@ -372,9 +378,9 @@ describe('the floors through BOTH stores', () => {
       setFloors(rt, { semantic: 0.5, fts: 2, jaccard: 0.2 })
 
       for (const unrelated of ['如何给三文鱼去骨', '量子色动力学里的渐近自由', '宋朝科举制度的演变', '怎么训练边牧接飞盘']) {
-        const strict = await memSearch(rt, unrelated, 5, 'strict')
-        const omitted = await memSearch(rt, unrelated, 5)
-        const loose = await memSearch(rt, unrelated, 5, 'loose')
+        const strict = await memSearch(rt, unrelated, 5, 'strict', NO_REWRITE)
+        const omitted = await memSearch(rt, unrelated, 5, undefined, NO_REWRITE)
+        const loose = await memSearch(rt, unrelated, 5, 'loose', NO_REWRITE)
         expect(strict.hits, unrelated).toHaveLength(0)
         expect(loose.hits, unrelated).toHaveLength(0)
         // The relaxed bar (0.40) is above the 0.384 ceiling, so the default policy finds nothing on
@@ -384,18 +390,18 @@ describe('the floors through BOTH stores', () => {
 
       // A query that CLEARS the strict floors is never retried, so its result set is exactly what it
       // was before this rule existed (no archive tail, no extra candidates).
-      const relatedOmitted = await memSearch(rt, '我的名字', 5)
-      const relatedStrict = await memSearch(rt, '我的名字', 5, 'strict')
+      const relatedOmitted = await memSearch(rt, '我的名字', 5, undefined, NO_REWRITE)
+      const relatedStrict = await memSearch(rt, '我的名字', 5, 'strict', NO_REWRITE)
       expect(textsOf(relatedOmitted.hits)).toEqual([fact])
       expect(relatedOmitted).toEqual(relatedStrict)
       expect(relatedOmitted.relaxed).toBeUndefined()
 
       // 「我是谁」: empty strict (0.444 < 0.5), answered by the relaxed pass (0.444 >= 0.40).
-      const strict = await memSearch(rt, '我是谁', 5, 'strict')
+      const strict = await memSearch(rt, '我是谁', 5, 'strict', NO_REWRITE)
       expect(strict.hits).toHaveLength(0)
       expect(strict.dropped_by_floor?.semantic).toBe(1)
-      expect(textsOf((await memSearch(rt, '我是谁', 5, 'loose')).hits)).toEqual([fact])
-      const omitted = await memSearch(rt, '我是谁', 5)
+      expect(textsOf((await memSearch(rt, '我是谁', 5, 'loose', NO_REWRITE)).hits)).toEqual([fact])
+      const omitted = await memSearch(rt, '我是谁', 5, undefined, NO_REWRITE)
       expect(textsOf(omitted.hits)).toEqual([fact])
       expect(omitted.relaxed).toBe(true)
       expect(omitted.floors?.semantic).toBe(0.4)
@@ -704,7 +710,22 @@ function setFloors(rt: AvantfRuntime, floors: { semantic?: number; fts?: number;
   if (floors.jaccard !== undefined) rt.config.common.retriever.min_jaccard = floors.jaccard
 }
 
-async function memSearch(rt: AvantfRuntime, query: string, limit: number, floors?: FloorProfile): Promise<RecallResult> {
+/**
+ * `rewrite` is the 方案 A test seam. The floors' own calibration runs on the RAW query: `我是谁` /
+ * `我的名字` are exactly the self-referential forms A now AUGMENTS (a second leg run for the
+ * third-person rewrite), which adds candidates and is not a floor behaviour at all. The band test
+ * therefore turns the table off to keep measuring the floor module.
+ */
+async function memSearch(
+  rt: AvantfRuntime,
+  query: string,
+  limit: number,
+  floors?: FloorProfile,
+  rewrite?: (query: string) => string | undefined,
+): Promise<RecallResult> {
+  if (rewrite !== undefined) {
+    return await rt.memory.search({ query, limit, ...(floors === undefined ? {} : { floors }), rewriteQuery: rewrite })
+  }
   return await rt.recall({ action: 'search', query, limit, ...(floors === undefined ? {} : { floors }) }) as RecallResult
 }
 

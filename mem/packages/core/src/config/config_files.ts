@@ -28,8 +28,8 @@ export const DEFAULT_COMMON_CONFIG = `# avantf-mem 公共配置（分层第②�
 
 # semantic:                           # 嵌入后端（记忆与知识共用，跨库分数才可比）
 #   backend: local_bge
-#   local_model: Xenova/bge-small-zh-v1.5   # 必须是 ONNX 仓库
-#   dim: 512
+#   local_model: Xenova/bge-base-zh-v1.5    # 必须是 ONNX 仓库
+#   dim: 768
 #   auto_download: true
 #   ⚠️ cache_dir / mirror 由家族底座 @avantf/dsh-plugin-base 管理：写在这里会被忽略并告警。
 #      缓存目录用环境变量 AVANTF_MEM_MODEL_CACHE，镜像用 AVANTF_MEM_MODEL_MIRROR（或 HF_ENDPOINT）。
@@ -50,7 +50,7 @@ export const DEFAULT_COMMON_CONFIG = `# avantf-mem 公共配置（分层第②�
 #   weight_jaccard: 0.15
 #   # 绝对门槛打在每条腿的原始分上、fuse() 之前（融合分只在一次查询内可比，不能当门槛）。
 #   # 0 = 关闭该门槛；分数等于门槛保留。语义后端不可用时 min_fts_terms 的生效值放宽到 1。
-#   min_semantic_similarity: 0.5      # 语义腿余弦；0.5 只对 bge-small-zh-v1.5/512 标定过，换模型要重标
+#   min_semantic_similarity: 0.5      # 语义腿余弦；0.5 只对 bge-base-zh-v1.5/768（mean pooling）标定过，换模型要重标
 #   min_fts_terms: 2                  # FTS 腿：这一行命中几个不同的查询词元（拉丁词≥5字符 + CJK 3-gram）
 #   min_jaccard: 0.2                  # 实体腿 Jaccard 比值
 

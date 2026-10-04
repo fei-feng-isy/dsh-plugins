@@ -31,6 +31,7 @@ import { MEMORY_SCHEMA, openMemoryStore, type Db } from './db/conn.js'
 import { describeSqlite } from './db/sqlite.js'
 import { describeMigrationOutcome, wasUpgraded } from './db/store.js'
 import { looksRelevant, type RelevanceHit } from './store/lexical.js'
+import { selfQueryRewrite } from './store/self_query.js'
 import { droppedLegs, emptyFloorDrops, totalFloorDrops, type FloorLeg } from './store/floors.js'
 import { MemoryStore } from './store/memory.js'
 import { KnowledgeStore } from './store/knowledge.js'
@@ -293,7 +294,18 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
       // `stopAt = 2` because `looksRelevant` asks exactly that: the probes otherwise run up to
       // 24 `LIMIT 1` FTS lookups each, on the SYNCHRONOUS path that assembles the prompt. The `||`
       // is a real short-circuit: a memory hit answers the question without probing knowledge at all.
-      return looksRelevant(memory.lexicalProbe(text, 2)) || looksRelevant(knowledge.lexicalProbe(text, 2))
+      if (looksRelevant(memory.lexicalProbe(text, 2)) || looksRelevant(knowledge.lexicalProbe(text, 2))) {
+        return true
+      }
+      // 方案 A② — the SAME closed table the retrieval path augments with (`store/self_query.ts`).
+      // `store/lexical.ts` records why the probe is lexical and why that makes a first-person
+      // question score 0 against the third-person fact that answers it ("用户的名字是…" shares no
+      // trigram with "我叫什么"). Counting the rewrite's terms as well is the second chance that
+      // recovers the hint for exactly that family. Still synchronous and pure-string — no model, no
+      // await — so the prompt provider that calls this can keep calling it synchronously.
+      const rewrite = selfQueryRewrite(text)
+      if (rewrite === undefined) return false
+      return looksRelevant(memory.lexicalProbe(rewrite, 2)) || looksRelevant(knowledge.lexicalProbe(rewrite, 2))
     },
     async remember(req: RememberRequest) {
       switch (req.action) {

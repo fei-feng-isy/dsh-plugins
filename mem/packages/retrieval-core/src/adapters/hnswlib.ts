@@ -29,18 +29,20 @@ interface Hnsw {
 /**
  * Search-time beam width, when the config does not say otherwise.
  *
- * hnswlib defaults `ef` to the value passed to `initIndex` (10 here), and that default is a
- * QUALITY CLIFF rather than a neutral choice. Measured through this adapter (2000 random unit
- * vectors, dim 512, true top-10 as ground truth):
+ * hnswlib's own narrow default beam is a QUALITY CLIFF rather than a neutral choice. Measured with
+ * the raw binding at the shipped width (2000 random unit vectors, dim 768, true top-10 as ground
+ * truth):
  *
  *     ef   10     64     128    256    400
- *     R@10 0.45   0.78   0.93   1.00   1.00
- *     ms   0.10   0.36   0.53   0.74   0.90
+ *     R@10 0.29   0.79   0.94   0.99   1.00
+ *     ms   0.20   0.43   0.56   0.72   0.82
  *
- * Recall falls as the corpus grows (at n=8000, R@50 was 0.89 even at `ef = 400`), and random
- * vectors are the WORST case — real embeddings cluster, so production recall is higher than
- * these numbers. 256 keeps the small/medium corpora exact without giving up the speedup; the
- * knob is `vectorStore.hnswlib_ef_search`.
+ * (At dim 512 the same measurement was R@10 0.36 / 0.81 / 0.93 / 1.00 / 1.00 at 0.13 / 0.27 / 0.39 /
+ * 0.51 / 0.57 ms; the row of 0.45 … 1.00 this comment used to carry was an earlier run.) Recall
+ * falls as the corpus grows (at n=8000 / dim 768, R@10 was 0.86 at `ef = 256` and 0.91 at
+ * `ef = 400`), and random vectors are the WORST case — real embeddings cluster, so production
+ * recall is higher than these numbers. 256 keeps the small/medium corpora near-exact without
+ * giving up the speedup; the knob is `vectorStore.hnswlib_ef_search`.
  */
 export const DEFAULT_EF_SEARCH = 256
 

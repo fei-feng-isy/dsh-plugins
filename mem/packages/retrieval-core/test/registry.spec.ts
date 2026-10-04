@@ -30,7 +30,7 @@ describe('model bootstrap config', () => {
   })
 
   it('BGE backend degrades gracefully when transformers.js is not installed', async () => {
-    const b = new LocalBgeBackend('BAAI/bge-small-zh-v1.5', 512)
+    const b = new LocalBgeBackend('BAAI/bge-base-zh-v1.5', 768)
     expect(b.isAvailable()).toBe(false)
     await b.warmUp() // must resolve (not throw) and stay unavailable
     expect(b.isAvailable()).toBe(false)
@@ -62,7 +62,7 @@ describe('pluggable backends', () => {
     const cfg = ConfigSchema.parse({ vectorStore: { backend: 'auto' } })
     const vs = resolveVStore(cfg)
     expect(vs).toBeInstanceOf(AutoVectorStore)
-    expect(vs.dim).toBe(512)
+    expect(vs.dim).toBe(768)
     expect(vs.name).toBe('auto:local_numpy')
   })
 
@@ -83,7 +83,7 @@ describe('pluggable backends', () => {
     const cfg = ConfigSchema.parse({ vectorStore: { backend: 'custom' } })
     class CustomStore implements VectorStore {
       readonly name = 'custom'
-      readonly dim = 512
+      readonly dim = 768
       add() {}
       topk() { return [] }
       fetch() { return new Map() }
@@ -100,9 +100,9 @@ describe('pluggable backends', () => {
     const cfg = ConfigSchema.parse({ semantic: { backend: 'fake' } })
     const fake: SemanticBackend = {
       name: 'fake',
-      dim: 512,
+      dim: 768,
       isAvailable: () => true,
-      encode: async () => new Float32Array(512),
+      encode: async () => new Float32Array(768),
       encodeBatch: async () => [],
     }
     registerSemanticBackend('fake', () => fake)
@@ -152,9 +152,9 @@ describe('pluggable backends', () => {
       seen.push(opts)
       return {
         name: 'capture',
-        dim: 512,
+        dim: 768,
         isAvailable: () => true,
-        encode: async () => new Float32Array(512),
+        encode: async () => new Float32Array(768),
         encodeBatch: async () => [],
       }
     })

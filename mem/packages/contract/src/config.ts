@@ -1,8 +1,10 @@
 import { z } from 'zod'
 
 /**
- * Input window of the SHIPPED models: `Xenova/bge-small-zh-v1.5` (embedder) and
- * `Xenova/bge-reranker-base` (reranker) both read 512 tokens.
+ * Input window of the SHIPPED models: `Xenova/bge-base-zh-v1.5` (embedder) and
+ * `Xenova/bge-reranker-base` (reranker) both read 512 tokens. (The previous default embedder,
+ * `Xenova/bge-small-zh-v1.5`, shares the same 512-token window — this constant did NOT move when
+ * the embedder changed; only its vector width did, 512 → 768.)
  *
  * Exported because more than one default derives from it: the embedder's fallback window, the
  * reranker's pair budget (retrieval-core), and `knowledge.chunk_size` below. transformers.js
@@ -22,8 +24,8 @@ const semanticSchema = z.object({
   backend: z.string().default('local_bge'),
   // Must be an ONNX repo — transformers.js cannot load the PyTorch-only `BAAI/*`
   // originals (they silently degrade to FTS+entity). Xenova/* are the ONNX ports.
-  local_model: z.string().default('Xenova/bge-small-zh-v1.5'),
-  dim: z.number().int().positive().default(512),
+  local_model: z.string().default('Xenova/bge-base-zh-v1.5'),
+  dim: z.number().int().positive().default(768),
   max_input_tokens: maxInputTokens,
   // model download / warmup
   mirror: z.string().default('https://hf-mirror.com'), // domestic mirror by default
@@ -54,14 +56,16 @@ const vectorStoreSchema = z.object({
   /**
    * Vector counts at which `backend: auto` migrates to an ANN index.
    *
-   * Measured with `node scripts/bench-vstore.mjs` (2000 and 8000 uniform-random vectors, dim 512,
-   * k=50): at 2000 the brute-force store answers in a few ms and hnswlib in under 1 ms
-   * (3.3 ms → 0.83 ms on the machine that measured it; the RATIO moves with the CPU, so compare
-   * your own run of the script rather than this pair) at recall 0.999, so migrating there is both
-   * worthwhile and nearly exact. Two reasons not to lower
-   * it: the native index takes ~0.9 s to BUILD (paid on the upgrade and on every batch eviction,
-   * i.e. on the write path), and below a few hundred vectors brute force is already
-   * sub-millisecond. At 8000 recall falls to 0.89, so for a larger corpus raise
+   * Measured with `node scripts/bench-vstore.mjs` at the shipped width (**dim 768**, k=50,
+   * uniform-random vectors = the ANN worst case): at 2000 the brute-force store answers in 3.3 ms
+   * and hnswlib in 1.0 ms (recall 0.9987) while the native index takes **1.17 s** to BUILD; at
+   * 8000 it is 14.3 ms → 2.5 ms at recall 0.864 (build 10.7 s). The earlier dim-512 run was
+   * 2.5 ms → 0.7 ms at recall 0.9993 / build 0.83 s — the RATIO moves with the CPU, so compare your
+   * own run of the script rather than these pairs. Migrating at 2000 is both worthwhile and nearly
+   * exact. Two reasons not to lower
+   * it: the native index build is paid on the upgrade and on every batch eviction,
+   * i.e. on the write path, and below a few hundred vectors brute force is already
+   * millisecond-scale. Recall falls as the corpus grows, so for a larger corpus raise
    * `hnswlib_ef_search` (or accept the loss) instead of moving this threshold.
    */
   auto_thresholds: z
@@ -71,10 +75,11 @@ const vectorStoreSchema = z.object({
     .default({ hnswlib: 2000 }),
   /**
    * ANN search beam width (`ef`). This is the recall/speed knob of the hnswlib index, and it is
-   * NOT optional in practice: the library's own default (10) returned 0.45 of the true top-10 in
-   * a measured benchmark at dim 512, while 256 returned 1.00 at ~0.7 ms per query (brute force:
-   * ~3 ms at n=2000). Recall falls as the corpus grows, so raise this before raising
-   * `auto_thresholds.hnswlib`. The store uses `max(ef_search, 8 × k)`.
+   * NOT optional in practice: the library's own narrow default returned only 0.29 of the true
+   * top-10 in a measured benchmark at the shipped dim 768 (0.36 at dim 512), while 256 returned
+   * 0.99 at 0.72 ms per query (brute force: 3.3 ms at n=2000, dim 768). Recall falls as the corpus
+   * grows (at n=8000 / dim 768, R@10 is 0.86 at `ef=256` and 0.91 at `ef=400`), so raise this before
+   * raising `auto_thresholds.hnswlib`. The store uses `max(ef_search, 8 × k)`.
    */
   hnswlib_ef_search: z.number().int().min(16).max(2048).default(256),
 })
@@ -98,7 +103,7 @@ const retrieverSchema = z.object({
    * the fused number is relative to the query and cannot carry an absolute cutoff (DESIGN §7 /
    * §20.19). A score EQUAL to the floor is kept — only strictly-lower candidates are dropped.
    *
-   * The default is calibrated for the shipped embedder (`Xenova/bge-small-zh-v1.5`, dim 512,
+   * The default is calibrated for the shipped embedder (`Xenova/bge-base-zh-v1.5`, dim 768,
    * mean-pooled AND normalized). A different model is a different cosine scale: re-measure before
    * keeping 0.5 (see DESIGN §20.19).
    */
@@ -304,7 +309,7 @@ export const KnowledgeConfigSchema = z.object({
   domains: z.array(z.string()).default(['design', 'api', 'ops', 'research', 'notes']),
   /**
    * Characters per chunk, derived from the SHIPPED model's window rather than chosen by feel:
-   * `bge-small-zh-v1.5` reads {@link DEFAULT_MODEL_WINDOW_TOKENS} tokens and Chinese costs
+   * `bge-base-zh-v1.5` reads {@link DEFAULT_MODEL_WINDOW_TOKENS} tokens and Chinese costs
    * ~1 token per character, so ~510 characters fit minus the two wrapper tokens; 500 leaves
    * room and keeps the number round. Longer chunks are not
    * rejected — the embedder bounds them and warns once — but their tail would only reach the

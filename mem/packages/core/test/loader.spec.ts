@@ -49,7 +49,7 @@ describe('config layering', () => {
     // untouched siblings keep their defaults (section-deep, not whole-section replace)
     expect(cfg.common.retriever.weight_semantic).toBe(0.55)
     expect(cfg.common.semantic.local_model).toBe('custom/model')
-    expect(cfg.common.semantic.dim).toBe(512)
+    expect(cfg.common.semantic.dim).toBe(768)
   })
 
   it('merges the per-store memory config.yaml (layer ③) — previously parsed and discarded', () => {

@@ -13,9 +13,9 @@ import { ENTITY_EXTRACTOR_VERSION } from '../src/entities/extract.js'
 import { readClock } from '../src/lifecycle/presence.js'
 import { encodeHrrEntityVector, hrrFromBytes, hrrToBytes, phaseSimilarity } from '../src/hrr/index.js'
 
-/** A persisted-vector blob with the configured 512 dim (unit basis vector). */
+/** A persisted-vector blob with the configured 768 dim (unit basis vector). */
 function fakeVector(axis: number): Buffer {
-  const v = new Float32Array(512)
+  const v = new Float32Array(768)
   v[axis] = 1
   return float32ToBytes(v)
 }
@@ -31,7 +31,7 @@ function fakeVector(axis: number): Buffer {
  */
 class NeverWarm implements SemanticBackend {
   readonly name = 'never_warm'
-  readonly dim = 512
+  readonly dim = 768
   isAvailable(): boolean { return false }
   async encode(): Promise<Float32Array> { throw new Error('no model') }
   async encodeBatch(): Promise<Float32Array[]> { throw new Error('no model') }
@@ -488,7 +488,7 @@ describe('semantic index persistence across restarts', () => {
     // actually replace the vector, re-add it to the live index, and record the space it wrote.
     class AlwaysWarm implements SemanticBackend {
       readonly name = 'always_warm'
-      readonly dim = 512
+      readonly dim = 768
       isAvailable(): boolean { return true }
       async encode(): Promise<Float32Array> {
         const vec = new Float32Array(this.dim)
@@ -786,7 +786,7 @@ describe('admin.detail', () => {
  * undetected until something happens to rewrite the fact.
  */
 describe('a vector repair re-queues the facts it just made scorable', () => {
-  const DIM = 512
+  const DIM = 768
   const CONTENT_A = '老王负责甲事务'
   const CONTENT_B = '老王负责乙事务'
   /** cos(V_A, V_B) = 0.85 — high enough that overlap × sim clears the 0.6 threshold. */

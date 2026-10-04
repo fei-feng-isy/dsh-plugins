@@ -5,6 +5,7 @@
  * the same LOCAL vitest config as the other harness-independent units (see `vitest.config.ts`).
  */
 import { describe, it, expect } from 'vitest'
+import { DEGRADED_LEG_NOTE } from '@avantf/mem-contract'
 import { OUTPUT } from '../src/render.js'
 
 /** Every string reachable from the value must be well-formed (JSON.parse accepts lone surrogates). */
@@ -46,5 +47,20 @@ describe('model-facing tool output', () => {
     const text = blocks[0]!.text
     expect(text).toContain('\n  ') // `null, 2` pretty printing is part of the contract
     expect(JSON.parse(text)).toEqual({ ok: true, result: { n: 1, b: false, s: '🐟𠀀' } })
+  })
+
+  it('surfaces the EXISTING degraded flag as a note, and only when it is true (方案 G)', () => {
+    // A recall/query result already carries `degraded`; the note names the consequence. The JSON
+    // block stays the FIRST and strictly-parseable block — the note is appended, never interleaved.
+    const degraded = OUTPUT.render(undefined, { ok: true, result: { hits: [], degraded: true } })
+    expect(degraded).toHaveLength(2)
+    expect(JSON.parse(degraded[0]!.text)).toEqual({ ok: true, result: { hits: [], degraded: true } })
+    expect(degraded[1]!.text).toBe(DEGRADED_LEG_NOTE)
+
+    // Semantic leg live: no note.
+    expect(OUTPUT.render(undefined, { ok: true, result: { hits: [], degraded: false } })).toHaveLength(1)
+    // Graph-only answers / non-recall payloads carry no flag at all: no note.
+    expect(OUTPUT.render(undefined, { ok: true, result: { entity: 'x', count: 1 } })).toHaveLength(1)
+    expect(OUTPUT.render(undefined, { ok: false, error: 'boom' })).toHaveLength(1)
   })
 })

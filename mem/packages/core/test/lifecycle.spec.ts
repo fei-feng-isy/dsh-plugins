@@ -22,16 +22,16 @@ import {
 function alwaysWarm(): SemanticBackend {
   return {
     name: 'always_warm',
-    dim: 512,
+    dim: 768,
     isAvailable: () => true,
-    encode: async () => { const v = new Float32Array(512); v[0] = 1; return v },
-    encodeBatch: async (texts: string[]) => texts.map(() => { const v = new Float32Array(512); v[0] = 1; return v }),
+    encode: async () => { const v = new Float32Array(768); v[0] = 1; return v },
+    encodeBatch: async (texts: string[]) => texts.map(() => { const v = new Float32Array(768); v[0] = 1; return v }),
   }
 }
 
-/** A persisted-vector blob with the configured 512 dim (unit basis vector). */
+/** A persisted-vector blob with the configured 768 dim (unit basis vector). */
 function fakeVector(axis: number): Buffer {
-  const v = new Float32Array(512)
+  const v = new Float32Array(768)
   v[axis] = 1
   return float32ToBytes(v)
 }

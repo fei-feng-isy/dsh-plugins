@@ -46,9 +46,10 @@ describe('hnswlib vector store', () => {
 })
 
 /**
- * The search beam (`ef`) is the recall/speed knob, and hnswlib's own default is a cliff: with
- * `ef = 10` this adapter returned ~0.45 of the true top-k on 2000 random vectors in dim 512,
- * while the configured floor (256) is ~exact. Pinned here because nothing else would notice the
+ * The search beam (`ef`) is the recall/speed knob, and hnswlib's own narrow default is a cliff:
+ * with raw `ef = 10` only ~0.29 of the true top-k was recalled on 2000 random vectors in the
+ * shipped dim 768 (0.36 in the earlier dim-512 run), while the configured floor (256) is
+ * near-exact (~0.99). Pinned here because nothing else would notice the
  * regression — the index still answers, just worse, and the fused ranking hides it.
  */
 describe('hnswlib search beam', () => {

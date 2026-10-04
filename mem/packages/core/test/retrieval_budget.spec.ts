@@ -120,7 +120,7 @@ describe('retrieval health counters', () => {
     // `buildRuntime({ semantic })` seam, which is exactly the difference under test.
     class AlwaysWarm implements SemanticBackend {
       readonly name = 'always_warm'
-      readonly dim = 512
+      readonly dim = 768
       isAvailable(): boolean { return true }
       async encode(): Promise<Float32Array> {
         const vec = new Float32Array(this.dim)

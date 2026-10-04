@@ -207,6 +207,12 @@ export interface SearchInput {
    */
   relaxLegs?: readonly FloorLeg[]
   /**
+   * Overrides the self-reference rewriter for this search (方案 A). Default = the intent table in
+   * `store/self_query.ts`; a TEST SEAM (see `HybridPlan.rewriteQuery`), not a second pluggability
+   * path — `runtime` and the cross-store router never set it.
+   */
+  rewriteQuery?: (query: string) => string | undefined
+  /**
    * Emit a `kind: 'memory'` health event for this search (default true). The cross-store router
    * sets it false: it fuses this leg with the knowledge leg and records ONE `kind: 'cross'`
    * event, so `queries` counts user questions instead of legs (DESIGN §20.5). Distinct from
@@ -1125,6 +1131,7 @@ export class MemoryStore {
       recordStats: input.recordStats,
       floors: input.floors,
       ...(input.relaxLegs === undefined ? {} : { relaxLegs: input.relaxLegs }),
+      ...(input.rewriteQuery === undefined ? {} : { rewriteQuery: input.rewriteQuery }),
     })
     return {
       hits: result.hits,

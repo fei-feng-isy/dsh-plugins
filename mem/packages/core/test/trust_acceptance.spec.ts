@@ -19,9 +19,9 @@ let rt: AvantfRuntime
 const config = (yaml: string): void => writeFileSync(join(dir, 'configs', 'common.yaml'), yaml, 'utf8')
 const open = (): AvantfRuntime => buildRuntime({ dataHome: dir, memoryDbPath: join(dir, 'memory.db') })
 
-/** A persisted-vector blob with the configured 512 dim (unit basis vector). */
+/** A persisted-vector blob with the configured 768 dim (unit basis vector). */
 const fakeVector = (axis: number): Buffer => {
-  const v = new Float32Array(512)
+  const v = new Float32Array(768)
   v[axis] = 1
   return float32ToBytes(v)
 }

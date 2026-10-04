@@ -1,7 +1,7 @@
 /**
  * Knowledge-ingest benchmark — the evidence behind `docs/PERFORMANCE_REVIEW.md` §3.3 / §4.10.
  *
- * This is the one benchmark that uses the REAL embedder (`Xenova/bge-small-zh-v1.5`), because
+ * This is the one benchmark that uses the REAL embedder (`Xenova/bge-base-zh-v1.5`), because
  * the dominant ingest cost is the per-chunk ONNX encode: the store is serial, so throughput is
  * `1 / encode_time` per chunk, and no stub can tell you that number. It measures:
  *

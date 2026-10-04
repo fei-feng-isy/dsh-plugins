@@ -31,7 +31,7 @@ import {
   type VectorStore,
 } from '../src/index.js'
 
-const DIM = 512
+const DIM = 768
 
 let dir: string | undefined
 let rt: AvantfRuntime | undefined

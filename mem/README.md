@@ -9,9 +9,9 @@
   **支持 PDF**（抽取文本层，含中文 CID 字体；扫描件没有文本层会明确报错），可直接摄入 **pandoc 能读的全部格式**（`.docx/.docm/.odt/.epub/.html/.htm/.xhtml/.tex/.rst/.ipynb/.csv/.tsv/.org/.rtf/.fb2/.opml/.bib/.docbook/.man/.typ`）以及 `.xlsx`（先转成 Markdown 再入库：用了哪条转换器随 `converter` 回报（带版本，如 `pandoc-3.11`）、没能带过来的内容随 `warnings` 透出），其他二进制（图片、pptx、旧版 .doc/.xls/.ppt 等）会被拒绝并说明原因；GBK/GB18030 等中文旧编码会自动解码并在结果里标出 `encoding`。pandoc 由家族底座 `@avantf/dsh-plugin-base`（内含环境初始化框架）在启动时按钉死的版本装到受管族根 `~/.avantf/env/tools/pandoc/`（国内镜像优先、官方源兜底，装不了就明确报错；无底座的 CLI/MCP 与降级路径仍用 legacy 目录 `~/.avantf/tools`）。
 - **交叉检索** — 一次查询同时覆盖记忆与文档，且分数可比（联合归一化），用于 agent 上下文。
 - **内部可插拔检索** — `SemanticBackend` / `Reranker` / `VectorStore` 可在 `retrieval-core` 内部替换（注册表 + 配置 + 优雅降级 + 自动升级），无需改动业务流程。
-- **方案 A** — 检索在本地完成（onnx `bge-small-zh-v1.5` + `bge-reranker`）；答案生成在外部（DSH / agent 模型）。
+- **方案 A** — 检索在本地完成（onnx `bge-base-zh-v1.5` + `bge-reranker`）；答案生成在外部（DSH / agent 模型）。
 
-完整架构与路线图见 [DESIGN.md](DESIGN.md)，DSH 分步安装手册见 [docs/INSTALL.md](docs/INSTALL.md)，向量后端选型见 [docs/VECTOR_STORES.md](docs/VECTOR_STORES.md)，预装设施现状（家族底座 `@avantf/dsh-plugin-base` 的环境初始化框架接管：item 清单、受管根、legacy 降级与迁移配方）见 [docs/PROVISIONING.md](docs/PROVISIONING.md)。
+完整架构与路线图见 [DESIGN.md](DESIGN.md)，DSH 分步安装手册见 [docs/INSTALL.md](docs/INSTALL.md)，向量后端选型见 [docs/VECTOR_STORES.md](docs/VECTOR_STORES.md)，预装设施现状（家族底座 `@avantf/dsh-plugin-base` 的环境初始化框架接管：item 清单、受管根、legacy 降级与迁移配方）见 [docs/PROVISIONING.md](docs/PROVISIONING.md)，**自指问句（「我是谁？」）的关联性实测与方案**（第 1 期已实施：A 查询侧增广改写 / A② hint 复用同一张表 / G 仅词法标注）见 [docs/SELF_QUERY_RELEVANCE.md](docs/SELF_QUERY_RELEVANCE.md)。
 
 ## 目录结构（工作区）
 
@@ -96,7 +96,7 @@
 
 当 DSH 插件接入后，启动时**异步**加载语义 / 重排模型（不阻塞 `apply`）。**模型的下载落点与来源由家族框架决定，不再由终端用户的 `~/.avantf/configs/common.yaml` 决定**：
 
-- `mem:model` 是框架的 `model-cache` item，用 **`flat` 布局**落到 `<home>/models/<repo>/<file>`——正是 `@huggingface/transformers` 在其 `cacheDir` 下读的形状。文件列表只对**默认仓库**写死运行时真正会取的四个（`config.json` / `tokenizer.json` / `tokenizer_config.json` / `onnx/model.onnx`）；改过 `semantic.local_model` 的仓库**不写列表**，交给框架按仓库自身的文件清单装，不会因为固定的六件套与仓库不符而 `failed`。运行时因此复用框架装好的那一份，不会二次下载；`buildRuntime` 在框架接管模型根时**延迟**后端构造时的预热，预热只从 `mem:model` 到达终态的回调开始，不会和框架的安装抢同一份文件。
+- `mem:model` 是框架的 `model-cache` item，用 **`flat` 布局**落到 `<home>/models/<repo>/<file>`——正是 `@huggingface/transformers` 在其 `cacheDir` 下读的形状。默认仓库是 `Xenova/bge-base-zh-v1.5`（768 维，首次下载约 **389 MB**）。文件列表只对**默认仓库**写死运行时真正会取的四个（`config.json` / `tokenizer.json` / `tokenizer_config.json` / `onnx/model.onnx`）；改过 `semantic.local_model` 的仓库**不写列表**，交给框架按仓库自身的文件清单装，不会因为固定的四件套与仓库不符而 `failed`。运行时因此复用框架装好的那一份，不会二次下载；`buildRuntime` 在框架接管模型根时**延迟**后端构造时的预热，预热只从 `mem:model` 到达终态的回调开始，不会和框架的安装抢同一份文件。
 - 缓存目录 = 框架的族根 `<home>/models`（`~/.avantf/env/models`，由 `managedRoots` 设成内建默认）；`config.yaml` 里的 `semantic.cache_dir` / `rerank.cache_dir` 会被**忽略并告警**。运维用 `AVANTF_MEM_MODEL_CACHE` 把缓存指到别处时，运行时读那一份，`mem:model` **不再声明**——否则框架会在族根再装一份没人读的完整副本。
 - 镜像默认 `https://hf-mirror.com`，`config.yaml` 里的 `semantic.mirror` / `rerank.mirror` 同样被忽略；运维只能用环境变量逃生口（见下）。
 - 模型 item 拿不到时按**降级**处理：`semantic.auto_download` 打开就由运行时自己取；关闭时 item 仍会声明，但框架判为 `skipped (policy/download-disabled)`、运行时也只读磁盘，检索退回 FTS+entity，**绝不拒载**。
@@ -104,7 +104,7 @@
 ```yaml
 # ~/.avantf/configs/common.yaml
 semantic:
-  local_model: Xenova/bge-small-zh-v1.5   # ⚠️ transformers.js 需要 ONNX 仓库
+  local_model: Xenova/bge-base-zh-v1.5   # ⚠️ transformers.js 需要 ONNX 仓库
   auto_download: true                     # 启动时自动下载（false 则只在已缓存时加载）
 rerank:
   backend: bge_reranker               # 默认 none（不重排）；重排的唯一开关
@@ -113,10 +113,12 @@ rerank:
 ```
 
 > **ONNX 注意**：`@huggingface/transformers`（transformers.js）需要 **ONNX 模型仓库**。
-> `Xenova/bge-small-zh-v1.5`（或 `onnx-community/bge-small-zh-v1.5`）是 ONNX 版；
-> `BAAI/bge-small-zh-v1.5` 是 PyTorch 版，**不能直接用于 transformers.js**（会因找不到 ONNX `model.json` 而降级）。
-> 配置默认值即 ONNX 仓库 `Xenova/bge-small-zh-v1.5`（开箱即有语义检索），加载成功后产出真实 512 维向量。
-> **镜像不一定可达**：`hf-mirror.com` 在部分网络下 80/443 均连接超时（ICMP 也不通），此时语义路径会降级；把镜像环境变量换成可达的 HF 镜像即可（例如 `https://aifasthub.com`，实测可用——它 302 到 `us.aws.cdn.hf.co`）。权重落到族根后即离线可用。
+> `Xenova/bge-base-zh-v1.5`（或 `onnx-community/bge-base-zh-v1.5`）是 ONNX 版；
+> `BAAI/bge-base-zh-v1.5` 是 PyTorch 版，**不能直接用于 transformers.js**（会因找不到 ONNX `model.json` 而降级）。
+> 配置默认值即 ONNX 仓库 `Xenova/bge-base-zh-v1.5`（开箱即有语义检索），加载成功后产出真实 **768 维**向量，fp32
+> 权重首次下载约 **389 MB**、**首次冷启（下载 + 加载）实测约 16.6 s**；权重落到族根后离线可用（本机二次从缓存
+> 加载实测约 0.9 s）。
+> **镜像不一定可达**：`hf-mirror.com` 在部分网络下 80/443 均连接超时（ICMP 也不通），此时语义路径会降级；把镜像环境变量换成可达的 HF 镜像即可（例如 `https://aifasthub.com`，实测可用——它 302 到 `us.aws.cdn.hf.co`）。
 
 镜像与落点的优先级（只剩环境变量这一层，`config.yaml` 不再是真相来源）：
 
@@ -125,7 +127,7 @@ rerank:
 - 下载总闸：`AVANTF_ENVINIT_AUTO_DOWNLOAD=0`（家族级）或 `AVANTF_MEM_AUTO_DOWNLOAD=0`（本项目）——任一为 `0` 都会经环境层落进 `semantic.auto_download` / `rerank.auto_download`，框架与运行时**同时**停手。
 
 - 模型未就绪时检索**自动降级**到 FTS + 实体 Jaccard（`isAvailable()` = false）；下载完成后自动升级到 `0.55 / 0.30 / 0.15` 三路融合。**降级不是终态**：启动预热失败后，后续检索/索引会自动重试（同一时刻只跑一次，最短间隔 30s），无需重启进程；`vectors_fix` 则会当场等待一次完整尝试。`auto_download: false` 时不重试（本地缺失是确定性的）。CLI 启动时同步预热；插件与 MCP 异步预热（MCP 先应答 `initialize`，再后台加载模型）。
-- `@huggingface/transformers` 已声明为 `@avantf/mem-retrieval` 的 **optionalDependency**，`pnpm install` 会自动装上（无需额外 `pnpm add`），由适配器动态加载；首次运行时从镜像下载 BGE 权重（约 95MB，之后离线）。即使装不上也只是语义路径降级，不会报错。
+- `@huggingface/transformers` 已声明为 `@avantf/mem-retrieval` 的 **optionalDependency**，`pnpm install` 会自动装上（无需额外 `pnpm add`），由适配器动态加载；首次运行时从镜像下载 BGE 权重（默认 `Xenova/bge-base-zh-v1.5` 约 **389 MB**，之后离线可用）。即使装不上也只是语义路径降级，不会报错。
 - 重排的唯一开关是 `rerank.backend`（默认 `none`，不加载任何重排模型）；语义后端只负责嵌入。
 - agent 工具统一返回 `{ok:true,result}` / `{ok:false,error,violations}`（DSH 工具与 MCP server 一致）；`db.path` 里的 `~/` 展开为**用户 home**，留空则落在数据目录下。
 

@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
+import { DEGRADED_LEG_NOTE } from '@avantf/mem-contract'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const CLI = join(here, '..', 'lib', 'index.js')
@@ -14,6 +15,12 @@ function run(args: string[], home: string): string {
     env: { ...process.env, AVANTF_HOME: home },
     encoding: 'utf8',
   })
+}
+
+/** Run a command and capture BOTH streams — the 方案 G note is on stderr by design. */
+function runCapture(args: string[], home: string): { stdout: string; stderr: string } {
+  const result = spawnSync('node', [CLI, ...args], { env: { ...process.env, AVANTF_HOME: home }, encoding: 'utf8' })
+  return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' }
 }
 
 /** Run a command expected to FAIL (non-zero exit), capturing its status and stderr. */
@@ -67,6 +74,16 @@ describe('CLI', () => {
 
     const list = JSON.parse(run(['list'], home))
     expect(list.facts.length).toBeGreaterThan(0)
+  })
+
+  it('G: a degraded search keeps stdout pure JSON and states 「仅词法腿」 on stderr', () => {
+    // The CLI tests run with `AVANTF_MEM_AUTO_DOWNLOAD=0` (see `vitest.config.ts`), so the semantic
+    // leg is down and `degraded` is true. 方案 G surfaces that EXISTING flag as a sentence — on
+    // stderr, so `avantf-mem search … | jq` still gets parseable stdout.
+    run(['add', '张伟管理李娜'], home)
+    const { stdout, stderr } = runCapture(['search', '理李娜'], home)
+    expect(JSON.parse(stdout).degraded).toBe(true)
+    expect(stderr).toContain(DEGRADED_LEG_NOTE)
   })
 
   it('kb ingest + list round-trips a document', () => {

@@ -83,17 +83,19 @@ export const MODEL_ITEM = 'mem:model'
  * {@link MODEL_FILES} describes. A DIFFERENT repo is a different file set, which is why the item
  * omits `spec.files` for it (see {@link managedModelSpec}).
  */
-const DEFAULT_MODEL_REPO = 'Xenova/bge-small-zh-v1.5'
+const DEFAULT_MODEL_REPO = 'Xenova/bge-base-zh-v1.5'
 
 /**
  * The files the local embedding runtime actually requests for the DEFAULT ONNX model.
  *
  * Measured, not guessed: with an empty cache, `@huggingface/transformers@4.x` resolving
- * `feature-extraction` for `Xenova/bge-small-zh-v1.5` fetches exactly these four — `config.json`,
+ * `feature-extraction` for `Xenova/bge-base-zh-v1.5` fetches exactly these four — `config.json`,
  * `tokenizer.json`, `tokenizer_config.json` and the fp32 `onnx/model.onnx`. The repo ALSO carries
  * `special_tokens_map.json`, `vocab.txt` and seven other ONNX quantisations the default run never
  * opens; declaring them would download hundreds of megabytes of dead weight. The list stays narrow
- * to what is read.
+ * to what is read. (It is UNCHANGED from the previous default `Xenova/bge-small-zh-v1.5`: both
+ * repos are Xenova BGE ports with the same four runtime files — verified against the local cache of
+ * each. Only the bytes behind `onnx/model.onnx` differ, ~95 MB for small vs ~389 MB for base.)
  */
 const MODEL_FILES: readonly string[] = [
   'config.json',
@@ -175,7 +177,8 @@ export interface ResourcePlan {
  *   2. **The runtime reads its models from elsewhere** — `semantic.cache_dir` is not the framework's
  *      `<home>/models`. That happens through the operator escape hatch `AVANTF_MEM_MODEL_CACHE`
  *      (env layer ④): the runtime loads from that directory, so a `mem:model` item would install a
- *      full second copy under `<home>/models` that nothing ever reads (~190 MB). Declaring nothing
+ *      full second copy under `<home>/models` that nothing ever reads (~389 MB for the default
+ *      `Xenova/bge-base-zh-v1.5`). Declaring nothing
  *      is the fix; the caller warms from the override directory instead.
  *
  * `files` is the narrow {@link MODEL_FILES} set only for the DEFAULT repo; a user-changed repo has a

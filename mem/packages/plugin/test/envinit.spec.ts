@@ -209,7 +209,7 @@ describe('envinit loader', () => {
       pandoc: true,
       archiveMirrors: ['https://mirror.example/{url}'],
       modelAutoDownload: true,
-      model: { repo: 'Xenova/bge-small-zh-v1.5', files: ['config.json', 'onnx/model.onnx'], endpoint: 'https://hf-mirror.com' },
+      model: { repo: 'Xenova/bge-base-zh-v1.5', files: ['config.json', 'onnx/model.onnx'], endpoint: 'https://hf-mirror.com' },
     }, (entry) => { settled.push(entry) })
 
     // A second instance, with the engine's archive mirror list and its own provider set: the archive
@@ -252,7 +252,7 @@ describe('envinit loader', () => {
     expect(model.target).toEqual({ root: 'models' })
     expect(model.onMissing).toEqual({ atStartup: 'degrade', atUse: 'degrade' })
     expect(model.spec).toMatchObject({
-      repo: 'Xenova/bge-small-zh-v1.5',
+      repo: 'Xenova/bge-base-zh-v1.5',
       revision: 'main',
       layout: 'flat',
       endpoint: 'https://hf-mirror.com',
@@ -432,7 +432,7 @@ describe('envinit loader', () => {
       pandoc: true,
       archiveMirrors: [],
       modelAutoDownload: false,
-      model: { repo: 'Xenova/bge-small-zh-v1.5', files: ['config.json', 'onnx/model.onnx'], endpoint: 'https://hf-mirror.com' },
+      model: { repo: 'Xenova/bge-base-zh-v1.5', files: ['config.json', 'onnx/model.onnx'], endpoint: 'https://hf-mirror.com' },
     }, (entry) => { settled.push(entry) })
 
     // The item is STILL declared — the framework's `skipped (policy/download-disabled)` line is the
@@ -481,7 +481,7 @@ describe('envinit loader', () => {
       pandoc: true,
       archiveMirrors: [],
       modelAutoDownload: true,
-      model: { repo: 'Xenova/bge-small-zh-v1.5', files: ['config.json'], endpoint: 'https://hf-mirror.com' },
+      model: { repo: 'Xenova/bge-base-zh-v1.5', files: ['config.json'], endpoint: 'https://hf-mirror.com' },
     }, () => {})
 
     const model = calls.declare[0].items.find((item: { id: string }) => item.id === 'mem:model')
@@ -501,12 +501,12 @@ describe('envinit loader', () => {
   it('scopes the model item to repos whose files the runtime really reads (managedModelSpec)', async () => {
     const env = await freshEnvinit()
     const root = join(tmpdir(), 'avantf-mem-envinit-models')
-    const semantic = { backend: 'local_bge', local_model: 'Xenova/bge-small-zh-v1.5', cache_dir: root, mirror: 'https://hf-mirror.com' }
+    const semantic = { backend: 'local_bge', local_model: 'Xenova/bge-base-zh-v1.5', cache_dir: root, mirror: 'https://hf-mirror.com' }
 
     // The default repo gets the measured narrow list: exactly what transformers.js requests.
     const managed = env.managedModelSpec(semantic, root)
     expect(managed).toEqual({
-      repo: 'Xenova/bge-small-zh-v1.5',
+      repo: 'Xenova/bge-base-zh-v1.5',
       files: ['config.json', 'tokenizer.json', 'tokenizer_config.json', 'onnx/model.onnx'],
       endpoint: 'https://hf-mirror.com',
     })

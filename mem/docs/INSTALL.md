@@ -149,10 +149,16 @@ pnpm add <AVANTF>/packages/plugin
 ```yaml
 semantic:
   backend: local_bge
-  local_model: Xenova/bge-small-zh-v1.5   # ⚠️ 必须是 ONNX 仓库（默认值已是它）
-  dim: 512
+  local_model: Xenova/bge-base-zh-v1.5   # ⚠️ 必须是 ONNX 仓库（默认值已是它）
+  dim: 768
   auto_download: true
 ```
+
+> 默认仓库 `Xenova/bge-base-zh-v1.5` 是 768 维 fp32 ONNX：**首次下载约 389 MB、首次冷启（下载 + 加载）约
+> 16.6 s**；权重落到族根后即**离线可用**（本机二次从缓存加载实测约 0.9 s）。一行 `semantic.local_model`
+> 换成别的仓库时，`semantic.dim` 必须同步改（向量库按它建，不一致会在以后表现为乱码分数），并 `reindex`。
+>
+> 语义路径拿不到时检索**自动降级为 FTS + 实体 Jaccard**，功能仍可用（只是没有语义召回），绝不拒载。
 
 > `semantic.cache_dir` / `semantic.mirror`（以及 `rerank` 的同名键）在 `config.yaml` 里**已不再生效**：
 > 框架接管了模型的落点与来源，这两个键会被忽略并打一条告警。落点固定是框架族根
@@ -172,7 +178,7 @@ semantic:
 > 用 `AVANTF_MEM_MODEL_CACHE` 把缓存目录指到族根以外时，运行时读那个目录，`mem:model` **不再声明**
 > （否则框架会在族根再装一份没人读的副本）。
 
-- `BAAI/bge-small-zh-v1.5` 是 **PyTorch** 仓库，transformers.js 找不到 `onnx/model.onnx`，
+- `BAAI/bge-base-zh-v1.5` 是 **PyTorch** 仓库，transformers.js 找不到 `onnx/model.onnx`，
   会**优雅降级**为 FTS + 实体检索（功能可用，只是没有语义召回）。
 - 启动日志会直接打印降级原因，便于确认。
 - 优先级：环境变量 `AVANTF_MEM_MODEL_MIRROR` / `HF_ENDPOINT` > 默认镜像；环境层④ 把它写进
@@ -296,7 +302,7 @@ cd <HARNESS> && pnpm dsh web
 [avantf-mem] INFO envinit: mem:pandoc installed (… 3.11)          # 家族框架后台派发；已存在=present，失败=skipped/failed
 [avantf-mem] INFO envinit: mem:model installed (installed <sha>) # flat 模型：<home>/models/<repo>/<file>
 [avantf-mem] INFO model bootstrap: warm start — model=... mirror=... cache=...
-[avantf-mem] INFO semantic: embedding model ready ... (dim=512, ...ms)
+[avantf-mem] INFO semantic: embedding model ready ... (dim=768, ...ms)
 [avantf-mem] INFO tool registered: mem_remember / mem_recall / mem_admin / kb_add / kb_list / kb_remove / kb_reindex / kb_query
 [avantf-mem] INFO remote registered: avantfMem (client ctx.remote.avantfMem.*)
 [avantf-mem] INFO typert registered: avantfMem host face (5 invocations)
@@ -444,7 +450,7 @@ domains:              # 允许的领域；库中已有的领域始终仍然可�
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
-| 日志里 `semantic: embedding model unavailable … Could not locate file …/onnx/model.onnx` | 配的是 PyTorch 仓库，或镜像不可达 | 改成 ONNX 仓库（如 `Xenova/bge-small-zh-v1.5`），检查 `mirror` |
+| 日志里 `semantic: embedding model unavailable … Could not locate file …/onnx/model.onnx` | 配的是 PyTorch 仓库，或镜像不可达 | 改成 ONNX 仓库（如 `Xenova/bge-base-zh-v1.5`），检查 `mirror` |
 | 标签条里看不到「记忆」「知识」 | `exports["./client"]` 指向的文件不存在／不是自注册 bundle；或 `dsh.client.inject` 缺客户端包边 | 确认 `lib/client.js` 存在且含 `__ModuleLoader__.load`；`dsh.client.inject` 至少含 `@deepseek-ai/dsh-client-ui-conversation`、`@deepseek-ai/dsh-api-remotes` |
 | 页面显示「avantfMem Remote 未挂载」 | 客户端没挂载自己的 typert contribution | 客户端 apply 里 `await ctx.remote.$mount(clientContribution)`，再用 `ctx.get('remote.avantfMem')` 取（**不能**把 `remote.avantfMem` 写进插件 `inject`：boot 审计 pending 条目会整体失败） |
 | 整个 web 界面崩塌／设置入口消失 | 有客户端条目 pending 或 apply 抛错 | `packages/client/web/src/boot.ts#assertEntriesActive` 会因 pending 条目整体 throw；检查控制台 `[avantf-mem]` 报错 |

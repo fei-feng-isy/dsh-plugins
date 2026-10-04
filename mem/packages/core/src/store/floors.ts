@@ -23,8 +23,10 @@
  * WHY THERE IS A RELAXED PROFILE AT ALL, AND WHY IT IS NOT "NO FLOOR". The floors are calibrated
  * for paraphrase-style relevance, and there is a band where no threshold separates "answers the
  * question" from "unrelated": measured on the live store, the fact answering 「我是谁」 scored cosine
- * 0.444 while four unrelated queries topped out at 0.384 — a 0.06 margin, and the answering fact
- * was the query's own top-1. So the answer is not a lower default (which would trade precision for
+ * 0.444 under the original 512-dim default (0.459 under the shipped 768-dim `bge-base-zh-v1.5`)
+ * while four unrelated queries topped out at 0.384 (0.353 at 768) — a ~0.1 margin, and the
+ * answering fact was the query's own top-1. So the answer is not a lower default (which would trade
+ * precision for
  * the whole corpus) but a SECOND pass with an absolute bottom line ({@link LOOSE_FLOORS}), run only
  * when the strict pass returned nothing at all AND the floors are why (`dropped_by_floor > 0`).
  *
@@ -73,12 +75,14 @@ export type FloorLeg = 'semantic' | 'fts' | 'jaccard'
 /**
  * What the RELAXED pass lowers each floor TO, as absolute values.
  *
- *  - semantic **0.40**: strictly BETWEEN the measured unrelated-query ceiling (0.384) and the
- *    pronoun-query top-1 (0.444). Both bounds are load-bearing. Above 0.384, so a genuinely
+ *  - semantic **0.40**: strictly BETWEEN the measured unrelated-query ceiling and the
+ *    pronoun-query top-1. Both bounds are load-bearing. Above the ceiling, so a genuinely
  *    unrelated question still comes back EMPTY from the relaxed pass — the four measured samples
- *    topped out at 0.300/0.384/0.315/0.351, and a 0.35 bar would already admit two of them. Below
- *    0.444, so 「我是谁」 finds its fact. 0.40 keeps the larger margin on the noise side, which is
- *    where a false positive costs the caller a wrong answer rather than a missing one.
+ *    topped out at 0.300/0.384/0.315/0.351 under the original 512-dim default and at
+ *    0.271/0.353/0.350/0.269 under the shipped 768-dim `bge-base-zh-v1.5` (a 0.35 bar would already
+ *    admit two of them in either scale). Below the top-1, so 「我是谁」 finds its fact (0.444 at 512,
+ *    0.459 at 768). 0.40 keeps the larger margin on the noise side, which is where a false positive
+ *    costs the caller a wrong answer rather than a missing one.
  *  - fts: NOT a constant — {@link looseTermFloor}, half the query's distinct terms with a floor of
  *    1. `1` here is the "no terms to scale by" baseline (the previously constant value); a query
  *    that cannot produce terms is not graded at all, and one that produces a single term (every

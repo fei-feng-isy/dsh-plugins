@@ -41,6 +41,7 @@ import {
 } from '@avantf/mem-retrieval'
 import { droppedLegs, emptyFloorDrops, resolveFloors, totalFloorDrops, type FloorLeg } from './floors.js'
 import { relevanceTerms } from './lexical.js'
+import { selfQueryRewrite } from './self_query.js'
 
 /** The `limit` a caller gets when it passes nothing usable. */
 export const DEFAULT_SEARCH_LIMIT = 10
@@ -164,6 +165,15 @@ export interface HybridPlan {
   /** Per-call output token budget; `0` = unlimited, omitted = `retriever.max_output_tokens`. */
   maxTokens?: number
   queryVector?: Float32Array
+  /**
+   * Overrides the self-reference rewriter for this search (方案 A, `store/self_query.ts`).
+   *
+   * Default = the intent table. A TEST SEAM, not a second pluggability path: the frozen sentinel
+   * passes `() => undefined` to prove its assertions rest on the table (turn it off and the
+   * self-referential questions fall back to their pre-A outcomes), and `() => '<anything>'` to
+   * reproduce a MISCONFIGURED table and prove the augmentation only ever ADDS recall.
+   */
+  rewriteQuery?: (query: string) => string | undefined
   /**
    * Which relevance-floor policy governs this query (see the contract's `FLOOR_PROFILES`):
    * omitted = the configured floors plus ONE relaxed pass when they empty the result, `'strict'` =
@@ -289,6 +299,30 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
   const termCount = relevanceTerms(query).length
 
   /**
+   * 方案 A — the self-reference AUGMENTATION (docs/SELF_QUERY_RELEVANCE.md §4-A).
+   *
+   * The corpus writes the user in the third person and the user asks in the first, so a
+   * first-person question shares no lexical term with the fact that answers it and the semantic leg
+   * has to carry the whole decision. The intent table (`store/self_query.ts`) supplies ONE canonical
+   * third-person rewrite; the ORIGINAL query and the rewrite each run the full leg set, and each
+   * leg's raw scores are UNIONED (a candidate in both keeps its MAX score — this is not a second
+   * leg, so it must not double the leg's weight).
+   *
+   * WHY AUGMENT, NOT REPLACE. The table is a closed cue list over a language with unbounded
+   * self-reference variants, so a wrong match is inevitable. Under augmentation a false positive can
+   * only add candidates; the original query's candidates are always kept, exactly like the relaxed
+   * floor policy ("only ever widens"). Under replacement it would change what the user actually
+   * asked. `queries.length === 1` (the overwhelming majority) leaves the run below bit-identical to
+   * the pre-A path: one `deps.legs` call, same context, same vector wiring.
+   *
+   * The floors are resolved ONCE from the ORIGINAL query and applied to both runs. That is what
+   * makes "never narrows" structural rather than a promise: the merged per-leg score is
+   * `max(original, rewrite) >= original`, and a floor only removes entries, so any candidate the
+   * original query cleared its floor with still clears it in the union.
+   */
+  const augment = (plan.rewriteQuery ?? selfQueryRewrite)(query)
+  const queries = augment !== undefined && augment !== query ? [query, augment] : [query]
+  /**
    * The query vector in force, ACROSS both passes.
    *
    * The single-store path is handed no vector by its caller (only the cross-store router encodes
@@ -298,6 +332,12 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
    * (cross-store) is already here and is passed through unchanged.
    */
   let passVector = plan.queryVector
+  /**
+   * The rewrite's own vector, ACROSS both passes, for the same reason as {@link passVector}: the
+   * rewrite is a different text, so it needs its own encode, and the relaxed retry must not pay for
+   * it twice. Keyed by variant text (there is at most one).
+   */
+  const augmentVectors = new Map<string, Float32Array>()
 
   /**
    * One full pass under ONE floor profile: legs → fuse → live filter → rerank → slice → budget.
@@ -317,17 +357,29 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
       termCount,
       ...(relaxLegs === undefined ? {} : { relaxLegs }),
     })
-    const legs = await runLegs(deps, {
-      query,
-      limit,
-      overFetch,
-      legCap,
-      semAvail,
-      weights,
-      floors,
-      ...(passVector === undefined ? {} : { queryVector: passVector }),
-      onQueryVector: (vec) => { passVector = vec },
-    })
+    // One `deps.legs` call per query variant, CONCURRENTLY. The caller-supplied vector belongs to the
+    // ORIGINAL query only: handing it to the rewrite would score the semantic leg with the wrong
+    // text's embedding. The rewrite therefore encodes itself (the store's own `semantic.encode`) and
+    // publishes through `onQueryVector`, which is kept per variant for the relaxed retry.
+    const runs = await Promise.all(queries.map(async (variant, index) => {
+      const isOriginal = index === 0
+      const vector = isOriginal ? passVector : augmentVectors.get(variant)
+      return runLegs(deps, {
+        query: variant,
+        limit,
+        overFetch,
+        legCap,
+        semAvail,
+        weights,
+        floors,
+        ...(vector === undefined ? {} : { queryVector: vector }),
+        onQueryVector: (vec) => {
+          if (isOriginal) passVector = vec
+          else augmentVectors.set(variant, vec)
+        },
+      })
+    }))
+    const legs = runs.length === 1 ? runs[0]! : unionLegs(runs)
     let capped = 0
     for (const leg of legs) if (leg.capped === true) capped += 1
     const droppedByFloor = emptyFloorDrops()
@@ -390,6 +442,47 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
     dropped_by_floor: chosen.dropped_by_floor,
     ...(relaxed ? { relaxed: true } : {}),
   }
+}
+
+/**
+ * Union the per-leg raw scores of the augmented runs (方案 A) — original first, then the rewrite(s).
+ *
+ * Same leg INDEX, not "same `leg` label": both runs come from ONE store with an identical context
+ * except for the query text, so the leg array has the same shape and order (memory: semantic,
+ * jaccard, fts[, hrr]; knowledge: semantic, fts, jaccard). Merging by index is what keeps this from
+ * becoming a second leg with its own weight — the weight, `leg` label and `capped` bookkeeping stay
+ * the ORIGINAL run's.
+ *
+ * A candidate present in both runs keeps its MAX score, and `capped` is the OR. `droppedByFloor`
+ * is the MAX too: both runs commonly drop the SAME candidate (the rewrite is a third-person
+ * paraphrase of the same question), and we do not carry the pre-floor raw sets, so summing would
+ * double-count it. The max is the conservative number that never inflates the drop report — which
+ * is what `feeds` the relaxed-retry decision and the health counters. A store returning a different
+ * leg count for one variant is a contract violation; the extra legs are appended rather than
+ * silently discarded, so it cannot narrow the union either.
+ */
+function unionLegs(runs: readonly (readonly HybridLeg[])[]): HybridLeg[] {
+  const [first, ...rest] = runs
+  const out: HybridLeg[] = (first ?? []).map((leg) => ({ ...leg, scores: new Map(leg.scores) }))
+  for (const run of rest) {
+    run.forEach((leg, index) => {
+      const current = out[index]
+      if (current === undefined) {
+        out.push({ ...leg, scores: new Map(leg.scores) })
+        return
+      }
+      for (const [id, score] of leg.scores) {
+        const previous = current.scores.get(id)
+        if (previous === undefined || score > previous) current.scores.set(id, score)
+      }
+      if (leg.capped === true) current.capped = true
+      if (leg.leg !== undefined) current.leg = leg.leg
+      if (leg.droppedByFloor !== undefined) {
+        current.droppedByFloor = Math.max(current.droppedByFloor ?? 0, leg.droppedByFloor)
+      }
+    })
+  }
+  return out
 }
 
 /**

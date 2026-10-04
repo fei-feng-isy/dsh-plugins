@@ -45,7 +45,7 @@
   自己开抓，先等文件落盘再让运行时去看。
 - **`mem:model` 在运行时另指缓存目录时不声明**：运维设了 `AVANTF_MEM_MODEL_CACHE`（环境层写进
   `semantic.cache_dir`）时，运行时读的是那个目录，声明 item 只会让族根多出一份没人读的完整副本（约
-  190 MB）。此时插件不派发 item，直接预热。
+  389 MB，默认仓库 `Xenova/bge-base-zh-v1.5` 的 fp32 权重）。此时插件不派发 item，直接预热。
 
 **功能与开关**：`auto_install: false` 的 pandoc 拿不到 item，框架不会去取操作者明确关掉的东西。模型侧不同：
 `semantic.auto_download: false` 时 item **仍会声明**，但只对该 kind 关掉下载，框架的终态是

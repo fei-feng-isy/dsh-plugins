@@ -220,6 +220,17 @@ export interface RecallResult {
  */
 export const DEGRADED_WEIGHTS: RecallResult['weights'] = { semantic: 0, fts: 0.65, jaccard: 0.35 }
 
+/**
+ * The human/model-facing sentence a caller renders when {@link RecallResult.degraded} is true (方案 G).
+ *
+ * The signal itself is the EXISTING `degraded` flag — this constant adds NO field and no new state,
+ * it only spells out what that flag means so the tool output, the CLI and the panel say the same
+ * thing instead of each keeping its own copy. Deliberately not awaited on a model warm-up: the
+ * three-stage prewarm gate keeps the model off the first screen, so a cold semantic leg is annotated,
+ * never waited for.
+ */
+export const DEGRADED_LEG_NOTE = '本次仅词法腿，语义腿未就绪（语义后端不可用，结果只来自 FTS 与实体腿）。'
+
 export interface ContradictionRecord {
   contradiction_id: number
   fact_a: number

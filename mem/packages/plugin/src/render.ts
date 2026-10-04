@@ -21,12 +21,31 @@
  * @module plugin/render
  */
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import { toWellFormedDeep } from '@avantf/mem-contract'
+import { DEGRADED_LEG_NOTE, toWellFormedDeep } from '@avantf/mem-contract'
+
+/**
+ * 方案 G — surface the EXISTING `degraded` flag as a sentence, without inventing a field.
+ *
+ * A recall/query result already carries `degraded` (with `weights`/`floors`) in its JSON, so a
+ * caller COULD read it; the annotation names the consequence in plain words ("本次仅词法腿") for the
+ * model and the operator who does not parse the envelope. It is a SECOND text block, never text
+ * appended to the JSON block: the JSON block stays strictly parseable (see the module note). Absent
+ * whenever the flag is absent/false — a graph-only answer reports `degraded: false`, so no note.
+ */
+function degradedLegNote(value: JsonValue): string | undefined {
+  const result = (value as { result?: { degraded?: unknown } } | null)?.result
+  return result !== null && typeof result === 'object' && result.degraded === true ? DEGRADED_LEG_NOTE : undefined
+}
 
 /** The tool output spec registered on every mem tool. */
 export const OUTPUT = {
   schema: { type: 'object', additionalProperties: true },
-  render: (_args: unknown, value: JsonValue): { type: 'text'; text: string }[] => [
-    { type: 'text', text: JSON.stringify(toWellFormedDeep(value), null, 2) },
-  ],
+  render: (_args: unknown, value: JsonValue): { type: 'text'; text: string }[] => {
+    const blocks: { type: 'text'; text: string }[] = [
+      { type: 'text', text: JSON.stringify(toWellFormedDeep(value), null, 2) },
+    ]
+    const note = degradedLegNote(value)
+    if (note !== undefined) blocks.push({ type: 'text', text: note })
+    return blocks
+  },
 } as const

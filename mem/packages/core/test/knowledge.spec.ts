@@ -784,7 +784,7 @@ describe('ingestion boundary: file kind and size', () => {
  */
 describe('cross-store query encodes the query once', () => {
   it('passes one pre-encoded vector to both legs', async () => {
-    const DIM = 512
+    const DIM = 768
     let encodes = 0
     const vector = ((): Float32Array => { const v = new Float32Array(DIM); v[0] = 1; return v })()
     const counting: SemanticBackend = {
@@ -830,20 +830,20 @@ describe('injected vectors are checked for width', () => {
   })
 
   it('buildRuntime refuses a semantic override whose dim differs from config.semantic.dim', () => {
-    // The vector stores are built from `config.semantic.dim` (512 by default), so a narrower
+    // The vector stores are built from `config.semantic.dim` (768 by default), so a narrower
     // backend would put mismatched vectors into them and only show up later as garbage scores.
     // The guard fires before the database is opened.
     expect(() => buildRuntime({ dataHome: dir, memoryDbPath: join(dir, 'memory.db'), semantic: fake(128) }))
-      .toThrow(/语义覆盖维度 128 ≠ 配置里的 semantic\.dim 512/)
+      .toThrow(/语义覆盖维度 128 ≠ 配置里的 semantic\.dim 768/)
   })
 
   it('a store rejects a caller-supplied queryVector of the wrong width', async () => {
-    const rt2 = buildRuntime({ dataHome: dir, memoryDbPath: join(dir, 'memory.db'), semantic: fake(512) })
+    const rt2 = buildRuntime({ dataHome: dir, memoryDbPath: join(dir, 'memory.db'), semantic: fake(768) })
     try {
       await expect(rt2.memory.search({ query: '张伟', queryVector: new Float32Array(8) }))
-        .rejects.toThrow(/queryVector 维度不符：8 != 512/)
+        .rejects.toThrow(/queryVector 维度不符：8 != 768/)
       await expect(rt2.knowledge.search('张伟', { queryVector: new Float32Array(8) }))
-        .rejects.toThrow(/queryVector 维度不符：8 != 512/)
+        .rejects.toThrow(/queryVector 维度不符：8 != 768/)
     } finally {
       rt2.shutdown()
     }
@@ -999,10 +999,10 @@ describe('file ingestion: formats that used to be silent', () => {
 describe('ingest reports the chunks that got no semantic vector', () => {
   const fake = (available: boolean): SemanticBackend => ({
     name: 'fake_ingest_report',
-    dim: 512,
+    dim: 768,
     isAvailable: () => available,
-    encode: async () => new Float32Array(512),
-    encodeBatch: async (texts) => texts.map(() => new Float32Array(512)),
+    encode: async () => new Float32Array(768),
+    encodeBatch: async (texts) => texts.map(() => new Float32Array(768)),
   })
 
   function runtimeWith(available: boolean): { rt: AvantfRuntime; home: string } {
@@ -1079,7 +1079,7 @@ describe('ingest reports the chunks that got no semantic vector', () => {
  * dropped vectors it did not have to drop.
  */
 describe('re-ingesting unchanged text reuses the stored vectors', () => {
-  const DIM = 512
+  const DIM = 768
   let available = true
   let encodes = 0
 

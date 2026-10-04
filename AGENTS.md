@@ -245,15 +245,18 @@ base 只构建一次）：
 - **mem**：`@avantf/mem-contract` 是工具 / 配置 schema 与 UI payload 的**唯一真源**（工具 schema、
   MCP inputSchema、CLI 参数、client 类型都由它派生）。两个存储（memory / knowledge）各自独立、共用一套
   检索编排：工具键 → 运行时的派发表只在 `core/src/dispatch.ts`，检索流程只在 `core/src/store/hybrid.ts`，
-  **不许再分叉**。中文评测集（`core/test/eval_zh.spec.ts`，35 条）的汇总数字是**精确断言** —— 任何移动它的
+  **不许再分叉**。中文评测集（`core/test/eval_zh.spec.ts`，**41 条**：原 35 条 + 2026-10-04 自指问句哨兵 6 条——
+  4 条表内 + 2 条表外 KNOWN GAP，见 `mem/docs/SELF_QUERY_RELEVANCE.md`）的汇总数字是**精确断言** —— 任何移动它的
   改动都要重新冻结并解释。`pnpm -C mem typecheck` 也检查 `test/`，且要在 `pnpm -C mem build` **之后**跑
   （包通过产出的 `lib/*.d.ts` 读依赖）；`pnpm -C mem typecheck:dsh` 覆盖插件的 src + specs，是本地门禁
   （CI 没有 harness）。读 zod 内部别猜：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })`，
   形状断言在 `contract.spec.ts` / `tool_schema.spec.ts`。**工具面就是 `TOOL_SPECS` 里的 8 个**（`mem_*` 3 +
   `kb_*` 5）；`kb_manage` 属 `KB_TOOL`（UI remote 与 CLI 用的内部引擎 API），**不在模型面**——按 `name:` 数会数成 9，
   挂载冒烟断言的就是 8。**`mem/CHANGELOG.md` 的 `[Unreleased]` 必须为空**（mem 严格门禁的 preflight 要求）：
-  新条目写进**正在准备的版本段**（当前 `[0.4.0]`），已冻结的历史段不动——这条已经咬过两次（2026-10-02 两次把条目
-  落进 `[Unreleased]` 都让 `pnpm -C mem release:check` 变红），派单时可直接把"往 `[0.4.0]` 写"写进任务。
+  新条目写进**正在准备的版本段**——`[0.4.0]` 已于 **2026-10-03 发布**（历史段不动），**下一条用户可见改动起用 `[0.5.0]`**：
+  门禁要求**首个版本段 == `packages/plugin/package.json` 的版本**，所以要么先 `pnpm version:set mem 0.5.0` 再写 `[0.5.0]`，
+  要么把条目攥在手里、等切版本那天一起写（**不要**塞进已发布的 `[0.4.0]`）——这条已经咬过两次（2026-10-02 两次把条目
+  落进 `[Unreleased]` 都让 `pnpm -C mem release:check` 变红）。
 - **mission**：任务树状态机在 `mission/packages/core`（**刻意不带 Node 类型**），`mission/packages/plugin` 是薄壳；
   它的领域模型与 mem 不共享任何东西。**调度语义（v1）**：**容量是派发闸门，不是受理闸门** ——
   `create_mission`/`decompose_mission` 永不因容量失败，节点进 `ready` 即排队；候选不满足

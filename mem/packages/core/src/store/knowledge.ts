@@ -76,6 +76,8 @@ export interface KnowledgeSearchOptions {
    * dropping legs on its second call.
    */
   relaxLegs?: readonly FloorLeg[]
+  /** See `SearchInput.rewriteQuery` (方案 A test seam); default = the intent table. */
+  rewriteQuery?: (query: string) => string | undefined
   /** See `SearchInput.recordStats`: the cross-store router records the merged query once. */
   recordStats?: boolean
   /**
@@ -1328,6 +1330,7 @@ export class KnowledgeStore {
       recordStats: opts?.recordStats,
       floors: opts?.floors,
       ...(opts?.relaxLegs === undefined ? {} : { relaxLegs: opts.relaxLegs }),
+      ...(opts?.rewriteQuery === undefined ? {} : { rewriteQuery: opts.rewriteQuery }),
     })
     opts?.onResult?.(result)
     return result.hits

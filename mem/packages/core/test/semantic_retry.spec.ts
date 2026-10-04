@@ -13,7 +13,7 @@ import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
  */
 class FakeSemantic implements SemanticBackend {
   readonly name = 'fake_retry'
-  readonly dim = 512
+  readonly dim = 768
   available = false
   warmUps = 0
   nudges = 0
