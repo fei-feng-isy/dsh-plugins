@@ -19,6 +19,7 @@ import type {
   WorkerSessionTarget,
 } from './contract.js'
 import { INSTALL_STYLES } from './styles.js'
+import { rememberOverride, viewStateFor, type MissionViewState } from './viewState.js'
 import { timingBadge, timingDetail } from '../timeFormat.js'
 
 /** Statuses that mean "this mission is over" — a tree whose root reached one is deletable. */
@@ -106,11 +107,19 @@ interface DialogState {
 /**
  * The shared row state, passed down as one object so adding a field cannot go stale in half
  * the tree. The delete action is deliberately NOT here: it belongs to the tree.
+ *
+ * `overrides`/`rememberOverride` are the session's module-level view state (see `viewState.ts`): the
+ * host remounts this whole view whenever the tab's running marker flips, so a row's expand/collapse
+ * click is seeded from there and written back — otherwise a mission starting would fold the tree the
+ * reader had just opened.
  */
 interface RowActions {
   /** The node whose dialog is open, if any; the row uses it to mark itself as the source. */
   readonly openId: string | undefined
   readonly onOpenDetail: (nodeId: string) => void
+  /** Survives the remount: a Map so mutating it does not invalidate this memoized object. */
+  readonly overrides: ReadonlyMap<string, boolean>
+  readonly rememberOverride: (nodeId: string, expanded: boolean) => void
 }
 
 /**
@@ -876,7 +885,7 @@ const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestor
   ancestors?: ReadonlySet<string>
   actions: RowActions
 }): ReactNode {
-  const { openId, onOpenDetail } = actions
+  const { openId, onOpenDetail, overrides, rememberOverride: remember } = actions
   // A child already on this path is a cycle, not a dependency: it stops here instead of descending.
   const children = childrenOf(byId, node).filter((child) => !ancestors.has(child.id))
   // Listed here as a prerequisite: marked so a repeated row does not read as a duplicate.
@@ -884,7 +893,11 @@ const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestor
   // The default follows the node: open while its mission is in play, folded once it finished.
   // A click is stored as an OVERRIDE rather than as the state itself, so the default keeps
   // tracking the node afterwards and "I opened this one" survives it finishing.
-  const [override, setOverride] = useState<boolean | undefined>(undefined)
+  //
+  // The override is seeded from and written back to the module-level view state: this component is
+  // unmounted whenever the tab's running marker flips (the host keys entries by identity), and a
+  // reader's click must not be undone by a mission starting.
+  const [override, setOverride] = useState<boolean | undefined>(() => overrides.get(node.id))
   const settled = TERMINAL.includes(node.status)
   const expanded = override ?? !settled
   const expandable = children.length > 0
@@ -908,7 +921,11 @@ const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestor
         <button
           type="button"
           className={expandable ? 'avwf-twisty' : 'avwf-twisty avwf-twisty-empty'}
-          onClick={() => { setOverride(!expanded) }}
+          onClick={() => {
+            const next = !expanded
+            setOverride(next)
+            remember(node.id, next)
+          }}
           aria-expanded={expandable ? expanded : undefined}
           tabIndex={expandable ? 0 : -1}
           title={expandable ? '展开/收起子任务' : undefined}
@@ -1123,13 +1140,22 @@ export function MissionTreeView({
 }: MissionViewProps): ReactNode {
   INSTALL_STYLES()
   const state = useSnapshot()
+  // The remount-resistant slice of this view's UI state (see `viewState.ts`): the host mints a new
+  // entry — and React a new component instance — every time the tab's running marker flips.
+  const ui: MissionViewState = useMemo(() => viewStateFor(sessionId), [sessionId])
   const [busy, setBusy] = useState<string | undefined>(undefined)
   const [failure, setFailure] = useState<string | undefined>(undefined)
   const [cleaning, setCleaning] = useState(false)
   const [cleanNote, setCleanNote] = useState<string | undefined>(undefined)
   const [cleanFailed, setCleanFailed] = useState(false)
-  const [openId, setOpenId] = useState<string | undefined>(undefined)
+  const [openId, setOpenIdState] = useState<string | undefined>(() => ui.openId)
   const [dialog, setDialog] = useState<DialogState | undefined>(undefined)
+
+  /** The open dialog is part of the remount-resistant state: reopening it re-reads its detail. */
+  const setOpenId = useCallback((nodeId: string | undefined): void => {
+    ui.openId = nodeId
+    setOpenIdState(nodeId)
+  }, [ui])
 
   // The loader is a fresh closure on every render of the seat's view, so the
   // re-read effect below must not depend on it — that would loop forever.
@@ -1212,11 +1238,28 @@ export function MissionTreeView({
 
   // Stable identities matter for the row memo: a fresh `actions` object (or callback) on every render
   // would invalidate every `NodeRow` even when nothing it renders changed.
-  const openDetail = useCallback((nodeId: string): void => { setOpenId(nodeId) }, [])
-  const actions: RowActions = useMemo(() => ({ openId, onOpenDetail: openDetail }), [openId, openDetail])
+  const openDetail = useCallback((nodeId: string): void => { setOpenId(nodeId) }, [setOpenId])
+  const rememberRowOverride = useCallback((nodeId: string, expanded: boolean): void => {
+    rememberOverride(ui, nodeId, expanded)
+  }, [ui])
+  const actions: RowActions = useMemo(
+    () => ({ openId, onOpenDetail: openDetail, overrides: ui.overrides, rememberOverride: rememberRowOverride }),
+    [openId, openDetail, ui, rememberRowOverride],
+  )
   // Only CLOSED trees (finish_mission) are batch-clean candidates; an un-retired tree is skipped and
   // reported by the host. Counting here is for the button's label and its enabled/disabled state.
   const finishedCount = trees.filter((tree) => tree.closedAt !== null).length
+
+  // Put the list back where the reader left it, once, as soon as there is a list to scroll: a
+  // remount starts with an EMPTY container (the snapshot is re-read), so restoring earlier would
+  // simply clamp to 0. The flag keeps a later snapshot from yanking the view back to the old offset.
+  const scrollRestored = useRef(false)
+  useEffect(() => {
+    if (scrollRestored.current || state.data === undefined) return
+    scrollRestored.current = true
+    const element = scrollRef.current
+    if (element !== null && ui.scrollTop > 0) element.scrollTop = ui.scrollTop
+  }, [state.data, ui])
 
   const renderTree = (tree: MissionTreeViewData, slot?: { style: CSSProperties; index: number }): ReactNode => (
     <div
@@ -1255,8 +1298,14 @@ export function MissionTreeView({
       {state.loading && state.data === undefined ? <div className="avwf-empty">读取中…</div> : null}
       {/* No empty-state message: a session with no trees shows an empty panel. */}
       {/* The scroll container owns the viewport the window is computed from, so it is
-          the element the virtualizer measures — the messages above stay put. */}
-      <div className="avwf-scroll" ref={scrollRef}>
+          the element the virtualizer measures — the messages above stay put. Its offset is mirrored
+          into the module-level view state so the remount the running marker forces lands where the
+          reader left off. */}
+      <div
+        className="avwf-scroll"
+        ref={scrollRef}
+        onScroll={(event) => { ui.scrollTop = event.currentTarget.scrollTop }}
+      >
         {windowed
           ? (
             <div className="avwf-canvas" style={{ height: `${String(virtualizer.getTotalSize())}px` }}>

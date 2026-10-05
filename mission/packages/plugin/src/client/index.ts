@@ -29,6 +29,7 @@ import {
 } from './api.js'
 import type { MissionSnapshot, MissionSnapshotState, WorkerSessionTarget } from './contract.js'
 import { isRunning, queuedCount, type SeatSessionView } from './seat.js'
+import { createMissionStatusSignal, mainSessionId, missionTabLabel } from './status.js'
 /** Cordis plugin name; matches the host half. */
 export const name = 'avantf-mission'
 
@@ -59,11 +60,22 @@ interface ClientContext {
   remote: { $mount(contribution: unknown): Promise<() => Promise<void>> }
   get(name: string): unknown
   slots: {
-    inject(name: string, register: () => void): void
+    /**
+     * Run `register` while the named slot is declared, and tie the disposer it returns to this
+     * plugin's fiber (the host wraps the callback in `ctx.effect`; a slot collapse disposes it and a
+     * later re-declaration runs the callback again). That is why re-registering the seat needs no
+     * extra teardown bookkeeping of ours.
+     */
+    inject(name: string, register: () => (() => void) | void): void
+    /**
+     * Register one occupant; the returned disposer unregisters it. Every registry change notifies
+     * `subscribe(name, …)` listeners, which is the ONLY thing that makes the host re-resolve this
+     * tab's label (see `docs/TAB_STATUS_INDICATOR_FIX.md` §1) — hence the re-registration below.
+     */
     register(
       options: { name: string; id: string; order: number; locale: string; label: () => string },
       component: (props: { sessionId: SessionId }) => ReactNode,
-    ): void
+    ): () => void
   }
 }
 
@@ -90,6 +102,16 @@ interface SeatProps {
  */
 interface UiWorkspaceLike {
   openSession(target: WorkerSessionTarget): void
+}
+
+/**
+ * The host's session catalog, read structurally and OPTIONALLY for the same reason as
+ * {@link UiWorkspaceLike}: it is the only body-level way to know WHICH session the 「任务」 tab's
+ * marker should speak for. Only the one read this half performs is declared; the row shape itself is
+ * decoded by `mainSessionId` (see `status.ts`), which owns the defensive reading.
+ */
+interface SessionsLike {
+  readonly list?: { getSnapshot?: () => unknown }
 }
 
 /**
@@ -323,6 +345,46 @@ export function apply(ctx: ClientContext): void {
       : undefined
   }
 
+  /**
+   * WHICH session the tab marker speaks for.
+   *
+   * The tab's `label` is projected GLOBALLY by the host (one label list shared by every
+   * conversation), so the marker answers for the session the reader is looking at — the row the host
+   * itself retains for the main view. Resolved through `ctx.get` on EVERY read for the same reason
+   * `uiWorkspace` is: a service that mounts after this plugin must still be found. Absent / blank /
+   * malformed ⇒ `undefined`, which the signal reads as "no marker".
+   */
+  const currentSessionId = (): string | undefined => {
+    try {
+      const service = ctx.get('sessions') as SessionsLike | undefined
+      return mainSessionId(service?.list?.getSnapshot?.())
+    } catch {
+      // A host that exposes the catalog differently is a fact, not a failure: no marker.
+      return undefined
+    }
+  }
+
+  // ── the tab's running marker ─────────────────────────────────────────────
+  // Owned by the PLUGIN BODY, not by `MissionTreeView`: the view exists only while its own tab is
+  // selected, and the whole point of the marker is to be right while the reader is elsewhere. Every
+  // uncertain state reads as "not running" (see `status.ts`), and the disposer is this plugin's
+  // effect so unloading it can never leave a timer or a late write behind.
+  //
+  // `rearmSeat` is filled in by the seat registration at the end of `apply`. It is declared here
+  // because the signal is built first, but it cannot be missed: the first read awaits `mounted`, and
+  // `apply` runs the whole registration synchronously before that promise can settle.
+  let rearmSeat: (() => void) | undefined
+  const status = createMissionStatusSignal({
+    getRemote,
+    mounted: mounted.promise,
+    getSessionId: currentSessionId,
+    getTimer: () => ctx.get('timer') as Partial<IntervalTimer> | undefined,
+    log,
+    // A flipped verdict must reach the tab, and only a registry change re-projects it (see below).
+    onRunningChange: () => { rearmSeat?.() },
+  })
+  ctx.effect(() => () => status.dispose(), 'avantf-mission: conversation.view running marker')
+
   // The seat's session hooks are the refresh trigger (see `sessionRevision`). The seat's chat hook is
   // deliberately NOT read any more: folding the chat node count into the revision made every message
   // re-read and re-render the whole tree, and the mission tree is not a function of chat length. The
@@ -395,13 +457,60 @@ export function apply(ctx: ClientContext): void {
     })
   }
 
-  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+  /**
+   * The seat options, built ONCE and handed to the registry VERBATIM on every re-registration. The
+   * label thunk and the `View` reference above all must not change identity: the host keys the
+   * rendered entry by ENTRY IDENTITY (`entryKeyOf` — a per-entry WeakMap counter in
+   * `@deepseek-ai/dsh-client-ui-renderer`), so a fresh component would mean "a different view" just
+   * as surely as a fresh entry does. The remount that re-registration inevitably causes is absorbed
+   * by the module-level view state (`viewState.ts`), not by pretending it does not happen.
+   */
+  const seatOptions = {
     name: 'conversation.view',
     id: 'missions',
     // After 对话 (0) and 轨迹 (10).
     order: 20,
     locale: NS,
-    label: () => t('view.missions'),
-  }, View))
+    // The marker is composed here, from the body-level signal, so the label is right whatever tab
+    // is selected. The base text stays `t('view.missions')`; no locale entry is added for the glyph.
+    label: () => missionTabLabel(t('view.missions'), status.isRunning()),
+  }
+  const registerSeat = (): (() => void) => ctx.slots.register(seatOptions, View)
+
+  ctx.slots.inject('conversation.view', () => {
+    let live = true
+    let disposeSeat = registerSeat()
+    /**
+     * Dispose + re-register, so the host's `slots.subscribe("conversation.view", refreshViews)` runs
+     * and the label is resolved again. This is the ONLY reason the tab ever updates: a verdict change
+     * alone is invisible (see `docs/TAB_STATUS_INDICATOR_FIX.md`).
+     *
+     * Bounded by construction — at most one pair per FLIP and at most two flips per mission
+     * lifecycle — because the signal announces a flip and never a repeated read (`status.ts`). The
+     * host's `refreshViews` only READS the label thunk, so nothing here can call back into the
+     * registry: no loop.
+     */
+    rearmSeat = (): void => {
+      if (!live) return
+      try {
+        disposeSeat()
+        disposeSeat = registerSeat()
+      } catch (cause) {
+        // Never let this escape (it runs inside the signal's read, fire-and-forget): an unhandled
+        // rejection would take down the host boot. Try once more so the tab itself is not lost.
+        log('error', `re-registering the conversation.view seat after the running marker flipped failed: ${String(cause)}`)
+        try {
+          disposeSeat = registerSeat()
+        } catch {
+          // Reported above; the tab may be gone, but the plugin and the host stay up.
+        }
+      }
+    }
+    return () => {
+      live = false
+      rearmSeat = undefined
+      disposeSeat()
+    }
+  })
   log('log', 'registered the conversation.view seat: id=missions order=20')
 }

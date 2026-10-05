@@ -197,3 +197,7 @@ if (failures.length > 0) {
   process.exit(1)
 }
 console.log('\nCLIENT SMOKE OK')
+// `apply()` starts the tab-status keepalive with the sandbox's real `setInterval` (no `timer`
+// service is provided here), so the process would otherwise stay alive forever and hang
+// `pnpm check:fast mission` / `release:check`. The script's work is done at this point.
+process.exit(0)

@@ -385,13 +385,22 @@ describe('opening the session that ran a mission', () => {
       remote: { $mount: (): Promise<() => Promise<void>> => Promise.resolve(() => Promise.resolve()) },
       get: (name: string): unknown => {
         if (name === 'uiWorkspace') return workspace()
+        // A mounted platform timer, so the body-level running marker's 30 s poll never falls back to a
+        // real browser interval inside a test.
+        if (name === 'timer') return { interval: (): (() => void) => () => undefined }
         // A namespace, so the mount's `.then` does not report a broken contribution.
         if (name === 'remote.avantfMission') return {}
         return undefined
       },
       slots: {
         inject: (_name: string, register: () => void): void => { register() },
-        register: (_options: unknown, registered: unknown): void => { component = registered as Registered },
+        // The host's `register` returns the entry's disposer, and `inject` releases it with the fiber.
+        // The stub mirrors that shape because `apply` now disposes + re-registers the seat whenever the
+        // tab's running marker flips: a stub returning nothing would only hide a contract break.
+        register: (_options: unknown, registered: unknown): (() => void) => {
+          component = registered as Registered
+          return () => undefined
+        },
       },
     }
     return {
