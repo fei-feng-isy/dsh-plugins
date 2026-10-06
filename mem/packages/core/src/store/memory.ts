@@ -10,7 +10,9 @@ import {
   type RecallHit,
   type RecallResult,
   type RememberResult,
+  type SourceCoverage,
   type TrustDiagnostic,
+  type ValidityCoverage,
   type VectorMigrationOutcome,
   type VectorMigrationProgress,
   type VectorSpaceHealth,
@@ -31,13 +33,15 @@ import {
   type HybridDeps,
   type HybridLeg,
 } from './hybrid.js'
-import { evictVectors as evictVectorsOf, normalizeWrite, normalizeWrites, reportStaleVectors, yieldToEventLoop, vectorSpaceOf, type StaleVectorCounts } from './common.js'
+import { evictVectors as evictVectorsOf, normalizeWrite, reportStaleVectors, yieldToEventLoop, vectorSpaceOf, type StaleVectorCounts } from './common.js'
+import { detectSecretShape, secretRefusalMessage } from './secret_guard.js'
 import type { Db } from '../db/conn.js'
 import { bytesToFloat32, float32ToBytes, isPreFingerprintSpace, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
 import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeTerms, substringTerms, type LexicalProbe } from './lexical.js'
 import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
 import { anchoredOverlap, ENTITY_UNION_CAP, selectAnchors } from './entity_leg.js'
+import { parseTimeWindow, windowDayBounds } from './time_window.js'
 import {
   ENTITY_EXTRACTOR_VERSION,
   entitiesFromTokens,
@@ -45,6 +49,7 @@ import {
   parseQueryPattern,
   tagText,
   triplesFromTokens,
+  type ExtractedEntity,
   type ExtractedTriple,
   type TriplePattern,
 } from '../entities/extract.js'
@@ -52,6 +57,7 @@ import { encodeHrrEntityVector, hrrFromBytes, hrrToBytes, phaseSimilarity } from
 import { EntitiesDao } from '../db/dao/entities.js'
 import { StatsDao } from '../db/dao/stats.js'
 import { FactsDao } from '../db/dao/facts.js'
+import { classifySourceRef, FactSourcesDao } from '../db/dao/fact_sources.js'
 import { TriplesDao } from '../db/dao/triples.js'
 import { ContradictDetector, type Sig } from '../lifecycle/contradiction.js'
 import { runMaintenance, type MaintenanceResult } from '../lifecycle/maintenance.js'
@@ -187,6 +193,13 @@ export interface ContradictionResolution {
 export interface SearchInput {
   query: string
   category?: string
+  /**
+   * P-08: restrict every leg to facts whose `fact_sources.ref` equals this value. Applied INSIDE
+   * each leg's SQL (an `EXISTS` predicate, before its `LIMIT cap`), never as a post-fusion filter:
+   * pruning after fusion would return fewer than `limit` and would make the relaxed-floor retry
+   * mistake a source-empty result for "the floors were too strict".
+   */
+  source?: string
   limit?: number
   /** Also fuse the HRR entity-probe path (used by `recall.probe`). */
   includeHrr?: boolean
@@ -233,6 +246,8 @@ export interface SearchInput {
    * `track`, which is about the dormancy clock — a caller may want one without the other.
    */
   recordStats?: boolean
+  /** P-01: attach per-leg evidence (`scores` / `final`) to the returned hits. Default false. */
+  includeScores?: boolean
 }
 
 /**
@@ -252,6 +267,22 @@ const GRAPH_RESULT: Pick<RecallResult, 'degraded' | 'weights'> = {
   weights: { semantic: 0, fts: 0, jaccard: 0 },
 }
 
+/**
+ * P-08 / P-13 write-side extras on `add` / `update`.
+ *
+ * All three are optional and "omitted" has one meaning everywhere: do not write (a new row's
+ * NULL/1 default, or the existing row's value on a duplicate) — the store never invents a source,
+ * an event time or an end date.
+ */
+export interface FactWriteOptions {
+  /** P-08: `fact_sources` provenance. `kind:` prefix selects the kind, else `manual`. */
+  sourceRef?: string
+  /** P-13: event time → `valid_from`. */
+  eventDate?: string
+  /** P-13: known end → `valid_to`, WITHOUT archiving the row. */
+  validUntil?: string
+}
+
 export class MemoryStore {
   private readonly db: Db
   private readonly config: Config
@@ -261,6 +292,7 @@ export class MemoryStore {
   private readonly facts: FactsDao
   private readonly entities: EntitiesDao
   private readonly triples: TriplesDao
+  private readonly sources: FactSourcesDao
   /**
    * The tokenizer `facts_fts` was ACTUALLY built with, read from the database at open.
    *
@@ -297,6 +329,7 @@ export class MemoryStore {
     this.facts = new FactsDao(db)
     this.entities = new EntitiesDao(db)
     this.triples = new TriplesDao(db)
+    this.sources = new FactSourcesDao(db)
     this.contradictions = new ContradictDetector(
       db,
       config.lifecycle.contradiction_threshold,
@@ -419,26 +452,37 @@ export class MemoryStore {
     return { stale, space_stale: spaceStale, legacy }
   }
 
-  async add(content: string, category?: string, ttlDays?: number): Promise<RememberResult> {
+  async add(content: string, category?: string, ttlDays?: number, opts?: FactWriteOptions): Promise<RememberResult> {
     // Normalize BEFORE tagging: the row, every derived entity/triple and the `entities` this call
     // RETURNS all descend from this one string, so repairing it here is what lets them agree
     // (`normalizeWrite` = well-formed + NFC; see store/common).
     const normalized = normalizeWrite(content).trim()
     if (!normalized) throw new Error('内容不能为空')
+    // P-03: AFTER normalization, BEFORE tokenizing. A high-confidence credential/PII shape is
+    // refused outright — never rewritten, never stored, never scanned retroactively. The throw
+    // travels the store's existing error path (the plugin's `wireErr` turns it into a tool error).
+    const secret = detectSecretShape(normalized)
+    if (secret) throw new Error(secretRefusalMessage(secret))
 
     // ONE tagging pass drives both extractors (they used to tag the same content separately).
     const tokens = await tagText(normalized)
-    const entities = normalizeWrites(entitiesFromTokens(tokens, normalized).map((e) => e.name))
+    // FULL extractor output, not just the names: `type`/`method` are already computed and used to
+    // be discarded here. P-05b writes them into `entities.entity_type` / `extraction_method`
+    // WITHOUT bumping `ENTITY_EXTRACTOR_VERSION` (a bump would re-run triples, overwrite HRR and
+    // requeue contradiction detection for the whole store).
+    const entityWrites = normalizeEntityWrites(entitiesFromTokens(tokens, normalized))
+    const entities = entityWrites.map((e) => e.name)
     const triples = this.normalizeTriples(triplesFromTokens(tokens))
 
     // `category`/`ttlDays` stay `undefined` when unset, so a duplicate-content hit keeps the
     // existing row's values instead of resetting them (see `persistFact`).
-    const { fact_id, is_new, revived } = this.persistFact(
+    const { fact_id, is_new, revived, assert_count } = this.persistFact(
       normalized,
       category === undefined ? undefined : normalizeWrite(category),
       ttlDays,
-      entities,
+      entityWrites,
       triples,
+      opts,
     )
     if (is_new || revived) {
       // Index BEFORE checking: the embedding leg can only see a vector that exists,
@@ -454,7 +498,7 @@ export class MemoryStore {
     // A duplicate `add` (is_new === false && !revived) changes nothing: the row already
     // exists and its conflicts were reported when it was first written, so re-reporting them
     // on every idempotent re-add would be noise (and a repeated detection pass).
-    return { fact_id, is_new, revived, entities, ...(check.conflicts.length > 0 ? { contradictions: check.conflicts } : {}) }
+    return { fact_id, is_new, revived, entities, assert_count, ...(check.conflicts.length > 0 ? { contradictions: check.conflicts } : {}) }
   }
 
   /**
@@ -516,30 +560,35 @@ export class MemoryStore {
     }
   }
 
-  async update(fact_id: number, content: string, category?: string, ttlDays?: number): Promise<RememberResult> {
+  async update(fact_id: number, content: string, category?: string, ttlDays?: number, opts?: FactWriteOptions): Promise<RememberResult> {
     const row = this.getRow(fact_id)
     if (!row) throw new Error(`找不到 fact_id=${fact_id}`)
     // Same entry as `add`: normalize before tagging, so the replaced row, its derived data and the
     // echoed `entities` all describe the SAME text (see there).
     const normalized = normalizeWrite(content).trim()
     if (!normalized) throw new Error('内容不能为空')
+    // Same guard, same position as `add` (P-03): an update is a write too, and rewriting a fact
+    // must not be a way to smuggle a credential past the `add` path.
+    const secret = detectSecretShape(normalized)
+    if (secret) throw new Error(secretRefusalMessage(secret))
     // Re-extract for the NEW content: an updated fact must stay visible to the
     // entity/jaccard/ask paths and to semantic search, exactly like a fresh add.
     // ONE tagging pass drives both extractors (they used to tag the same content separately).
     const tokens = await tagText(normalized)
-    const entities = normalizeWrites(entitiesFromTokens(tokens, normalized).map((e) => e.name))
+    const entityWrites = normalizeEntityWrites(entitiesFromTokens(tokens, normalized))
+    const entities = entityWrites.map((e) => e.name)
     const triples = this.normalizeTriples(triplesFromTokens(tokens))
     // Archive old and create a fresh fact linked by supersedes_id.
     // A revision is the same fact rewritten: `persistFact` carries the replaced row's
     // category and TTL over unless the caller gave new ones, so an update no longer
     // silently drops an explicit TTL (or retags the fact a merge lands on).
-    const { fact_id: newId, is_new, revived } = this.persistFact(
+    const { fact_id: newId, is_new, revived, assert_count } = this.persistFact(
       normalized,
       category === undefined ? undefined : normalizeWrite(category),
       ttlDays,
-      entities,
+      entityWrites,
       triples,
-      { supersedesId: fact_id, archiveOldIfActive: true },
+      { ...opts, supersedesId: fact_id, archiveOldIfActive: true },
     )
     if (is_new || revived) await this.maybeIndexSemantic(newId, normalized)
     // `changed` = this write altered state. The MERGE case (`newId !== fact_id`, the new
@@ -550,7 +599,7 @@ export class MemoryStore {
     const check = changed ? this.detectContradictions(newId) : NO_CHECK
     // Same rule as `add`: the marker follows the CHECK, not the write (see there).
     if (check.complete) this.facts.markConflictChecked([newId])
-    return { fact_id: newId, is_new, revived, entities, ...(check.conflicts.length > 0 ? { contradictions: check.conflicts } : {}) }
+    return { fact_id: newId, is_new, revived, entities, assert_count, ...(check.conflicts.length > 0 ? { contradictions: check.conflicts } : {}) }
   }
 
   remove(fact_id: number, reason = 'manual'): boolean {
@@ -706,7 +755,6 @@ export class MemoryStore {
     if (!row) return null
     return this.toDetail(row, this.entityNames(fact_id), this.triplesOf(fact_id), readClock(this.db))
   }
-
   private triplesOf(fact_id: number): { subj: string; pred: string; obj: string; confidence: number }[] {
     return this.triples.listForFact(fact_id)
   }
@@ -725,9 +773,11 @@ export class MemoryStore {
     status = 'active',
     limit = 50,
     offset = 0,
+    /** P-08: only facts whose `fact_sources.ref` equals this value (reverse provenance lookup). */
+    source?: string,
   ): FactPage {
-    const rows = this.facts.page(status, category, limit, offset)
-    const total = this.facts.countInStatus(status, category)
+    const rows = this.facts.page(status, category, limit, offset, source)
+    const total = this.facts.countInStatus(status, category, source)
     const clock = readClock(this.db)
     return {
       facts: rows.map((r) => this.toSummary(r, clock)),
@@ -735,6 +785,23 @@ export class MemoryStore {
       total,
       truncated: offset + rows.length < total,
     }
+  }
+
+  /**
+   * P-08 coverage over the ACTIVE corpus, for `admin stats`: the share of facts that can answer
+   * "why do I remember this". Reported from day one so the field cannot quietly become a second
+   * `mirror_source` (filled but meaningless).
+   */
+  sourceCoverage(): SourceCoverage {
+    const { active, facts_with_source } = this.sources.activeCoverage()
+    return { active, facts_with_source, coverage: active === 0 ? 0 : facts_with_source / active }
+  }
+
+  /** P-13 coverage over the ACTIVE corpus: the share of facts carrying an event time. */
+  validityCoverage(): ValidityCoverage {
+    const active = this.facts.countActive()
+    const factsWithValidFrom = this.facts.countActiveWithValidFrom()
+    return { active, facts_with_valid_from: factsWithValidFrom, coverage: active === 0 ? 0 : factsWithValidFrom / active }
   }
 
   countByStatus(): { active: number; archived: number } {
@@ -860,6 +927,9 @@ export class MemoryStore {
         return { resolved: false, contradiction_id: id, archived_loser: null, reason: 'loser_not_in_pair' }
       }
       this.archive(loserFactId, 'contradiction')
+      // P-07 audit: the loser is archived, so it also gets an end time. Written before the verdict
+      // row so a crash between the two still leaves the fact's own history consistent.
+      this.facts.markValidTo(loserFactId, formatUtcTs(Date.now()))
       this.contradictions.resolve(id, resolution, loserFactId)
       return { resolved: true, contradiction_id: id, archived_loser: loserFactId }
     }
@@ -1209,12 +1279,13 @@ export class MemoryStore {
       for (const row of rows) {
         // Tag ONCE for both extractors (the write path does the same — see `tagText`).
         const tokens = await tagText(row.content)
-        const entities = normalizeWrites(entitiesFromTokens(tokens, row.content).map((e) => e.name))
+        const entityWrites = normalizeEntityWrites(entitiesFromTokens(tokens, row.content))
+        const entities = entityWrites.map((e) => e.name)
         const triples = this.normalizeTriples(triplesFromTokens(tokens))
         const hrr = hrrToBytes(encodeHrrEntityVector(entities))
         this.db.transaction(() => {
           this.entities.unlinkFact(row.fact_id)
-          this.linkEntities(row.fact_id, entities)
+          this.linkEntities(row.fact_id, entityWrites)
           this.triples.deleteForFact(row.fact_id)
           this.insertTriples(row.fact_id, triples)
           this.facts.setHrrVector(row.fact_id, hrr)
@@ -1294,6 +1365,7 @@ export class MemoryStore {
       queryVector: input.queryVector,
       recordStats: input.recordStats,
       floors: input.floors,
+      ...(input.includeScores === undefined ? {} : { includeScores: input.includeScores }),
       ...(input.relaxLegs === undefined ? {} : { relaxLegs: input.relaxLegs }),
       ...(input.rewriteQuery === undefined ? {} : { rewriteQuery: input.rewriteQuery }),
     })
@@ -1365,7 +1437,7 @@ export class MemoryStore {
       ? selectAnchors(qEntities, this.entities.activeDocFrequency(qEntities), this.facts.countActive())
       : []
     const candidates = anchors.length > 0
-      ? this.entities.candidateFactsForAnyEntity(anchors, input.category, ctx.legCap, qEntities.length, ENTITY_UNION_CAP)
+      ? this.entities.candidateFactsForAnyEntity(anchors, input.category, ctx.legCap, qEntities.length, ENTITY_UNION_CAP, input.source)
       : []
     /**
      * Wrap one leg's raw scores. `capped` must be measured on the RAW set (before the relevance
@@ -1382,7 +1454,7 @@ export class MemoryStore {
     // FTS floor: per ROW distinct-query-term coverage, on the terms `lexical.ts` defines. The texts
     // are loaded once for the capped candidate set (one batched query) — a row whose text is gone
     // scores 0 terms and is dropped, which the live filter would have done anyway.
-    const ftsRaw = this.ftsPath(ctx.query, input.category, ctx.legCap)
+    const ftsRaw = this.ftsPath(ctx.query, input.category, ctx.legCap, input.source)
     const ftsFloored = applyTermFloor(ftsRaw, this.loadTexts([...ftsRaw.keys()]), ctx.query, ctx.floors.fts)
     // Entity floor: applied to the shared candidate set, then the survivors are what the HRR probe
     // scores — an HRR bundle IS a bundle of entity atoms, so a candidate the entity floor rejected
@@ -1393,7 +1465,7 @@ export class MemoryStore {
     const legs: (HybridLeg | Promise<HybridLeg>)[] = [
       // The async legs (model encode) are independent — the orchestrator awaits them concurrently.
       ctx.semAvail
-        ? this.semanticPath(ctx.query, input.category, ctx.overFetch, ctx.queryVector, ctx.onQueryVector)
+        ? this.semanticPath(ctx.query, input.category, ctx.overFetch, ctx.queryVector, ctx.onQueryVector, input.source)
             .then((raw) => {
               const floored = applyScoreFloor(raw, ctx.floors.semantic)
               return { weight: ctx.weights.semantic, scores: floored.scores, leg: 'semantic' as const, droppedByFloor: floored.dropped } satisfies HybridLeg
@@ -1415,11 +1487,61 @@ export class MemoryStore {
           input.category,
           ctx.legCap,
           candidates.length === 0,
+          input.source,
         ),
         ctx.weights.jaccard,
       )))
     }
+    if (this.config.retriever.time_window) {
+      // P-11 · the time-window leg, appended LAST so the legs above keep their indices and the
+      // per-leg evidence labels of every already-shipped query are untouched.
+      //
+      // CONDITIONAL ON CONFIG, NEVER ON THE QUERY. A query with no time expression yields an EMPTY
+      // leg rather than no leg at all: `hybrid.ts` unions the original run and the self-reference
+      // rewrite run BY LEG INDEX, so a leg that appeared only for one of the two texts would make
+      // the arrays different lengths — the contract violation the orchestration comment warns about.
+      // (A window IS per-text: the original and the rewrite can legitimately parse to different
+      // windows, and the index-wise union keeps each run's own scores.)
+      //
+      // It shares the jaccard weight, exactly like the HRR probe: the reported 3-key weights
+      // contract (`RecallResult.weights`) must not grow a fourth key for a default-OFF leg.
+      legs.push(Promise.resolve(leg(
+        this.timeWindowPath(ctx.query, input.category, ctx.legCap, input.source),
+        ctx.weights.jaccard,
+      )))
+    }
     return legs
+  }
+
+  /**
+   * P-11: active facts whose EVENT time (`valid_from`) falls in the query's own time window.
+   *
+   * THREE DELIBERATE PROPERTIES, each of which the acceptance criteria name:
+   *
+   *  1. **Only `valid_from`.** A fact with no event time is not a candidate, and there is no
+   *     fallback to `created_at`: mixing a write clock into the event-time axis would make the leg
+   *     "work" on a corpus where it measured zero effect and would answer "上个月做了什么" with
+   *     facts merely WRITTEN last month.
+   *  2. **A leg, not a filter.** The window only ever ADDS candidates at a constant score; it never
+   *     removes one another leg (or the FTS/entity/semantic path) produced. A hard pre-filter would
+   *     drop gold facts whose event time is outside the phrase's window but whose text is the answer.
+   *  3. **Constant score, capped.** Every in-window fact scores 1, so `fuse`'s per-leg max-scaling
+   *     is cap-INVARIANT for this leg (any survivor IS the maximum) and the ranking WITHIN the
+   *     window stays the other legs' business. The constant is why "which of last month's facts is
+   *     the answer" is not decided by a date.
+   *
+   * Cost: one non-indexable scan (the date prefix is computed, so no index can serve it) of the
+   * active corpus, capped at `legCap`. It runs only when `retriever.time_window` is on — the whole
+   * point of the default-OFF switch.
+   */
+  private timeWindowPath(query: string, category: string | undefined, cap: number, source?: string): Map<number, number> {
+    const window = parseTimeWindow(query)
+    if (window === undefined) return new Map()
+    const { from, to } = windowDayBounds(window)
+    const ids = this.facts.windowRows(from, to, category, cap, source)
+    const out = new Map<number, number>()
+    for (const id of ids) out.set(id, 1)
+    return out
   }
 
   /**
@@ -1433,18 +1555,25 @@ export class MemoryStore {
     const textMap = texts ?? this.loadTexts(ids)
     const bags = this.entityBags(ids)
     const times = this.facts.timesByIds(ids)
-    return ids.map((id) => ({
-      kind: 'fact' as const,
-      ref_id: id,
-      text: textMap.get(id) ?? '',
-      score: scoreOf(id),
-      domain: null,
-      source: null,
-      source_ref: `memory:fact:${id}`,
-      entities: bags.get(id) ?? [],
-      created_at: times.get(id)?.created_at ?? '',
-      updated_at: times.get(id)?.updated_at ?? null,
-    }))
+    return ids.map((id) => {
+      const time = times.get(id)
+      return {
+        kind: 'fact' as const,
+        ref_id: id,
+        text: textMap.get(id) ?? '',
+        score: scoreOf(id),
+        domain: null,
+        source: null,
+        source_ref: `memory:fact:${id}`,
+        entities: bags.get(id) ?? [],
+        created_at: time?.created_at ?? '',
+        updated_at: time?.updated_at ?? null,
+        // P-07/P-13: serialized ONLY when non-null. `null` means "unknown", and omitting the key
+        // keeps every envelope written before this column byte-identical.
+        ...(time?.valid_from === null || time?.valid_from === undefined ? {} : { valid_from: time.valid_from }),
+        ...(time?.valid_to === null || time?.valid_to === undefined ? {} : { valid_to: time.valid_to }),
+      }
+    })
   }
 
   /**
@@ -1524,7 +1653,7 @@ export class MemoryStore {
    * `onVector` publishes the vector this leg actually used, so the relaxed retry pass can reuse it
    * instead of re-encoding (performance review §7.7 / P8).
    */
-  private async semanticPath(query: string, category: string | undefined, k: number, queryVector?: Float32Array, onVector?: (vec: Float32Array) => void): Promise<Map<number, number>> {
+  private async semanticPath(query: string, category: string | undefined, k: number, queryVector?: Float32Array, onVector?: (vec: Float32Array) => void, source?: string): Promise<Map<number, number>> {
     const vec = queryVector ?? await this.semantic.encode(query)
     // A caller-supplied vector is trusted to come from this backend (see `SearchInput`), but the
     // dimension is cheap to check and a mismatch would otherwise score as garbage. It is an INPUT
@@ -1537,9 +1666,10 @@ export class MemoryStore {
     onVector?.(vec)
     const topk = this.vstore.topk(vec, Math.max(50, k))
     if (!topk.length) return new Map()
-    // The vstore has no notion of status/category — filter candidates through the DB
-    // so archived/purged facts and other categories never leak into the semantic leg.
-    const allowed = new Set(this.facts.activeIdsIn(topk.map((t) => t.id), category))
+    // The vstore has no notion of status/category/source — filter candidates through the DB
+    // so archived/purged facts, other categories and other sources never leak into the leg.
+    // The `topk` pool is over-fetched above `k`, so the filter happens before the leg's own cap.
+    const allowed = new Set(this.facts.activeIdsIn(topk.map((t) => t.id), category, source))
     const out = new Map<number, number>()
     for (const t of topk) if (allowed.has(t.id)) out.set(t.id, t.score)
     return out
@@ -1564,6 +1694,8 @@ export class MemoryStore {
      * no fact shares (and for a query with no entities at all).
      */
     allowRecencyFallback = candidates.length === 0,
+    /** P-08 provenance filter, applied to whichever candidate source this branch reads. */
+    source?: string,
   ): Map<number, number> {
     if (entityNames.length === 0 && !query.trim()) return new Map()
     if (candidates.length === 0 && !allowRecencyFallback) return new Map()
@@ -1575,8 +1707,8 @@ export class MemoryStore {
     // once, because the alternative is decoding one 8 KB blob per active fact (1.37 s at 33k).
     const truncatedFallback = allowRecencyFallback
     const rows = truncatedFallback
-      ? this.facts.activeHrrRows(category, cap)
-      : this.facts.hrrRowsForFacts(candidates, category)
+      ? this.facts.activeHrrRows(category, cap, source)
+      : this.facts.hrrRowsForFacts(candidates, category, source)
     if (truncatedFallback && rows.length === cap && !this.hrrFallbackWarned) {
       this.hrrFallbackWarned = true
       retrievalLogger().warn(
@@ -1651,12 +1783,12 @@ export class MemoryStore {
     }, stopAt)
   }
 
-  private ftsPath(query: string, category: string | undefined, cap: number): Map<number, number> {
+  private ftsPath(query: string, category: string | undefined, cap: number, source?: string): Map<number, number> {
     const ftsQuery = buildFtsQuery(query, this.ftsTokenizer)
     if (ftsQuery) {
       // ORDER BY bm25 + LIMIT: FTS5 still scores every match internally, but only the best `cap`
       // rows cross into JS — which is what the old code paid for (33k rows through min-max + sort).
-      const rows = this.facts.ftsSearch(ftsQuery, category, cap)
+      const rows = this.facts.ftsSearch(ftsQuery, category, cap, source)
       // FTS5 bm25() is negative (more negative = better match); negate so higher = better.
       return new Map(rows.map((r) => [r.id, -r.rank]))
     }
@@ -1668,7 +1800,7 @@ export class MemoryStore {
     // the terms the row contains, so higher is better like the bm25 branch above.
     const terms = substringTerms(query)
     if (terms.length === 0) return new Map()
-    const rows = this.facts.ftsSubstringSearch(terms, category, cap)
+    const rows = this.facts.ftsSubstringSearch(terms, category, cap, source)
     return new Map(rows.map((r) => [r.id, r.rank]))
   }
 
@@ -1713,11 +1845,11 @@ export class MemoryStore {
     content: string,
     category: string | undefined,
     ttlDays: number | undefined,
-    entities: string[],
+    entities: ExtractedEntity[],
     triples: ExtractedTriple[],
-    opts?: { supersedesId?: number; archiveOldIfActive?: boolean },
-  ): { fact_id: number; is_new: boolean; revived: boolean } {
-    const hrr = hrrToBytes(encodeHrrEntityVector(entities))
+    opts?: { supersedesId?: number; archiveOldIfActive?: boolean } & FactWriteOptions,
+  ): { fact_id: number; is_new: boolean; revived: boolean; assert_count: number } {
+    const hrr = hrrToBytes(encodeHrrEntityVector(entities.map((e) => e.name)))
     const trust = this.config.trust
     const clock = readClock(this.db)
     const nowIso = formatUtcTs(Date.now())
@@ -1742,6 +1874,15 @@ export class MemoryStore {
     const createdAt = replaced === undefined || replaced.created_at === null
       ? nowIso
       : String(replaced.created_at)
+    // P-13: an explicitly provided time bound lands; an omitted one is NULL on a first add and
+    // INHERITS the replaced row's value on a revision (the same "omitted keeps what the row had"
+    // rule as category/TTL — a rewrite of the same memory must not silently forget its event time).
+    const validFrom = opts?.eventDate === undefined
+      ? (replaced === undefined ? null : nullableString(replaced.valid_from))
+      : normalizeEventTime(opts.eventDate, 'event_date')
+    const validTo = opts?.validUntil === undefined
+      ? (replaced === undefined ? null : nullableString(replaced.valid_to))
+      : normalizeEventTime(opts.validUntil, 'valid_until')
     const tx = this.db.transaction(() => {
       // R1/S1: `settle_clock` is NOT NULL with no default — every insert writes it.
       const cur = this.facts.insertRevision({
@@ -1756,9 +1897,12 @@ export class MemoryStore {
         pinnedAt: startPinned === 1 ? nowIso : null,
         windowAt: nowIso, // R25: the quota window starts at creation, so no NULL branch exists
         createdAt,
+        validFrom,
+        validTo,
       })
       let fact_id: number
       let is_new: boolean
+      let assert_count: number
       if (cur.changes === 0) {
         const row = this.facts.findByContent(content) as Record<string, unknown>
         fact_id = Number(row.fact_id)
@@ -1768,6 +1912,10 @@ export class MemoryStore {
         const rowTtl = Number(row.ttl_days ?? 0)
         const keepCategory = category ?? rowCategory
         const keepTtl = ttlDays ?? rowTtl
+        // P-13: an explicitly provided time bound lands on the duplicate row too; an omitted one
+        // keeps whatever is already there (including a NULL).
+        this.facts.applyValidity(fact_id, opts?.eventDate === undefined ? undefined : validFrom ?? undefined,
+          opts?.validUntil === undefined ? undefined : validTo ?? undefined)
         // Revive if archived: settle the frozen value, lift to `recall_floor`, refresh
         // the idle clock (R18) and clear the archive bookkeeping (R19).
         const settled = effectiveTrust(asTrustRow(row), clock, trust)
@@ -1778,23 +1926,67 @@ export class MemoryStore {
         if (!revived && (keepCategory !== rowCategory || keepTtl !== rowTtl)) {
           this.facts.applyValues(fact_id, keepCategory, keepTtl)
         }
+        // P-10: the counter moves only for a PURE duplicate. A revive is a resurrection, not a new
+        // assertion, so the archived row's own count (read back below) stands.
+        assert_count = revived
+          ? Number(row.assert_count ?? 1)
+          : this.facts.incrementAssertCount(fact_id)
         // link entities/triples for both new & revived
         this.linkEntities(fact_id, entities)
         this.insertTriples(fact_id, triples)
+        // P-08: record an explicitly given source; on a REVISION with none given, carry the
+        // replaced row's sources forward (same logical fact) — never on a plain duplicate, whose
+        // sources are already there.
+        this.recordSources(fact_id, opts, replaced, revived)
         const supersededId = this.applySupersede(fact_id, opts)
-        return { fact_id, is_new, revived, supersededId }
+        return { fact_id, is_new, revived, assert_count, supersededId }
       }
       fact_id = Number(cur.lastInsertRowid)
       is_new = true
+      // P-10: the column DEFAULT 1 IS the semantics of a first assertion; read it rather than
+      // hardcoding, so the two cannot drift.
+      assert_count = this.facts.assertCount(fact_id)
       this.linkEntities(fact_id, entities)
       this.insertTriples(fact_id, triples)
+      this.recordSources(fact_id, opts, replaced, false)
       const supersededId = this.applySupersede(fact_id, opts)
-      return { fact_id, is_new, revived: false, supersededId }
+      return { fact_id, is_new, revived: false, assert_count, supersededId }
     })
     const { supersededId, ...result } = tx()
     // After the commit (see `applySupersede`), never inside the transaction.
     if (supersededId !== null) this.evictVectors([supersededId])
     return result
+  }
+
+  /**
+   * P-08: land the provenance rows for one write.
+   *
+   * Rules, in order: an explicit `source_ref` is recorded (classified by its `kind:` prefix); on a
+   * REVISION with none given, the replaced row's sources are copied forward (it is the same logical
+   * fact, and the new row would otherwise become untraceable); on a plain duplicate, nothing is
+   * added (its sources are already there). Nothing is ever invented — an omitted source on a first
+   * add leaves the fact with no `fact_sources` row at all, which is what the stats coverage reports.
+   */
+  private recordSources(
+    factId: number,
+    opts: { sourceRef?: string } | undefined,
+    replaced: Record<string, unknown> | undefined,
+    revived: boolean,
+  ): void {
+    if (opts?.sourceRef !== undefined) {
+      const parsed = classifySourceRef(normalizeWrite(opts.sourceRef).trim())
+      this.sources.insert(factId, parsed.kind, parsed.ref)
+      return
+    }
+    if (replaced === undefined) return
+    // A revision's new row: carry the predecessor's sources. A revive keeps its own rows (they were
+    // never deleted), so only copy when the caller actually wrote a new row (`revived === false`).
+    if (revived) return
+    const previousId = Number(replaced.fact_id)
+    if (!Number.isFinite(previousId)) return
+    for (const source of this.sources.listForFact(previousId)) {
+      this.sources.insert(factId, source.kind, source.ref)
+    }
   }
 
   /**
@@ -1811,14 +2003,19 @@ export class MemoryStore {
     if (opts.archiveOldIfActive) {
       // The superseded revision is the loser of any conflict it was named in — retire
       // those rows, or `update` would stack a permanent duplicate per edit.
-      if (this.facts.archiveSuperseded(opts.supersedesId, readClock(this.db)) > 0) this.contradictions.resolveForFact(opts.supersedesId)
+      if (this.facts.archiveSuperseded(opts.supersedesId, readClock(this.db)) > 0) {
+        this.contradictions.resolveForFact(opts.supersedesId)
+        // P-07 audit: the row that left the active corpus gets an end time. `COALESCE` inside the
+        // DAO keeps a `valid_until` the caller had already declared.
+        this.facts.markValidTo(opts.supersedesId, formatUtcTs(Date.now()))
+      }
     }
     // The superseded revision leaves the live graph (and the active-only vector index).
     this.triples.deleteForFact(opts.supersedesId)
     return opts.supersedesId
   }
 
-  private linkEntities(fact_id: number, entities: string[]): void {
+  private linkEntities(fact_id: number, entities: readonly ExtractedEntity[]): void {
     this.entities.linkFact(fact_id, entities)
   }
 
@@ -1877,7 +2074,6 @@ export class MemoryStore {
       pinned: isPinned(row),
       remaining_days: remainingDays(row, clock, this.config.trust),
       helpful_count: Number(r.helpful_count),
-      mirror_source: r.mirror_source ? String(r.mirror_source) : null,
       created_at: String(r.created_at),
       archived_at: r.archived_at ? String(r.archived_at) : null,
       archive_reason: r.archive_reason ? String(r.archive_reason) : null,
@@ -1885,10 +2081,10 @@ export class MemoryStore {
   }
 
   private toDetail(r: Record<string, unknown>, entities: string[], triples: FactDetail['triples'], clock: number): FactDetail {
+    const factId = Number(r.fact_id)
     return {
       ...this.toSummary(r, clock),
       retrieval_count: Number(r.retrieval_count),
-      mirror_target: r.mirror_target ? String(r.mirror_target) : null,
       supersedes_id: r.supersedes_id ? Number(r.supersedes_id) : null,
       entities,
       triples,
@@ -1898,6 +2094,15 @@ export class MemoryStore {
       updated_at: r.updated_at ? String(r.updated_at) : null,
       bonus_count: Number(r.bonus_count ?? 0),
       bonus_window_at: r.bonus_window_at ? String(r.bonus_window_at) : null,
+      // P-08: the recorded provenance rows. Empty (not fabricated) when the writer gave none.
+      sources: this.sources.listForFact(factId),
+      // P-07: null = unknown. `valid_to` on a still-active row is the `valid_until` state.
+      valid_from: nullableString(r.valid_from),
+      valid_to: nullableString(r.valid_to),
+      // P-07: reverse derivation from the existing `supersedes_id` link — no redundant column.
+      superseded_by: this.facts.supersededBy(factId),
+      // P-10: a first assertion is 1; a legacy row that predates the column also reads 1.
+      assert_count: Number(r.assert_count ?? 1),
     }
   }
 }
@@ -1912,5 +2117,42 @@ function asTrustRow(r: Record<string, unknown>): TrustRow {
     bonus_window_at: r.bonus_window_at === null || r.bonus_window_at === undefined ? null : String(r.bonus_window_at),
     status: String(r.status ?? 'active'),
   }
+}
+
+/**
+ * Normalize the extractor's entity NAMES through the same write entry as fact content, keeping
+ * the `type` / `method` that the extractor already computed (P-05b).
+ *
+ * The names are what the rest of the pipeline keys on (HRR, `fact_entities`, the echoed result),
+ * so they go through `normalizeWrite` exactly as before; only the two provenance fields are new.
+ * A pure map, so the ORDER — and therefore the HRR vector — is unchanged from the pre-P-05b
+ * `.map((e) => e.name)` version.
+ */
+function normalizeEntityWrites(entities: readonly ExtractedEntity[]): ExtractedEntity[] {
+  return entities.map((e) => ({ name: normalizeWrite(e.name), type: e.type, method: e.method }))
+}
+
+/** A nullable TEXT column as `string | null` (never `undefined`, never `"null"`). */
+function nullableString(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  const text = String(value)
+  return text === '' ? null : text
+}
+
+/**
+ * P-13: accept the caller's ISO date/datetime, or refuse with an actionable message.
+ *
+ * The value is stored VERBATIM (no re-formatting): the column is a TIMESTAMP and later readers
+ * compare it as text, so silently normalizing here would rewrite the caller's own answer. What is
+ * checked is only that it is a date this engine can reason about — `Date.parse` rejects the typo
+ * class (`2026-13-45`) while accepting both `2026-10-06` and a full offset timestamp.
+ */
+function normalizeEventTime(value: string, field: string): string {
+  const text = normalizeWrite(value).trim()
+  if (!text) throw new Error(`${field} 不能为空`)
+  if (Number.isNaN(Date.parse(text))) {
+    throw new Error(`${field} 不是可识别的 ISO 日期/时间：${value}（示例：2026-10-06 或 2026-10-06T09:30:00+08:00）`)
+  }
+  return text
 }
 

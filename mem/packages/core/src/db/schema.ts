@@ -53,6 +53,17 @@ export const DDL: string[] = [
     archived_at       TIMESTAMP,
     archive_reason    TEXT,
     ttl_days          INTEGER DEFAULT 0,
+    -- P-07/P-13: when the fact became true and when it stopped being true. NULL = unknown, and no
+    -- retrieval leg reads either column (the envelope only carries them, and only when non-null).
+    -- valid_to is written by mem_remember valid_until WITHOUT archiving the row, which is what
+    -- makes "still active, known to end at T" representable at all; the two archival paths
+    -- (supersede, contradiction verdict) also stamp it for audit.
+    valid_from        TIMESTAMP,
+    valid_to          TIMESTAMP,
+    -- P-10: how many times this exact content has been asserted. DEFAULT 1 because every row that
+    -- predates the counter was asserted once; a verbatim duplicate add moves it (+1) while
+    -- reviving an archived row does not (that is a resurrection, not a new assertion). Never scored.
+    assert_count      INTEGER DEFAULT 1,
     mirror_source     TEXT,
     mirror_target     TEXT,
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -83,6 +94,17 @@ export const DDL: string[] = [
   // The two "how much reinforcement quota is live" diagnostics share one window predicate
   // (`bonus_window_at > datetime('now', '-1 day')`); windowed rows are a small minority.
   `CREATE INDEX IF NOT EXISTS idx_facts_bonus_window ON facts(bonus_window_at)`,
+  // P-08: where a fact came from — one row per (fact, kind, ref). `kind` is a closed vocabulary
+  // (`session` / `kb_doc` / `tool` / `manual`); the composite PRIMARY KEY makes a repeated write
+  // idempotent and serves the forward direction (a fact's sources), while the separate `ref` index
+  // serves the reverse one (`admin list source=`).
+  `CREATE TABLE IF NOT EXISTS fact_sources (
+    fact_id INTEGER NOT NULL REFERENCES facts(fact_id) ON DELETE CASCADE,
+    kind    TEXT NOT NULL CHECK (kind IN ('session', 'kb_doc', 'tool', 'manual')),
+    ref     TEXT NOT NULL,
+    PRIMARY KEY (fact_id, kind, ref)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_fact_sources_ref ON fact_sources(ref)`,
   // The derived-state sweep and drain indexes (`idx_facts_entities_version`,
   // `idx_facts_conflict_pending`) are deliberately NOT part of the base DDL: step 1 must stay
   // runnable against a pre-versioning database whose `facts` lacks these columns, and migration

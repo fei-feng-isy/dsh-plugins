@@ -31,6 +31,18 @@ export interface FusionPath {
 export interface Hit {
   id: number
   score: number
+  /**
+   * P-01 per-leg evidence, aligned to the `paths` array the caller passed, and only present when
+   * the caller asked for it (`opts.includeLegs`). `null` at an index means that leg did not
+   * recall this candidate — the explicit "no evidence", which a missing entry would hide.
+   */
+  legs?: (LegScore | null)[]
+}
+
+/** P-01: one leg's contribution to one candidate (raw on the leg's scale + the value fused). */
+export interface LegScore {
+  raw: number
+  normalized: number
 }
 
 /**
@@ -65,26 +77,42 @@ export function scaleByMax(scores: Map<number, number>): Map<number, number> {
  * scaled scores collide far more often than min-max ones did (both legs of a pair can rank two
  * candidates identically), and the previous order was Map-insertion order.
  */
-export function fuse(paths: FusionPath[], topK: number): Hit[] {
+export function fuse(paths: FusionPath[], topK: number, opts?: { includeLegs?: boolean }): Hit[] {
   const pooled = new Set<number>()
   for (const p of paths) for (const id of p.scores.keys()) pooled.add(id)
 
   const scaledPaths = paths.map((p) => ({ weight: p.weight, scores: scaleByMax(p.scores) }))
+  const withLegs = opts?.includeLegs === true
 
   const merged = new Map<number, number>()
+  // The evidence is collected in the SAME pass as the merge (not a second walk of the paths): the
+  // scaled value is already in hand here, and re-deriving it would be a second chance to disagree
+  // with the number that actually decided the rank.
+  const evidence = withLegs ? new Map<number, (LegScore | null)[]>() : undefined
   for (const id of pooled) {
     let s = 0
-    for (const p of scaledPaths) {
+    const perLeg: (LegScore | null)[] | undefined = evidence === undefined ? undefined : []
+    for (let i = 0; i < scaledPaths.length; i += 1) {
+      const p = scaledPaths[i]!
       const nv = p.scores.get(id)
       if (nv !== undefined) s += p.weight * nv
+      if (perLeg !== undefined) {
+        const raw = paths[i]!.scores.get(id)
+        perLeg.push(raw === undefined ? null : { raw, normalized: nv ?? 0 })
+      }
     }
     // Every pooled id is kept, including a zero total: it came from some path, so dropping it here
     // would hide a candidate the caller may still want (the output budget decides what is returned).
     merged.set(id, s)
+    if (perLeg !== undefined && evidence !== undefined) evidence.set(id, perLeg)
   }
 
-  return [...merged.entries()]
-    .map(([id, score]) => ({ id, score }))
+  const hits = [...merged.entries()]
+    .map(([id, score]) => {
+      const legs = evidence?.get(id)
+      return legs === undefined ? { id, score } : { id, score, legs }
+    })
     .sort((a, b) => b.score - a.score || a.id - b.id)
     .slice(0, topK)
+  return hits
 }

@@ -35,8 +35,11 @@ describe('union → DSH parameter map', () => {
 
   it('merges the branches` fields instead of taking the first branch only', () => {
     // `fact_id` only exists on update/remove/helpful/unhelpful — a first-branch-only
-    // merge would drop it and the model could never call those actions.
-    expect(Object.keys(remember).sort()).toEqual(['action', 'category', 'content', 'fact_id', 'reason', 'ttl_days'])
+    // merge would drop it and the model could never call those actions. `source_ref` / `event_date`
+    // / `valid_until` (batch 1) live on add/update only, so they exercise the same merge path.
+    expect(Object.keys(remember).sort()).toEqual([
+      'action', 'category', 'content', 'event_date', 'fact_id', 'reason', 'source_ref', 'ttl_days', 'valid_until',
+    ])
   })
 
   it('keeps each field`s real type and description', () => {
@@ -51,6 +54,10 @@ describe('union → DSH parameter map', () => {
     expect(recall['entities']?.type).toBe('array')
     expect(recall['entities']?.items?.type).toBe('string')
     expect(recall['limit']?.type).toBe('integer')
+    // Batch 1: the provenance filter and the per-leg-evidence switch are derived like any other
+    // field, so a model calling `mem_recall` can actually send them.
+    expect(recall['source']?.type).toBe('string')
+    expect(recall['include_scores']?.type).toBe('boolean')
   })
 
   it('derives every tool without falling back to a bare string', () => {

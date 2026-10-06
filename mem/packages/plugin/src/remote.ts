@@ -117,6 +117,12 @@ export const descriptors: readonly InvocationDescriptor[] = [
     category: optionalText.optional(),
     ttl_days: count.optional(),
     reason: optionalText.optional(),
+    // P-08 / P-13 (batch 1): optional write-side extras. Declared here because a strict codec drops
+    // an undeclared key silently; NOT a wire bump — the BUMP RULE bumps only for a new/removed
+    // `@Remote` method or a removed payload field the other half dereferences (see WIRE_VERSION).
+    source_ref: optionalText.optional(),
+    event_date: optionalText.optional(),
+    valid_until: optionalText.optional(),
   })),
   // recall: search/ask/chain/probe/reason/related/contradict (defaults to 'search')
   direct('recall', z.object({
@@ -129,6 +135,10 @@ export const descriptors: readonly InvocationDescriptor[] = [
     obj: optionalText.optional(),
     second_pred: optionalText.optional(),
     category: optionalText.optional(),
+    // P-08: provenance filter (`fact_sources.ref`); P-01: per-leg evidence. Both optional and both
+    // `declared ⊇ contract` fields (see `test/remote_wire.spec.ts`).
+    source: optionalText.optional(),
+    include_scores: bool.optional(),
     limit: count.optional(),
     max_tokens: count.optional(),
     // `strict` / `loose` (see `FLOOR_PROFILES`): the client's 查询 panel sends this when the user
@@ -151,6 +161,8 @@ export const descriptors: readonly InvocationDescriptor[] = [
     fact_id: count.optional(),
     category: optionalText.optional(),
     status: optionalText.optional(),
+    // P-08: reverse provenance lookup on `admin list`.
+    source: optionalText.optional(),
     limit: count.optional(),
     offset: count.optional(),
     reason: optionalText.optional(),
@@ -192,6 +204,9 @@ export const descriptors: readonly InvocationDescriptor[] = [
     source: optionalText.optional(),
     limit: count.optional(),
     max_tokens: count.optional(),
+    // P-01: the 查询 panel asks for per-leg evidence explicitly; the default (absent) keeps the
+    // envelope byte-identical for every other caller.
+    include_scores: bool.optional(),
     // Same field as `recall`'s: the 查询 panel's 严格/宽松 control. See `FLOOR_PROFILES`.
     floors: optionalText.optional(),
   })),

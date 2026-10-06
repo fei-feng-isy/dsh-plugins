@@ -89,6 +89,8 @@ export interface KnowledgeSearchOptions {
    * store-level "last result" field would race two concurrent queries.
    */
   onResult?: (result: HybridResult<RecallHit>) => void
+  /** P-01: attach per-leg evidence (`scores` / `final`) to every hit. Default false. */
+  includeScores?: boolean
 }
 
 /** Refuse absurd inputs at the ingestion boundary (paste/URI/file all funnel through here). */
@@ -1344,6 +1346,7 @@ export class KnowledgeStore {
       queryVector: opts?.queryVector,
       recordStats: opts?.recordStats,
       floors: opts?.floors,
+      ...(opts?.includeScores === undefined ? {} : { includeScores: opts.includeScores }),
       ...(opts?.relaxLegs === undefined ? {} : { relaxLegs: opts.relaxLegs }),
       ...(opts?.rewriteQuery === undefined ? {} : { rewriteQuery: opts.rewriteQuery }),
     })

@@ -143,6 +143,23 @@ const retrieverSchema = z.object({
    * measurable variable instead of a constant baked into the store.
    */
   leg_cap: z.number().int().nonnegative().default(0),
+  /**
+   * P-11: enable the Chinese TIME-WINDOW retrieval leg. **Default OFF.**
+   *
+   * When on, a query that carries a Chinese time expression (`上个月` / `最近三天` /
+   * `2026年9月` … see `store/time_window.ts` for the closed table) additionally scores every ACTIVE
+   * fact whose EVENT time (`valid_from`, written by `mem_remember`'s `event_date`) falls in that
+   * window. It is ONE MORE LEG, never a filter: it only adds candidates, never removes what the
+   * semantic / FTS / entity legs already found, so a caller whose gold fact has no event time (or
+   * one outside the phrase's window) still receives it from the other legs.
+   *
+   * Why OFF by default: the leg is only useful once the corpus carries event times, and
+   * `admin stats` reports that coverage (`validity.coverage`). Until an operator has measured
+   * coverage and the regression net says the leg helps, turning it on changes rankings for
+   * time-worded queries — a default must not do that on its own. It shares the entity/Jaccard
+   * weight, so the reported 3-key weights contract is unchanged either way.
+   */
+  time_window: z.boolean().default(false),
 })
 
 /**

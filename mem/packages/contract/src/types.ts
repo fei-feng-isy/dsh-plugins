@@ -34,7 +34,6 @@ export interface FactSummary {
   /** Remaining ACTIVE days before `forgot`; null when pinned / non-active / trust disabled. */
   remaining_days: number | null
   helpful_count: number
-  mirror_source: string | null
   created_at: string
   archived_at: string | null
   archive_reason: string | null
@@ -80,7 +79,6 @@ export function withoutRetentionDiagnostics<T>(value: T): T {
 
 export interface FactDetail extends FactSummary {
   retrieval_count: number
-  mirror_target: string | null
   supersedes_id: number | null
   entities: string[]
   triples: FactTriple[]
@@ -96,6 +94,34 @@ export interface FactDetail extends FactSummary {
   /** Effective reinforcement events in the current 24h window (recall + feedback). */
   bonus_count: number
   bonus_window_at: string | null
+  /**
+   * P-08: where this fact came from, as recorded rows. Empty when the writer gave no `source_ref`
+   * — the read surface must show "unknown" rather than invent one.
+   */
+  sources: FactSourceView[]
+  /**
+   * P-07: when the fact became true / stopped being true. `null` = unknown; `valid_to` set while
+   * the row is still `active` means "still valid, known to end at T" (the state
+   * `mem_remember valid_until` creates), while an archived row's `valid_to` is an audit stamp.
+   */
+  valid_from: string | null
+  valid_to: string | null
+  /**
+   * P-07: the fact that supersedes this one, DERIVED from the existing `supersedes_id` link
+   * (reverse lookup) — no redundant column. `null` when nothing supersedes it.
+   */
+  superseded_by: number | null
+  /**
+   * P-10: how many times this exact content has been asserted. `1` for every row that predates the
+   * counter and for a first write; a verbatim duplicate `add` moves it. Never scored.
+   */
+  assert_count: number
+}
+
+/** P-08: one provenance row on a fact (`fact_sources`), as `admin detail` renders it. */
+export interface FactSourceView {
+  kind: 'session' | 'kb_doc' | 'tool' | 'manual'
+  ref: string
 }
 
 /** A single hit from hybrid retrieval over the merged candidate pool. */
@@ -136,6 +162,39 @@ export interface RecallHit {
    * `source_ref`, so the caller knows it exists and can fetch it explicitly.
    */
   truncated?: boolean
+  /**
+   * P-01 per-leg evidence, present only when the caller asked (`include_scores`) — absent is the
+   * default and is what keeps the envelope byte-identical for every existing caller.
+   *
+   * Keys are the LEG NAMES actually fused for this hit's store (`semantic` / `fts` / `jaccard` /
+   * `hrr`; the HRR probe shares the jaccard weight, which is why it is named separately). A leg
+   * that did not recall this candidate is `null` — an explicit "this leg has nothing to say",
+   * which is information a missing key would lose.
+   */
+  scores?: Record<string, RecallLegScore | null>
+  /**
+   * P-01: the FUSION output score for this hit, before any cross-store normalization.
+   *
+   * `score` is what the surface ranks by and can be re-scaled downstream (`crossQuery` min-max
+   * normalizes over the merged pool), so a caller reasoning about "which leg carried this" needs
+   * the fusion value itself rather than a number that means a different thing per surface.
+   */
+  final?: number
+  /**
+   * P-07/P-13: the fact's event time / known end, serialized ONLY when non-null (the same
+   * convention as {@link RecallHit.truncated}). `null` means "unknown", and omitting the key keeps
+   * every pre-P-07 envelope byte-identical. Both are display/audit only — no leg filters on them.
+   */
+  valid_from?: string
+  valid_to?: string
+}
+
+/** P-01: one leg's contribution to a hit (see {@link RecallHit.scores}). */
+export interface RecallLegScore {
+  /** The leg's own raw score, on its own scale. */
+  raw: number
+  /** `raw / legMax` in `[0,1]` — the value fusion actually weighted. Not comparable across legs. */
+  normalized: number
 }
 
 /**
@@ -270,6 +329,12 @@ export interface RememberResult {
   revived: boolean
   entities: string[]
   /**
+   * P-10: how many times this content has been asserted. A first write is `1`; a verbatim
+   * duplicate `add` increments it. Reviving an archived row does NOT increment it — that is a
+   * resurrection, not a new assertion.
+   */
+  assert_count: number
+  /**
    * Contradictions detected against the existing corpus while writing this fact (DESIGN §11).
    * Present only when at least one was found, so the writer learns immediately instead of
    * discovering it from a later sweep.
@@ -354,6 +419,28 @@ export interface VectorSpaceHealth {
   space_stale: number
 }
 
+/**
+ * SQLite WAL sidecar health for the memory database (P-06).
+ *
+ * The `-wal` / `-shm` files are TRANSIENT: versioning or copying them next to `memory.db` can leave
+ * a database that will not recover. `admin stats` is offline and dependency-free by design, so it
+ * never shells out to git to ask whether they are tracked — it only reports the one fact a single
+ * `statSync` can establish. The "do not version these; `wal_checkpoint(TRUNCATE)` before a commit or
+ * a copy" rule lives in `docs/INSTALL.md`.
+ */
+export interface WalHealth {
+  /** The `-wal` sidecar exists right now (a checkpoint has not removed it, or the store is live). */
+  present: boolean
+  /** Size of `-wal` in bytes; 0 when it does not exist or has been truncated. */
+  bytes: number
+  /**
+   * The operator-facing reminder, non-null only while `-wal` actually holds bytes. An EMPTY
+   * sidecar (the normal post-`wal_checkpoint(TRUNCATE)` state) and an absent one are both silent —
+   * this is a backup-discipline hint, never an error.
+   */
+  warning: string | null
+}
+
 /** `mem_admin stats`: store counts plus the retrieval-health counters. */
 export interface StatsSummary {
   active: number
@@ -364,6 +451,35 @@ export interface StatsSummary {
    * status surface instead of only from a one-shot startup warning.
    */
   vectors: VectorSpaceHealth
+  /**
+   * WAL sidecar health, so "there is an uncheckpointed `-wal` next to the database" is visible
+   * before someone versions or copies the data root.
+   */
+  wal: WalHealth
+  /**
+   * P-08 source coverage. Reported from day one so the field cannot silently become empty: a
+   * `source_ref` that never lands (or a predicate that stops matching) shows up here as `0`.
+   */
+  sources: SourceCoverage
+  /** P-13 `valid_from` coverage, the same "prevent an empty field" argument as {@link StatsSummary.sources}. */
+  validity: ValidityCoverage
+}
+
+/** P-08: how much of the ACTIVE corpus carries provenance (`fact_sources`). */
+export interface SourceCoverage {
+  active: number
+  /** ACTIVE facts with at least one `fact_sources` row (a fact with three sources counts once). */
+  facts_with_source: number
+  /** `facts_with_source / active`, `0` on an empty corpus. */
+  coverage: number
+}
+
+/** P-13: how much of the ACTIVE corpus carries an event time (`valid_from`). */
+export interface ValidityCoverage {
+  active: number
+  facts_with_valid_from: number
+  /** `facts_with_valid_from / active`, `0` on an empty corpus. */
+  coverage: number
 }
 
 /** One page of facts (`mem_admin list`). */

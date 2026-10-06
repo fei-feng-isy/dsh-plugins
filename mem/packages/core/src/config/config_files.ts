@@ -50,6 +50,13 @@ export const DEFAULT_COMMON_CONFIG = `# avantf-mem 公共配置（分层第②�
 #   min_semantic_similarity: 0.5      # 语义腿余弦；0.5 只对 bge-base-zh-v1.5/768（mean pooling）标定过，换模型要重标
 #   min_fts_terms: 2                  # FTS 腿：这一行命中几个不同的查询词元（拉丁词≥5字符 + CJK 3-gram）
 #   min_jaccard: 0.2                  # 实体腿：锚点实体的 Jaccard（事实宽度饱和）；2 实体命中 1 个正好 0.2
+#   # P-11 中文时间窗腿（默认关）：开启后，带中文时间表达的查询（上个月 / 最近三天 / 2026年9月 …）
+#   # 会额外把"事件时间 valid_from 落在该窗口"的活跃事实作为一条腿参与融合。它是**加一条腿、不是过滤器**：
+#   # 只增加候选，绝不删掉语义 / FTS / 实体腿已经找到的事实；没有事件时间的事实不作为该腿候选，
+#   # 也**不回退到写入时间 created_at**。它共用 jaccard 权重位（对外的三键权重不变）。
+#   # 什么时候该开：先用 mem_admin stats 看 validity.coverage（有多少活跃事实带事件时间），
+#   # 再用回归网确认它确实改善时间类查询——覆盖率≈0 时它等于没开。写入事件时间用 mem_remember 的 event_date。
+#   time_window: false
 
 # lifecycle:
 #   purge_after_archived_days: 365    # 归档事实的物理清理窗口（活跃日）

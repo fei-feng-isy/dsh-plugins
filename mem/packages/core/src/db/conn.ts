@@ -184,6 +184,41 @@ export const MEMORY_SCHEMA: StoreSchema = {
         )
       },
     },
+    {
+      version: 10,
+      name: 'fact-validity-sources-and-assert-count',
+      up: (db) => {
+        // Batch 1 lands in ONE step on purpose: `valid_from` / `valid_to` (P-07/P-13),
+        // `assert_count` (P-10) and the `fact_sources` table (P-08) are one schema generation, and
+        // splitting them would make every store pay two ALTER rounds for one release.
+        //
+        // All three columns are in the base DDL too, so a fresh database gets them from step 1 and
+        // this step is a no-op there (the same arrangement as step 6's provenance columns).
+        //
+        // `valid_from` / `valid_to` are NULLABLE with NO default: NULL means "unknown", and the
+        // retrieval legs must not grow a time predicate from this migration (P-07 is display/audit
+        // only). `assert_count` is NOT NULL-by-default 1 — "asserted once" is the honest value for
+        // every row that predates the counter, and `ALTER TABLE … DEFAULT 1` backfills exactly that
+        // for existing rows while an INSERT that does not name the column still gets 1 (P-10).
+        addColumnIfMissing(db, 'facts', 'valid_from', 'TIMESTAMP')
+        addColumnIfMissing(db, 'facts', 'valid_to', 'TIMESTAMP')
+        addColumnIfMissing(db, 'facts', 'assert_count', 'INTEGER DEFAULT 1')
+        db.exec('UPDATE facts SET assert_count = 1 WHERE assert_count IS NULL')
+        // The provenance of a fact: one row per (fact, kind, ref). `kind` is a closed set so a
+        // future reader can trust the vocabulary; the composite PRIMARY KEY also makes a repeated
+        // write idempotent without a separate dedupe query.
+        db.exec(`CREATE TABLE IF NOT EXISTS fact_sources (
+            fact_id INTEGER NOT NULL REFERENCES facts(fact_id) ON DELETE CASCADE,
+            kind    TEXT NOT NULL CHECK (kind IN ('session', 'kb_doc', 'tool', 'manual')),
+            ref     TEXT NOT NULL,
+            PRIMARY KEY (fact_id, kind, ref)
+          )`)
+        // Reverse lookup: "which facts came from this source" (`admin list source=`), and the
+        // coverage EXISTS predicate. `fact_id` leads the composite PK, so the forward direction is
+        // already served.
+        db.exec('CREATE INDEX IF NOT EXISTS idx_fact_sources_ref ON fact_sources(ref)')
+      },
+    },
   ],
 }
 

@@ -134,6 +134,16 @@ describe('contract', () => {
     expect(ConfigSchema.safeParse({ retriever: { leg_cap: 1.5 } }).success).toBe(false)
   })
 
+  it('P-11: the time-window leg is OFF unless the config says otherwise', () => {
+    // Default OFF is the whole acceptance story: the default path must stay byte-identical and
+    // "is this leg worth it" is decided from measured `validity.coverage`, not from a shipped
+    // default. The key is a plain boolean, and it is NOT a model-facing knob (asserted below with
+    // the floors), because the model cannot enable a retrieval leg per call.
+    expect(ConfigSchema.parse({}).retriever.time_window).toBe(false)
+    expect(ConfigSchema.parse({ retriever: { time_window: true } }).retriever.time_window).toBe(true)
+    expect(ConfigSchema.safeParse({ retriever: { time_window: 'yes' } }).success).toBe(false)
+  })
+
   it('retriever relevance floors default to the calibrated values, admit 0 = off, and refuse nonsense', () => {
     // The three floors are absolute cutoffs on the legs' OWN raw scores (cosine / distinct query
     // terms / Jaccard ratio); `0` means "this leg is not gated". They are config + result-payload
@@ -153,7 +163,7 @@ describe('contract', () => {
     // schema. The per-call profile is a different thing and IS model-facing — an enum, not the
     // numbers — because the model needs the documented escape hatch when the floors empty its query.
     const toolSchemas = JSON.stringify([REMEMBER_TOOL, RECALL_TOOL, ADMIN_TOOL, KB_TOOL, KB_ADD_TOOL, QUERY_TOOL])
-    expect(toolSchemas).not.toMatch(/min_semantic_similarity|min_fts_terms|min_jaccard/)
+    expect(toolSchemas).not.toMatch(/min_semantic_similarity|min_fts_terms|min_jaccard|time_window/)
     for (const spec of [RECALL_TOOL, QUERY_TOOL]) {
       const schema = toolInputJsonSchema(spec) as { properties: Record<string, { enum?: string[] }> }
       expect(schema.properties.floors?.enum).toEqual([...FLOOR_PROFILES])

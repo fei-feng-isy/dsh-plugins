@@ -8,24 +8,31 @@
  */
 import type { Db } from '../port.js'
 import { batches, inList } from '../chunk.js'
+import type { ExtractedEntity } from '../../entities/extract.js'
 
 export class EntitiesDao {
   constructor(private readonly db: Db) {}
 
   /**
-   * Ensure every name exists and link the fact to them.
+   * Ensure every entity exists (with the extractor's `type` / `method`) and link the fact to it.
    *
    * `INSERT OR IGNORE` + the `name` uniqueness make this idempotent, which matters because
    * both `add` and the revive branch of `persistFact` call it for the same fact.
+   *
+   * FIRST WRITE WINS for `entity_type` / `extraction_method`: a name already in the vocabulary
+   * keeps the type/method of whichever write introduced it (`INSERT OR IGNORE` skips the row),
+   * so an old row is never rewritten by a later fact that happens to share the name. That is the
+   * documented trade-off of not bumping `ENTITY_EXTRACTOR_VERSION` — new entities get real
+   * values, pre-existing ones keep theirs.
    */
-  linkFact(factId: number, names: readonly string[]): void {
-    if (!names.length) return
-    const ensure = this.db.prepare('INSERT OR IGNORE INTO entities (name) VALUES (?)')
+  linkFact(factId: number, entities: readonly ExtractedEntity[]): void {
+    if (!entities.length) return
+    const ensure = this.db.prepare('INSERT OR IGNORE INTO entities (name, entity_type, extraction_method) VALUES (?, ?, ?)')
     const idOf = this.db.prepare<{ entity_id: number }>('SELECT entity_id FROM entities WHERE name = ?')
     const link = this.db.prepare('INSERT OR IGNORE INTO fact_entities (fact_id, entity_id) VALUES (?, ?)')
-    for (const name of names) {
-      ensure.run(name)
-      const row = idOf.get(name)
+    for (const entity of entities) {
+      ensure.run(entity.name, entity.type, entity.method)
+      const row = idOf.get(entity.name)
       if (row) link.run(factId, row.entity_id)
     }
   }
@@ -179,7 +186,18 @@ export class EntitiesDao {
    * deterministic tie-break among equal ratios. The caller still recomputes the score in JS for the
    * survivors, so one formula stays in charge.
    */
-  candidateFactsForAnyEntity(names: readonly string[], category: string | undefined, limit: number, queryWidth: number, widthCap: number): number[] {
+  candidateFactsForAnyEntity(
+    names: readonly string[],
+    category: string | undefined,
+    limit: number,
+    queryWidth: number,
+    widthCap: number,
+    /**
+     * P-08 provenance filter (`fact_sources.ref`). `EXISTS`, never a JOIN: a fact with several
+     * sources would fan out into several rows and eat the leg's `LIMIT`, silently shrinking recall.
+     */
+    source?: string,
+  ): number[] {
     if (!names.length || limit <= 0) return []
     const { placeholders, values } = inList(names)
     return this.db
@@ -190,11 +208,14 @@ export class EntitiesDao {
            JOIN fact_entities fe ON fe.fact_id = fa.fact_id
            JOIN entities e ON e.entity_id = fe.entity_id
           WHERE e.name IN (${placeholders}) AND fa.status = 'active' AND (? IS NULL OR fa.category = ?)
+            AND (? IS NULL OR EXISTS (
+                  SELECT 1 FROM fact_sources fs WHERE fs.fact_id = fa.fact_id AND fs.ref = ?
+                ))
           GROUP BY fa.fact_id
           ORDER BY (CAST(shared AS REAL) / (? + MIN(total - shared, ?))) DESC, total ASC, fa.fact_id ASC
           LIMIT ?`,
       )
-      .all(...values, category ?? null, category ?? null, queryWidth, widthCap, limit)
+      .all(...values, category ?? null, category ?? null, source ?? null, source ?? null, queryWidth, widthCap, limit)
       .map((row) => row.id)
   }
 }

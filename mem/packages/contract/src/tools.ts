@@ -19,6 +19,28 @@ import { CATEGORY_VALUES, FACT_STATUSES, FLOOR_PROFILES, withoutRetentionDiagnos
  */
 const CATEGORY_HINT = `内置分类：${CATEGORY_VALUES.join(' / ')}；也可自定义。`
 
+/**
+ * P-08 `source_ref`: the caller names where the fact came from. Omitted means "unknown" and the
+ * engine records nothing (it never invents a source). The `kind` axis of the `fact_sources` table
+ * is DERIVED from a `kind:` prefix — `session:…` / `kb_doc:…` / `tool:…` — and anything without a
+ * recognized prefix is recorded as `manual`; the reference text after the prefix is kept verbatim.
+ * Spelled out in the tool description because the model is the one that has to use it well.
+ */
+const SOURCE_REF_DESCRIPTION =
+  '这条事实的来源（可选）：未给 = 未知来源，引擎不会臆造。用 `kind:` 前缀标明来源类型——'
+  + '`session:<会话 id>`（会话供述）、`kb_doc:<domain>:<source>:<title>`（知识库文档）、`tool:<工具名>`（工具产出）、'
+  + '无前缀则记为 `manual`（调用方手工给出），前缀之后的文本原样保存。可用 `mem_admin` 的 `list`（`source=`）反查同一来源产生了哪些事实。'
+
+/** P-13 `event_date`: the event time, written into `valid_from`. */
+const EVENT_DATE_DESCRIPTION =
+  '这件事发生的时间（可选，ISO 日期或日期时间，如 2026-10-06 或 2026-10-06T09:30:00+08:00）：'
+  + '写入事实的事件时间，供时间窗检索与展示使用；不参与打分。未给 = 未知（不写）。'
+
+/** P-13 `valid_until`: a known end, written into `valid_to` WITHOUT archiving the row. */
+const VALID_UNTIL_DESCRIPTION =
+  '这条事实有效到什么时候（可选，ISO 日期或日期时间）：写入有效期终点，**不会归档该事实**——'
+  + '「仍然有效、但已知截止于某时」的事实照常参与检索。未给 = 未知（不写）。'
+
 export const CONTRADICTION_RESOLUTIONS = ['true_positive', 'false_positive'] as const
 export const QUERY_KINDS = ['all', 'fact', 'doc_chunk'] as const
 
@@ -32,6 +54,15 @@ const FLOORS_FIELD_DESCRIPTION =
   '相关性门槛档位（可选）。不传=默认策略：严格门槛，严格门槛一条都没命中而确有条目被门槛丢弃时自动再跑一次宽松门槛；'
   + 'strict=只用严格门槛，无自动放宽；'
   + 'loose=直接用宽松门槛（仍有绝对底线，代词式提问如「我是谁」「我司」属于这一类）。'
+
+/**
+ * P-01 `include_scores`: per-leg evidence on every hit. Default OFF, and that default is the whole
+ * point — the field is pure explanation, so a caller that does not ask must not pay for it in
+ * tokens (and the envelope stays byte-identical).
+ */
+const INCLUDE_SCORES_DESCRIPTION =
+  '返回每条命中的逐腿证据（可选，默认 false）：每条命中带 `scores`（各腿的原始分 `raw` 与按该腿最大值归一后的 `normalized`，'
+  + '该腿未召回为 null）与 `final`（融合分）。用于回答「这条靠哪条腿进来的」；默认关，不产生额外输出。'
 
 /**
  * The longest retrieval query the contract accepts, in characters.
@@ -105,6 +136,9 @@ export const RememberUnion = z.discriminatedUnion(
       content: z.string().min(1).describe('要写入或替换的事实内容：一句自包含的陈述。action=add 时必填。'),
       category: z.string().optional().describe(`分类标签；可选，默认 general。${CATEGORY_HINT}`),
       ttl_days: z.number().int().nonnegative().optional().describe('有效期天数（0 或省略 = 不设有效期；正整数 = 自写入起该天数后自动归档）。update 未给则继承被改写事实的 TTL。'),
+      source_ref: z.string().min(1).optional().describe(SOURCE_REF_DESCRIPTION),
+      event_date: z.string().min(1).optional().describe(EVENT_DATE_DESCRIPTION),
+      valid_until: z.string().min(1).optional().describe(VALID_UNTIL_DESCRIPTION),
     }),
     z.object({
       action: z.literal('update'),
@@ -112,6 +146,9 @@ export const RememberUnion = z.discriminatedUnion(
       content: z.string().min(1).describe('替换后的新事实内容。action=update 时必填。'),
       category: z.string().optional().describe(`新的分类标签；可选，未给则继承被改写事实的分类。${CATEGORY_HINT}`),
       ttl_days: z.number().int().nonnegative().optional().describe('新的有效期天数（0 = 取消有效期）；可选，未给则继承被改写事实的 TTL。'),
+      source_ref: z.string().min(1).optional().describe(SOURCE_REF_DESCRIPTION),
+      event_date: z.string().min(1).optional().describe(EVENT_DATE_DESCRIPTION),
+      valid_until: z.string().min(1).optional().describe(VALID_UNTIL_DESCRIPTION),
     }),
     z.object({
       action: z.literal('remove'),
@@ -137,9 +174,11 @@ export const RecallUnion = z.discriminatedUnion('action', [
     action: z.literal('search'),
     query: z.string().min(1).max(MAX_QUERY_CHARS, QUERY_TOO_LONG).describe('检索文本。action=search 时必填。'),
     category: z.string().optional().describe('限定分类；可选。'),
+    source: z.string().optional().describe('限定来源（`fact_sources.ref`）：来源等于该值的事实才参与本次检索；可选，不参与打分（未给 = 不过滤）。'),
     limit: z.number().int().positive().max(50).optional().describe('返回条数上限（1-50）；可选。'),
     max_tokens: z.number().int().nonnegative().optional().describe('本次结果的总 token 上限；0=不限制。缺省用配置 retrieval.max_output_tokens。'),
     floors: z.enum(FLOOR_PROFILES).optional().describe(FLOORS_FIELD_DESCRIPTION),
+    include_scores: z.boolean().optional().describe(INCLUDE_SCORES_DESCRIPTION),
   }),
   z.object({
     action: z.literal('ask'),
@@ -190,6 +229,7 @@ export const AdminUnion = z.discriminatedUnion('action', [
     action: z.literal('list'),
     category: z.string().optional().describe('限定分类；可选。'),
     status: z.enum(FACT_STATUSES).optional().describe('按状态过滤；可选，默认 active。'),
+    source: z.string().optional().describe('只列出来源（`fact_sources.ref`）等于该值的事实——反查「某来源产生了哪些事实」；可选，与 `mem_recall search` 的 `source=` 同语义。'),
     limit: z.number().int().positive().max(500).optional().describe('返回条数上限（1-500）；可选，默认 50。'),
     offset: z.number().int().nonnegative().optional().describe('分页偏移（从 0 开始）；配合 limit 翻页；可选。'),
   }),
@@ -290,9 +330,10 @@ export const QueryUnion = z.object({
   kind: z.enum(QUERY_KINDS).optional().describe('结果类型：all/fact/doc_chunk；可选，默认 all。'),
   max_tokens: z.number().int().nonnegative().optional().describe('本次结果的总 token 上限；0=不限制。缺省用配置 retrieval.max_output_tokens。'),
   domain: z.string().optional().describe('限定知识域；可选。'),
-  source: z.string().optional().describe('限定来源；可选。'),
+  source: z.string().optional().describe('限定知识库来源；可选。'),
   limit: z.number().int().positive().max(50).default(10).describe('返回条数上限（1-50）；可选，默认 10。'),
   floors: z.enum(FLOOR_PROFILES).optional().describe(FLOORS_FIELD_DESCRIPTION),
+  include_scores: z.boolean().optional().describe(INCLUDE_SCORES_DESCRIPTION),
 })
 export type QueryRequest = z.infer<typeof QueryUnion>
 

@@ -831,7 +831,21 @@ function MemoryPanel(props: { remote?: AvantfRemote }) {
           h('br'),
           `三元组：${(detail.data.triples ?? []).map(t => `${t.subj} —${t.pred}→ ${t.obj}（${t.confidence.toFixed(2)}）`).join('；') || '（无）'}`,
           h('br'),
-          `检索次数：${String(detail.data.retrieval_count ?? 0)}${detail.data.supersedes_id ? ` · 修订自 #${String(detail.data.supersedes_id)}` : ''}`)
+          `检索次数：${String(detail.data.retrieval_count ?? 0)}${detail.data.supersedes_id ? ` · 修订自 #${String(detail.data.supersedes_id)}` : ''}`
+          // P-10: how many times this exact content was asserted (a verbatim re-add moves it).
+          + ` · 被断言 ${String(detail.data.assert_count ?? 1)} 次`,
+          h('br'),
+          // P-07: event time / known end, and who superseded this row (reverse-derived from the
+          // existing supersedes_id link). `valid_to` on an ACTIVE row is the `valid_until` state.
+          `有效期：${detail.data.valid_from ?? '未知'} → ${detail.data.valid_to ?? (detail.data.status === 'active' ? '仍在有效' : '未知')}`
+          + (detail.data.superseded_by === null || detail.data.superseded_by === undefined
+            ? ''
+            : ` · 被 #${String(detail.data.superseded_by)} 取代`),
+          h('br'),
+          // P-08: the recorded provenance. Empty is the honest "unknown source" — never invented.
+          `来源：${(detail.data.sources ?? []).length === 0
+            ? '（未记录）'
+            : (detail.data.sources ?? []).map(s => `${s.kind}:${s.ref}`).join('；')}`)
         : null,
     ))),
     truncated
@@ -866,6 +880,9 @@ function HealthBlock(props: { stats: StatsSummary }) {
   // Optional (`undefined` against a host from before the field existed) so an older host still renders.
   const vectors = props.stats.vectors
   const pendingVectors = vectors === undefined ? 0 : vectors.stale + vectors.space_stale
+  // P-06: the offline WAL reminder. Also optional for the same older-host reason as `vectors`; a
+  // host that predates the field simply renders nothing.
+  const wal = props.stats.wal
   const pct = (v: number): string => `${String(Math.round(v * 100))}%`
   const kinds = Object.entries(r.by_kind)
     .map(([kind, v]) => `${kind} ${String(v.queries)} 次（空 ${String(v.zero_results)}）`)
@@ -878,11 +895,24 @@ function HealthBlock(props: { stats: StatsSummary }) {
         `⚠ 向量空间待迁移：${String(pendingVectors)} 条 ACTIVE 向量来自旧嵌入空间`
         + `（宽度不符 ${String(vectors?.stale ?? 0)} · 其他表示 ${String(vectors?.space_stale ?? 0)}）`
         + '——语义腿对它们失效，正在后台分批重算；手动入口 `avantf-mem vectors --fix`'),
+    wal?.warning === null || wal?.warning === undefined
+      ? null
+      : h('div', { className: css.status },
+        `⚠ ${wal.warning}（当前 ${String(wal.bytes)} 字节）`),
     h('div', { className: css.status },
       `检索 ${String(r.queries)} 次 · 空结果 ${pct(r.zero_result_rate)} · 平均 ${r.avg_latency_ms.toFixed(1)}ms · 峰值 ${r.max_latency_ms.toFixed(1)}ms`),
     h('div', { className: css.meta },
       `语义腿在线 ${pct(r.semantic_live_rate)} · 平均命中 ${String(r.avg_results_per_query)} 条`),
     kinds === '' ? null : h('div', { className: css.meta }, kinds),
+    // P-08 / P-13 coverage. Optional for the same older-host reason as `vectors`/`wal`: a host from
+    // before batch 1 simply renders nothing instead of `NaN`/`undefined%`.
+    props.stats.sources === undefined && props.stats.validity === undefined
+      ? null
+      : h('div', { className: css.meta },
+        `来源覆盖 ${props.stats.sources === undefined ? '—' : pct(props.stats.sources.coverage)}`
+        + `（${String(props.stats.sources?.facts_with_source ?? 0)}/${String(props.stats.sources?.active ?? 0)}）`
+        + ` · 事件时间覆盖 ${props.stats.validity === undefined ? '—' : pct(props.stats.validity.coverage)}`
+        + `（${String(props.stats.validity?.facts_with_valid_from ?? 0)}/${String(props.stats.validity?.active ?? 0)}）`),
     h('div', { className: css.meta },
       truncated === 0
         ? '未被任何预算截断。'
@@ -906,6 +936,25 @@ function groupKey(hit: RecallHit): string {
   const source = hit.source ?? ''
   if (domain !== '' && source !== '') return `${domain} → ${source}`
   return domain || source || '文档切片'
+}
+
+/**
+ * P-01: render the per-leg evidence the query page explicitly asked for (`include_scores: true`).
+ *
+ * `scores` is absent for every other caller (the field is default-off), so this returns null and
+ * the row renders exactly as before. A leg that did not recall the hit is `null` and prints as
+ * `—`, which is the honest reading: the candidate entered through some OTHER leg.
+ */
+function legEvidenceLine(hit: RecallHit): string | null {
+  const scores = hit.scores
+  if (scores === undefined) return null
+  const label: Record<string, string> = { semantic: '语义', fts: 'FTS', jaccard: '实体', hrr: 'HRR' }
+  const parts = Object.entries(scores).map(([leg, score]) =>
+    score === null
+      ? `${label[leg] ?? leg} —`
+      : `${label[leg] ?? leg} ${score.normalized.toFixed(2)}（原始 ${score.raw.toFixed(2)}）`)
+  const final = hit.final === undefined ? '' : ` · 融合 ${hit.final.toFixed(3)}`
+  return `证据：${parts.join(' · ')}${final}`
 }
 
 /**
@@ -1015,6 +1064,9 @@ function KnowledgePanel(props: { remote?: AvantfRemote }) {
       source: source.trim() || undefined,
       limit: 10,
       floors,
+      // P-01: the panel's query page is an EXPLICIT consumer of the per-leg evidence — it is one of
+      // the two callers (the eval harness is the other) that turn the default-off field on.
+      include_scores: true,
     }))
       .then((outcome) => {
         if (!queryGuard.isCurrent(seq)) return // a newer Enter already owns the panel
@@ -1503,7 +1555,8 @@ function KnowledgePanel(props: { remote?: AvantfRemote }) {
               // 记忆的「何时记下 / 何时改过」：updated_at 只在行被改动时前进，检索不会写它，
               // 所以它与 created_at 不同才是真的改过（而不是刚被查到过）。
               + ` · 创建于 ${hit.created_at}`
-              + (hit.updated_at !== null && hit.updated_at !== hit.created_at ? ` · 更新于 ${hit.updated_at}` : '')),
+              + (hit.updated_at !== null && hit.updated_at !== hit.created_at ? ` · 更新于 ${hit.updated_at}` : '')
+              + (legEvidenceLine(hit) === null ? '' : ` · ${legEvidenceLine(hit) ?? ''}`)),
           ))),
         )),
       )

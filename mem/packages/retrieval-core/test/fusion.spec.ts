@@ -135,3 +135,45 @@ describe('fusion with a non-finite score', () => {
     expect(hits.find((h) => h.id === 2)!.score).toBeCloseTo(1.5, 6)
   })
 })
+
+/**
+ * P-01: per-leg evidence is opt-in, and turning it on changes NOTHING about the ranking.
+ *
+ * `fuse` is the memory/knowledge shared kernel, so this is the level at which "the evidence is
+ * additive" can be stated without either store in the room.
+ */
+describe('fuse with per-leg evidence (P-01)', () => {
+  const paths: FusionPath[] = [
+    { weight: 0.55, scores: new Map([[1, 0.9], [2, 0.7]]) },
+    { weight: 0.3, scores: new Map([[2, 0.8], [3, 0.6]]) },
+  ]
+
+  it('omits the evidence entirely unless asked', () => {
+    for (const hit of fuse(paths, 3)) expect(hit).not.toHaveProperty('legs')
+  })
+
+  it('reports raw and normalized per leg, null where the leg had no candidate', () => {
+    const hits = fuse(paths, 3, { includeLegs: true })
+    const byId = new Map(hits.map((h) => [h.id, h]))
+    const expectLeg = (leg: { raw: number; normalized: number } | null | undefined, raw: number, normalized: number): void => {
+      expect(leg).not.toBeNull()
+      expect(leg!.raw).toBeCloseTo(raw, 12)
+      expect(leg!.normalized).toBeCloseTo(normalized, 12)
+    }
+    // Candidate 1: only the first leg. raw kept; normalized = raw / that leg's max (0.9).
+    expectLeg(byId.get(1)!.legs![0], 0.9, 1)
+    expect(byId.get(1)!.legs![1]).toBeNull()
+    // Candidate 3: only the second leg, normalized against THAT leg's max (0.8).
+    expect(byId.get(3)!.legs![0]).toBeNull()
+    expectLeg(byId.get(3)!.legs![1], 0.6, 0.75)
+    // Both legs recalled candidate 2.
+    expectLeg(byId.get(2)!.legs![0], 0.7, 0.7 / 0.9)
+    expectLeg(byId.get(2)!.legs![1], 0.8, 1)
+  })
+
+  it('produces the identical ranking and scores with and without the evidence', () => {
+    const plain = fuse(paths, 3).map((h) => [h.id, h.score])
+    const withLegs = fuse(paths, 3, { includeLegs: true }).map((h) => [h.id, h.score])
+    expect(withLegs).toEqual(plain)
+  })
+})

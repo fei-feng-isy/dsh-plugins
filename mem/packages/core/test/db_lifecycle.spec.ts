@@ -199,7 +199,7 @@ describe('store schema lifecycle', () => {
     try {
       // From v2: the verdict column AND everything after it (indexes from steps 4 and 5, the
       // derived-state columns from step 6).
-      expect(upgraded.migration.applied).toEqual([3, 4, 5, 6, 7, 8, 9])
+      expect(upgraded.migration.applied).toEqual([3, 4, 5, 6, 7, 8, 9, 10])
       expect(readUserVersion(upgraded.db)).toBe(MEMORY_SCHEMA.migrations.length)
       // Closed → automatic; still open → not suppressed by a verdict either.
       expect(upgraded.db.prepare('SELECT resolved_by FROM contradiction_log ORDER BY id').all())
@@ -221,7 +221,7 @@ describe('store schema lifecycle', () => {
 
     const upgraded = openMemoryStore(path)
     try {
-      expect(upgraded.migration.applied).toEqual([4, 5, 6, 7, 8, 9])
+      expect(upgraded.migration.applied).toEqual([4, 5, 6, 7, 8, 9, 10])
       expect(readUserVersion(upgraded.db)).toBe(MEMORY_SCHEMA.migrations.length)
       expect(indexExists(upgraded.db, 'idx_facts_created')).toBe(true)
       expect(indexExists(upgraded.db, 'idx_contradict_fact_a')).toBe(true)
@@ -265,7 +265,7 @@ describe('store schema lifecycle', () => {
 
     const upgraded = openMemoryStore(path)
     try {
-      expect(upgraded.migration.applied).toEqual([6, 7, 8, 9])
+      expect(upgraded.migration.applied).toEqual([6, 7, 8, 9, 10])
       expect(readUserVersion(upgraded.db)).toBe(MEMORY_SCHEMA.migrations.length)
       expect(
         upgraded.db.prepare('SELECT content, entities_version, conflict_checked FROM facts ORDER BY fact_id').all(),
@@ -298,7 +298,7 @@ describe('store schema lifecycle', () => {
 
     const upgraded = openMemoryStore(path)
     try {
-      expect(upgraded.migration.applied).toEqual([7, 8, 9])
+      expect(upgraded.migration.applied).toEqual([7, 8, 9, 10])
       const index = upgraded.db
         .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_facts_conflict_pending'")
         .get() as { sql: string } | undefined
@@ -338,7 +338,7 @@ describe('store schema lifecycle', () => {
 
     const upgraded = openMemoryStore(path)
     try {
-      expect(upgraded.migration.applied).toEqual([8, 9])
+      expect(upgraded.migration.applied).toEqual([8, 9, 10])
       expect(searchable(upgraded)).toBe(1)
     } finally {
       upgraded.db.close()
@@ -459,7 +459,7 @@ describe('store schema lifecycle', () => {
  * is spelled out, so it has to be kept in step with the table — this is the step-keeping.
  */
 describe('the scalar column projection', () => {
-  it('names every facts column except the two BLOBs', () => {
+  it('names every facts column except the two BLOBs and the two deprecated provenance columns', () => {
     const db = openMemoryDb(join(dir, 'columns.db'))
     try {
       const actual = db.prepare<{ name: string }>('PRAGMA table_info(facts)').all().map((row) => row.name)
@@ -467,8 +467,15 @@ describe('the scalar column projection', () => {
       // A column added to the table and forgotten here would silently disappear from `mem_admin
       // list` and from the reinforcement read — no type error, no runtime error, just a missing
       // field. Sets, so the order of the projection is not part of the contract.
+      //
+      // The two DEPRECATED columns are exempt on purpose (P-05a, 零迁移): `mirror_source` was the
+      // constant `'user'` at the single INSERT and `mirror_target` had no writer at all, so the
+      // model-facing views stopped projecting them. The COLUMNS stay in the schema for a later
+      // migration; only this projection stops reading them. Naming them here keeps the exemption
+      // explicit — a THIRD column cannot vanish silently.
+      const deprecated = new Set(['mirror_source', 'mirror_target'])
       expect(new Set(projected)).toEqual(
-        new Set(actual.filter((name) => name !== 'hrr_vector' && name !== 'semantic_vector')),
+        new Set(actual.filter((name) => name !== 'hrr_vector' && name !== 'semantic_vector' && !deprecated.has(name))),
       )
     } finally {
       db.close()
@@ -492,7 +499,7 @@ describe('the contradiction resolved-indexes (v9)', () => {
 
     const upgraded = openMemoryStore(path)
     try {
-      expect(upgraded.migration.applied).toEqual([9])
+      expect(upgraded.migration.applied).toEqual([9, 10])
       expect(indexExists(upgraded.db, 'idx_contradict_resolved_score')).toBe(true)
       expect(indexExists(upgraded.db, 'idx_contradict_verdict')).toBe(true)
     } finally {
@@ -533,6 +540,56 @@ describe('the contradiction resolved-indexes (v9)', () => {
  * The other half is equal and opposite: a store that is already current must not add a per-boot
  * line, or the signal drowns.
  */
+/**
+ * Batch 1's schema generation (P-07 / P-08 / P-10 / P-13): the columns, the provenance table and
+ * its reverse-lookup index. The every-starting-version parity guard lives in
+ * `db_upgrade_parity.spec.ts` (it iterates the migration list, so step 10 is covered there); this
+ * pins the two places the objects must appear — the base DDL (fresh file) and step 10 (old file).
+ */
+describe('the v10 validity/sources/assert-count schema', () => {
+  const V10_COLUMNS = ['valid_from', 'valid_to', 'assert_count']
+  const factsColumns = (db: Db): string[] =>
+    db.prepare<{ name: string }>('PRAGMA table_info(facts)').all().map((c) => c.name)
+
+  it('a fresh database gets them from the base DDL, so step 10 is a no-op there', () => {
+    const { db, migration } = openMemoryStore(join(dir, 'fresh-v10.db'))
+    try {
+      expect(factsColumns(db)).toEqual(expect.arrayContaining(V10_COLUMNS))
+      expect(tableExists(db, 'fact_sources')).toBe(true)
+      expect(indexExists(db, 'idx_fact_sources_ref')).toBe(true)
+      expect(migration.applied).toContain(10)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('a v9 database gains ALL of them from step 10 alone', () => {
+    const path = join(dir, 'v9-v10.db')
+    const seeded = openMemoryStore(path)
+    // Downgrade the fresh file to the v9 shape: the columns/table/index step 10 introduces are the
+    // only things a v9 database lacks (every earlier step is already at its final form).
+    seeded.db.exec('DROP TABLE IF EXISTS fact_sources')
+    seeded.db.exec('DROP INDEX IF EXISTS idx_fact_sources_ref')
+    for (const column of V10_COLUMNS) seeded.db.exec(`ALTER TABLE facts DROP COLUMN ${column}`)
+    seeded.db.pragma('user_version = 9')
+    seeded.db.close()
+
+    const upgraded = openMemoryStore(path)
+    try {
+      expect(upgraded.migration.applied).toEqual([10])
+      expect(factsColumns(upgraded.db)).toEqual(expect.arrayContaining(V10_COLUMNS))
+      expect(tableExists(upgraded.db, 'fact_sources')).toBe(true)
+      expect(indexExists(upgraded.db, 'idx_fact_sources_ref')).toBe(true)
+      // `assert_count` is DEFAULT 1 for every row that predates it ("asserted once").
+      expect(
+        upgraded.db.prepare<{ dflt: string | null }>("SELECT dflt_value AS dflt FROM pragma_table_info('facts') WHERE name = 'assert_count'").get()?.dflt,
+      ).toBe('1')
+    } finally {
+      upgraded.db.close()
+    }
+  })
+})
+
 describe('startup schema diagnostics', () => {
   it('phrases both states, naming every applied step', () => {
     const path = join(dir, 'diagnostics.db')

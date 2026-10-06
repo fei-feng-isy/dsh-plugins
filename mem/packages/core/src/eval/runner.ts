@@ -1,4 +1,4 @@
-import { aggregate, precisionAtK, recallAtK, reciprocalRank, type PerQueryMetrics, type AggregateMetrics } from './metrics.js'
+import { aggregate, aggregateRanking, precisionAtK, recallAtK, reciprocalRank, type PerQueryMetrics, type AggregateMetrics, type RankingMetrics } from './metrics.js'
 import type { EvalCase } from './loader.js'
 
 /** A retrieve function over the case's facts, returning indices in relevance order. */
@@ -7,6 +7,13 @@ type RetrieveFn = (query: string, k: number, facts: string[]) => Promise<number[
 interface EvalReport {
   perQuery: PerQueryMetrics[]
   summary: AggregateMetrics
+  /**
+   * P-02 ranking-quality metrics. A SIBLING of `summary`, never a key inside it: `eval_zh.spec.ts`
+   * asserts `summary` with `toEqual` over exactly seven keys, so a new key there would turn a
+   * frozen-number regression into a key-set failure. `perQuery` is unchanged, so the bench
+   * harness's `(ids, scores)` fingerprint over it cannot move.
+   */
+  ranking: RankingMetrics
 }
 
 async function evaluateCase(caseData: EvalCase, retrieve: RetrieveFn): Promise<PerQueryMetrics[]> {
@@ -33,5 +40,5 @@ async function evaluateCase(caseData: EvalCase, retrieve: RetrieveFn): Promise<P
 export async function evaluateCases(cases: EvalCase[], retrieve: RetrieveFn): Promise<EvalReport> {
   const all: PerQueryMetrics[] = []
   for (const c of cases) all.push(...(await evaluateCase(c, retrieve)))
-  return { perQuery: all, summary: aggregate(all) }
+  return { perQuery: all, summary: aggregate(all), ranking: aggregateRanking(all) }
 }

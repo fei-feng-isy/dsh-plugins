@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'
 import type {
   AdminRequest,
   FloorProfile,
@@ -13,6 +14,7 @@ import {
   defaultLogger,
   type AvantfLogger,
   type StatsSummary,
+  type WalHealth,
 } from '@avantf/mem-contract'
 import {
   recordRetrieval,
@@ -32,9 +34,55 @@ import { describeMigrationOutcome, wasUpgraded } from './db/store.js'
 import { looksRelevant, type RelevanceHit } from './store/lexical.js'
 import { selfQueryRewrite } from './store/self_query.js'
 import { droppedLegs, emptyFloorDrops, totalFloorDrops, type FloorLeg } from './store/floors.js'
-import { MemoryStore } from './store/memory.js'
+import { MemoryStore, type FactWriteOptions } from './store/memory.js'
 import { KnowledgeStore } from './store/knowledge.js'
 import { crossQuery } from './router.js'
+
+/**
+ * WAL sidecar health for the memory database (P-06), from ONE `statSync`.
+ *
+ * An ABSENT `-wal` is the healthy/quiet case (it was checkpointed, or the database has never been
+ * opened), and so is a zero-byte one — `wal_checkpoint(TRUNCATE)` leaves the file in place but
+ * empty. Only a sidecar that actually holds bytes raises the reminder, because that is the state in
+ * which versioning or copying the data root can carry an inconsistent pair.
+ *
+ * No git call and no subprocess: `admin stats` is an offline surface, and "are the transient files
+ * tracked" is a rule for the operator (see `docs/INSTALL.md`), not a runtime probe. A `statSync`
+ * failure (ENOENT, or a permission the process does not have) is reported as "no WAL bytes"
+ * rather than surfacing as a stats error.
+ */
+function walHealth(dbPath: string): WalHealth {
+  let present = false
+  let bytes = 0
+  try {
+    const stat = statSync(`${dbPath}-wal`)
+    present = true
+    bytes = stat.size
+  } catch {
+    present = false
+    bytes = 0
+  }
+  return {
+    present,
+    bytes,
+    warning: bytes > 0
+      ? `memory.db-wal 有 ${String(bytes)} 字节未回写：版本化或复制数据根前先执行 wal_checkpoint(TRUNCATE)，且不要版本化 -wal/-shm`
+      : null,
+  }
+}
+
+/**
+ * P-08 / P-13: the `mem_remember` extras, lifted off the request and onto the store's write
+ * options. Only the keys actually present are carried, so an omitted argument stays "omitted" all
+ * the way down (the store's "unset keeps what the row has" rule depends on that distinction).
+ */
+function writeOptions(req: { source_ref?: string; event_date?: string; valid_until?: string }): FactWriteOptions {
+  return {
+    ...(req.source_ref === undefined ? {} : { sourceRef: req.source_ref }),
+    ...(req.event_date === undefined ? {} : { eventDate: req.event_date }),
+    ...(req.valid_until === undefined ? {} : { validUntil: req.valid_until }),
+  }
+}
 
 export interface RuntimeOptions {
   dataHome?: string
@@ -305,9 +353,9 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
     async remember(req: RememberRequest) {
       switch (req.action) {
         case 'add':
-          return this.memory.add(req.content, req.category, req.ttl_days)
+          return this.memory.add(req.content, req.category, req.ttl_days, writeOptions(req))
         case 'update':
-          return this.memory.update(req.fact_id, req.content, req.category, req.ttl_days)
+          return this.memory.update(req.fact_id, req.content, req.category, req.ttl_days, writeOptions(req))
         case 'remove':
           return this.memory.remove(req.fact_id, req.reason)
         case 'helpful':
@@ -319,7 +367,15 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
     async recall(req: RecallRequest) {
       switch (req.action) {
         case 'search':
-          return this.memory.search({ query: req.query, category: req.category, limit: req.limit, maxTokens: req.max_tokens, floors: req.floors })
+          return this.memory.search({
+            query: req.query,
+            category: req.category,
+            source: req.source,
+            limit: req.limit,
+            maxTokens: req.max_tokens,
+            floors: req.floors,
+            includeScores: req.include_scores,
+          })
         case 'ask': {
           if (req.query) return this.memory.ask(req.query, req.limit ?? 10)
           if (!req.subj && !req.pred && !req.obj) {
@@ -364,13 +420,21 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
           // `vectors` is the same section's DETECTION half: a changed embedding space leaves the
           // semantic leg unable to use every persisted vector, which used to be invisible outside a
           // one-shot startup warning. Cheap (blob lengths only), so the `/mem` poll can read it.
+          //
+          // `wal` (P-06) is one `statSync` on `<memory.db>-wal`: the offline, dependency-free half of
+          // the backup discipline whose rule (never version `-wal`/`-shm`) lives in docs/INSTALL.md.
           return {
             ...this.memory.countByStatus(),
             retrieval: retrievalHealthSummary(),
             vectors: this.memory.vectorSpaceHealth(),
+            wal: walHealth(memDb),
+            // P-08 / P-13 coverage: a `source_ref` / `event_date` that never lands shows up here as
+            // 0 instead of as a field that "looks implemented" (the `mirror_source` precedent).
+            sources: this.memory.sourceCoverage(),
+            validity: this.memory.validityCoverage(),
           } satisfies AdminStatsResult
         case 'list':
-          return this.memory.list(req.category, req.status ?? 'active', req.limit ?? 50, req.offset ?? 0)
+          return this.memory.list(req.category, req.status ?? 'active', req.limit ?? 50, req.offset ?? 0, req.source)
         case 'detail':
           return this.memory.get(req.fact_id) ?? ({ error: `fact_id=${req.fact_id} not found` } satisfies DispatchError)
         case 'archive':
@@ -483,6 +547,7 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
           // knowledge leg's zero-result case was not counted at all.
           this.memory.search({
             query: req.query, limit: limit * 3, track: false, recordStats: false, queryVector, maxTokens: 0, floors: profile,
+            includeScores: req.include_scores,
             ...(relaxLegs === undefined ? {} : { relaxLegs }),
           }),
           this.knowledge.search(req.query, {
@@ -493,6 +558,7 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
             queryVector,
             maxTokens: 0,
             floors: profile,
+            includeScores: req.include_scores,
             ...(relaxLegs === undefined ? {} : { relaxLegs }),
             onResult: (r) => { kbDroppedByFloor = r.dropped_by_floor },
           }),

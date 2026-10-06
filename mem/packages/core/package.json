@@ -18,7 +18,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval:derived:stub": "node scripts/derived_eval.mjs --mode stub",
+    "eval:derived:real": "node scripts/derived_eval.mjs --mode real"
   },
   "dependencies": {
     "@avantf/mem-contract": "workspace:*",

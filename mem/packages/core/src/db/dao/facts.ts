@@ -11,7 +11,8 @@ import { likeSubstring } from '../tokenizer.js'
 import { ENTITY_EXTRACTOR_VERSION } from '../../entities/extract.js'
 
 /**
- * Every `facts` column EXCEPT the two BLOBs (`hrr_vector` ~8 KB, `semantic_vector` ~2 KB per row).
+ * Every `facts` column EXCEPT the two BLOBs (`hrr_vector` ~8 KB, `semantic_vector` ~2 KB per row)
+ * and the two DEPRECATED provenance columns (`mirror_source` / `mirror_target`, see below).
  *
  * Multi-row reads that only need scalars used to be `SELECT *`, so a page of the admin list and
  * every recall's trust settlement dragged the whole vector corpus through the driver — tens of
@@ -21,14 +22,19 @@ import { ENTITY_EXTRACTOR_VERSION } from '../../entities/extract.js'
  * `getById` deliberately still selects everything: `restore` re-indexes the persisted vector it
  * reads off that one row.
  *
- * `test/db_lifecycle.spec.ts` asserts this list against `PRAGMA table_info(facts)`, so a new column
- * fails a test instead of silently vanishing from these two reads.
+ * `mirror_source` was written as the constant `'user'` at the single INSERT below and
+ * `mirror_target` never had a writer; neither had a reader left once the model-facing views
+ * dropped them (零迁移：the COLUMNS stay in `db/schema.ts` for a later migration to clean up,
+ * only this projection and the INSERT stop touching them).
+ *
+ * `test/db_lifecycle.spec.ts` asserts this list against `PRAGMA table_info(facts)` MINUS those
+ * two deprecations, so a new column fails a test instead of silently vanishing from these reads.
  */
 export const FACT_COLUMNS_NO_BLOB = `fact_id, content, category, tags, trust_score, settle_clock,
     pinned, pinned_at, bonus_count, bonus_window_at, last_reinforced_at, archived_clock,
     retrieval_count, helpful_count, last_retrieved_at, embedding_model, vector_store, status,
     supersedes_id, entities_version, conflict_checked, archived_at, archive_reason, ttl_days,
-    mirror_source, mirror_target, created_at, updated_at`
+    valid_from, valid_to, assert_count, created_at, updated_at`
 
 /**
  * The FTS leg's exact SQL, exported so the plan guard (`test/fts_plan.spec.ts`) and the bench
@@ -64,6 +70,29 @@ export const FACT_COLUMNS_NO_BLOB = `fact_id, content, category, tags, trust_sco
 export const FTS_SEARCH_SQL = `SELECT f.rowid AS id, bm25(facts_fts) AS rank FROM facts_fts f
          JOIN facts fa NOT INDEXED ON fa.fact_id = f.rowid
          WHERE facts_fts MATCH ? AND fa.status = 'active' AND (? IS NULL OR fa.category = ?)
+         ORDER BY rank ASC
+         LIMIT ?`
+
+/**
+ * {@link FTS_SEARCH_SQL} with the P-08 source predicate, as a SEPARATE statement rather than one
+ * more `(? IS NULL OR …)` branch in the shared text.
+ *
+ * The unfiltered statement's query plan is guarded by `test/fts_plan.spec.ts` (the external-content
+ * MATCH must not become the inner loop on a fresh, un-analyzed database), and the guard EXPLAINs
+ * `FTS_SEARCH_SQL` itself. Keeping the two texts apart means the default path's plan is provably
+ * unchanged, and the filtered path is a NEW statement with its own comment instead of a silent
+ * modification of the guarded one.
+ *
+ * `EXISTS`, never a JOIN on `fact_sources`: a fact with several sources would fan out into several
+ * rows, and this leg is `ORDER BY bm25 … LIMIT cap` — the duplicates would eat cap slots and shrink
+ * recall behind the caller's back.
+ */
+export const FTS_SEARCH_SQL_FILTERED = `SELECT f.rowid AS id, bm25(facts_fts) AS rank FROM facts_fts f
+         JOIN facts fa NOT INDEXED ON fa.fact_id = f.rowid
+         WHERE facts_fts MATCH ? AND fa.status = 'active' AND (? IS NULL OR fa.category = ?)
+           AND (? IS NULL OR EXISTS (
+                 SELECT 1 FROM fact_sources fs WHERE fs.fact_id = fa.fact_id AND fs.ref = ?
+               ))
          ORDER BY rank ASC
          LIMIT ?`
 
@@ -151,20 +180,22 @@ export class FactsDao {
     return out
   }
 
-  /** `fact_id → created_at/updated_at` for a hit set (the recall hit's two timestamps). */
-  timesByIds(ids: readonly number[]): Map<number, { created_at: string; updated_at: string | null }> {
-    const out = new Map<number, { created_at: string; updated_at: string | null }>()
+  /** `fact_id → created_at/updated_at/validity` for a hit set (the recall hit's timestamps). */
+  timesByIds(ids: readonly number[]): Map<number, { created_at: string; updated_at: string | null; valid_from: string | null; valid_to: string | null }> {
+    const out = new Map<number, { created_at: string; updated_at: string | null; valid_from: string | null; valid_to: string | null }>()
     if (!ids.length) return out
     const { placeholders, values } = inList(ids)
     const rows = this.db
-      .prepare<{ fact_id: number; created_at: string | null; updated_at: string | null }>(
-        `SELECT fact_id, created_at, updated_at FROM facts WHERE fact_id IN (${placeholders})`,
+      .prepare<{ fact_id: number; created_at: string | null; updated_at: string | null; valid_from: string | null; valid_to: string | null }>(
+        `SELECT fact_id, created_at, updated_at, valid_from, valid_to FROM facts WHERE fact_id IN (${placeholders})`,
       )
       .all(...values)
     for (const row of rows) {
       out.set(row.fact_id, {
         created_at: row.created_at === null ? '' : String(row.created_at),
         updated_at: row.updated_at === null ? null : String(row.updated_at),
+        valid_from: row.valid_from === null || row.valid_from === undefined ? null : String(row.valid_from),
+        valid_to: row.valid_to === null || row.valid_to === undefined ? null : String(row.valid_to),
       })
     }
     return out
@@ -243,19 +274,139 @@ export class FactsDao {
     pinnedAt: string | null
     windowAt: string
     createdAt: string
+    /**
+     * P-13: the caller's event time / known end, written straight onto the new row. `null` means
+     * "unknown" and is what an omitted argument leaves (the column has no default on purpose).
+     * `assert_count` is deliberately NOT named: the column default (1) is the semantics — "this
+     * content has been asserted once" — and naming it here would be a second place to keep in step.
+     */
+    validFrom?: string | null
+    validTo?: string | null
   }): { changes: number; lastInsertRowid: number | bigint } {
     return this.db
       .prepare(
         `INSERT OR IGNORE INTO facts
-           (content, category, ttl_days, mirror_source, supersedes_id, hrr_vector,
+           (content, category, ttl_days, supersedes_id, hrr_vector,
             trust_score, settle_clock, pinned, pinned_at, bonus_count, bonus_window_at,
-            entities_version, conflict_checked, created_at, updated_at, last_retrieved_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            entities_version, conflict_checked, valid_from, valid_to,
+            created_at, updated_at, last_retrieved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
       .run(
-        v.content, v.category, v.ttlDays, 'user', v.supersedesId, v.hrr, v.trust, v.clock,
-        v.pinned, v.pinnedAt, v.windowAt, ENTITY_EXTRACTOR_VERSION, v.createdAt,
+        v.content, v.category, v.ttlDays, v.supersedesId, v.hrr, v.trust, v.clock,
+        v.pinned, v.pinnedAt, v.windowAt, ENTITY_EXTRACTOR_VERSION,
+        v.validFrom ?? null, v.validTo ?? null, v.createdAt,
       )
+  }
+
+  /**
+   * P-10: land an explicitly given validity on a row that already exists (a duplicate `add` whose
+   * caller named `event_date` / `valid_until`). Omitted arguments keep what the row has, exactly
+   * like `category`/`ttl_days` (see `add`'s doc).
+   */
+  applyValidity(factId: number, validFrom: string | undefined, validTo: string | undefined): void {
+    if (validFrom === undefined && validTo === undefined) return
+    this.db
+      .prepare(
+        `UPDATE facts SET valid_from = COALESCE(?, valid_from), valid_to = COALESCE(?, valid_to),
+            updated_at = CURRENT_TIMESTAMP
+          WHERE fact_id = ?`,
+      )
+      .run(validFrom ?? null, validTo ?? null, factId)
+  }
+
+  /** P-10: the row's assertion counter (`1` when the column is somehow NULL on a legacy row). */
+  assertCount(factId: number): number {
+    const row = this.db.prepare<{ n: number | null }>('SELECT assert_count AS n FROM facts WHERE fact_id = ?').get(factId)
+    return Number(row?.n ?? 1)
+  }
+
+  /**
+   * P-10: a verbatim re-assertion of an EXISTING active fact. Returns the new count.
+   *
+   * Only the pure-duplicate branch calls this: reviving an archived row is a resurrection, not a
+   * new assertion (`assert_count` answers "how many times was this said", and the archived row's
+   * own count already recorded that). `RETURNING` keeps the read and the write one statement, so
+   * two processes cannot interleave between them.
+   */
+  incrementAssertCount(factId: number): number {
+    const row = this.db
+      .prepare<{ n: number }>('UPDATE facts SET assert_count = COALESCE(assert_count, 1) + 1 WHERE fact_id = ? RETURNING assert_count AS n')
+      .get(factId)
+    return Number(row?.n ?? 1)
+  }
+
+  /**
+   * P-07 audit: stamp `valid_to` on a row that is leaving the active corpus (supersede / a
+   * contradiction verdict). `COALESCE` keeps an end the caller already declared (`valid_until`):
+   * overwriting it with the archival instant would replace a real answer with an administrative one.
+   */
+  markValidTo(factId: number, at: string): void {
+    this.db.prepare('UPDATE facts SET valid_to = COALESCE(valid_to, ?) WHERE fact_id = ?').run(at, factId)
+  }
+
+  /**
+   * P-07: "who superseded this fact", derived from the existing `supersedes_id` link — no
+   * redundant column. `MIN` is deterministic when several revisions named the same predecessor
+   * (which a merge can produce); the caller renders it as a single direct successor.
+   */
+  supersededBy(factId: number): number | null {
+    const row = this.db
+      .prepare<{ id: number | null }>('SELECT MIN(fact_id) AS id FROM facts WHERE supersedes_id = ?')
+      .get(factId)
+    return row?.id === null || row?.id === undefined ? null : Number(row.id)
+  }
+
+  /** P-13 coverage: ACTIVE facts that carry an event time (the `admin stats` numerator). */
+  countActiveWithValidFrom(): number {
+    return Number(
+      this.db
+        .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM facts WHERE status = 'active' AND valid_from IS NOT NULL")
+        .get()?.n ?? 0,
+    )
+  }
+
+  /**
+   * P-11: the ids of ACTIVE facts whose EVENT time (`valid_from`) falls inside an INCLUSIVE local
+   * day range, newest first, capped.
+   *
+   * The comparison is on the DATE PREFIX (`substr(valid_from, 1, 10)`) rather than on the raw text:
+   * `valid_from` is whatever ISO string the caller wrote (`2026-09-15` or
+   * `2026-09-15T09:30:00+08:00`), and a lexicographic range over the full strings would put a
+   * midnight timestamp on the wrong side of a day boundary. Day granularity is the unit the window
+   * parser speaks (`store/time_window.ts`), so `substr` is the matching one. No index can serve it;
+   * the leg is default-OFF and capped, and a full scan of `facts` for one enabled query is the
+   * accepted cost (see the leg's own comment).
+   *
+   * The `GLOB` is a SHAPE guard, not decoration: the prefix is compared LEXICOGRAPHICALLY, so a
+   * non-padded `2026-9-5` (which `Date.parse` accepts, so `normalizeEventTime` stores it) would sort
+   * AFTER `2026-09-30` and leak into an October window. Requiring the canonical zero-padded prefix
+   * excludes such a value from the leg entirely — the same "no usable event time" treatment, never a
+   * mis-binned one.
+   *
+   * `valid_from IS NOT NULL` is the P-11 discipline written into SQL: a fact with no event time is
+   * NOT a candidate here, and there is deliberately no `COALESCE(valid_from, created_at)` fallback —
+   * mixing a write clock into an event-time axis is exactly what this leg must not do.
+   *
+   * `EXISTS`, never a JOIN on `fact_sources` (the {@link FTS_SEARCH_SQL_FILTERED} rule): the cap is
+   * `LIMIT`, and a multi-source fact would eat cap slots with duplicate rows.
+   */
+  windowRows(fromDate: string, toDate: string, category: string | undefined, cap: number, source?: string): number[] {
+    const rows = this.db
+      .prepare<{ fact_id: number }>(
+        `SELECT fa.fact_id AS fact_id FROM facts fa
+          WHERE fa.status = 'active' AND fa.valid_from IS NOT NULL
+            AND substr(fa.valid_from, 1, 10) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+            AND substr(fa.valid_from, 1, 10) BETWEEN ? AND ?
+            AND (? IS NULL OR fa.category = ?)
+            AND (? IS NULL OR EXISTS (
+                  SELECT 1 FROM fact_sources fs WHERE fs.fact_id = fa.fact_id AND fs.ref = ?
+                ))
+          ORDER BY fa.valid_from DESC, fa.fact_id ASC
+          LIMIT ?`,
+      )
+      .all(fromDate, toDate, category ?? null, category ?? null, source ?? null, source ?? null, cap)
+    return rows.map((row) => Number(row.fact_id))
   }
 
   findByContent(content: string): Record<string, unknown> | undefined {
@@ -560,8 +711,11 @@ export class FactsDao {
    *    index in order and filter per row (measured 9.8 ms for a category with 17 rows at 33k),
    *    i.e. it would trade a fast path for a slow one to save an index we do not need.
    */
-  page(status: string, category: string | undefined, limit: number, offset: number): Record<string, unknown>[] {
-    if (category === undefined) {
+  page(status: string, category: string | undefined, limit: number, offset: number, source?: string): Record<string, unknown>[] {
+    // The source predicate (P-08) is `EXISTS`, never a JOIN on `fact_sources` — a fact with several
+    // sources would otherwise appear several times in one page.
+    const sourceClause = ' AND EXISTS (SELECT 1 FROM fact_sources fs WHERE fs.fact_id = facts.fact_id AND fs.ref = ?)'
+    if (category === undefined && source === undefined) {
       return this.db
         .prepare<Record<string, unknown>>(
           `SELECT ${FACT_COLUMNS_NO_BLOB} FROM facts INDEXED BY idx_facts_created
@@ -569,20 +723,44 @@ export class FactsDao {
         )
         .all(status, limit, offset)
     }
+    if (category === undefined) {
+      return this.db
+        .prepare<Record<string, unknown>>(
+          `SELECT ${FACT_COLUMNS_NO_BLOB} FROM facts INDEXED BY idx_facts_created
+            WHERE status = ?${sourceClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        )
+        .all(status, source, limit, offset)
+    }
+    if (source === undefined) {
+      return this.db
+        .prepare<Record<string, unknown>>(
+          `SELECT ${FACT_COLUMNS_NO_BLOB} FROM facts
+            WHERE status = ? AND category = ?
+            ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        )
+        .all(status, category, limit, offset)
+    }
     return this.db
       .prepare<Record<string, unknown>>(
         `SELECT ${FACT_COLUMNS_NO_BLOB} FROM facts
-          WHERE status = ? AND category = ?
+          WHERE status = ? AND category = ?${sourceClause}
           ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       )
-      .all(status, category, limit, offset)
+      .all(status, category, source, limit, offset)
   }
 
-  countInStatus(status: string, category?: string): number {
+  countInStatus(status: string, category?: string, source?: string): number {
+    const sourceClause = source === undefined
+      ? ''
+      : ' AND EXISTS (SELECT 1 FROM fact_sources fs WHERE fs.fact_id = facts.fact_id AND fs.ref = ?)'
+    const params: unknown[] = [status, category ?? null, category ?? null]
+    if (source !== undefined) params.push(source)
     return Number(
       this.db
-        .prepare<{ n: number }>('SELECT COUNT(*) AS n FROM facts WHERE status = ? AND (? IS NULL OR category = ?)')
-        .get(status, category ?? null, category ?? null)?.n ?? 0,
+        .prepare<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM facts WHERE status = ? AND (? IS NULL OR category = ?)${sourceClause}`,
+        )
+        .get(...params)?.n ?? 0,
     )
   }
 
@@ -722,15 +900,18 @@ export class FactsDao {
    * facts with a cap of 200 it silently made 32.8k of them unreachable. Recency is the honest
    * prior for a memory store and `idx_facts_created(status, created_at DESC)` already serves it.
    */
-  activeHrrRows(category?: string, limit?: number): { fact_id: number; hrr_vector: Uint8Array }[] {
+  activeHrrRows(category?: string, limit?: number, source?: string): { fact_id: number; hrr_vector: Uint8Array }[] {
     return this.db
       .prepare<{ fact_id: number; hrr_vector: Uint8Array }>(
         `SELECT fact_id, hrr_vector FROM facts
           WHERE status = 'active' AND hrr_vector IS NOT NULL AND (? IS NULL OR category = ?)
+            AND (? IS NULL OR EXISTS (
+                  SELECT 1 FROM fact_sources fs WHERE fs.fact_id = facts.fact_id AND fs.ref = ?
+                ))
           ORDER BY created_at DESC, fact_id DESC
           LIMIT ?`,
       )
-      .all(category ?? null, category ?? null, limit ?? -1)
+      .all(category ?? null, category ?? null, source ?? null, source ?? null, limit ?? -1)
   }
 
   /**
@@ -741,7 +922,7 @@ export class FactsDao {
    * which is the same information the HRR bundle encodes (its atoms ARE the entity names), so the
    * narrowing removes the O(N) part rather than a meaningful part of the ranking.
    */
-  hrrRowsForFacts(ids: readonly number[], category?: string): { fact_id: number; hrr_vector: Uint8Array }[] {
+  hrrRowsForFacts(ids: readonly number[], category?: string, source?: string): { fact_id: number; hrr_vector: Uint8Array }[] {
     if (!ids.length) return []
     const out: { fact_id: number; hrr_vector: Uint8Array }[] = []
     for (const batch of batches(ids)) {
@@ -751,23 +932,30 @@ export class FactsDao {
           .prepare<{ fact_id: number; hrr_vector: Uint8Array }>(
             `SELECT fact_id, hrr_vector FROM facts
               WHERE fact_id IN (${placeholders}) AND status = 'active' AND hrr_vector IS NOT NULL
-                AND (? IS NULL OR category = ?)`,
+                AND (? IS NULL OR category = ?)
+                AND (? IS NULL OR EXISTS (
+                      SELECT 1 FROM fact_sources fs WHERE fs.fact_id = facts.fact_id AND fs.ref = ?
+                    ))`,
           )
-          .all(...values, category ?? null, category ?? null),
+          .all(...values, category ?? null, category ?? null, source ?? null, source ?? null),
       )
     }
     return out
   }
 
-  /** ACTIVE subset of `ids` in one category (`null` = any) — the semantic leg's filter. */
-  activeIdsIn(ids: readonly number[], category?: string): number[] {
+  /** ACTIVE subset of `ids` in one category/source (`null` = any) — the semantic leg's filter. */
+  activeIdsIn(ids: readonly number[], category?: string, source?: string): number[] {
     if (!ids.length) return []
     const { placeholders, values } = inList(ids)
     return this.db
       .prepare<{ fact_id: number }>(
-        `SELECT fact_id FROM facts WHERE fact_id IN (${placeholders}) AND status = 'active' AND (? IS NULL OR category = ?)`,
+        `SELECT fact_id FROM facts WHERE fact_id IN (${placeholders}) AND status = 'active'
+           AND (? IS NULL OR category = ?)
+           AND (? IS NULL OR EXISTS (
+                 SELECT 1 FROM fact_sources fs WHERE fs.fact_id = facts.fact_id AND fs.ref = ?
+               ))`,
       )
-      .all(...values, category ?? null, category ?? null)
+      .all(...values, category ?? null, category ?? null, source ?? null, source ?? null)
       .map((row) => row.fact_id)
   }
 
@@ -808,7 +996,12 @@ export class FactsDao {
    * that JOIN from becoming the drive (see {@link FTS_SEARCH_SQL}, which carries the plans and
    * measurements).
    */
-  ftsSearch(ftsQuery: string, category?: string, limit?: number): { id: number; rank: number }[] {
+  ftsSearch(ftsQuery: string, category?: string, limit?: number, source?: string): { id: number; rank: number }[] {
+    if (source !== undefined) {
+      return this.db
+        .prepare<{ id: number; rank: number }>(FTS_SEARCH_SQL_FILTERED)
+        .all(ftsQuery, category ?? null, category ?? null, source, source, limit ?? -1)
+    }
     return this.db
       .prepare<{ id: number; rank: number }>(FTS_SEARCH_SQL)
       .all(ftsQuery, category ?? null, category ?? null, limit ?? -1)
@@ -825,18 +1018,23 @@ export class FactsDao {
    * single-term query (all ranks 1) has a deterministic order. `ORDER BY rank` must read the SELECT
    * alias, so the LIKE expressions are built once and bound twice — same fragment, same order.
    */
-  ftsSubstringSearch(terms: readonly string[], category?: string, limit?: number): { id: number; rank: number }[] {
+  ftsSubstringSearch(terms: readonly string[], category?: string, limit?: number, source?: string): { id: number; rank: number }[] {
     const { any, count, params } = likeSubstring('fa.content', terms)
     if (params.length === 0) return []
+    // Same `EXISTS`-not-`JOIN` rule as {@link FTS_SEARCH_SQL_FILTERED}: multi-source facts must not
+    // fan out under the `LIMIT cap`.
+    const sourceClause = source === undefined
+      ? ''
+      : ' AND EXISTS (SELECT 1 FROM fact_sources fs WHERE fs.fact_id = fa.fact_id AND fs.ref = ?)'
     return this.db
       .prepare<{ id: number; rank: number }>(
         `SELECT fa.fact_id AS id, ${count} AS rank
            FROM facts fa
-          WHERE fa.status = 'active' AND (? IS NULL OR fa.category = ?) AND (${any})
+          WHERE fa.status = 'active' AND (? IS NULL OR fa.category = ?)${sourceClause} AND (${any})
           ORDER BY rank DESC, fa.fact_id ASC
           LIMIT ?`,
       )
-      .all(...params, category ?? null, category ?? null, ...params, limit ?? -1)
+      .all(...params, category ?? null, category ?? null, ...(source === undefined ? [] : [source]), ...params, limit ?? -1)
   }
 
   // ─── lifecycle tick (DESIGN §TRUST_MODEL §4) ─────────────────────────────

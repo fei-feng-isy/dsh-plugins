@@ -324,6 +324,16 @@ describe('zh relations eval (degraded FTS+entity path + 1 semantic-live self-que
       must_include_pass_rate: 0.9512195121951219,
       must_exclude_pass_rate: 0.7073170731707317,
     })
+    // P-02: the two new metrics live in the SIBLING `ranking` field. The `toEqual` above is what
+    // keeps them out of `summary` (an extra key would fail it); these lines make the new numbers
+    // visible and non-vacuous on the frozen 41 — a metric that silently stayed 0 would be a fixture
+    // that asserts nothing.
+    expect(report.ranking.n_queries).toBe(41)
+    expect(report.ranking.mean_ndcg_at_k).toBeGreaterThan(0)
+    expect(report.ranking.mean_ndcg_at_k).toBeLessThanOrEqual(1)
+    expect(report.ranking.top3_relevant_total).toBeGreaterThan(0)
+    expect(report.ranking.mean_top3_relevant).toBeGreaterThan(0)
+    expect(report.ranking.top3_hit_rate).toBeGreaterThan(0)
   })
 
   it('SENTINEL (方案 A): 表内 4 + 原表外 2 都必须来自严格档', async () => {

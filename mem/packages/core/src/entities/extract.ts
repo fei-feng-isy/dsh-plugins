@@ -7,7 +7,7 @@
  * differs from Python jieba (e.g. proper nouns → `nr`, 名动词 → `vn`).
  */
 
-interface ExtractedEntity {
+export interface ExtractedEntity {
   name: string
   type: string
   method: string

@@ -197,6 +197,12 @@ export interface HybridPlan {
    * `queries` counts questions instead of legs (DESIGN §20.5).
    */
   recordStats?: boolean
+  /**
+   * P-01: attach per-leg evidence to the returned hits (`RecallHit.scores` / `final`). Default
+   * false, and that default is load-bearing: the evidence is explanation only, so a caller that did
+   * not ask must not pay for it in tokens (`fuse` skips building the arrays entirely).
+   */
+  includeScores?: boolean
 }
 
 /** A hit after the output budget: `text` may have been shortened, and `truncated` says so. */
@@ -406,12 +412,20 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
     for (const leg of legs) {
       if (leg.leg !== undefined && leg.droppedByFloor !== undefined) droppedByFloor[leg.leg] += leg.droppedByFloor
     }
-    const fused = fuse(legs.map((leg) => ({ weight: leg.weight, scores: leg.scores })), overFetch)
+    const fused = fuse(
+      legs.map((leg) => ({ weight: leg.weight, scores: leg.scores })),
+      overFetch,
+      plan.includeScores === true ? { includeLegs: true } : undefined,
+    )
     const texts = deps.texts(fused.map((h) => h.id))
     // Drop stale candidates (purged rows, vectors lingering in the index).
     const live = fused.filter((h) => texts.has(h.id))
     const ranked = live.slice(0, limit)
     const hits = deps.hits(ranked, texts)
+    // P-01: the evidence rides on the fusion Hit; translate it to the caller's leg-name keying on
+    // the hits BEFORE the budget, so a truncated entry keeps its evidence (the budget copies fields
+    // through, but attaching to the object the caller receives is the one place that cannot drift).
+    if (plan.includeScores === true) attachLegScores(hits, ranked, legs)
     // The output budget is applied LAST: it must bound what the caller receives, and it is the only
     // place that knows how much text the whole result carries (DESIGN §20).
     const budgeted = applyOutputBudget(deps.config, hits, plan.maxTokens)
@@ -458,6 +472,37 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
     floors: chosen.floors,
     dropped_by_floor: chosen.dropped_by_floor,
     ...(relaxed ? { relaxed: true } : {}),
+  }
+}
+
+/**
+ * P-01: put the fused per-leg evidence onto the caller-facing hits.
+ *
+ * Matched by `ref_id`, not by array index: a store's `hits` mapper may legitimately drop an entry
+ * its `texts` load cannot resolve (knowledge's belt-and-braces filter), and an index-keyed attach
+ * would then shift every later hit's evidence by one. A hit whose id has no evidence is left
+ * untouched — "no evidence" and "wrong evidence" are not the same thing.
+ */
+function attachLegScores<H extends BudgetInput>(
+  hits: readonly H[],
+  ranked: readonly Hit[],
+  legs: readonly HybridLeg[],
+): void {
+  const names = legs.map((leg, index) => leg.leg ?? `leg${String(index)}`)
+  const evidenceById = new Map<number, { scores: Record<string, { raw: number; normalized: number } | null>; final: number }>()
+  for (const hit of ranked) {
+    if (hit.legs === undefined) continue
+    const scores: Record<string, { raw: number; normalized: number } | null> = {}
+    for (let i = 0; i < names.length; i += 1) scores[names[i]!] = hit.legs[i] ?? null
+    evidenceById.set(hit.id, { scores, final: hit.score })
+  }
+  for (const hit of hits) {
+    const refId = (hit as { ref_id?: unknown }).ref_id
+    const evidence = typeof refId === 'number' ? evidenceById.get(refId) : undefined
+    if (evidence === undefined) continue
+    const target = hit as H & { scores?: unknown; final?: number }
+    target.scores = evidence.scores
+    target.final = evidence.final
   }
 }
 
