@@ -1,0 +1,661 @@
+{
+  "card": "R2-4",
+  "measured_at": "2026-10-05T16:11:57.992Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    2.7,
+    1.61,
+    1.52
+  ],
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85,
+    "median_len": 313
+  },
+  "simulation": {
+    "alters": [
+      "facts.valid_from",
+      "facts.valid_to",
+      "facts.superseded_by",
+      "facts.assert_count DEFAULT 1",
+      "entities.entity_type_v2"
+    ],
+    "migrate_ms": 2,
+    "annotation": {
+      "facts_with_valid_from": 85,
+      "facts_with_valid_to": 2,
+      "facts_with_superseded_by": 2,
+      "facts_with_assert_count_gt1": 1,
+      "entities": 2232,
+      "entity_types_distinct_legacy": 1,
+      "entity_type_fallback_to_other": 2232
+    },
+    "invariant_sql": "SELECT COUNT(*) n FROM facts WHERE superseded_by IS NOT NULL AND status <> 'archived' AND valid_to IS NULL",
+    "invariant_violations_clean": 0,
+    "invariant_violations_planted_control": 1,
+    "invariant_violations_after_revert": 0
+  },
+  "comparisons": [
+    {
+      "id": "real-self-who",
+      "query": "我是谁？",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "modified_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ]
+    },
+    {
+      "id": "real-self-name",
+      "query": "我叫什么",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "modified_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ]
+    },
+    {
+      "id": "real-self-myname",
+      "query": "我的名字",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        4,
+        117,
+        103,
+        95,
+        101
+      ],
+      "modified_ids": [
+        4,
+        117,
+        103,
+        95,
+        101
+      ]
+    },
+    {
+      "id": "real-self-do",
+      "query": "我是做什么的",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        4,
+        117,
+        133,
+        103,
+        160
+      ],
+      "modified_ids": [
+        4,
+        117,
+        133,
+        103,
+        160
+      ]
+    },
+    {
+      "id": "real-self-what",
+      "query": "我叫啥",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "modified_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ]
+    },
+    {
+      "id": "real-self-benren",
+      "query": "本人是谁",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "modified_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ]
+    },
+    {
+      "id": "real-nonself-install",
+      "query": "插件的安装方法",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        122,
+        108,
+        159,
+        29,
+        109
+      ],
+      "modified_ids": [
+        122,
+        108,
+        159,
+        29,
+        109
+      ]
+    },
+    {
+      "id": "real-nonself-deploy",
+      "query": "生产环境的部署流程",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [],
+      "modified_ids": []
+    },
+    {
+      "id": "real-nonself-lag",
+      "query": "数据库主从延迟",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        72,
+        151,
+        128,
+        138,
+        63
+      ],
+      "modified_ids": [
+        72,
+        151,
+        128,
+        138,
+        63
+      ]
+    },
+    {
+      "id": "real-2char-plugin",
+      "query": "插件",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        29,
+        64,
+        94,
+        95,
+        96
+      ],
+      "modified_ids": [
+        29,
+        64,
+        94,
+        95,
+        96
+      ]
+    },
+    {
+      "id": "real-2char-task",
+      "query": "任务",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        95,
+        96,
+        97,
+        112,
+        116
+      ],
+      "modified_ids": [
+        95,
+        96,
+        97,
+        112,
+        116
+      ]
+    },
+    {
+      "id": "real-2char-version",
+      "query": "版本",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        21,
+        23,
+        72,
+        101,
+        108
+      ],
+      "modified_ids": [
+        21,
+        23,
+        72,
+        101,
+        108
+      ]
+    },
+    {
+      "id": "real-2char-host",
+      "query": "宿主",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        29,
+        33,
+        63,
+        94,
+        104
+      ],
+      "modified_ids": [
+        29,
+        33,
+        63,
+        94,
+        104
+      ]
+    },
+    {
+      "id": "real-2char-session",
+      "query": "会话",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        25,
+        62,
+        116,
+        121,
+        128
+      ],
+      "modified_ids": [
+        25,
+        62,
+        116,
+        121,
+        128
+      ]
+    },
+    {
+      "id": "extra-install-how",
+      "query": "插件怎么安装",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        108,
+        163
+      ],
+      "modified_ids": [
+        108,
+        163
+      ]
+    },
+    {
+      "id": "extra-db-where",
+      "query": "记忆库在哪",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        89,
+        125,
+        133,
+        164
+      ],
+      "modified_ids": [
+        89,
+        125,
+        133,
+        164
+      ]
+    },
+    {
+      "id": "extra-weights",
+      "query": "检索权重是多少",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [],
+      "modified_ids": []
+    },
+    {
+      "id": "extra-model-swap",
+      "query": "模型怎么换",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        25,
+        33,
+        96,
+        109,
+        153
+      ],
+      "modified_ids": [
+        25,
+        33,
+        96,
+        109,
+        153
+      ]
+    },
+    {
+      "id": "extra-datahome",
+      "query": "数据根在哪",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        62,
+        63,
+        87,
+        89,
+        154
+      ],
+      "modified_ids": [
+        62,
+        63,
+        87,
+        89,
+        154
+      ]
+    },
+    {
+      "id": "extra-schedule",
+      "query": "任务怎么调度",
+      "ids_equal": true,
+      "scores_equal": true,
+      "product_ids_equal": true,
+      "product_scores_equal": true,
+      "baseline_ids": [
+        141,
+        128,
+        95,
+        97,
+        116
+      ],
+      "modified_ids": [
+        141,
+        128,
+        95,
+        97,
+        116
+      ]
+    }
+  ],
+  "fts_comparison": [
+    {
+      "id": "real-self-who",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-self-name",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-self-myname",
+      "sizes": [
+        2,
+        2
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-self-do",
+      "sizes": [
+        1,
+        1
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-self-what",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-self-benren",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-nonself-install",
+      "sizes": [
+        10,
+        10
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-nonself-deploy",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-nonself-lag",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-2char-plugin",
+      "sizes": [
+        25,
+        25
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-2char-task",
+      "sizes": [
+        18,
+        18
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-2char-version",
+      "sizes": [
+        18,
+        18
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-2char-host",
+      "sizes": [
+        11,
+        11
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "real-2char-session",
+      "sizes": [
+        12,
+        12
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "extra-install-how",
+      "sizes": [
+        1,
+        1
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "extra-db-where",
+      "sizes": [
+        1,
+        1
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "extra-weights",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "extra-model-swap",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "extra-datahome",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    },
+    {
+      "id": "extra-schedule",
+      "sizes": [
+        0,
+        0
+      ],
+      "keys_equal": true
+    }
+  ],
+  "default_retrieval_byte_identical": true,
+  "fts_candidate_sets_identical": true,
+  "identity": {
+    "runtime": "modified copy",
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "verdicts": {
+    "G-A1": {
+      "feasible": true,
+      "default_unchanged": true,
+      "migration": "1 nullable column (valid_from); a historical validity column needs valid_to + a backfill policy, which is a data decision, not a mechanism one",
+      "wire": "RecallHit/detail gain valid_from (contract + wire version) if the reader is to see it",
+      "verdict": "feasible; default retrieval byte-identical"
+    },
+    "G-A2": {
+      "feasible": true,
+      "default_unchanged": true,
+      "invariant_holds": true,
+      "invariant_checker_can_fail": true,
+      "annotated_active_rows": 2,
+      "migration": "2 nullable columns (valid_to, superseded_by)",
+      "wire": "result rendering of \"superseded by / valid until\" + admin audit; the ACTIVE+valid_to row still ranks identically (measured)",
+      "verdict": "feasible; invariant is one SQL statement and it can fail"
+    },
+    "G-A6": {
+      "feasible": true,
+      "default_unchanged": true,
+      "migration": "1 column with DEFAULT 1 (metadata-only ALTER in SQLite)",
+      "wire": "RememberResult gains assert_count",
+      "verdict": "feasible; retrieval untouched"
+    },
+    "G-A8": {
+      "feasible": true,
+      "default_unchanged": true,
+      "migration": "no new column required (entity_type exists); needs whitelist + fallback + re-scan",
+      "fallback_share": 1,
+      "wire": "entity payload enum already exists; the constrained set is a contract change",
+      "verdict": "feasible; retrieval untouched"
+    }
+  },
+  "verdict": {
+    "call": "G-A1/A2/A6/A8 all feasible on the copy; default retrieval byte-identical; invariants are one SQL statement and the checker can fail",
+    "default_retrieval_byte_identical": true,
+    "fts_candidate_sets_identical": true,
+    "invariant_holds": true,
+    "invariant_checker_can_fail": true
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r2-4-ga-schema-unchanged.mjs --json mem/docs/spikes/raw/round2-r2-4-ga-schema-unchanged.json"
+}

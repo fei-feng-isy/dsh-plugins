@@ -1,0 +1,1344 @@
+{
+  "card": "round6-s2-actions",
+  "generated_at": "2026-10-05T18:18:30.180Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    1.69,
+    1.34,
+    1.62
+  ],
+  "corpus": {
+    "active_facts": 86,
+    "active_triples": 320
+  },
+  "identity": {
+    "checked": 48,
+    "ok": 48
+  },
+  "narrowing": {
+    "tested": 36,
+    "strict_narrowing": 29,
+    "empty": 4
+  },
+  "answered_total": 44,
+  "elapsed_ms": {
+    "n": 48,
+    "min": 0,
+    "p25": 1,
+    "median": 4,
+    "p75": 16,
+    "p90": 173,
+    "max": 289,
+    "mean": 48.19
+  },
+  "per_action": [
+    {
+      "action": "chain",
+      "questions": 12,
+      "answered": 12,
+      "gold_top3": 12,
+      "gold_in_result": 12,
+      "mid_is_entity": 0,
+      "subj_is_entity": 0,
+      "note": "gold derived from the same triple chain -> gold hit is constructive; mid_is_entity / subj_is_entity are the real readings"
+    },
+    {
+      "action": "probe",
+      "questions": 12,
+      "answered": 12,
+      "gold_top3": 12,
+      "precision_top3": 1
+    },
+    {
+      "action": "reason",
+      "questions": 12,
+      "answered": 8,
+      "gold_in_result": 8,
+      "cooccurring_answered": 8,
+      "cooccurring_n": 8,
+      "severed_answered": 0,
+      "severed_n": 4
+    },
+    {
+      "action": "related",
+      "questions": 12,
+      "answered": 12,
+      "pool_size": {
+        "n": 12,
+        "min": 65,
+        "p25": 89,
+        "median": 130,
+        "p75": 162,
+        "p90": 277,
+        "max": 930,
+        "mean": 216.5
+      }
+    },
+    {
+      "action": "contradict",
+      "real_log_rows": 0,
+      "real_open_listed": 0,
+      "true_pairs": 6,
+      "true_logged": 6,
+      "false_pairs": 6,
+      "false_logged": 0,
+      "inline_true_reported": 6
+    }
+  ],
+  "rows": {
+    "chain": [
+      {
+        "subj_len": 3,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 104,
+        "hop1_fact": 160,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          104
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 54,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 6,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 62,
+        "hop1_fact": 158,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          62
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 50,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 6,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 99,
+        "hop1_fact": 158,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          99
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 50,
+          "subset_of_union": false,
+          "strict_narrowing": false,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 18,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 157,
+        "hop1_fact": 148,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          157
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 59,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 18,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 142,
+        "hop1_fact": 148,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          142
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 57,
+          "subset_of_union": false,
+          "strict_narrowing": false,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 18,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 140,
+        "hop1_fact": 148,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          140
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 58,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 18,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 127,
+        "hop1_fact": 148,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          127
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 59,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 18,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 97,
+        "hop1_fact": 148,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          97
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 55,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 18,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 120,
+        "hop1_fact": 148,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          120
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 57,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 29,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 157,
+        "hop1_fact": 135,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          157
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 60,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 29,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 3,
+        "gold": 148,
+        "hop1_fact": 135,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          148
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 59,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "subj_len": 29,
+        "pred_len": 2,
+        "mid_len": 2,
+        "second_pred_len": 2,
+        "gold": 142,
+        "hop1_fact": 135,
+        "mid_is_entity": false,
+        "subj_is_entity": false,
+        "answered": true,
+        "gold_hit": true,
+        "gold_top3": true,
+        "returned": [
+          142
+        ],
+        "narrowing": {
+          "action_size": 1,
+          "union_size": 59,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      }
+    ],
+    "probe": [
+      {
+        "entity_len": 3,
+        "df": 42,
+        "gold": [
+          29,
+          36,
+          62,
+          63,
+          64,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          104,
+          105,
+          110,
+          116,
+          120,
+          121,
+          122,
+          123,
+          127,
+          128,
+          138,
+          140,
+          142,
+          143,
+          144,
+          145,
+          146,
+          149,
+          150,
+          154,
+          155,
+          156,
+          157,
+          159,
+          160,
+          161,
+          162,
+          165,
+          166
+        ],
+        "answered": true,
+        "gold_hit": 10,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          94,
+          155,
+          110,
+          64,
+          95,
+          101,
+          128,
+          29,
+          98,
+          123
+        ],
+        "narrowing": {
+          "action_size": 10,
+          "union_size": 62,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 2,
+        "df": 11,
+        "gold": [
+          29,
+          33,
+          63,
+          94,
+          104,
+          110,
+          122,
+          140,
+          142,
+          144,
+          148
+        ],
+        "answered": true,
+        "gold_hit": 10,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          110,
+          122,
+          29,
+          148,
+          94,
+          104,
+          33,
+          144,
+          140,
+          142
+        ],
+        "narrowing": {
+          "action_size": 10,
+          "union_size": 54,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 2,
+        "df": 7,
+        "gold": [
+          25,
+          36,
+          62,
+          100,
+          119,
+          142,
+          148
+        ],
+        "answered": true,
+        "gold_hit": 7,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          148,
+          119,
+          62,
+          100,
+          25,
+          142,
+          36,
+          125
+        ],
+        "narrowing": {
+          "action_size": 8,
+          "union_size": 52,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 2,
+        "df": 6,
+        "gold": [
+          19,
+          72,
+          87,
+          94,
+          131,
+          159
+        ],
+        "answered": true,
+        "gold_hit": 6,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          72,
+          131,
+          87,
+          19,
+          159,
+          94,
+          124,
+          154,
+          163,
+          165
+        ],
+        "narrowing": {
+          "action_size": 10,
+          "union_size": 54,
+          "subset_of_union": false,
+          "strict_narrowing": false,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 7,
+        "df": 5,
+        "gold": [
+          72,
+          114,
+          132,
+          158,
+          160
+        ],
+        "answered": true,
+        "gold_hit": 5,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          132,
+          160,
+          114,
+          72,
+          158,
+          110,
+          23,
+          144,
+          140,
+          154
+        ],
+        "narrowing": {
+          "action_size": 10,
+          "union_size": 73,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 6,
+        "df": 4,
+        "gold": [
+          98,
+          100,
+          110,
+          157
+        ],
+        "answered": true,
+        "gold_hit": 4,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          98,
+          157,
+          100,
+          110,
+          123,
+          116
+        ],
+        "narrowing": {
+          "action_size": 6,
+          "union_size": 60,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 2,
+        "df": 4,
+        "gold": [
+          106,
+          133,
+          137,
+          143
+        ],
+        "answered": true,
+        "gold_hit": 4,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          133,
+          137,
+          143,
+          106
+        ],
+        "narrowing": {
+          "action_size": 4,
+          "union_size": 51,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 2,
+        "df": 4,
+        "gold": [
+          63,
+          138,
+          142,
+          144
+        ],
+        "answered": true,
+        "gold_hit": 4,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          138,
+          142,
+          63,
+          144,
+          97
+        ],
+        "narrowing": {
+          "action_size": 5,
+          "union_size": 50,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 5,
+        "df": 3,
+        "gold": [
+          36,
+          138,
+          142
+        ],
+        "answered": true,
+        "gold_hit": 3,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          138,
+          142,
+          36
+        ],
+        "narrowing": {
+          "action_size": 3,
+          "union_size": 60,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 2,
+        "df": 3,
+        "gold": [
+          87,
+          120,
+          166
+        ],
+        "answered": true,
+        "gold_hit": 3,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          166,
+          120,
+          87
+        ],
+        "narrowing": {
+          "action_size": 3,
+          "union_size": 52,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 9,
+        "df": 3,
+        "gold": [
+          36,
+          104,
+          121
+        ],
+        "answered": true,
+        "gold_hit": 3,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          121,
+          104,
+          36
+        ],
+        "narrowing": {
+          "action_size": 3,
+          "union_size": 59,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_len": 2,
+        "df": 3,
+        "gold": [
+          98,
+          104,
+          118
+        ],
+        "answered": true,
+        "gold_hit": 3,
+        "gold_top3": true,
+        "precision_top3": 1,
+        "returned": [
+          104,
+          118,
+          98
+        ],
+        "narrowing": {
+          "action_size": 3,
+          "union_size": 50,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      }
+    ],
+    "reason": [
+      {
+        "entity_lens": [
+          3,
+          7
+        ],
+        "cooccurring": true,
+        "annotated_archived_only": false,
+        "gold": [
+          94,
+          95,
+          96,
+          97,
+          101,
+          116,
+          123,
+          128,
+          140,
+          144,
+          146,
+          149,
+          150,
+          154,
+          155,
+          156,
+          160,
+          166
+        ],
+        "answered": true,
+        "gold_hit": true,
+        "returned": [
+          94,
+          95,
+          96,
+          97,
+          101,
+          116,
+          123,
+          128,
+          140,
+          144
+        ],
+        "narrowing": {
+          "action_size": 10,
+          "union_size": 67,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          4,
+          2
+        ],
+        "cooccurring": true,
+        "annotated_archived_only": false,
+        "gold": [
+          33,
+          99,
+          116
+        ],
+        "answered": true,
+        "gold_hit": true,
+        "returned": [
+          33,
+          99,
+          116
+        ],
+        "narrowing": {
+          "action_size": 3,
+          "union_size": 56,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          5,
+          2
+        ],
+        "cooccurring": true,
+        "annotated_archived_only": false,
+        "gold": [
+          62,
+          63
+        ],
+        "answered": true,
+        "gold_hit": true,
+        "returned": [
+          62,
+          63
+        ],
+        "narrowing": {
+          "action_size": 2,
+          "union_size": 53,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          3,
+          6
+        ],
+        "cooccurring": true,
+        "annotated_archived_only": false,
+        "gold": [
+          33,
+          106
+        ],
+        "answered": true,
+        "gold_hit": true,
+        "returned": [
+          33,
+          106
+        ],
+        "narrowing": {
+          "action_size": 2,
+          "union_size": 56,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          5,
+          8
+        ],
+        "cooccurring": true,
+        "annotated_archived_only": false,
+        "gold": [
+          138,
+          142
+        ],
+        "answered": true,
+        "gold_hit": true,
+        "returned": [
+          138,
+          142
+        ],
+        "narrowing": {
+          "action_size": 2,
+          "union_size": 70,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          3,
+          2
+        ],
+        "cooccurring": true,
+        "annotated_archived_only": false,
+        "gold": [
+          125,
+          152
+        ],
+        "answered": true,
+        "gold_hit": true,
+        "returned": [
+          125,
+          152
+        ],
+        "narrowing": {
+          "action_size": 2,
+          "union_size": 54,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          6,
+          2
+        ],
+        "cooccurring": true,
+        "annotated_archived_only": false,
+        "gold": [
+          29,
+          100
+        ],
+        "answered": true,
+        "gold_hit": true,
+        "returned": [
+          29,
+          100
+        ],
+        "narrowing": {
+          "action_size": 2,
+          "union_size": 57,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          3,
+          2
+        ],
+        "cooccurring": true,
+        "annotated_archived_only": false,
+        "gold": [
+          29,
+          94
+        ],
+        "answered": true,
+        "gold_hit": true,
+        "returned": [
+          29,
+          94
+        ],
+        "narrowing": {
+          "action_size": 2,
+          "union_size": 51,
+          "subset_of_union": true,
+          "strict_narrowing": true,
+          "empty": false
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          5,
+          6
+        ],
+        "cooccurring": false,
+        "annotated_archived_only": true,
+        "gold": [
+          70,
+          73,
+          75,
+          92
+        ],
+        "answered": false,
+        "gold_hit": false,
+        "returned": [],
+        "narrowing": {
+          "action_size": 0,
+          "union_size": 57,
+          "subset_of_union": true,
+          "strict_narrowing": false,
+          "empty": true
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          6,
+          7
+        ],
+        "cooccurring": false,
+        "annotated_archived_only": true,
+        "gold": [
+          50,
+          51
+        ],
+        "answered": false,
+        "gold_hit": false,
+        "returned": [],
+        "narrowing": {
+          "action_size": 0,
+          "union_size": 64,
+          "subset_of_union": true,
+          "strict_narrowing": false,
+          "empty": true
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          6,
+          4
+        ],
+        "cooccurring": false,
+        "annotated_archived_only": true,
+        "gold": [
+          61
+        ],
+        "answered": false,
+        "gold_hit": false,
+        "returned": [],
+        "narrowing": {
+          "action_size": 0,
+          "union_size": 51,
+          "subset_of_union": true,
+          "strict_narrowing": false,
+          "empty": true
+        },
+        "identity_ok": true
+      },
+      {
+        "entity_lens": [
+          5,
+          2
+        ],
+        "cooccurring": false,
+        "annotated_archived_only": true,
+        "gold": [
+          47,
+          48
+        ],
+        "answered": false,
+        "gold_hit": false,
+        "returned": [],
+        "narrowing": {
+          "action_size": 0,
+          "union_size": 55,
+          "subset_of_union": true,
+          "strict_narrowing": false,
+          "empty": true
+        },
+        "identity_ok": true
+      }
+    ],
+    "related": [
+      {
+        "entity_len": 3,
+        "df": 42,
+        "cooccurrence_pool_size": 930,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 2,
+        "df": 11,
+        "cooccurrence_pool_size": 351,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 2,
+        "df": 7,
+        "cooccurrence_pool_size": 277,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 2,
+        "df": 6,
+        "cooccurrence_pool_size": 162,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 7,
+        "df": 5,
+        "cooccurrence_pool_size": 132,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 6,
+        "df": 4,
+        "cooccurrence_pool_size": 95,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 2,
+        "df": 4,
+        "cooccurrence_pool_size": 89,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 2,
+        "df": 4,
+        "cooccurrence_pool_size": 150,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 5,
+        "df": 3,
+        "cooccurrence_pool_size": 128,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 2,
+        "df": 3,
+        "cooccurrence_pool_size": 89,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 9,
+        "df": 3,
+        "cooccurrence_pool_size": 130,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      },
+      {
+        "entity_len": 2,
+        "df": 3,
+        "cooccurrence_pool_size": 65,
+        "returned_count": 10,
+        "answered": true,
+        "identity_ok": true,
+        "narrowing": null
+      }
+    ],
+    "contradict": [
+      {
+        "truth": "true",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": true,
+        "open_rows": 1,
+        "inline_reported": true
+      },
+      {
+        "truth": "true",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": true,
+        "open_rows": 1,
+        "inline_reported": true
+      },
+      {
+        "truth": "true",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": true,
+        "open_rows": 1,
+        "inline_reported": true
+      },
+      {
+        "truth": "true",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": true,
+        "open_rows": 1,
+        "inline_reported": true
+      },
+      {
+        "truth": "true",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": true,
+        "open_rows": 1,
+        "inline_reported": true
+      },
+      {
+        "truth": "true",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": true,
+        "open_rows": 1,
+        "inline_reported": true
+      },
+      {
+        "truth": "false",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": false,
+        "open_rows": 0,
+        "inline_reported": false
+      },
+      {
+        "truth": "false",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": false,
+        "open_rows": 0,
+        "inline_reported": false
+      },
+      {
+        "truth": "false",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": false,
+        "open_rows": 0,
+        "inline_reported": false
+      },
+      {
+        "truth": "false",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": false,
+        "open_rows": 0,
+        "inline_reported": false
+      },
+      {
+        "truth": "false",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": false,
+        "open_rows": 0,
+        "inline_reported": false
+      },
+      {
+        "truth": "false",
+        "fact_a": 167,
+        "fact_b": 168,
+        "logged": false,
+        "open_rows": 0,
+        "inline_reported": false
+      }
+    ]
+  },
+  "manual_sample": {
+    "sample_file": "/tmp/dsh-r6/s2-sample.json",
+    "sample_size": 24,
+    "judged": {
+      "items": 24,
+      "verdicts": {
+        "wrong": 7,
+        "correct": 14,
+        "partial": 3
+      },
+      "correct": 14,
+      "correct_rate": 0.5833,
+      "method": "manual judgment by the executing agent, reading /tmp/dsh-r6/s2-sample.json in-process; correct = the returned set actually answers the question; partial = related but off-target; w"
+    }
+  }
+}

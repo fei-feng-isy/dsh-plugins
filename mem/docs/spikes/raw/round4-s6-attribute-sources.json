@@ -1,0 +1,1176 @@
+{
+  "card": "R4-S6",
+  "measured_at": "2026-10-05T17:01:16.574Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    2.53,
+    1.84,
+    1.16
+  ],
+  "identity": {
+    "applicable": false,
+    "note": "the identity check for this runtime is reported in S5 (same runtimes/plan); this section adds legs on top of an already-identity-checked pass"
+  },
+  "attribute": {
+    "derivation": "annotation subject groups with >= 3 facts; query = \"<subject>的<attribute>\", gold = the one fact carrying that attribute",
+    "subjects_with_3plus_facts": 3,
+    "exact_subject_attribute_pair_groups_of_2plus": 0,
+    "queries": 11,
+    "summary": {
+      "baseline": {
+        "queries": 11,
+        "top1_queries": 10,
+        "top3_gold": 10,
+        "gold_total": 11,
+        "gold_in_pool": 11,
+        "missing_queries": 0,
+        "mean_pool": 19.0909
+      },
+      "filter_caller_group": {
+        "queries": 11,
+        "top1_queries": 10,
+        "top3_gold": 11,
+        "gold_total": 11,
+        "gold_in_pool": 11,
+        "missing_queries": 0,
+        "mean_pool": 3.0909
+      },
+      "filter_rule_subject_group": {
+        "queries": 11,
+        "top1_queries": 3,
+        "top3_gold": 3,
+        "gold_total": 11,
+        "gold_in_pool": 4,
+        "missing_queries": 7,
+        "mean_pool": 5.7273
+      },
+      "groupleg_caller_w015": {
+        "queries": 11,
+        "top1_queries": 10,
+        "top3_gold": 11,
+        "gold_total": 11,
+        "gold_in_pool": 11,
+        "missing_queries": 0,
+        "mean_pool": 19.6364
+      },
+      "groupleg_caller_w05": {
+        "queries": 11,
+        "top1_queries": 10,
+        "top3_gold": 11,
+        "gold_total": 11,
+        "gold_in_pool": 11,
+        "missing_queries": 0,
+        "mean_pool": 19.6364
+      },
+      "groupleg_rule_subject_w05": {
+        "queries": 11,
+        "top1_queries": 7,
+        "top3_gold": 10,
+        "gold_total": 11,
+        "gold_in_pool": 11,
+        "missing_queries": 0,
+        "mean_pool": 19.7273
+      }
+    },
+    "mean_gold_rank": {
+      "baseline": 1.2727,
+      "filter": 1.1818,
+      "groupleg_w05": 1.1818,
+      "groupleg_rule_w05": 1.6364
+    },
+    "union_narrowed_by_filter": 11,
+    "rows": [
+      {
+        "id": "attrq-1",
+        "subject_group_size": 3,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            103,
+            43,
+            4,
+            117,
+            133
+          ],
+          "pool_size": 23,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            103,
+            133,
+            64
+          ],
+          "pool_size": 3,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [
+            103,
+            43,
+            4,
+            117,
+            25
+          ],
+          "pool_size": 6,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w015": {
+          "ids": [
+            103,
+            133,
+            43,
+            4,
+            117
+          ],
+          "pool_size": 23,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            103,
+            133,
+            64,
+            43,
+            4
+          ],
+          "pool_size": 23,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            103,
+            43,
+            4,
+            117,
+            25
+          ],
+          "pool_size": 23,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": true,
+        "rule_group_size": 6
+      },
+      {
+        "id": "attrq-2",
+        "subject_group_size": 3,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            64,
+            165,
+            145,
+            114,
+            105
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            64
+          ],
+          "pool_size": 1,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [
+            117
+          ],
+          "pool_size": 1,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "gold_rank": null,
+          "missing": true
+        },
+        "groupleg_w015": {
+          "ids": [
+            64,
+            165,
+            145,
+            114,
+            105
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            64,
+            165,
+            103,
+            133,
+            145
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            117,
+            25,
+            64,
+            165,
+            4
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 0,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 3,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": true,
+        "rule_group_size": 6
+      },
+      {
+        "id": "attrq-3",
+        "subject_group_size": 3,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            133,
+            43,
+            165,
+            107,
+            113
+          ],
+          "pool_size": 11,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            133
+          ],
+          "pool_size": 1,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [
+            43,
+            4
+          ],
+          "pool_size": 2,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "gold_rank": null,
+          "missing": true
+        },
+        "groupleg_w015": {
+          "ids": [
+            133,
+            43,
+            165,
+            107,
+            113
+          ],
+          "pool_size": 13,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            133,
+            43,
+            165,
+            107,
+            113
+          ],
+          "pool_size": 13,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            43,
+            133,
+            165,
+            4,
+            107
+          ],
+          "pool_size": 15,
+          "gold_in_top1": 0,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 2,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": true,
+        "rule_group_size": 6
+      },
+      {
+        "id": "attrq-4",
+        "subject_group_size": 3,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            141,
+            138,
+            134,
+            128,
+            135
+          ],
+          "pool_size": 24,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 1,
+          "gold_rank": 4,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            141,
+            134,
+            128
+          ],
+          "pool_size": 3,
+          "gold_in_top1": 0,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 3,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [
+            141,
+            138,
+            134,
+            128,
+            135
+          ],
+          "pool_size": 24,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 1,
+          "gold_rank": 4,
+          "missing": false
+        },
+        "groupleg_w015": {
+          "ids": [
+            141,
+            134,
+            128,
+            138,
+            135
+          ],
+          "pool_size": 24,
+          "gold_in_top1": 0,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 3,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            141,
+            134,
+            128,
+            138,
+            135
+          ],
+          "pool_size": 24,
+          "gold_in_top1": 0,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 3,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            141,
+            138,
+            134,
+            128,
+            135
+          ],
+          "pool_size": 24,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 1,
+          "gold_rank": 4,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": false,
+        "rule_group_size": 0
+      },
+      {
+        "id": "attrq-5",
+        "subject_group_size": 3,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            141,
+            138,
+            134,
+            128,
+            135
+          ],
+          "pool_size": 15,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            141,
+            134,
+            128
+          ],
+          "pool_size": 3,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [
+            141,
+            138,
+            134,
+            128,
+            135
+          ],
+          "pool_size": 15,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w015": {
+          "ids": [
+            141,
+            134,
+            128,
+            138,
+            135
+          ],
+          "pool_size": 15,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            141,
+            134,
+            128,
+            138,
+            135
+          ],
+          "pool_size": 15,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            141,
+            138,
+            134,
+            128,
+            135
+          ],
+          "pool_size": 15,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": false,
+        "rule_group_size": 0
+      },
+      {
+        "id": "attrq-6",
+        "subject_group_size": 3,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            134,
+            141,
+            135,
+            128,
+            116
+          ],
+          "pool_size": 12,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            134,
+            141,
+            128
+          ],
+          "pool_size": 3,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [
+            134,
+            141,
+            135,
+            128,
+            116
+          ],
+          "pool_size": 12,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w015": {
+          "ids": [
+            134,
+            141,
+            128,
+            135,
+            116
+          ],
+          "pool_size": 12,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            134,
+            141,
+            128,
+            135,
+            116
+          ],
+          "pool_size": 12,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            134,
+            141,
+            135,
+            128,
+            116
+          ],
+          "pool_size": 12,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": false,
+        "rule_group_size": 0
+      },
+      {
+        "id": "attrq-7",
+        "subject_group_size": 5,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            150,
+            128,
+            146,
+            96,
+            95
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            150,
+            146,
+            135,
+            123
+          ],
+          "pool_size": 4,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [],
+          "pool_size": 0,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "gold_rank": null,
+          "missing": true
+        },
+        "groupleg_w015": {
+          "ids": [
+            150,
+            146,
+            135,
+            123,
+            128
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            150,
+            146,
+            135,
+            123,
+            128
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            150,
+            128,
+            146,
+            96,
+            95
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": true,
+        "rule_group_size": 2
+      },
+      {
+        "id": "attrq-8",
+        "subject_group_size": 5,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            149,
+            146,
+            96,
+            140,
+            129
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            149,
+            146,
+            135,
+            150,
+            123
+          ],
+          "pool_size": 5,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [],
+          "pool_size": 0,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "gold_rank": null,
+          "missing": true
+        },
+        "groupleg_w015": {
+          "ids": [
+            149,
+            146,
+            135,
+            150,
+            123
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            149,
+            146,
+            135,
+            150,
+            123
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            149,
+            146,
+            96,
+            140,
+            129
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": true,
+        "rule_group_size": 2
+      },
+      {
+        "id": "attrq-9",
+        "subject_group_size": 5,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            123,
+            150,
+            116,
+            95,
+            135
+          ],
+          "pool_size": 17,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            123,
+            150,
+            135,
+            146
+          ],
+          "pool_size": 4,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [
+            134
+          ],
+          "pool_size": 1,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "gold_rank": null,
+          "missing": true
+        },
+        "groupleg_w015": {
+          "ids": [
+            123,
+            150,
+            135,
+            146,
+            116
+          ],
+          "pool_size": 18,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            123,
+            150,
+            135,
+            146,
+            116
+          ],
+          "pool_size": 18,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            134,
+            123,
+            150,
+            116,
+            137
+          ],
+          "pool_size": 18,
+          "gold_in_top1": 0,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 2,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": true,
+        "rule_group_size": 2
+      },
+      {
+        "id": "attrq-10",
+        "subject_group_size": 5,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            146,
+            149,
+            96,
+            116,
+            95
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            146,
+            149,
+            123,
+            135,
+            150
+          ],
+          "pool_size": 5,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [
+            134,
+            137
+          ],
+          "pool_size": 2,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "gold_rank": null,
+          "missing": true
+        },
+        "groupleg_w015": {
+          "ids": [
+            146,
+            149,
+            123,
+            135,
+            150
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            146,
+            149,
+            123,
+            135,
+            150
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            146,
+            134,
+            137,
+            149,
+            96
+          ],
+          "pool_size": 25,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": true,
+        "rule_group_size": 2
+      },
+      {
+        "id": "attrq-11",
+        "subject_group_size": 5,
+        "gold_total": 1,
+        "baseline": {
+          "ids": [
+            135,
+            95,
+            96,
+            116,
+            123
+          ],
+          "pool_size": 8,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter": {
+          "ids": [
+            135,
+            123
+          ],
+          "pool_size": 2,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "filter_rule_subject": {
+          "ids": [],
+          "pool_size": 0,
+          "gold_in_top1": 0,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "gold_rank": null,
+          "missing": true
+        },
+        "groupleg_w015": {
+          "ids": [
+            135,
+            95,
+            96,
+            123,
+            116
+          ],
+          "pool_size": 11,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_w05": {
+          "ids": [
+            135,
+            123,
+            95,
+            96,
+            116
+          ],
+          "pool_size": 11,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "groupleg_rule_subject_w05": {
+          "ids": [
+            135,
+            95,
+            96,
+            116,
+            123
+          ],
+          "pool_size": 10,
+          "gold_in_top1": 1,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "gold_rank": 1,
+          "missing": false
+        },
+        "union_narrowed_filter": true,
+        "union_narrowed_filter_rule": true,
+        "rule_group_size": 2
+      }
+    ]
+  },
+  "ga7_attribution": {
+    "per_pass": {
+      "A": {
+        "facts": 64,
+        "source_ref_non_null": 29,
+        "rate": 0.4531,
+        "kinds": {
+          "other": 4,
+          "path_or_doc": 25
+        }
+      },
+      "A-ext": {
+        "facts": 64,
+        "source_ref_non_null": 31,
+        "rate": 0.4844,
+        "kinds": {
+          "other": 4,
+          "path_or_doc": 22,
+          "commit": 5
+        }
+      },
+      "B-ext": {
+        "facts": 64,
+        "source_ref_non_null": 40,
+        "rate": 0.625,
+        "kinds": {
+          "path_or_doc": 27,
+          "other": 13
+        }
+      }
+    },
+    "r2_5_offline_proxy": {
+      "proxy_share": 0,
+      "overlapping_facts": 0,
+      "counts": {
+        "active_facts": 85,
+        "facts_with_mirror_source": 85,
+        "mirror_source_distinct_values": 1,
+        "mirror_source_max_length": 4,
+        "facts_with_path_like_text": 19
+      },
+      "kb": {
+        "exists": true,
+        "documents": 0,
+        "doc_chunks": 0,
+        "chunk_entities": 0,
+        "documents_with_source_uri": 0,
+        "distinct_chunk_entity_names": 0
+      },
+      "acceptance_threshold": ">= 0.30 of active facts carrying source_ref within 2 weeks of the write-side parameter shipping; below that the field is the next mirror_source (a column that exists and is always empty) and should be dropped rather than kept"
+    },
+    "predicted_production_band": "the model annotator filled a source for 45–63% of facts; a real writing agent has strictly less information than the annotator (it does not re-read the fact), so treat the offline rate as an UPPER bound, not a forecast",
+    "mirror_source_current": {
+      "facts_with_mirror_source": 85,
+      "active": 85
+    }
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r4-4-time-attribute.mjs",
+  "privacy": {
+    "clean": true,
+    "forbidden_keys": [],
+    "strings_over_max": [],
+    "sensitive_pattern_hits": [],
+    "cjk_runs_over_7_not_whitelisted": [],
+    "keys_checked": true
+  }
+}

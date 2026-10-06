@@ -194,3 +194,27 @@ pnpm -C packages/core exec vitest run test/eval_zh.spec.ts
 # 结果应与修前 JSON 逐字节相同；还原成 2 再重建。
 pnpm -C packages/core build
 ```
+
+---
+
+## 附记（2026-10-06）：混合形状的边界**只到词法腿**，融合层由实体腿接住
+
+本文 §2/§2a 的裁决（两条取词路径分数不可比、不合并）**继续有效**。补充的是对"混合形状里 2 字话题不被搜索"
+这一已知边界的**影响范围实测**——它不需要靠合并词法路径来修：
+
+1. **2 字 CJK 名保留为实体**：`entities/extract.ts:141` 只丢弃 `length < 2` 的词元 ⇒ `李娜`/`张伟` 这类名字
+   在查询侧与写入侧都会进实体集合；
+2. **df=1 也算锚点**：`store/entity_leg.ts:93-103` 的 `selectAnchors` 条件只有
+   `frequency > 0 && frequency <= anchorCeiling(corpus)` ⇒ 只出现在一条事实里的 2 字名同样会被选中；
+3. **候选按名索引取**：`store/memory.ts:1363-1367` 用这些锚点走 `candidateFactsForAnyEntity(...)`，
+   即按 `entity.name` 索引取事实，**不经过 FTS 取词**。
+
+⇒ 对 `缓存失效 李娜` 这类查询，2 字 run 在**词法腿**不可见，但**实体腿已经能按该名字取到相关事实**；
+融合是各腿归一后的加权和，因此该形状在融合层并不存在"取不到"的结构性缺口。
+这一点与另一次实测一致：把子串候选注入 fts 腿后，**冻结 41 条的 id 与分数逐字节不变**
+（`spikes/raw/round4-s7-fixor.json` 的 `frozen_41`：`byte_identical_ids: 41`、`byte_identical_scores: 41`）。
+
+**后续若要动这一块**：先用评测网在**融合层**证明混排形状确有缺口（现有证据只到腿级），
+并且**优先走实体索引路线**（把 2 字 run 当实体查，复用实体腿自己的权重/门槛/cap），
+而不是合并 `bm25` 与子串两条取词路径——后者要处理量纲、cap 与 `LIKE '%…%'` 的无索引全语料扫描，
+而收益至今未在任何融合级测量上出现。

@@ -1,0 +1,1745 @@
+{
+  "card": "round6-s3-needs",
+  "generated_at": "2026-10-05T18:18:41.276Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    2.38,
+    1.5,
+    1.67
+  ],
+  "corpus": {
+    "active_facts": 86
+  },
+  "derivation": {
+    "multi_hop": 12,
+    "relation_browse": 10,
+    "limit_per_mechanism": 5,
+    "guard": "shared 3-gram df>=2 + time-free + >=1 shared trigram",
+    "guard_rejects": {},
+    "by_bridge_kind": {
+      "bridge_entity": 6,
+      "bridge_triple": 3,
+      "bridge_topic": 3,
+      "archived_gold": 0
+    },
+    "archived_pair_candidates": 5606,
+    "query_strings_file": "/tmp/dsh-r6/s3-queries.json"
+  },
+  "s3": {
+    "multi_hop": {
+      "questions": 12,
+      "gold_total": 24,
+      "any_mechanism_all": 0,
+      "by_mechanism": {
+        "search": {
+          "all": 0,
+          "partial": 8,
+          "none": 4,
+          "missing_total": 9,
+          "gold_total": 24,
+          "avg_rank": 4.13
+        },
+        "ask": {
+          "all": 0,
+          "partial": 8,
+          "none": 4,
+          "missing_total": 9,
+          "gold_total": 24,
+          "avg_rank": 4.13
+        }
+      }
+    },
+    "relation_browse": {
+      "questions": 10,
+      "gold_total": 30,
+      "any_mechanism_all": 6,
+      "by_mechanism": {
+        "search": {
+          "all": 6,
+          "partial": 3,
+          "none": 1,
+          "missing_total": 5,
+          "gold_total": 30,
+          "avg_rank": 2.1
+        },
+        "related": {
+          "all": 0,
+          "partial": 0,
+          "none": 10,
+          "missing_total": 30,
+          "gold_total": 30,
+          "avg_rank": null
+        }
+      }
+    }
+  },
+  "s4": {
+    "failing_questions": 12,
+    "multi_hop_failures": 12,
+    "browse_failures": 4,
+    "counts": {
+      "C": 6,
+      "D": 3,
+      "B": 3
+    },
+    "shares": {
+      "C": 0.5,
+      "D": 0.25,
+      "B": 0.25
+    },
+    "criteria": {
+      "A": "a gold fact is not active",
+      "D": "carrier exists but only spurious (shared entity df>15 or triple link joins fragments)",
+      "B": "no shared entity, no triple link, no supersede, no contradiction",
+      "C": "a real carrier exists and no tested mechanism walks it"
+    },
+    "reach": {
+      "multi_hop_failures": 12,
+      "missing_gold_total": 9,
+      "missing_in_leg_union": 9,
+      "missing_absent_from_leg_union": 0,
+      "failures_with_all_gold_in_union": 12,
+      "note": "missing_in_leg_union = the gap is RANKING (a relation edge could re-rank it); absent = the gap is CANDIDATE GENERATION"
+    }
+  },
+  "s5": {
+    "multi_hop_questions": 12,
+    "derivable_connected": 6,
+    "coverage": 0.5,
+    "by_bridge_kind": {
+      "bridge_entity": {
+        "questions": 6,
+        "derivable_connected": 6,
+        "coverage": 1
+      },
+      "bridge_triple": {
+        "questions": 3,
+        "derivable_connected": 0,
+        "coverage": 0
+      },
+      "bridge_topic": {
+        "questions": 3,
+        "derivable_connected": 0,
+        "coverage": 0
+      }
+    },
+    "needed_types": {
+      "causal_or_belongs_to(unspecified)": 2,
+      "same_as_or_same_topic(surface)": 4
+    },
+    "single_edge_type_hits": {
+      "shared_entity": 6,
+      "temporal": 1,
+      "supersedes": 0,
+      "contradicts": 0
+    },
+    "single_type_only": {
+      "shared_entity_only": 5,
+      "temporal_only": 0,
+      "supersedes_only": 0,
+      "contradicts_only": 0,
+      "multi_needed": 1,
+      "none": 6
+    },
+    "derivable_types_only": [
+      "shared_entity",
+      "temporal",
+      "supersedes",
+      "contradicts"
+    ]
+  },
+  "identity": {
+    "checked": 44,
+    "ok": 44,
+    "records_file": null
+  },
+  "queries": [
+    {
+      "id": "mh-1",
+      "kind": "multi_hop",
+      "derivation": "bridge_entity",
+      "bridge_kind": "bridge_entity",
+      "gold": [
+        25,
+        62
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 6,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            25,
+            120,
+            123,
+            63,
+            122
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        },
+        "ask": {
+          "returned": [
+            25,
+            120,
+            123,
+            63,
+            122
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 1,
+        "missing_in_leg_union": 1,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 52,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 4,
+        "shared_entity_max_df": 9,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": true,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": {
+        "class": "C",
+        "evidence": "real_carriers: shared=4 triple=0 supersede=0 contradict=0"
+      }
+    },
+    {
+      "id": "mh-2",
+      "kind": "multi_hop",
+      "derivation": "bridge_entity",
+      "bridge_kind": "bridge_entity",
+      "gold": [
+        25,
+        63
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 4,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            62,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 2,
+          "missing": 0,
+          "avg_rank": 4.5
+        },
+        "ask": {
+          "returned": [
+            62,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 2,
+          "missing": 0,
+          "avg_rank": 4.5
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 0,
+        "missing_in_leg_union": 0,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 56,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 2,
+        "shared_entity_max_df": 6,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": true,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": {
+        "class": "C",
+        "evidence": "real_carriers: shared=2 triple=0 supersede=0 contradict=0"
+      }
+    },
+    {
+      "id": "mh-3",
+      "kind": "multi_hop",
+      "derivation": "bridge_entity",
+      "bridge_kind": "bridge_entity",
+      "gold": [
+        25,
+        120
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 4,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            62,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 2,
+          "missing": 0,
+          "avg_rank": 4
+        },
+        "ask": {
+          "returned": [
+            62,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 2,
+          "missing": 0,
+          "avg_rank": 4
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 0,
+        "missing_in_leg_union": 0,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 56,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 2,
+        "shared_entity_max_df": 6,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": true,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": {
+        "class": "C",
+        "evidence": "real_carriers: shared=2 triple=0 supersede=0 contradict=0"
+      }
+    },
+    {
+      "id": "mh-4",
+      "kind": "multi_hop",
+      "derivation": "bridge_entity",
+      "bridge_kind": "bridge_entity",
+      "gold": [
+        25,
+        122
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 4,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            62,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 2,
+          "missing": 0,
+          "avg_rank": 3.5
+        },
+        "ask": {
+          "returned": [
+            62,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 2,
+          "missing": 0,
+          "avg_rank": 3.5
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 0,
+        "missing_in_leg_union": 0,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 56,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 3,
+        "shared_entity_max_df": 6,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": true,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": {
+        "class": "C",
+        "evidence": "real_carriers: shared=3 triple=0 supersede=0 contradict=0"
+      }
+    },
+    {
+      "id": "mh-5",
+      "kind": "multi_hop",
+      "derivation": "bridge_entity",
+      "bridge_kind": "bridge_entity",
+      "gold": [
+        25,
+        148
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 7,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            123,
+            118,
+            104,
+            148,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 2,
+          "missing": 0,
+          "avg_rank": 4.5
+        },
+        "ask": {
+          "returned": [
+            123,
+            118,
+            104,
+            148,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 2,
+          "missing": 0,
+          "avg_rank": 4.5
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 0,
+        "missing_in_leg_union": 0,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 50,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 5,
+        "shared_entity_max_df": 9,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": true
+      },
+      "derivable_edges": {
+        "shared_entity": true,
+        "temporal": true,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": {
+        "class": "C",
+        "evidence": "real_carriers: shared=5 triple=0 supersede=0 contradict=0"
+      }
+    },
+    {
+      "id": "mh-6",
+      "kind": "multi_hop",
+      "derivation": "bridge_entity",
+      "bridge_kind": "bridge_entity",
+      "gold": [
+        62,
+        63
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 3,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            109,
+            128,
+            63,
+            116,
+            95
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        },
+        "ask": {
+          "returned": [
+            109,
+            128,
+            63,
+            116,
+            95
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 1,
+        "missing_in_leg_union": 1,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 58,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 10,
+        "shared_entity_max_df": 42,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": true,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": {
+        "class": "C",
+        "evidence": "real_carriers: shared=9 triple=0 supersede=0 contradict=0"
+      }
+    },
+    {
+      "id": "mh-7",
+      "kind": "multi_hop",
+      "derivation": "bridge_triple",
+      "bridge_kind": "bridge_triple",
+      "gold": [
+        107,
+        62
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 3,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            148,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 2,
+          "avg_rank": null
+        },
+        "ask": {
+          "returned": [
+            148,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 2,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 2,
+        "missing_in_leg_union": 2,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 51,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 0,
+        "shared_entity_max_df": 0,
+        "triple_link_count": 1,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": false,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": false,
+      "needed_edge_type": "causal_or_belongs_to(unspecified)",
+      "attribution": {
+        "class": "D",
+        "evidence": "spurious_only: shared=0(max_df=0) triple=1(fragment)"
+      }
+    },
+    {
+      "id": "mh-8",
+      "kind": "multi_hop",
+      "derivation": "bridge_triple",
+      "bridge_kind": "bridge_triple",
+      "gold": [
+        131,
+        62
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 7,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            21,
+            25,
+            62,
+            63,
+            120
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        },
+        "ask": {
+          "returned": [
+            21,
+            25,
+            62,
+            63,
+            120
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 1,
+        "missing_in_leg_union": 1,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 53,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 0,
+        "shared_entity_max_df": 0,
+        "triple_link_count": 1,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": false,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": false,
+      "needed_edge_type": "same_as_or_same_topic(surface)",
+      "attribution": {
+        "class": "D",
+        "evidence": "spurious_only: shared=0(max_df=0) triple=1(fragment)"
+      }
+    },
+    {
+      "id": "mh-9",
+      "kind": "multi_hop",
+      "derivation": "bridge_triple",
+      "bridge_kind": "bridge_triple",
+      "gold": [
+        132,
+        97
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 6,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            132,
+            144,
+            140,
+            110,
+            160
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        },
+        "ask": {
+          "returned": [
+            132,
+            144,
+            140,
+            110,
+            160
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 1,
+        "missing_in_leg_union": 1,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 51,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 0,
+        "shared_entity_max_df": 0,
+        "triple_link_count": 1,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": false,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": false,
+      "needed_edge_type": "causal_or_belongs_to(unspecified)",
+      "attribution": {
+        "class": "D",
+        "evidence": "spurious_only: shared=0(max_df=0) triple=1(fragment)"
+      }
+    },
+    {
+      "id": "mh-10",
+      "kind": "multi_hop",
+      "derivation": "bridge_topic",
+      "bridge_kind": "bridge_topic",
+      "gold": [
+        5,
+        95
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 3,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            4,
+            95,
+            116,
+            25,
+            141
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        },
+        "ask": {
+          "returned": [
+            4,
+            95,
+            116,
+            25,
+            141
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 1,
+        "missing_in_leg_union": 1,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 51,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 0,
+        "shared_entity_max_df": 0,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": false,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": false,
+      "needed_edge_type": "same_as_or_same_topic(surface)",
+      "attribution": {
+        "class": "B",
+        "evidence": "no_carrier"
+      }
+    },
+    {
+      "id": "mh-11",
+      "kind": "multi_hop",
+      "derivation": "bridge_topic",
+      "bridge_kind": "bridge_topic",
+      "gold": [
+        19,
+        25
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 4,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            148,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        },
+        "ask": {
+          "returned": [
+            148,
+            122,
+            120,
+            63,
+            25
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 1,
+        "missing_in_leg_union": 1,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 53,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 0,
+        "shared_entity_max_df": 0,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": false,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": false,
+      "needed_edge_type": "same_as_or_same_topic(surface)",
+      "attribution": {
+        "class": "B",
+        "evidence": "no_carrier"
+      }
+    },
+    {
+      "id": "mh-12",
+      "kind": "multi_hop",
+      "derivation": "bridge_topic",
+      "bridge_kind": "bridge_topic",
+      "gold": [
+        21,
+        36
+      ],
+      "gold_status": [
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 5,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            21,
+            131,
+            154,
+            25,
+            29
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        },
+        "ask": {
+          "returned": [
+            21,
+            131,
+            154,
+            25,
+            29
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 1,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": {
+        "missing_gold": 1,
+        "missing_in_leg_union": 1,
+        "missing_absent_from_leg_union": 0,
+        "leg_union_size": 61,
+        "gold_all_in_leg_union": true
+      },
+      "carriers": {
+        "shared_entity_count": 0,
+        "shared_entity_max_df": 0,
+        "triple_link_count": 0,
+        "triple_link_entity_named": 0,
+        "supersedes": false,
+        "contradicts": false,
+        "temporal": false
+      },
+      "derivable_edges": {
+        "shared_entity": false,
+        "temporal": false,
+        "supersedes": false,
+        "contradicts": false
+      },
+      "derivable_connected": false,
+      "needed_edge_type": "same_as_or_same_topic(surface)",
+      "attribution": {
+        "class": "B",
+        "evidence": "no_carrier"
+      }
+    },
+    {
+      "id": "br-1",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        21,
+        131,
+        154
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 4,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            21,
+            106,
+            117,
+            113,
+            107
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 1,
+          "gold_in_pool": 1,
+          "missing": 2,
+          "avg_rank": null
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-2",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        106,
+        109,
+        160
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 1,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            106,
+            123,
+            109,
+            160
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 2,
+          "gold_in_pool": 3,
+          "missing": 0,
+          "avg_rank": 2.67
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-3",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        104,
+        118,
+        148
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 4,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            104,
+            118,
+            123,
+            25,
+            95
+          ],
+          "top3_all": false,
+          "top3_partial": true,
+          "top3_none": false,
+          "gold_in_top3": 2,
+          "gold_in_pool": 2,
+          "missing": 1,
+          "avg_rank": null
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-4",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        119,
+        148,
+        166
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 3,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            106,
+            123,
+            97,
+            147,
+            119
+          ],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 1,
+          "missing": 2,
+          "avg_rank": null
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": false,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-5",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        138,
+        140,
+        142
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 6,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            138,
+            140,
+            142
+          ],
+          "top3_all": true,
+          "top3_partial": false,
+          "top3_none": false,
+          "gold_in_top3": 3,
+          "gold_in_pool": 3,
+          "missing": 0,
+          "avg_rank": 2
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": true,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-6",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        36,
+        148,
+        164
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 3,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            36,
+            148,
+            164
+          ],
+          "top3_all": true,
+          "top3_partial": false,
+          "top3_none": false,
+          "gold_in_top3": 3,
+          "gold_in_pool": 3,
+          "missing": 0,
+          "avg_rank": 2
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": true,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-7",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        115,
+        124,
+        133
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 7,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            115,
+            124,
+            133
+          ],
+          "top3_all": true,
+          "top3_partial": false,
+          "top3_none": false,
+          "gold_in_top3": 3,
+          "gold_in_pool": 3,
+          "missing": 0,
+          "avg_rank": 2
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": true,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-8",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        25,
+        95,
+        116
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 3,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            25,
+            95,
+            116
+          ],
+          "top3_all": true,
+          "top3_partial": false,
+          "top3_none": false,
+          "gold_in_top3": 3,
+          "gold_in_pool": 3,
+          "missing": 0,
+          "avg_rank": 2
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": true,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-9",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        33,
+        99,
+        106
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 1,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            33,
+            99,
+            106
+          ],
+          "top3_all": true,
+          "top3_partial": false,
+          "top3_none": false,
+          "gold_in_top3": 3,
+          "gold_in_pool": 3,
+          "missing": 0,
+          "avg_rank": 2
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": true,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    },
+    {
+      "id": "br-10",
+      "kind": "relation_browse",
+      "derivation": null,
+      "bridge_kind": null,
+      "gold": [
+        131,
+        154,
+        159
+      ],
+      "gold_status": [
+        "active",
+        "active",
+        "active"
+      ],
+      "guard": {
+        "ok": true,
+        "reason": null,
+        "shared_trigrams": 1,
+        "unique_shared_trigrams": 0,
+        "time_free": true
+      },
+      "mechanisms": {
+        "search": {
+          "returned": [
+            131,
+            154,
+            159
+          ],
+          "top3_all": true,
+          "top3_partial": false,
+          "top3_none": false,
+          "gold_in_top3": 3,
+          "gold_in_pool": 3,
+          "missing": 0,
+          "avg_rank": 2
+        },
+        "related": {
+          "returned": [],
+          "top3_all": false,
+          "top3_partial": false,
+          "top3_none": true,
+          "gold_in_top3": 0,
+          "gold_in_pool": 0,
+          "missing": 3,
+          "avg_rank": null
+        }
+      },
+      "any_mechanism_all": true,
+      "reach": null,
+      "carriers": null,
+      "derivable_edges": null,
+      "derivable_connected": true,
+      "needed_edge_type": null,
+      "attribution": null
+    }
+  ],
+  "manual_sample": {
+    "sample_file": "/tmp/dsh-r6/s3-sample.json",
+    "sample_size": 6,
+    "judged": {
+      "items": 6,
+      "types": {
+        "fragment_pivot_not_a_relation": 3,
+        "unrelated_surface_coincidence": 3
+      },
+      "method": "manual judgment by the executing agent, reading /tmp/dsh-r6/s3-sample.json in-process. For each unconnected gold pair: does a genuine semantic relation exist that a relation type c"
+    }
+  }
+}

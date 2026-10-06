@@ -1,0 +1,871 @@
+{
+  "card": "A2",
+  "measured_at": "2026-10-05T15:49:07.008Z",
+  "node": "v22.23.2",
+  "model": "Xenova/bge-base-zh-v1.5",
+  "now": "2026-10-05T04:00:00.000Z",
+  "real_time_query_scan": {
+    "scanned": 61,
+    "carrying_time_expression": 0,
+    "detail": []
+  },
+  "fixture": {
+    "facts": 16,
+    "windows": {
+      "今天": "2026-10-05T01:00:00.000Z",
+      "昨天": "2026-10-04T01:00:00.000Z",
+      "前天": "2026-10-03T01:00:00.000Z",
+      "上个月": "2026-09-15T01:00:00.000Z",
+      "2026年8月15日": "2026-08-15T01:00:00.000Z"
+    },
+    "topics": [
+      "缓存",
+      "部署",
+      "限流"
+    ],
+    "distractor_id": 16,
+    "note": "script-authored, real-shaped lengths; dates written to the TEMP copy only"
+  },
+  "parser_rules": [
+    "yyyy年m月d日",
+    "yyyy-m-d",
+    "yyyy年m月",
+    "m月d日",
+    "最近N天",
+    "最近一周",
+    "最近一个月",
+    "今天/昨天/前天",
+    "本周/上周",
+    "这个月/上个月",
+    "今年/去年"
+  ],
+  "arm": "three forms: boost legs at weight 0.30 and 1.00, and a hard form (window leg supplies candidates + pool restricted to the window)",
+  "identity": {
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "summary": {
+    "base": {
+      "top1_gold": 1,
+      "in_top3": 1,
+      "missing": 14,
+      "mean_rank": 1
+    },
+    "arm": {
+      "top1_gold": 5,
+      "in_top3": 14,
+      "missing": 0,
+      "mean_rank": 2.0667
+    },
+    "guard_false_injury": 0,
+    "parse_ok": 15,
+    "parse_total": 15
+  },
+  "verdicts": {
+    "w0.3": {
+      "improved": true,
+      "base": {
+        "top1_gold": 1,
+        "in_top3": 1,
+        "missing": 14,
+        "mean_rank": 1
+      },
+      "arm": {
+        "top1_gold": 2,
+        "in_top3": 10,
+        "missing": 0,
+        "mean_rank": 2.8
+      },
+      "guard_false_injury": 0,
+      "parse_ok": "15/15",
+      "verdict": "adopt",
+      "caveat": "the real library carries NO time-scoped query, so this is measured on a script-authored real-shaped fixture, not on real user data"
+    },
+    "w1.0": {
+      "improved": true,
+      "base": {
+        "top1_gold": 1,
+        "in_top3": 1,
+        "missing": 14,
+        "mean_rank": 1
+      },
+      "arm": {
+        "top1_gold": 5,
+        "in_top3": 14,
+        "missing": 0,
+        "mean_rank": 2.0667
+      },
+      "guard_false_injury": 0,
+      "parse_ok": "15/15",
+      "verdict": "adopt",
+      "caveat": "the real library carries NO time-scoped query, so this is measured on a script-authored real-shaped fixture, not on real user data"
+    },
+    "hard": {
+      "improved": true,
+      "base": {
+        "top1_gold": 1,
+        "in_top3": 1,
+        "missing": 14,
+        "mean_rank": 1
+      },
+      "arm": {
+        "top1_gold": 5,
+        "in_top3": 14,
+        "missing": 0,
+        "mean_rank": 2.0667
+      },
+      "guard_false_injury": 0,
+      "parse_ok": "15/15",
+      "verdict": "adopt",
+      "caveat": "the real library carries NO time-scoped query, so this is measured on a script-authored real-shaped fixture, not on real user data"
+    }
+  },
+  "selected_weight": 1,
+  "time_queries": [
+    {
+      "query": "缓存 今天",
+      "topic": "缓存",
+      "window": "今天",
+      "gold": [
+        1
+      ],
+      "parsed_rule": "今天",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          5
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          1,
+          6,
+          11
+        ],
+        "gold_rank": 1,
+        "top3": 1
+      }
+    },
+    {
+      "query": "缓存 昨天",
+      "topic": "缓存",
+      "window": "昨天",
+      "gold": [
+        2
+      ],
+      "parsed_rule": "昨天",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          5
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          2,
+          7,
+          12
+        ],
+        "gold_rank": 1,
+        "top3": 1
+      }
+    },
+    {
+      "query": "缓存 前天",
+      "topic": "缓存",
+      "window": "前天",
+      "gold": [
+        3
+      ],
+      "parsed_rule": "前天",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          5
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          3,
+          8,
+          13
+        ],
+        "gold_rank": 1,
+        "top3": 1
+      }
+    },
+    {
+      "query": "缓存 上个月",
+      "topic": "缓存",
+      "window": "上个月",
+      "gold": [
+        4
+      ],
+      "parsed_rule": "上个月",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          5,
+          16
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          16,
+          4,
+          9,
+          14
+        ],
+        "gold_rank": 2,
+        "top3": 1
+      }
+    },
+    {
+      "query": "缓存 2026年8月15日",
+      "topic": "缓存",
+      "window": "2026年8月15日",
+      "gold": [
+        5
+      ],
+      "parsed_rule": "yyyy年m月d日",
+      "parse_ok": true,
+      "base": {
+        "ids": [],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          5,
+          10,
+          15
+        ],
+        "gold_rank": 1,
+        "top3": 1
+      }
+    },
+    {
+      "query": "部署 今天",
+      "topic": "部署",
+      "window": "今天",
+      "gold": [
+        6
+      ],
+      "parsed_rule": "今天",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          10
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          1,
+          6,
+          11
+        ],
+        "gold_rank": 2,
+        "top3": 1
+      }
+    },
+    {
+      "query": "部署 昨天",
+      "topic": "部署",
+      "window": "昨天",
+      "gold": [
+        7
+      ],
+      "parsed_rule": "昨天",
+      "parse_ok": true,
+      "base": {
+        "ids": [],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          2,
+          7,
+          12
+        ],
+        "gold_rank": 2,
+        "top3": 1
+      }
+    },
+    {
+      "query": "部署 前天",
+      "topic": "部署",
+      "window": "前天",
+      "gold": [
+        8
+      ],
+      "parsed_rule": "前天",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          10
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          3,
+          8,
+          13
+        ],
+        "gold_rank": 2,
+        "top3": 1
+      }
+    },
+    {
+      "query": "部署 上个月",
+      "topic": "部署",
+      "window": "上个月",
+      "gold": [
+        9
+      ],
+      "parsed_rule": "上个月",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          10,
+          16
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          16,
+          4,
+          9,
+          14
+        ],
+        "gold_rank": 3,
+        "top3": 1
+      }
+    },
+    {
+      "query": "部署 2026年8月15日",
+      "topic": "部署",
+      "window": "2026年8月15日",
+      "gold": [
+        10
+      ],
+      "parsed_rule": "yyyy年m月d日",
+      "parse_ok": true,
+      "base": {
+        "ids": [],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          5,
+          10,
+          15
+        ],
+        "gold_rank": 2,
+        "top3": 1
+      }
+    },
+    {
+      "query": "限流 今天",
+      "topic": "限流",
+      "window": "今天",
+      "gold": [
+        11
+      ],
+      "parsed_rule": "今天",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          15
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          1,
+          6,
+          11
+        ],
+        "gold_rank": 3,
+        "top3": 1
+      }
+    },
+    {
+      "query": "限流 昨天",
+      "topic": "限流",
+      "window": "昨天",
+      "gold": [
+        12
+      ],
+      "parsed_rule": "昨天",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          15
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          2,
+          7,
+          12
+        ],
+        "gold_rank": 3,
+        "top3": 1
+      }
+    },
+    {
+      "query": "限流 前天",
+      "topic": "限流",
+      "window": "前天",
+      "gold": [
+        13
+      ],
+      "parsed_rule": "前天",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          15
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          3,
+          8,
+          13
+        ],
+        "gold_rank": 3,
+        "top3": 1
+      }
+    },
+    {
+      "query": "限流 上个月",
+      "topic": "限流",
+      "window": "上个月",
+      "gold": [
+        14
+      ],
+      "parsed_rule": "上个月",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          15,
+          16
+        ],
+        "gold_rank": null,
+        "top3": 0
+      },
+      "arm": {
+        "ids": [
+          16,
+          4,
+          9,
+          14
+        ],
+        "gold_rank": 4,
+        "top3": 0
+      }
+    },
+    {
+      "query": "限流 2026年8月15日",
+      "topic": "限流",
+      "window": "2026年8月15日",
+      "gold": [
+        15
+      ],
+      "parsed_rule": "yyyy年m月d日",
+      "parse_ok": true,
+      "base": {
+        "ids": [
+          15
+        ],
+        "gold_rank": 1,
+        "top3": 1
+      },
+      "arm": {
+        "ids": [
+          15,
+          5,
+          10
+        ],
+        "gold_rank": 1,
+        "top3": 1
+      }
+    }
+  ],
+  "parse_audit": [
+    {
+      "query": "缓存 今天",
+      "expected_window": "今天",
+      "expected_time": "2026-10-05T01:00:00.000Z",
+      "parsed": {
+        "rule": "今天",
+        "matched": "今天",
+        "start": "2026-10-04T16:00:00.000Z",
+        "end": "2026-10-05T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "缓存 昨天",
+      "expected_window": "昨天",
+      "expected_time": "2026-10-04T01:00:00.000Z",
+      "parsed": {
+        "rule": "昨天",
+        "matched": "昨天",
+        "start": "2026-10-03T16:00:00.000Z",
+        "end": "2026-10-04T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "缓存 前天",
+      "expected_window": "前天",
+      "expected_time": "2026-10-03T01:00:00.000Z",
+      "parsed": {
+        "rule": "前天",
+        "matched": "前天",
+        "start": "2026-10-02T16:00:00.000Z",
+        "end": "2026-10-03T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "缓存 上个月",
+      "expected_window": "上个月",
+      "expected_time": "2026-09-15T01:00:00.000Z",
+      "parsed": {
+        "rule": "上个月",
+        "matched": "上个月",
+        "start": "2026-08-31T16:00:00.000Z",
+        "end": "2026-09-30T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "缓存 2026年8月15日",
+      "expected_window": "2026年8月15日",
+      "expected_time": "2026-08-15T01:00:00.000Z",
+      "parsed": {
+        "rule": "yyyy年m月d日",
+        "matched": "2026年8月15日",
+        "start": "2026-08-14T16:00:00.000Z",
+        "end": "2026-08-15T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "部署 今天",
+      "expected_window": "今天",
+      "expected_time": "2026-10-05T01:00:00.000Z",
+      "parsed": {
+        "rule": "今天",
+        "matched": "今天",
+        "start": "2026-10-04T16:00:00.000Z",
+        "end": "2026-10-05T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "部署 昨天",
+      "expected_window": "昨天",
+      "expected_time": "2026-10-04T01:00:00.000Z",
+      "parsed": {
+        "rule": "昨天",
+        "matched": "昨天",
+        "start": "2026-10-03T16:00:00.000Z",
+        "end": "2026-10-04T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "部署 前天",
+      "expected_window": "前天",
+      "expected_time": "2026-10-03T01:00:00.000Z",
+      "parsed": {
+        "rule": "前天",
+        "matched": "前天",
+        "start": "2026-10-02T16:00:00.000Z",
+        "end": "2026-10-03T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "部署 上个月",
+      "expected_window": "上个月",
+      "expected_time": "2026-09-15T01:00:00.000Z",
+      "parsed": {
+        "rule": "上个月",
+        "matched": "上个月",
+        "start": "2026-08-31T16:00:00.000Z",
+        "end": "2026-09-30T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "部署 2026年8月15日",
+      "expected_window": "2026年8月15日",
+      "expected_time": "2026-08-15T01:00:00.000Z",
+      "parsed": {
+        "rule": "yyyy年m月d日",
+        "matched": "2026年8月15日",
+        "start": "2026-08-14T16:00:00.000Z",
+        "end": "2026-08-15T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "限流 今天",
+      "expected_window": "今天",
+      "expected_time": "2026-10-05T01:00:00.000Z",
+      "parsed": {
+        "rule": "今天",
+        "matched": "今天",
+        "start": "2026-10-04T16:00:00.000Z",
+        "end": "2026-10-05T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "限流 昨天",
+      "expected_window": "昨天",
+      "expected_time": "2026-10-04T01:00:00.000Z",
+      "parsed": {
+        "rule": "昨天",
+        "matched": "昨天",
+        "start": "2026-10-03T16:00:00.000Z",
+        "end": "2026-10-04T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "限流 前天",
+      "expected_window": "前天",
+      "expected_time": "2026-10-03T01:00:00.000Z",
+      "parsed": {
+        "rule": "前天",
+        "matched": "前天",
+        "start": "2026-10-02T16:00:00.000Z",
+        "end": "2026-10-03T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "限流 上个月",
+      "expected_window": "上个月",
+      "expected_time": "2026-09-15T01:00:00.000Z",
+      "parsed": {
+        "rule": "上个月",
+        "matched": "上个月",
+        "start": "2026-08-31T16:00:00.000Z",
+        "end": "2026-09-30T16:00:00.000Z"
+      },
+      "parse_ok": true
+    },
+    {
+      "query": "限流 2026年8月15日",
+      "expected_window": "2026年8月15日",
+      "expected_time": "2026-08-15T01:00:00.000Z",
+      "parsed": {
+        "rule": "yyyy年m月d日",
+        "matched": "2026年8月15日",
+        "start": "2026-08-14T16:00:00.000Z",
+        "end": "2026-08-15T16:00:00.000Z"
+      },
+      "parse_ok": true
+    }
+  ],
+  "guards": [
+    {
+      "query": "缓存",
+      "parsed": null,
+      "base_ids": [
+        5,
+        1,
+        2,
+        3,
+        4
+      ],
+      "arm_ids": [
+        5,
+        1,
+        2,
+        3,
+        4
+      ],
+      "identical": true
+    },
+    {
+      "query": "部署",
+      "parsed": null,
+      "base_ids": [
+        10,
+        6,
+        7,
+        8,
+        9
+      ],
+      "arm_ids": [
+        10,
+        6,
+        7,
+        8,
+        9
+      ],
+      "identical": true
+    },
+    {
+      "query": "限流",
+      "parsed": null,
+      "base_ids": [
+        15,
+        11,
+        12,
+        13,
+        14
+      ],
+      "arm_ids": [
+        15,
+        11,
+        12,
+        13,
+        14
+      ],
+      "identical": true
+    },
+    {
+      "query": "缓存怎么配置",
+      "parsed": null,
+      "base_ids": [],
+      "arm_ids": [],
+      "identical": true
+    },
+    {
+      "query": "部署流程",
+      "parsed": null,
+      "base_ids": [
+        10,
+        6,
+        7,
+        8,
+        9
+      ],
+      "arm_ids": [
+        10,
+        6,
+        7,
+        8,
+        9
+      ],
+      "identical": true
+    }
+  ],
+  "counterfactual": [
+    {
+      "query": "缓存 上个月",
+      "distractor_id": 16,
+      "gold_rank_with_distractor": 2,
+      "gold_rank_without_distractor": 1
+    },
+    {
+      "query": "部署 上个月",
+      "distractor_id": 16,
+      "gold_rank_with_distractor": 3,
+      "gold_rank_without_distractor": 2
+    },
+    {
+      "query": "限流 上个月",
+      "distractor_id": 16,
+      "gold_rank_with_distractor": 4,
+      "gold_rank_without_distractor": 3
+    }
+  ],
+  "verdict": {
+    "improved": true,
+    "base": {
+      "top1_gold": 1,
+      "in_top3": 1,
+      "missing": 14,
+      "mean_rank": 1
+    },
+    "arm": {
+      "top1_gold": 5,
+      "in_top3": 14,
+      "missing": 0,
+      "mean_rank": 2.0667
+    },
+    "guard_false_injury": 0,
+    "parse_ok": "15/15",
+    "verdict": "adopt",
+    "caveat": "the real library carries NO time-scoped query, so this is measured on a script-authored real-shaped fixture, not on real user data"
+  },
+  "per_weight_summary": {
+    "w0.3": {
+      "base": {
+        "top1_gold": 1,
+        "in_top3": 1,
+        "missing": 14,
+        "mean_rank": 1
+      },
+      "arm": {
+        "top1_gold": 2,
+        "in_top3": 10,
+        "missing": 0,
+        "mean_rank": 2.8
+      },
+      "guard_false_injury": 0
+    },
+    "w1.0": {
+      "base": {
+        "top1_gold": 1,
+        "in_top3": 1,
+        "missing": 14,
+        "mean_rank": 1
+      },
+      "arm": {
+        "top1_gold": 5,
+        "in_top3": 14,
+        "missing": 0,
+        "mean_rank": 2.0667
+      },
+      "guard_false_injury": 0
+    },
+    "hard": {
+      "base": {
+        "top1_gold": 1,
+        "in_top3": 1,
+        "missing": 14,
+        "mean_rank": 1
+      },
+      "arm": {
+        "top1_gold": 5,
+        "in_top3": 14,
+        "missing": 0,
+        "mean_rank": 2.0667
+      },
+      "guard_false_injury": 0
+    }
+  },
+  "reproduction": "node mem/scripts/spikes/bench-a2-time-window.mjs"
+}

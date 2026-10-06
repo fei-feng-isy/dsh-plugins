@@ -1,0 +1,109 @@
+{
+  "card": "R5-S1a",
+  "measured_at": "2026-10-05T17:35:50.173Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    0.08,
+    0.06,
+    0.2
+  ],
+  "identity": {
+    "applicable": false,
+    "note": "corpus profile card — no retrieval pass, so no production arm to identity-check (R2-5/R2-7 convention)"
+  },
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85,
+    "archived_facts": 79
+  },
+  "selection": {
+    "rule": "status='active' and length(content) >= 200",
+    "selected": 68,
+    "share_of_active": 0.8,
+    "brief_expectation": {
+      "active": 85,
+      "selected": 68
+    },
+    "matches_brief": true
+  },
+  "length": {
+    "all_active": {
+      "min": 9,
+      "p50": 313,
+      "p90": 510,
+      "max": 882,
+      "mean": 328.8706
+    },
+    "selected": {
+      "min": 203,
+      "p25": 286,
+      "p50": 346,
+      "p75": 422,
+      "p90": 516,
+      "max": 882,
+      "mean": 378.2647,
+      "total": 25722
+    },
+    "bands_all_active": {
+      "le200": 17,
+      "200-300": 20,
+      "300-500": 38,
+      "500-1000": 10,
+      "gt1000": 0
+    }
+  },
+  "entity_bag": {
+    "selected_median_width": 35,
+    "selected_max_width": 66,
+    "selected_total_links": 2531,
+    "note": "the engine bag of the SOURCE fact is what S2 arm A0 inherits; an atom re-extracts its own bag"
+  },
+  "split_contract": {
+    "version": 1,
+    "per_fact_fields": [
+      "id",
+      "atoms[]",
+      "relations[]"
+    ],
+    "atom_fields": [
+      "atom_id",
+      "text",
+      "source_sentence",
+      "self_contained"
+    ],
+    "relation_fields": [
+      "from",
+      "to",
+      "type"
+    ],
+    "relation_types": [
+      "same_topic",
+      "causal",
+      "temporal",
+      "subsumes",
+      "contradicts"
+    ],
+    "rules": [
+      "each atom carries exactly ONE assertion",
+      "each atom is self-contained: it names its own subject and never points at a sibling with a pronoun or an ellipsis",
+      "time information that the source states is preserved verbatim in the atom that carries it",
+      "relations are declared only BETWEEN atoms of the SAME source fact (the batch = one fact)",
+      "atom_id is \"<fact_id>.a<k>\" with k starting at 1 in reading order"
+    ]
+  },
+  "derived_inputs": {
+    "corpus": "/tmp/dsh-r5/corpus.json",
+    "meta": "/tmp/dsh-r5/corpus-meta.json"
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r5-0-corpus.mjs --json mem/docs/spikes/raw/round5-s1-corpus.json",
+  "privacy": {
+    "clean": true,
+    "forbidden_keys": [],
+    "strings_over_max": [],
+    "sensitive_pattern_hits": [],
+    "cjk_runs_over_7_not_whitelisted": [],
+    "keys_checked": true,
+    "whitelist_size": 1137,
+    "pattern_count": 47
+  }
+}

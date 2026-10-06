@@ -1,0 +1,1685 @@
+{
+  "card": "A3",
+  "measured_at": "2026-10-05T15:47:41.786Z",
+  "node": "v22.23.2",
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85,
+    "entities_total": 2232,
+    "entities_with_active_facts": 1442
+  },
+  "thresholds": [
+    0.5,
+    0.7,
+    0.9
+  ],
+  "merge_rule": "lowercased trigram Jaccard over entity names (names <3 chars contribute themselves), union-find, canonical = highest active df",
+  "bag_width": {
+    "raw_median": 32,
+    "raw_min": 3,
+    "raw_max": 66
+  },
+  "query_set": {
+    "two_char": [
+      "插件",
+      "任务",
+      "版本",
+      "宿主",
+      "会话"
+    ],
+    "extra_entity_names": [
+      "dsh",
+      "mem",
+      "avantf",
+      "mission",
+      "plugin",
+      "md",
+      "规则",
+      "base",
+      "文件",
+      "用户"
+    ]
+  },
+  "identity": {
+    "checked": 15,
+    "passed": 15,
+    "failures": []
+  },
+  "summary": {
+    "base": {
+      "queries": 15,
+      "top1_ok": 15,
+      "top3_relevant_mean": 3,
+      "fanout_median": 7,
+      "entity_leg_size_median": 7
+    },
+    "t0.5": {
+      "queries": 15,
+      "top1_ok": 15,
+      "top3_relevant_mean": 3,
+      "fanout_median": 7,
+      "entity_leg_size_median": 7
+    },
+    "t0.7": {
+      "queries": 15,
+      "top1_ok": 15,
+      "top3_relevant_mean": 3,
+      "fanout_median": 7,
+      "entity_leg_size_median": 7
+    },
+    "t0.9": {
+      "queries": 15,
+      "top1_ok": 15,
+      "top3_relevant_mean": 3,
+      "fanout_median": 7,
+      "entity_leg_size_median": 7
+    }
+  },
+  "rows": [
+    {
+      "query": "插件",
+      "gold_size": 25,
+      "base": {
+        "ids": [
+          29,
+          64,
+          94,
+          95,
+          96
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 0,
+        "entity_leg_size": 0,
+        "entity_leg_top3": []
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            29,
+            64,
+            94,
+            95,
+            96
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.7": {
+          "ids": [
+            29,
+            64,
+            94,
+            95,
+            96
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.9": {
+          "ids": [
+            29,
+            64,
+            94,
+            95,
+            96
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        }
+      }
+    },
+    {
+      "query": "任务",
+      "gold_size": 18,
+      "base": {
+        "ids": [
+          95,
+          96,
+          97,
+          112,
+          116
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 0,
+        "entity_leg_size": 0,
+        "entity_leg_top3": []
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            95,
+            96,
+            97,
+            112,
+            116
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.7": {
+          "ids": [
+            95,
+            96,
+            97,
+            112,
+            116
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.9": {
+          "ids": [
+            95,
+            96,
+            97,
+            112,
+            116
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        }
+      }
+    },
+    {
+      "query": "版本",
+      "gold_size": 16,
+      "base": {
+        "ids": [
+          21,
+          23,
+          72,
+          101,
+          108
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 16,
+        "entity_leg_size": 16,
+        "entity_leg_top3": [
+          21,
+          23,
+          72
+        ]
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            21,
+            23,
+            72,
+            101,
+            108
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            21,
+            23,
+            72
+          ],
+          "anchors": 1
+        },
+        "t0.7": {
+          "ids": [
+            21,
+            23,
+            72,
+            101,
+            108
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            21,
+            23,
+            72
+          ],
+          "anchors": 1
+        },
+        "t0.9": {
+          "ids": [
+            21,
+            23,
+            72,
+            101,
+            108
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            21,
+            23,
+            72
+          ],
+          "anchors": 1
+        }
+      }
+    },
+    {
+      "query": "宿主",
+      "gold_size": 11,
+      "base": {
+        "ids": [
+          29,
+          33,
+          63,
+          94,
+          104
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 11,
+        "entity_leg_size": 11,
+        "entity_leg_top3": [
+          29,
+          33,
+          63
+        ]
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            29,
+            33,
+            63,
+            94,
+            104
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 11,
+          "entity_leg_size": 11,
+          "entity_leg_top3": [
+            29,
+            33,
+            63
+          ],
+          "anchors": 1
+        },
+        "t0.7": {
+          "ids": [
+            29,
+            33,
+            63,
+            94,
+            104
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 11,
+          "entity_leg_size": 11,
+          "entity_leg_top3": [
+            29,
+            33,
+            63
+          ],
+          "anchors": 1
+        },
+        "t0.9": {
+          "ids": [
+            29,
+            33,
+            63,
+            94,
+            104
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 11,
+          "entity_leg_size": 11,
+          "entity_leg_top3": [
+            29,
+            33,
+            63
+          ],
+          "anchors": 1
+        }
+      }
+    },
+    {
+      "query": "会话",
+      "gold_size": 7,
+      "base": {
+        "ids": [
+          25,
+          62,
+          116,
+          121,
+          128
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 7,
+        "entity_leg_size": 7,
+        "entity_leg_top3": [
+          25,
+          62,
+          116
+        ]
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            25,
+            62,
+            116,
+            121,
+            128
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 7,
+          "entity_leg_size": 7,
+          "entity_leg_top3": [
+            25,
+            62,
+            116
+          ],
+          "anchors": 1
+        },
+        "t0.7": {
+          "ids": [
+            25,
+            62,
+            116,
+            121,
+            128
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 7,
+          "entity_leg_size": 7,
+          "entity_leg_top3": [
+            25,
+            62,
+            116
+          ],
+          "anchors": 1
+        },
+        "t0.9": {
+          "ids": [
+            25,
+            62,
+            116,
+            121,
+            128
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 7,
+          "entity_leg_size": 7,
+          "entity_leg_top3": [
+            25,
+            62,
+            116
+          ],
+          "anchors": 1
+        }
+      }
+    },
+    {
+      "query": "dsh",
+      "gold_size": 41,
+      "base": {
+        "ids": [
+          94,
+          155,
+          110,
+          95,
+          64
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 0,
+        "entity_leg_size": 0,
+        "entity_leg_top3": []
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            94,
+            155,
+            110,
+            95,
+            64
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.7": {
+          "ids": [
+            94,
+            155,
+            110,
+            95,
+            64
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.9": {
+          "ids": [
+            94,
+            155,
+            110,
+            95,
+            64
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        }
+      }
+    },
+    {
+      "query": "mem",
+      "gold_size": 25,
+      "base": {
+        "ids": [
+          99,
+          94,
+          33,
+          162,
+          164
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 0,
+        "entity_leg_size": 0,
+        "entity_leg_top3": []
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            99,
+            94,
+            33,
+            162,
+            164
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.7": {
+          "ids": [
+            99,
+            94,
+            33,
+            162,
+            164
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.9": {
+          "ids": [
+            99,
+            94,
+            33,
+            162,
+            164
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        }
+      }
+    },
+    {
+      "query": "avantf",
+      "gold_size": 22,
+      "base": {
+        "ids": [
+          95,
+          100,
+          155,
+          94,
+          98
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 0,
+        "entity_leg_size": 0,
+        "entity_leg_top3": []
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            95,
+            100,
+            155,
+            94,
+            98
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.7": {
+          "ids": [
+            95,
+            100,
+            155,
+            94,
+            98
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.9": {
+          "ids": [
+            95,
+            100,
+            155,
+            94,
+            98
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        }
+      }
+    },
+    {
+      "query": "mission",
+      "gold_size": 22,
+      "base": {
+        "ids": [
+          116,
+          95,
+          128,
+          94,
+          140
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 0,
+        "entity_leg_size": 0,
+        "entity_leg_top3": []
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            116,
+            95,
+            128,
+            94,
+            140
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.7": {
+          "ids": [
+            116,
+            95,
+            128,
+            94,
+            140
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.9": {
+          "ids": [
+            116,
+            95,
+            128,
+            94,
+            140
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        }
+      }
+    },
+    {
+      "query": "plugin",
+      "gold_size": 18,
+      "base": {
+        "ids": [
+          111,
+          98,
+          150,
+          149,
+          146
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 0,
+        "entity_leg_size": 0,
+        "entity_leg_top3": []
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            111,
+            98,
+            150,
+            149,
+            146
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.7": {
+          "ids": [
+            111,
+            98,
+            150,
+            149,
+            146
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        },
+        "t0.9": {
+          "ids": [
+            111,
+            98,
+            150,
+            149,
+            146
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 0,
+          "entity_leg_size": 0,
+          "entity_leg_top3": [],
+          "anchors": 0
+        }
+      }
+    },
+    {
+      "query": "md",
+      "gold_size": 16,
+      "base": {
+        "ids": [
+          33,
+          37,
+          89,
+          104,
+          105
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 16,
+        "entity_leg_size": 16,
+        "entity_leg_top3": [
+          33,
+          37,
+          89
+        ]
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            33,
+            37,
+            89,
+            104,
+            105
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            33,
+            37,
+            89
+          ],
+          "anchors": 1
+        },
+        "t0.7": {
+          "ids": [
+            33,
+            37,
+            89,
+            104,
+            105
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            33,
+            37,
+            89
+          ],
+          "anchors": 1
+        },
+        "t0.9": {
+          "ids": [
+            33,
+            37,
+            89,
+            104,
+            105
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            33,
+            37,
+            89
+          ],
+          "anchors": 1
+        }
+      }
+    },
+    {
+      "query": "规则",
+      "gold_size": 16,
+      "base": {
+        "ids": [
+          98,
+          100,
+          101,
+          104,
+          106
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 16,
+        "entity_leg_size": 16,
+        "entity_leg_top3": [
+          98,
+          100,
+          101
+        ]
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            98,
+            100,
+            101,
+            104,
+            106
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            98,
+            100,
+            101
+          ],
+          "anchors": 1
+        },
+        "t0.7": {
+          "ids": [
+            98,
+            100,
+            101,
+            104,
+            106
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            98,
+            100,
+            101
+          ],
+          "anchors": 1
+        },
+        "t0.9": {
+          "ids": [
+            98,
+            100,
+            101,
+            104,
+            106
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            98,
+            100,
+            101
+          ],
+          "anchors": 1
+        }
+      }
+    },
+    {
+      "query": "base",
+      "gold_size": 15,
+      "base": {
+        "ids": [
+          132,
+          98,
+          100,
+          156,
+          104
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 15,
+        "entity_leg_size": 15,
+        "entity_leg_top3": [
+          94,
+          98,
+          100
+        ]
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            132,
+            98,
+            100,
+            156,
+            104
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 16,
+          "entity_leg_size": 16,
+          "entity_leg_top3": [
+            94,
+            98,
+            100
+          ],
+          "anchors": 1
+        },
+        "t0.7": {
+          "ids": [
+            132,
+            98,
+            100,
+            156,
+            104
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 15,
+          "entity_leg_size": 15,
+          "entity_leg_top3": [
+            94,
+            98,
+            100
+          ],
+          "anchors": 1
+        },
+        "t0.9": {
+          "ids": [
+            132,
+            98,
+            100,
+            156,
+            104
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 15,
+          "entity_leg_size": 15,
+          "entity_leg_top3": [
+            94,
+            98,
+            100
+          ],
+          "anchors": 1
+        }
+      }
+    },
+    {
+      "query": "文件",
+      "gold_size": 15,
+      "base": {
+        "ids": [
+          37,
+          87,
+          105,
+          106,
+          111
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 15,
+        "entity_leg_size": 15,
+        "entity_leg_top3": [
+          37,
+          87,
+          105
+        ]
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            37,
+            87,
+            105,
+            106,
+            111
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 15,
+          "entity_leg_size": 15,
+          "entity_leg_top3": [
+            37,
+            87,
+            105
+          ],
+          "anchors": 1
+        },
+        "t0.7": {
+          "ids": [
+            37,
+            87,
+            105,
+            106,
+            111
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 15,
+          "entity_leg_size": 15,
+          "entity_leg_top3": [
+            37,
+            87,
+            105
+          ],
+          "anchors": 1
+        },
+        "t0.9": {
+          "ids": [
+            37,
+            87,
+            105,
+            106,
+            111
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 15,
+          "entity_leg_size": 15,
+          "entity_leg_top3": [
+            37,
+            87,
+            105
+          ],
+          "anchors": 1
+        }
+      }
+    },
+    {
+      "query": "用户",
+      "gold_size": 15,
+      "base": {
+        "ids": [
+          4,
+          117,
+          25,
+          36,
+          43
+        ],
+        "top1": 1,
+        "top3": 3,
+        "fanout": 15,
+        "entity_leg_size": 15,
+        "entity_leg_top3": [
+          4,
+          25,
+          36
+        ]
+      },
+      "arms": {
+        "t0.5": {
+          "ids": [
+            4,
+            117,
+            25,
+            36,
+            43
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 15,
+          "entity_leg_size": 15,
+          "entity_leg_top3": [
+            4,
+            25,
+            36
+          ],
+          "anchors": 1
+        },
+        "t0.7": {
+          "ids": [
+            4,
+            117,
+            25,
+            36,
+            43
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 15,
+          "entity_leg_size": 15,
+          "entity_leg_top3": [
+            4,
+            25,
+            36
+          ],
+          "anchors": 1
+        },
+        "t0.9": {
+          "ids": [
+            4,
+            117,
+            25,
+            36,
+            43
+          ],
+          "top1": 1,
+          "top3": 3,
+          "fanout": 15,
+          "entity_leg_size": 15,
+          "entity_leg_top3": [
+            4,
+            25,
+            36
+          ],
+          "anchors": 1
+        }
+      }
+    }
+  ],
+  "audit": {
+    "t0.5": {
+      "pair_count": 465,
+      "cluster_count": 217,
+      "sample": [
+        {
+          "a": "DSH",
+          "b": "dsh",
+          "jaccard": 1,
+          "df_a": 9,
+          "df_b": 41
+        },
+        {
+          "a": "MEM",
+          "b": "mem",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 25
+        },
+        {
+          "a": "AVANTF",
+          "b": "avantf",
+          "jaccard": 1,
+          "df_a": 2,
+          "df_b": 22
+        },
+        {
+          "a": "Mission",
+          "b": "mission",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 22
+        },
+        {
+          "a": "avantf",
+          "b": "avantfWork",
+          "jaccard": 0.5,
+          "df_a": 22,
+          "df_b": 0
+        },
+        {
+          "a": "mission",
+          "b": "missions",
+          "jaccard": 0.8333,
+          "df_a": 22,
+          "df_b": 2
+        },
+        {
+          "a": "plugin",
+          "b": "plugins",
+          "jaccard": 0.8,
+          "df_a": 18,
+          "df_b": 14
+        },
+        {
+          "a": "BASE",
+          "b": "base",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 15
+        },
+        {
+          "a": "base",
+          "b": "base64",
+          "jaccard": 0.5,
+          "df_a": 15,
+          "df_b": 1
+        },
+        {
+          "a": "Node",
+          "b": "node",
+          "jaccard": 1,
+          "df_a": 5,
+          "df_b": 13
+        },
+        {
+          "a": "PNPM",
+          "b": "pnpm",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 13
+        },
+        {
+          "a": "TS",
+          "b": "ts",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 13
+        },
+        {
+          "a": "node",
+          "b": "nodes",
+          "jaccard": 0.6667,
+          "df_a": 13,
+          "df_b": 1
+        },
+        {
+          "a": "npm",
+          "b": "pnpm",
+          "jaccard": 0.5,
+          "df_a": 12,
+          "df_b": 13
+        },
+        {
+          "a": "PNPM",
+          "b": "npm",
+          "jaccard": 0.5,
+          "df_a": 1,
+          "df_b": 12
+        },
+        {
+          "a": "DOC",
+          "b": "docs",
+          "jaccard": 0.5,
+          "df_a": 0,
+          "df_b": 11
+        },
+        {
+          "a": "doc",
+          "b": "docs",
+          "jaccard": 0.5,
+          "df_a": 2,
+          "df_b": 11
+        },
+        {
+          "a": "listPackages",
+          "b": "packages",
+          "jaccard": 0.6,
+          "df_a": 0,
+          "df_b": 10
+        },
+        {
+          "a": "package",
+          "b": "packages",
+          "jaccard": 0.8333,
+          "df_a": 4,
+          "df_b": 10
+        },
+        {
+          "a": "packageId",
+          "b": "packages",
+          "jaccard": 0.625,
+          "df_a": 0,
+          "df_b": 10
+        }
+      ],
+      "sample_size": 20,
+      "over_merge_judged": [
+        [
+          "npm",
+          "pnpm"
+        ],
+        [
+          "PNPM",
+          "npm"
+        ],
+        [
+          "base",
+          "base64"
+        ],
+        [
+          "avantf",
+          "avantfWork"
+        ],
+        [
+          "listPackages",
+          "packages"
+        ],
+        [
+          "packageId",
+          "packages"
+        ]
+      ],
+      "over_merge_judgement": "different tools (npm vs pnpm) and different identifiers (base vs base64, an identifier vs its package name) collapsed by substring overlap",
+      "over_merge_rate": 0.3
+    },
+    "t0.7": {
+      "pair_count": 198,
+      "cluster_count": 155,
+      "sample": [
+        {
+          "a": "DSH",
+          "b": "dsh",
+          "jaccard": 1,
+          "df_a": 9,
+          "df_b": 41
+        },
+        {
+          "a": "MEM",
+          "b": "mem",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 25
+        },
+        {
+          "a": "AVANTF",
+          "b": "avantf",
+          "jaccard": 1,
+          "df_a": 2,
+          "df_b": 22
+        },
+        {
+          "a": "Mission",
+          "b": "mission",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 22
+        },
+        {
+          "a": "mission",
+          "b": "missions",
+          "jaccard": 0.8333,
+          "df_a": 22,
+          "df_b": 2
+        },
+        {
+          "a": "plugin",
+          "b": "plugins",
+          "jaccard": 0.8,
+          "df_a": 18,
+          "df_b": 14
+        },
+        {
+          "a": "BASE",
+          "b": "base",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 15
+        },
+        {
+          "a": "Node",
+          "b": "node",
+          "jaccard": 1,
+          "df_a": 5,
+          "df_b": 13
+        },
+        {
+          "a": "PNPM",
+          "b": "pnpm",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 13
+        },
+        {
+          "a": "TS",
+          "b": "ts",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 13
+        },
+        {
+          "a": "package",
+          "b": "packages",
+          "jaccard": 0.8333,
+          "df_a": 4,
+          "df_b": 10
+        },
+        {
+          "a": "check",
+          "b": "checks",
+          "jaccard": 0.75,
+          "df_a": 9,
+          "df_b": 0
+        },
+        {
+          "a": "DESIGN",
+          "b": "design",
+          "jaccard": 1,
+          "df_a": 7,
+          "df_b": 1
+        },
+        {
+          "a": "JSON",
+          "b": "json",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 7
+        },
+        {
+          "a": "ROOT",
+          "b": "root",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 7
+        },
+        {
+          "a": "BUILD",
+          "b": "build",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 6
+        },
+        {
+          "a": "DeepSeek",
+          "b": "deepseek",
+          "jaccard": 1,
+          "df_a": 2,
+          "df_b": 6
+        },
+        {
+          "a": "JS",
+          "b": "js",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 6
+        },
+        {
+          "a": "LIB",
+          "b": "lib",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 6
+        },
+        {
+          "a": "PACK",
+          "b": "pack",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 6
+        }
+      ],
+      "sample_size": 20,
+      "over_merge_judged": [],
+      "over_merge_judgement": "the top-20 sample is case variants and singular/plural forms only",
+      "over_merge_rate": 0
+    },
+    "t0.9": {
+      "pair_count": 112,
+      "cluster_count": 104,
+      "sample": [
+        {
+          "a": "DSH",
+          "b": "dsh",
+          "jaccard": 1,
+          "df_a": 9,
+          "df_b": 41
+        },
+        {
+          "a": "MEM",
+          "b": "mem",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 25
+        },
+        {
+          "a": "AVANTF",
+          "b": "avantf",
+          "jaccard": 1,
+          "df_a": 2,
+          "df_b": 22
+        },
+        {
+          "a": "Mission",
+          "b": "mission",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 22
+        },
+        {
+          "a": "BASE",
+          "b": "base",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 15
+        },
+        {
+          "a": "Node",
+          "b": "node",
+          "jaccard": 1,
+          "df_a": 5,
+          "df_b": 13
+        },
+        {
+          "a": "PNPM",
+          "b": "pnpm",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 13
+        },
+        {
+          "a": "TS",
+          "b": "ts",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 13
+        },
+        {
+          "a": "DESIGN",
+          "b": "design",
+          "jaccard": 1,
+          "df_a": 7,
+          "df_b": 1
+        },
+        {
+          "a": "JSON",
+          "b": "json",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 7
+        },
+        {
+          "a": "ROOT",
+          "b": "root",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 7
+        },
+        {
+          "a": "BUILD",
+          "b": "build",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 6
+        },
+        {
+          "a": "DeepSeek",
+          "b": "deepseek",
+          "jaccard": 1,
+          "df_a": 2,
+          "df_b": 6
+        },
+        {
+          "a": "JS",
+          "b": "js",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 6
+        },
+        {
+          "a": "LIB",
+          "b": "lib",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 6
+        },
+        {
+          "a": "PACK",
+          "b": "pack",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 6
+        },
+        {
+          "a": "WORKSPACE",
+          "b": "workspace",
+          "jaccard": 1,
+          "df_a": 1,
+          "df_b": 6
+        },
+        {
+          "a": "Work",
+          "b": "work",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 6
+        },
+        {
+          "a": "CLIENT",
+          "b": "client",
+          "jaccard": 1,
+          "df_a": 0,
+          "df_b": 5
+        },
+        {
+          "a": "HOME",
+          "b": "home",
+          "jaccard": 1,
+          "df_a": 2,
+          "df_b": 5
+        }
+      ],
+      "sample_size": 20,
+      "over_merge_judged": [],
+      "over_merge_judgement": "only case variants merge at this threshold",
+      "over_merge_rate": 0
+    }
+  },
+  "verdicts": {
+    "t0.5": {
+      "improved": false,
+      "top1_delta": 0,
+      "top3_delta": 0,
+      "over_merge_rate": 0.3,
+      "verdict": "reject"
+    },
+    "t0.7": {
+      "improved": false,
+      "top1_delta": 0,
+      "top3_delta": 0,
+      "over_merge_rate": 0,
+      "verdict": "reject"
+    },
+    "t0.9": {
+      "improved": false,
+      "top1_delta": 0,
+      "top3_delta": 0,
+      "over_merge_rate": 0,
+      "verdict": "reject"
+    }
+  },
+  "reproduction": "node mem/scripts/spikes/bench-a3-entity-merge.mjs"
+}

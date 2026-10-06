@@ -1,0 +1,499 @@
+{
+  "card": "R2-6",
+  "measured_at": "2026-10-05T16:12:43.289Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    3.75,
+    2.07,
+    1.68
+  ],
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85,
+    "median_len": 313
+  },
+  "extraction": {
+    "rule": "subject = entity with highest global active df (ties lexicographic); attribute = pred of the highest-confidence triple whose subj is that subject",
+    "total_facts": 85,
+    "with_subject_and_attribute": 82,
+    "with_subject_and_oracle": 82,
+    "agreeing_subjects": 1,
+    "precision_proxy": 0.0122,
+    "coverage": 0.9647,
+    "subject_user_facts": 6,
+    "user_facts": 15,
+    "user_facts_subject_not_user": 9,
+    "user_carrier_facts": [
+      160
+    ],
+    "sample": [
+      {
+        "id": 4,
+        "category": "user_profile",
+        "len": 9,
+        "subject": "用户",
+        "attribute": null,
+        "oracle_subject": null,
+        "has_user": true,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 19,
+        "category": "environment",
+        "len": 313,
+        "subject": "npm",
+        "attribute": "握手",
+        "oracle_subject": "，104.16.25.34/104.16.26.34/104.16.27.34/104.16.31.34常可通（TLS",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 23,
+        "category": "environment",
+        "len": 347,
+        "subject": "版本",
+        "attribute": "组织",
+        "oracle_subject": "包名，原",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 29,
+        "category": "dsh-environment",
+        "len": 310,
+        "subject": "dsh",
+        "attribute": "配置",
+        "oracle_subject": "DSH的profile",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 36,
+        "category": "environment",
+        "len": 882,
+        "subject": "dsh",
+        "attribute": "提示",
+        "oracle_subject": "系统",
+        "has_user": true,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 43,
+        "category": "convention",
+        "len": 189,
+        "subject": "用户",
+        "attribute": "收紧",
+        "oracle_subject": "toolcall",
+        "has_user": true,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 63,
+        "category": "DSH",
+        "len": 373,
+        "subject": "dsh",
+        "attribute": "构建",
+        "oracle_subject": "dsh",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": true
+      },
+      {
+        "id": 72,
+        "category": "environment",
+        "len": 159,
+        "subject": "版本",
+        "attribute": "禁止",
+        "oracle_subject": "本机npm策略",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 89,
+        "category": "project",
+        "len": 409,
+        "subject": "avantf",
+        "attribute": "共享",
+        "oracle_subject": "主机",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 95,
+        "category": "project",
+        "len": 396,
+        "subject": "dsh",
+        "attribute": "提示",
+        "oracle_subject": "工具*_job*→*_work*；/job→/work；界面系统",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 97,
+        "category": "project",
+        "len": 167,
+        "subject": "dsh",
+        "attribute": "不显示",
+        "oracle_subject": "avantf-job）的客户端面板**",
+        "has_user": true,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 99,
+        "category": "decision",
+        "len": 510,
+        "subject": "dsh",
+        "attribute": "打包",
+        "oracle_subject": "**插件包，引擎（mem-contract→retrieval-core→mem）**内联",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 101,
+        "category": "project",
+        "len": 516,
+        "subject": "dsh",
+        "attribute": "不依赖",
+        "oracle_subject": "dsh，",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 104,
+        "category": "environment",
+        "len": 259,
+        "subject": "dsh",
+        "attribute": "依赖",
+        "oracle_subject": "mem的底座/",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 106,
+        "category": "decision",
+        "len": 192,
+        "subject": "规则",
+        "attribute": "新增",
+        "oracle_subject": "）：`kb_add`",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 108,
+        "category": "decision",
+        "len": 203,
+        "subject": "avantf",
+        "attribute": "没有",
+        "oracle_subject": "唯一必留的内置reader（pandoc",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 110,
+        "category": "project",
+        "len": 208,
+        "subject": "dsh",
+        "attribute": "未被",
+        "oracle_subject": "dsh\"，**宿主身份",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 112,
+        "category": "project",
+        "len": 119,
+        "subject": "任务",
+        "attribute": "共享",
+        "oracle_subject": "规则：证据路径node_id/attempt**唯一化**（",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 114,
+        "category": "project",
+        "len": 150,
+        "subject": "版本",
+        "attribute": "重载",
+        "oracle_subject": "遗留别名、旧API",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 116,
+        "category": "project",
+        "len": 386,
+        "subject": "dsh",
+        "attribute": "前缀",
+        "oracle_subject": "`@avantf/mission-core`、版本组名`mission`；工具create_mission/adjust_mission/note_mission/decompose_mission/submit_mission/mission_result/list_missions/finish_mission/cancel_mission；命令`/mission`；存储域`avantf_mission`；claim/会话",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 118,
+        "category": "decision",
+        "len": 243,
+        "subject": "插件",
+        "attribute": "残留",
+        "oracle_subject": "import",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 120,
+        "category": "project",
+        "len": 313,
+        "subject": "dsh",
+        "attribute": "默认",
+        "oracle_subject": "形状**——",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 122,
+        "category": "project",
+        "len": 278,
+        "subject": "dsh",
+        "attribute": "打印",
+        "oracle_subject": "符号——overlay插件",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 124,
+        "category": "tool",
+        "len": 307,
+        "subject": "mem",
+        "attribute": "决定",
+        "oracle_subject": "node:sqlite的关键版本结论（",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 127,
+        "category": "gotcha",
+        "len": 286,
+        "subject": "dsh",
+        "attribute": "注释",
+        "oracle_subject": "**",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 129,
+        "category": "gotcha",
+        "len": 271,
+        "subject": "mem",
+        "attribute": "遍历",
+        "oracle_subject": "文件的mtime目录",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 131,
+        "category": "environment",
+        "len": 403,
+        "subject": "用户",
+        "attribute": "提供",
+        "oracle_subject": "核实，",
+        "has_user": true,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 133,
+        "category": "user_pref",
+        "len": 170,
+        "subject": "规则",
+        "attribute": "提交",
+        "oracle_subject": "单、",
+        "has_user": true,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 135,
+        "category": "convention",
+        "len": 399,
+        "subject": "插件",
+        "attribute": "注入",
+        "oracle_subject": "原则）：`avantf:mission-tree-guide`",
+        "has_user": true,
+        "user_carrier": false,
+        "agrees": false
+      },
+      {
+        "id": 138,
+        "category": "project",
+        "len": 410,
+        "subject": "dsh",
+        "attribute": "不被判",
+        "oracle_subject": "小时",
+        "has_user": false,
+        "user_carrier": false,
+        "agrees": false
+      }
+    ]
+  },
+  "self_query": {
+    "query": "我是谁？",
+    "rewrite": "用户是谁",
+    "rows": {
+      "baseline": {
+        "ids": [
+          4,
+          117,
+          103,
+          25,
+          36
+        ],
+        "pool_size": 15
+      },
+      "filter": {
+        "ids": [
+          4,
+          117,
+          103,
+          25,
+          43
+        ],
+        "pool_size": 6,
+        "union_narrowed": true
+      },
+      "groupleg_w0.15": {
+        "ids": [
+          4,
+          117,
+          103,
+          25,
+          43
+        ],
+        "pool_size": 15
+      },
+      "groupleg_w0.5": {
+        "ids": [
+          4,
+          117,
+          103,
+          25,
+          43
+        ],
+        "pool_size": 15
+      },
+      "counterfactual_no_carrier": {
+        "ids": [
+          4,
+          117,
+          103,
+          25,
+          36
+        ],
+        "pool_size": 14
+      }
+    },
+    "distractors": {
+      "baseline": {
+        "in_top3": [
+          103,
+          117
+        ],
+        "gold_rank": 1
+      },
+      "filter": {
+        "in_top3": [
+          103,
+          117
+        ],
+        "gold_rank": 1
+      },
+      "groupleg_w0.15": {
+        "in_top3": [
+          103,
+          117
+        ],
+        "gold_rank": 1
+      },
+      "groupleg_w0.5": {
+        "in_top3": [
+          103,
+          117
+        ],
+        "gold_rank": 1
+      },
+      "counterfactual_no_carrier": {
+        "in_top3": [
+          103,
+          117
+        ],
+        "gold_rank": 1
+      }
+    }
+  },
+  "harm_on_gold_queries": {
+    "baseline": {
+      "gold_queries": 11,
+      "top1": 10,
+      "top3": 10,
+      "missing": 1
+    },
+    "filter": {
+      "gold_queries": 11,
+      "top1": 6,
+      "top3": 6,
+      "missing": 5
+    },
+    "groupleg_w0.15": {
+      "gold_queries": 11,
+      "top1": 10,
+      "top3": 10,
+      "missing": 1
+    }
+  },
+  "identity": {
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "verdict": {
+    "extraction_coverage": 0.9647,
+    "extraction_precision_proxy": 0.0122,
+    "precision_method": "rule-vs-production-triple-agreement (hand labelling would require printing fact text, which the campaign forbids)",
+    "subject_user_group_size": 6,
+    "user_facts_whose_subject_is_not_user": 9,
+    "user_carrier_facts": 1,
+    "filter_arm_excludes_named_distractor": true,
+    "filter_arm_narrows_union": true,
+    "filter_arm_gold_safe": false,
+    "groupleg_arm_excludes_named_distractor": true,
+    "groupleg_arm_preserves_union": true,
+    "groupleg_arm_gold_safe": true,
+    "adopt": false,
+    "call": "reject — the group FILTER loses gold on the wider query set"
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r2-6-subject-attribute.mjs --json mem/docs/spikes/raw/round2-r2-6-subject-attribute.json"
+}

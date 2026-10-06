@@ -1,0 +1,249 @@
+{
+  "card": "R3-3 (S4 schema tax + default-unchanged cost side)",
+  "measured_at": "2026-10-05T16:32:27.308Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    3.9,
+    2.46,
+    1.81
+  ],
+  "scope": "schema + validation + link-write cost of B1; no retrieval A/B here (that is R3-1)",
+  "identity": {
+    "checked": 0,
+    "passed": 0,
+    "note": "N/A — this card runs no retrieval pass (schema/validation/link-write only), like R2-5/R2-7"
+  },
+  "baseline": {
+    "tool": "mem_remember",
+    "derivation": "toolInputJsonSchema(TOOL_SPECS[mem_remember]) from @avantf/mem-contract (the MCP-surface derivation)",
+    "schema_chars_compact": 2623,
+    "schema_chars_pretty": 4191,
+    "schema_tokens": 917,
+    "full_tool_chars": 2932,
+    "full_tool_tokens": 1096,
+    "description_chars": 255,
+    "baseline_branch_field_count": 16,
+    "note": "the brief quotes ~5.0k chars for the mem_remember input schema; that is the PRETTY-PRINTED size (measured here at 4191). The compact serialization the host actually ships is 2623 chars. Both conventions are reported below so neither is hidden."
+  },
+  "candidates": [
+    {
+      "shape": "shape-1-per-field",
+      "label": "one optional parameter per field (subject/attribute/entities/event_date/source_ref/replaces)",
+      "descriptions": "verbose (production-style)",
+      "schema_chars": 4261,
+      "schema_chars_delta": 1638,
+      "schema_bytes_delta": 2934,
+      "schema_pretty_chars": 6606,
+      "schema_pretty_chars_delta": 2415,
+      "tokens": 1810,
+      "tokens_delta": 893,
+      "full_tool_chars_delta": 1638,
+      "full_tool_tokens_delta": 893
+    },
+    {
+      "shape": "shape-1-per-field",
+      "label": "one optional parameter per field (subject/attribute/entities/event_date/source_ref/replaces)",
+      "descriptions": "terse",
+      "schema_chars": 3718,
+      "schema_chars_delta": 1095,
+      "schema_bytes_delta": 1389,
+      "schema_pretty_chars": 6063,
+      "schema_pretty_chars_delta": 1872,
+      "tokens": 1300,
+      "tokens_delta": 383,
+      "full_tool_chars_delta": 1095,
+      "full_tool_tokens_delta": 383
+    },
+    {
+      "shape": "shape-2-structure-json",
+      "label": "one `structure` JSON object parameter",
+      "descriptions": "verbose (production-style)",
+      "schema_chars": 3784,
+      "schema_chars_delta": 1161,
+      "schema_bytes_delta": 1485,
+      "schema_pretty_chars": 6363,
+      "schema_pretty_chars_delta": 2172,
+      "tokens": 1324,
+      "tokens_delta": 407,
+      "full_tool_chars_delta": 1161,
+      "full_tool_tokens_delta": 407
+    },
+    {
+      "shape": "shape-2-structure-json",
+      "label": "one `structure` JSON object parameter",
+      "descriptions": "terse",
+      "schema_chars": 3451,
+      "schema_chars_delta": 828,
+      "schema_bytes_delta": 894,
+      "schema_pretty_chars": 6030,
+      "schema_pretty_chars_delta": 1839,
+      "tokens": 1149,
+      "tokens_delta": 232,
+      "full_tool_chars_delta": 828,
+      "full_tool_tokens_delta": 231
+    },
+    {
+      "shape": "shape-3-minimal-plus-update",
+      "label": "minimal set on write (entities + event_date); the rest goes through `update`",
+      "descriptions": "verbose (production-style)",
+      "schema_chars": 3292,
+      "schema_chars_delta": 669,
+      "schema_bytes_delta": 1077,
+      "schema_pretty_chars": 5185,
+      "schema_pretty_chars_delta": 994,
+      "tokens": 1236,
+      "tokens_delta": 319,
+      "full_tool_chars_delta": 669,
+      "full_tool_tokens_delta": 318
+    },
+    {
+      "shape": "shape-3-minimal-plus-update",
+      "label": "minimal set on write (entities + event_date); the rest goes through `update`",
+      "descriptions": "terse",
+      "schema_chars": 3070,
+      "schema_chars_delta": 447,
+      "schema_bytes_delta": 561,
+      "schema_pretty_chars": 4963,
+      "schema_pretty_chars_delta": 772,
+      "tokens": 1071,
+      "tokens_delta": 154,
+      "full_tool_chars_delta": 447,
+      "full_tool_tokens_delta": 153
+    }
+  ],
+  "context_conventions": {
+    "per_turn_host": "the host re-sends tool definitions in every request: pay tokens_delta every turn",
+    "cached_host": "the host caches the tool-definition prefix (or sends it once per conversation): pay tokens_delta once",
+    "observable_here": false,
+    "note": "which convention this runtime uses is a HOST property and cannot be observed from this repo; no client/transport was inspected.",
+    "table": [
+      {
+        "shape": "shape-1-per-field",
+        "descriptions": "verbose (production-style)",
+        "tokens_delta_per_definition": 893,
+        "per_turn_host": {
+          "1_turns": 893,
+          "20_turns": 17860,
+          "100_turns": 89300,
+          "1000_turns": 893000
+        },
+        "cached_host": {
+          "once": 893
+        }
+      },
+      {
+        "shape": "shape-1-per-field",
+        "descriptions": "terse",
+        "tokens_delta_per_definition": 383,
+        "per_turn_host": {
+          "1_turns": 383,
+          "20_turns": 7660,
+          "100_turns": 38300,
+          "1000_turns": 383000
+        },
+        "cached_host": {
+          "once": 383
+        }
+      },
+      {
+        "shape": "shape-2-structure-json",
+        "descriptions": "verbose (production-style)",
+        "tokens_delta_per_definition": 407,
+        "per_turn_host": {
+          "1_turns": 407,
+          "20_turns": 8140,
+          "100_turns": 40700,
+          "1000_turns": 407000
+        },
+        "cached_host": {
+          "once": 407
+        }
+      },
+      {
+        "shape": "shape-2-structure-json",
+        "descriptions": "terse",
+        "tokens_delta_per_definition": 232,
+        "per_turn_host": {
+          "1_turns": 232,
+          "20_turns": 4640,
+          "100_turns": 23200,
+          "1000_turns": 232000
+        },
+        "cached_host": {
+          "once": 232
+        }
+      },
+      {
+        "shape": "shape-3-minimal-plus-update",
+        "descriptions": "verbose (production-style)",
+        "tokens_delta_per_definition": 319,
+        "per_turn_host": {
+          "1_turns": 319,
+          "20_turns": 6380,
+          "100_turns": 31900,
+          "1000_turns": 319000
+        },
+        "cached_host": {
+          "once": 319
+        }
+      },
+      {
+        "shape": "shape-3-minimal-plus-update",
+        "descriptions": "terse",
+        "tokens_delta_per_definition": 154,
+        "per_turn_host": {
+          "1_turns": 154,
+          "20_turns": 3080,
+          "100_turns": 15400,
+          "1000_turns": 154000
+        },
+        "cached_host": {
+          "once": 154
+        }
+      }
+    ]
+  },
+  "validation_cost_us": {
+    "baseline_schema": 2.6,
+    "shape-1-per-field": 3.1,
+    "shape-1-per-field_without_new_fields": 1.9,
+    "shape-2-structure-json": 3.7,
+    "shape-2-structure-json_without_new_fields": 1,
+    "shape-3-minimal-plus-update": 1.2,
+    "shape-3-minimal-plus-update_without_new_fields": 1.1
+  },
+  "link_write_cost": {
+    "micro_benchmark_same_statements": {
+      "facts": 78,
+      "names_per_fact_2_ms": 2.2941,
+      "names_per_fact_30_ms": 11.5366
+    },
+    "measured_write_path": {
+      "source": "round3-s2-supplier.json arm_stats (same statements against the fixture DB, real write path)",
+      "facts": 78,
+      "baseline_engine_bags": {
+        "links": 2261,
+        "ms": 21.1301
+      },
+      "caller_canonical_bags": {
+        "links": 165,
+        "ms": 6.1846
+      },
+      "median_bag_width_production": 31,
+      "median_bag_width_caller": 2
+    },
+    "note": "the DAO statements (INSERT OR IGNORE entities / fact_entities) are the same; a caller-supplied canonical bag is NARROWER than the extractor bag, so B1 with supplied entities reduces the link write, it does not add to it."
+  },
+  "write_cost_summary": {
+    "baseline_engine_bag_width": 31,
+    "caller_canonical_bag_width": 2,
+    "links_per_78_facts_engine": 2261,
+    "links_per_78_facts_caller": 165
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r3-3-schema-tax.mjs --json mem/docs/spikes/raw/round3-s4-schema-tax.json (run after bench-r3-1 so the measured write path is present; it degrades to null without it)",
+  "privacy_selfcheck": {
+    "text_or_content_keys": [],
+    "strings_over_300": [],
+    "clean": true
+  }
+}

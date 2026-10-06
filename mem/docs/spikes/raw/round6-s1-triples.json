@@ -1,0 +1,321 @@
+{
+  "card": "round6-s1-triples",
+  "generated_at": "2026-10-05T18:18:18.091Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    0.57,
+    1.13,
+    1.56
+  ],
+  "elapsed_ms": 1581,
+  "corpus": {
+    "active_facts": 86,
+    "triples_on_active": 320,
+    "triples_total_all_status": 404,
+    "entities_total": 2238,
+    "fact_entity_links_total": 7624
+  },
+  "confidence_values": [
+    {
+      "confidence": 0.5,
+      "count": 404
+    }
+  ],
+  "per_fact": {
+    "facts_active": 86,
+    "facts_with_triple": 83,
+    "facts_without_triple": 3,
+    "triples_per_fact": {
+      "n": 86,
+      "min": 0,
+      "p25": 2,
+      "median": 3,
+      "p75": 5,
+      "p90": 7,
+      "max": 8,
+      "mean": 3.72
+    },
+    "triples_per_fact_histogram": {
+      "0": 3,
+      "1": 11,
+      "2": 13,
+      "3": 21,
+      "4": 8,
+      "5": 13,
+      "6": 3,
+      "7": 7,
+      "8": 7
+    },
+    "entities_per_fact": {
+      "n": 86,
+      "min": 3,
+      "p25": 23,
+      "median": 32,
+      "p75": 41,
+      "p90": 49,
+      "max": 66,
+      "mean": 33.01
+    },
+    "entities_per_fact_median": 32,
+    "triples_per_fact_median": 3,
+    "bag_cooccurrence_pairs_total": 266974,
+    "triples_that_add_a_relation_between_known_entities": 2,
+    "triple_to_bag_link_ratio": 0.1127
+  },
+  "predicates": {
+    "distinct": 198,
+    "singleton_predicates": 142,
+    "singleton_share": 0.7172,
+    "top25_redacted": [
+      {
+        "rank": 1,
+        "len": 2,
+        "count": 12,
+        "share": 0.0375
+      },
+      {
+        "rank": 2,
+        "len": 2,
+        "count": 11,
+        "share": 0.0344
+      },
+      {
+        "rank": 3,
+        "len": 2,
+        "count": 7,
+        "share": 0.0219
+      },
+      {
+        "rank": 4,
+        "len": 2,
+        "count": 7,
+        "share": 0.0219
+      },
+      {
+        "rank": 5,
+        "len": 2,
+        "count": 6,
+        "share": 0.0188
+      },
+      {
+        "rank": 6,
+        "len": 2,
+        "count": 5,
+        "share": 0.0156
+      },
+      {
+        "rank": 7,
+        "len": 2,
+        "count": 5,
+        "share": 0.0156
+      },
+      {
+        "rank": 8,
+        "len": 2,
+        "count": 4,
+        "share": 0.0125
+      },
+      {
+        "rank": 9,
+        "len": 2,
+        "count": 4,
+        "share": 0.0125
+      },
+      {
+        "rank": 10,
+        "len": 2,
+        "count": 4,
+        "share": 0.0125
+      },
+      {
+        "rank": 11,
+        "len": 2,
+        "count": 4,
+        "share": 0.0125
+      },
+      {
+        "rank": 12,
+        "len": 2,
+        "count": 4,
+        "share": 0.0125
+      },
+      {
+        "rank": 13,
+        "len": 2,
+        "count": 4,
+        "share": 0.0125
+      },
+      {
+        "rank": 14,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 15,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 16,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 17,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 18,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 19,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 20,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 21,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 22,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 23,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 24,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      },
+      {
+        "rank": 25,
+        "len": 2,
+        "count": 3,
+        "share": 0.0094
+      }
+    ],
+    "predicate_strings_file": "/tmp/dsh-r6/s1-predicates.json",
+    "predicate_is_an_entity_name": 2,
+    "predicate_is_an_entity_name_share": 0.0063,
+    "length_distribution": {
+      "n": 320,
+      "min": 2,
+      "p25": 2,
+      "median": 2,
+      "p75": 2,
+      "p90": 2,
+      "max": 3,
+      "mean": 2.05
+    },
+    "distinct_preds_per_fact": {
+      "n": 83,
+      "min": 1,
+      "p25": 2,
+      "median": 3,
+      "p75": 5,
+      "p90": 7,
+      "max": 8,
+      "mean": 3.75
+    }
+  },
+  "stop_preds_funnel": {
+    "facts_scanned": 86,
+    "strict_verb_candidates": 1475,
+    "dropped_stop_preds": 190,
+    "dropped_pred_too_short": 336,
+    "dropped_no_tagger": 0,
+    "kept_candidates": 949,
+    "replica_produced_triples": 320,
+    "stored_triples": 320,
+    "replica_mismatch_facts": 0,
+    "stop_pred_share_of_candidates": 0.1288,
+    "stored_triples_containing_stop_pred": 0
+  },
+  "subj_obj_shape": {
+    "triples": 320,
+    "subj_exact_entity_name": 49,
+    "obj_exact_entity_name": 29,
+    "both_exact_entity_names": 2,
+    "subj_in_own_bag": 48,
+    "obj_in_own_bag": 29,
+    "both_in_own_bag": 2,
+    "neither_in_own_bag": 245,
+    "subj_len": {
+      "n": 320,
+      "min": 2,
+      "p25": 3,
+      "median": 7,
+      "p75": 16,
+      "p90": 30,
+      "max": 215,
+      "mean": 13.67
+    },
+    "obj_len": {
+      "n": 320,
+      "min": 2,
+      "p25": 3,
+      "median": 8,
+      "p75": 19,
+      "p90": 42,
+      "max": 130,
+      "mean": 15.53
+    },
+    "pred_len": {
+      "n": 320,
+      "min": 2,
+      "p25": 2,
+      "median": 2,
+      "p75": 2,
+      "p90": 2,
+      "max": 3,
+      "mean": 2.05
+    },
+    "subj_exact_share": 0.1531,
+    "obj_exact_share": 0.0906,
+    "both_exact_share": 0.0063,
+    "both_in_own_bag_share": 0.0063,
+    "neither_in_own_bag_share": 0.7656
+  },
+  "manual_sample": {
+    "sample_file": "/tmp/dsh-r6/s1-sample.json",
+    "sample_size": 24,
+    "judged": {
+      "items": 24,
+      "verdicts": {
+        "fragment": 21,
+        "faithful": 1,
+        "boundary_noise": 2
+      },
+      "faithful": 1,
+      "accuracy": 0.0417,
+      "lenient_correct": 3,
+      "lenient_accuracy": 0.125,
+      "method": "manual judgment by the executing agent, reading /tmp/dsh-r6/s1-sample.json in-process (24 triples, one per stratified fact). faithful = the SPO states a real relation with recogniz",
+      "judge_note": "accuracy reported strict (faithful only) and lenient (faithful+boundary_noise)."
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "card": "round6-s0-pin",
+  "generated_at": "2026-10-05T18:15:41.872Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    0.83,
+    1.31,
+    1.68
+  ],
+  "source_live_store": "/home/ffeng/.avantf/memory/memory.db",
+  "live_store_at_pin_time": {
+    "mtime": "2026-10-05T14:55:54.122Z",
+    "size": 3715072
+  },
+  "pinned_snapshot": {
+    "path": "/tmp/dsh-r6/pinned.db",
+    "size": 3575808,
+    "sha256_16": "6b3c0470be4c889c",
+    "sha256": "6b3c0470be4c889c35baf4b5dc004cceb10fed3e6d289efbef9cf4eb87194f2f"
+  },
+  "counts": {
+    "active_facts": 86,
+    "archived_facts": 79,
+    "triples_total": 404,
+    "entities_total": 2238,
+    "fact_entity_links": 7624,
+    "contradiction_rows": 0
+  },
+  "how_cards_use_it": "R6_PINNED=/tmp/dsh-r6/pinned.db node mem/scripts/spikes/bench-r6-<n>-*.mjs"
+}

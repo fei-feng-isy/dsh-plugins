@@ -1,0 +1,751 @@
+{
+  "card": "A7/F2",
+  "measured_at": "2026-10-05T15:45:41.602Z",
+  "node": "v22.23.2",
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85
+  },
+  "code_evidence": [
+    "retrieval-core/src/fusion.ts: fuse() scales each path by that path’s own maximum (scaleByMax).",
+    "store/floors.ts module comment: \"the fused number is only comparable WITHIN one query\" — the cutoffs live on the legs’ absolute raw scores."
+  ],
+  "weight_sum_ceiling": 1,
+  "fused_top1_quantiles": {
+    "n": 59,
+    "min": 0.15,
+    "p10": 0.45,
+    "p25": 0.7,
+    "median": 1,
+    "p75": 1,
+    "p90": 1,
+    "max": 1
+  },
+  "semantic_top1_quantiles": {
+    "n": 61,
+    "min": 0.3637,
+    "p10": 0.4594,
+    "p25": 0.4813,
+    "median": 0.6356,
+    "p75": 0.7702,
+    "p90": 0.8062,
+    "max": 0.8706
+  },
+  "real_gold_top1": [
+    0.7,
+    1,
+    1,
+    0.7,
+    1,
+    0.7,
+    0.3,
+    0.3,
+    0.45,
+    0.45,
+    0.45
+  ],
+  "real_no_gold_top1": [
+    0.6573,
+    0,
+    0.55,
+    0.55,
+    0.15,
+    0,
+    0.15,
+    0.15,
+    0.7
+  ],
+  "threshold_sweep": [
+    {
+      "tau": 0.05,
+      "tp": 11,
+      "fp": 7,
+      "fn": 0,
+      "tn": 2,
+      "precision": 0.6111,
+      "recall": 1
+    },
+    {
+      "tau": 0.1,
+      "tp": 11,
+      "fp": 7,
+      "fn": 0,
+      "tn": 2,
+      "precision": 0.6111,
+      "recall": 1
+    },
+    {
+      "tau": 0.15,
+      "tp": 11,
+      "fp": 7,
+      "fn": 0,
+      "tn": 2,
+      "precision": 0.6111,
+      "recall": 1
+    },
+    {
+      "tau": 0.2,
+      "tp": 11,
+      "fp": 4,
+      "fn": 0,
+      "tn": 5,
+      "precision": 0.7333,
+      "recall": 1
+    },
+    {
+      "tau": 0.25,
+      "tp": 11,
+      "fp": 4,
+      "fn": 0,
+      "tn": 5,
+      "precision": 0.7333,
+      "recall": 1
+    },
+    {
+      "tau": 0.3,
+      "tp": 11,
+      "fp": 4,
+      "fn": 0,
+      "tn": 5,
+      "precision": 0.7333,
+      "recall": 1
+    },
+    {
+      "tau": 0.35,
+      "tp": 9,
+      "fp": 4,
+      "fn": 2,
+      "tn": 5,
+      "precision": 0.6923,
+      "recall": 0.8182
+    },
+    {
+      "tau": 0.4,
+      "tp": 9,
+      "fp": 4,
+      "fn": 2,
+      "tn": 5,
+      "precision": 0.6923,
+      "recall": 0.8182
+    },
+    {
+      "tau": 0.45,
+      "tp": 9,
+      "fp": 4,
+      "fn": 2,
+      "tn": 5,
+      "precision": 0.6923,
+      "recall": 0.8182
+    },
+    {
+      "tau": 0.5,
+      "tp": 6,
+      "fp": 4,
+      "fn": 5,
+      "tn": 5,
+      "precision": 0.6,
+      "recall": 0.5455
+    },
+    {
+      "tau": 0.55,
+      "tp": 6,
+      "fp": 4,
+      "fn": 5,
+      "tn": 5,
+      "precision": 0.6,
+      "recall": 0.5455
+    },
+    {
+      "tau": 0.6,
+      "tp": 6,
+      "fp": 2,
+      "fn": 5,
+      "tn": 7,
+      "precision": 0.75,
+      "recall": 0.5455
+    },
+    {
+      "tau": 0.65,
+      "tp": 6,
+      "fp": 2,
+      "fn": 5,
+      "tn": 7,
+      "precision": 0.75,
+      "recall": 0.5455
+    },
+    {
+      "tau": 0.7,
+      "tp": 6,
+      "fp": 1,
+      "fn": 5,
+      "tn": 8,
+      "precision": 0.8571,
+      "recall": 0.5455
+    },
+    {
+      "tau": 0.75,
+      "tp": 3,
+      "fp": 0,
+      "fn": 8,
+      "tn": 9,
+      "precision": 1,
+      "recall": 0.2727
+    },
+    {
+      "tau": 0.8,
+      "tp": 3,
+      "fp": 0,
+      "fn": 8,
+      "tn": 9,
+      "precision": 1,
+      "recall": 0.2727
+    },
+    {
+      "tau": 0.85,
+      "tp": 3,
+      "fp": 0,
+      "fn": 8,
+      "tn": 9,
+      "precision": 1,
+      "recall": 0.2727
+    },
+    {
+      "tau": 0.9,
+      "tp": 3,
+      "fp": 0,
+      "fn": 8,
+      "tn": 9,
+      "precision": 1,
+      "recall": 0.2727
+    },
+    {
+      "tau": 0.95,
+      "tp": 3,
+      "fp": 0,
+      "fn": 8,
+      "tn": 9,
+      "precision": 1,
+      "recall": 0.2727
+    },
+    {
+      "tau": 1,
+      "tp": 3,
+      "fp": 0,
+      "fn": 8,
+      "tn": 9,
+      "precision": 1,
+      "recall": 0.2727
+    }
+  ],
+  "separating_thresholds": [],
+  "frozen": {
+    "queries": 41,
+    "identity_failures": 0,
+    "passes": [
+      {
+        "query": "李娜管理谁",
+        "fused_top1": 1,
+        "semantic_top1": 0.7845,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "谁管理李娜",
+        "fused_top1": 0.9966,
+        "semantic_top1": 0.7561,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "王强管理谁",
+        "fused_top1": 1,
+        "semantic_top1": 0.7367,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "订单服务的主库是什么",
+        "fused_top1": 0.958,
+        "semantic_top1": 0.7013,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "哪个服务使用 MySQL",
+        "fused_top1": 1,
+        "semantic_top1": 0.6737,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "订单服务的缓存用什么",
+        "fused_top1": 1,
+        "semantic_top1": 0.7924,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "陈静加入了哪个组",
+        "fused_top1": 1,
+        "semantic_top1": 0.7946,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "谁加入了风控组",
+        "fused_top1": 1,
+        "semantic_top1": 0.6899,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "陈静离开了哪个组",
+        "fused_top1": 1,
+        "semantic_top1": 0.8124,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "老王喜欢什么风格",
+        "fused_top1": 0.9625,
+        "semantic_top1": 0.6674,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "谁喜欢详细的推导过程",
+        "fused_top1": 1,
+        "semantic_top1": 0.8034,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "谁负责支付网关",
+        "fused_top1": 1,
+        "semantic_top1": 0.76,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "张伟管理的人负责什么",
+        "fused_top1": 1,
+        "semantic_top1": 0.7339,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "上海站谁负责部署",
+        "fused_top1": 1,
+        "semantic_top1": 0.8352,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "刘洋负责哪个站点",
+        "fused_top1": 1,
+        "semantic_top1": 0.7936,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "周会什么时候开",
+        "fused_top1": 0.7,
+        "semantic_top1": 0.6896,
+        "weighted_leg_heads": 0.7
+      },
+      {
+        "query": "架构评审几点开始",
+        "fused_top1": 1,
+        "semantic_top1": 0.7702,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "支付网关依赖什么",
+        "fused_top1": 1,
+        "semantic_top1": 0.779,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "什么依赖风控引擎",
+        "fused_top1": 0.974,
+        "semantic_top1": 0.8062,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "风控引擎依赖什么",
+        "fused_top1": 1,
+        "semantic_top1": 0.8055,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "监控方案是什么",
+        "fused_top1": 0.55,
+        "semantic_top1": 0.5644,
+        "weighted_leg_heads": 0.55
+      },
+      {
+        "query": "项目部署在哪里",
+        "fused_top1": 1,
+        "semantic_top1": 0.6666,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "日志怎么收集",
+        "fused_top1": 0.7,
+        "semantic_top1": 0.5455,
+        "weighted_leg_heads": 0.7
+      },
+      {
+        "query": "李娜审核了谁的方案",
+        "fused_top1": 1,
+        "semantic_top1": 0.8559,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "谁审核了王强的方案",
+        "fused_top1": 0.986,
+        "semantic_top1": 0.8143,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "统一网关是哪个组负责的",
+        "fused_top1": 1,
+        "semantic_top1": 0.8213,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "数据组负责什么",
+        "fused_top1": 1,
+        "semantic_top1": 0.7791,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "生产环境的 Python 版本要求",
+        "fused_top1": 1,
+        "semantic_top1": 0.8706,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "CI 用哪个 Python 版本",
+        "fused_top1": 0.7,
+        "semantic_top1": 0.7155,
+        "weighted_leg_heads": 0.7
+      },
+      {
+        "query": "李娜",
+        "fused_top1": 1,
+        "semantic_top1": 0.675,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "张伟",
+        "fused_top1": 1,
+        "semantic_top1": 0.6471,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "王强",
+        "fused_top1": 1,
+        "semantic_top1": 0.6767,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "网关",
+        "fused_top1": 1,
+        "semantic_top1": 0.5947,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "数据库",
+        "fused_top1": 1,
+        "semantic_top1": 0.5686,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "风控",
+        "fused_top1": 1,
+        "semantic_top1": 0.6356,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "我是谁？",
+        "fused_top1": 0.7,
+        "semantic_top1": 0.4813,
+        "weighted_leg_heads": 0.7
+      },
+      {
+        "query": "我叫什么",
+        "fused_top1": 1,
+        "semantic_top1": 0.4615,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "我的名字",
+        "fused_top1": 1,
+        "semantic_top1": 0.5742,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "我是做什么的",
+        "fused_top1": 0.7,
+        "semantic_top1": 0.4165,
+        "weighted_leg_heads": 0.7
+      },
+      {
+        "query": "我叫啥",
+        "fused_top1": 1,
+        "semantic_top1": 0.4969,
+        "weighted_leg_heads": 1
+      },
+      {
+        "query": "本人是谁",
+        "fused_top1": 0.7,
+        "semantic_top1": 0.4733,
+        "weighted_leg_heads": 0.7
+      }
+    ]
+  },
+  "real": [
+    {
+      "id": "real-self-who",
+      "query": "我是谁？",
+      "kind": "self",
+      "has_gold": true,
+      "pooled": 15,
+      "fused_top1": 0.7,
+      "fused_top1_id": 4,
+      "semantic_top1": 0.4594,
+      "semantic_of_fused_top1": 0.4594,
+      "weighted_leg_heads": 0.7
+    },
+    {
+      "id": "real-self-name",
+      "query": "我叫什么",
+      "kind": "self",
+      "has_gold": true,
+      "pooled": 19,
+      "fused_top1": 1,
+      "fused_top1_id": 4,
+      "semantic_top1": 0.4545,
+      "semantic_of_fused_top1": 0.4545,
+      "weighted_leg_heads": 1
+    },
+    {
+      "id": "real-self-myname",
+      "query": "我的名字",
+      "kind": "self",
+      "has_gold": true,
+      "pooled": 19,
+      "fused_top1": 1,
+      "fused_top1_id": 4,
+      "semantic_top1": 0.5653,
+      "semantic_of_fused_top1": 0.5653,
+      "weighted_leg_heads": 1
+    },
+    {
+      "id": "real-self-do",
+      "query": "我是做什么的",
+      "kind": "self",
+      "has_gold": true,
+      "pooled": 15,
+      "fused_top1": 0.7,
+      "fused_top1_id": 4,
+      "semantic_top1": 0.4434,
+      "semantic_of_fused_top1": 0.404,
+      "weighted_leg_heads": 1
+    },
+    {
+      "id": "real-self-what",
+      "query": "我叫啥",
+      "kind": "self",
+      "has_gold": true,
+      "pooled": 19,
+      "fused_top1": 1,
+      "fused_top1_id": 4,
+      "semantic_top1": 0.482,
+      "semantic_of_fused_top1": 0.482,
+      "weighted_leg_heads": 1
+    },
+    {
+      "id": "real-self-benren",
+      "query": "本人是谁",
+      "kind": "self",
+      "has_gold": true,
+      "pooled": 15,
+      "fused_top1": 0.7,
+      "fused_top1_id": 4,
+      "semantic_top1": 0.4769,
+      "semantic_of_fused_top1": 0.4769,
+      "weighted_leg_heads": 0.7
+    },
+    {
+      "id": "real-nonself-install",
+      "query": "插件的安装方法",
+      "kind": "nonself",
+      "has_gold": false,
+      "pooled": 12,
+      "fused_top1": 0.6573,
+      "fused_top1_id": 122,
+      "semantic_top1": 0.5868,
+      "semantic_of_fused_top1": 0.5413,
+      "weighted_leg_heads": 0.7
+    },
+    {
+      "id": "real-nonself-deploy",
+      "query": "生产环境的部署流程",
+      "kind": "nonself",
+      "has_gold": false,
+      "pooled": 0,
+      "fused_top1": 0,
+      "fused_top1_id": null,
+      "semantic_top1": 0.4971,
+      "semantic_of_fused_top1": null,
+      "weighted_leg_heads": 0
+    },
+    {
+      "id": "real-nonself-lag",
+      "query": "数据库主从延迟",
+      "kind": "nonself",
+      "has_gold": false,
+      "pooled": 25,
+      "fused_top1": 0.55,
+      "fused_top1_id": 72,
+      "semantic_top1": 0.5677,
+      "semantic_of_fused_top1": 0.5677,
+      "weighted_leg_heads": 0.55
+    },
+    {
+      "id": "real-2char-plugin",
+      "query": "插件",
+      "kind": "entity2",
+      "has_gold": true,
+      "pooled": 25,
+      "fused_top1": 0.3,
+      "fused_top1_id": 29,
+      "semantic_top1": 0.4747,
+      "semantic_of_fused_top1": 0.4447,
+      "weighted_leg_heads": 0.3
+    },
+    {
+      "id": "real-2char-task",
+      "query": "任务",
+      "kind": "entity2",
+      "has_gold": true,
+      "pooled": 18,
+      "fused_top1": 0.3,
+      "fused_top1_id": 95,
+      "semantic_top1": 0.4835,
+      "semantic_of_fused_top1": 0.4453,
+      "weighted_leg_heads": 0.3
+    },
+    {
+      "id": "real-2char-version",
+      "query": "版本",
+      "kind": "entity2",
+      "has_gold": true,
+      "pooled": 18,
+      "fused_top1": 0.45,
+      "fused_top1_id": 21,
+      "semantic_top1": 0.4661,
+      "semantic_of_fused_top1": 0.3782,
+      "weighted_leg_heads": 0.45
+    },
+    {
+      "id": "real-2char-host",
+      "query": "宿主",
+      "kind": "entity2",
+      "has_gold": true,
+      "pooled": 11,
+      "fused_top1": 0.45,
+      "fused_top1_id": 29,
+      "semantic_top1": 0.4017,
+      "semantic_of_fused_top1": null,
+      "weighted_leg_heads": 0.45
+    },
+    {
+      "id": "real-2char-session",
+      "query": "会话",
+      "kind": "entity2",
+      "has_gold": true,
+      "pooled": 12,
+      "fused_top1": 0.45,
+      "fused_top1_id": 25,
+      "semantic_top1": 0.3637,
+      "semantic_of_fused_top1": 0.3107,
+      "weighted_leg_heads": 0.45
+    },
+    {
+      "id": "extra-install-how",
+      "query": "插件怎么安装",
+      "kind": "extra",
+      "has_gold": false,
+      "pooled": 2,
+      "fused_top1": 0.55,
+      "fused_top1_id": 108,
+      "semantic_top1": 0.5191,
+      "semantic_of_fused_top1": 0.5191,
+      "weighted_leg_heads": 0.85
+    },
+    {
+      "id": "extra-db-where",
+      "query": "记忆库在哪",
+      "kind": "extra",
+      "has_gold": false,
+      "pooled": 4,
+      "fused_top1": 0.15,
+      "fused_top1_id": 89,
+      "semantic_top1": 0.4771,
+      "semantic_of_fused_top1": 0.4727,
+      "weighted_leg_heads": 0.15
+    },
+    {
+      "id": "extra-weights",
+      "query": "检索权重是多少",
+      "kind": "extra",
+      "has_gold": false,
+      "pooled": 0,
+      "fused_top1": 0,
+      "fused_top1_id": null,
+      "semantic_top1": 0.4742,
+      "semantic_of_fused_top1": null,
+      "weighted_leg_heads": 0
+    },
+    {
+      "id": "extra-model-swap",
+      "query": "模型怎么换",
+      "kind": "extra",
+      "has_gold": false,
+      "pooled": 6,
+      "fused_top1": 0.15,
+      "fused_top1_id": 25,
+      "semantic_top1": 0.4078,
+      "semantic_of_fused_top1": 0.3708,
+      "weighted_leg_heads": 0.15
+    },
+    {
+      "id": "extra-datahome",
+      "query": "数据根在哪",
+      "kind": "extra",
+      "has_gold": false,
+      "pooled": 5,
+      "fused_top1": 0.15,
+      "fused_top1_id": 62,
+      "semantic_top1": 0.4795,
+      "semantic_of_fused_top1": 0.4185,
+      "weighted_leg_heads": 0.15
+    },
+    {
+      "id": "extra-schedule",
+      "query": "任务怎么调度",
+      "kind": "extra",
+      "has_gold": false,
+      "pooled": 10,
+      "fused_top1": 0.7,
+      "fused_top1_id": 141,
+      "semantic_top1": 0.5408,
+      "semantic_of_fused_top1": 0.5408,
+      "weighted_leg_heads": 0.7
+    }
+  ],
+  "verdict": {
+    "absolute_scale_exists": false,
+    "evidence": {
+      "weight_sum_ceiling": 1,
+      "fused_top1_min": 0.15,
+      "fused_top1_median": 1,
+      "semantic_top1_median": 0.6356,
+      "real_no_gold_top1_max": 0.7,
+      "real_gold_top1_min": 0.3,
+      "separating_thresholds_count": 0
+    },
+    "verdict": "不适用 (not applicable)",
+    "reason": "fusion scales every leg by its own maximum (retrieval-core/src/fusion.ts), so the fused number is only comparable WITHIN one query; no fixed fused threshold separates answer from no-answer, and the empty-answer decision must keep resting on the per-leg absolute raw floors (store/floors.ts)."
+  },
+  "reproduction": "node mem/scripts/spikes/bench-a7-fused-score-scale.mjs"
+}

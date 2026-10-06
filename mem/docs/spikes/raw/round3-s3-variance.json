@@ -1,0 +1,1237 @@
+{
+  "card": "R3-2 (S3 variance / two annotations of the same memory)",
+  "measured_at": "2026-10-05T16:31:44.925Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    2.53,
+    2.08,
+    1.67
+  ],
+  "model": "Xenova/bge-base-zh-v1.5",
+  "annotators": {
+    "A": {
+      "seed": 20261006,
+      "rule": "canonical truth as constructed"
+    },
+    "B": {
+      "seed": 20261007,
+      "rule": "same facts, second session wording: 50% of facts use the surface form seen in the note instead of the canonical name, 15% drop one entity, 60% of topic subjects use a surface form, 25% attribute synonym, 20% event date +/-1 day"
+    }
+  },
+  "fixture": {
+    "facts": 78,
+    "compared_facts": 78
+  },
+  "identity": {
+    "checked": 14,
+    "passed": 14,
+    "failures": []
+  },
+  "field_difference_rates": {
+    "entities_exact": {
+      "n": 78,
+      "same": 59,
+      "diff_rate": 0.2436
+    },
+    "entities_denoted": {
+      "n": 78,
+      "same": 64,
+      "diff_rate": 0.1795
+    },
+    "subject_exact": {
+      "n": 78,
+      "same": 66,
+      "diff_rate": 0.1538
+    },
+    "subject_denoted": {
+      "n": 78,
+      "same": 75,
+      "diff_rate": 0.0385
+    },
+    "attribute_exact": {
+      "n": 78,
+      "same": 70,
+      "diff_rate": 0.1026
+    },
+    "attribute_denoted": {
+      "n": 78,
+      "same": 78,
+      "diff_rate": 0
+    },
+    "event_date_exact": {
+      "n": 10,
+      "same": 7,
+      "diff_rate": 0.3
+    },
+    "event_date_within_1d": {
+      "n": 10,
+      "same": 10,
+      "diff_rate": 0
+    },
+    "any_field_exact_diff": {
+      "n": 78,
+      "diff_rate": 0.4359
+    },
+    "any_field_denoted_diff": {
+      "n": 78,
+      "diff_rate": 0.1923
+    }
+  },
+  "per_fact": [
+    {
+      "index": 0,
+      "key": "topic-pg-0",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 1,
+      "key": "topic-pg-1",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": false,
+      "attribute_exact": false,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 2,
+      "key": "topic-pg-2",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": false,
+      "attribute_exact": false,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 3,
+      "key": "carrier-pg",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 4,
+      "key": "topic-redis-0",
+      "entities_exact": false,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": false,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 5,
+      "key": "topic-redis-1",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": false,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 6,
+      "key": "topic-redis-2",
+      "entities_exact": false,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 7,
+      "key": "carrier-redis",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 8,
+      "key": "topic-pandoc-0",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 9,
+      "key": "topic-pandoc-1",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 10,
+      "key": "topic-pandoc-2",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 11,
+      "key": "topic-sqlite-0",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 12,
+      "key": "topic-sqlite-1",
+      "entities_exact": false,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 13,
+      "key": "topic-sqlite-2",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 14,
+      "key": "topic-xianliu-0",
+      "entities_exact": false,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 15,
+      "key": "topic-xianliu-1",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 16,
+      "key": "topic-xianliu-2",
+      "entities_exact": false,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 17,
+      "key": "carrier-xianliu",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 18,
+      "key": "topic-bge-0",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 19,
+      "key": "topic-bge-1",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": false,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 20,
+      "key": "topic-bge-2",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": false,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 21,
+      "key": "topic-kafka-0",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": false,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 22,
+      "key": "topic-kafka-1",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 23,
+      "key": "topic-kafka-2",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 24,
+      "key": "topic-nginx-0",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": false,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 25,
+      "key": "topic-nginx-1",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 26,
+      "key": "topic-nginx-2",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 27,
+      "key": "self-identity",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 28,
+      "key": "self-contact",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 29,
+      "key": "self-carrier",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 30,
+      "key": "self-policy",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 31,
+      "key": "time-0-0",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": false,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 32,
+      "key": "time-0-1",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 33,
+      "key": "time-0-2",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 34,
+      "key": "time-1-0",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 35,
+      "key": "time-1-1",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": false,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 36,
+      "key": "time-1-2",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 37,
+      "key": "time-2-0",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 38,
+      "key": "time-2-1",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 39,
+      "key": "time-2-2",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 40,
+      "key": "short-40",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 41,
+      "key": "short-41",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 42,
+      "key": "short-42",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 43,
+      "key": "short-43",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 44,
+      "key": "short-44",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 45,
+      "key": "short-45",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 46,
+      "key": "short-46",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 47,
+      "key": "short-47",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 48,
+      "key": "short-48",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 49,
+      "key": "medium-49",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 50,
+      "key": "medium-50",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 51,
+      "key": "medium-51",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 52,
+      "key": "medium-52",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 53,
+      "key": "medium-53",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 54,
+      "key": "medium-54",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 55,
+      "key": "medium-55",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 56,
+      "key": "medium-56",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 57,
+      "key": "medium-57",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 58,
+      "key": "medium-58",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 59,
+      "key": "medium-59",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 60,
+      "key": "medium-60",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 61,
+      "key": "medium-61",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": false,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 62,
+      "key": "medium-62",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 63,
+      "key": "medium-63",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 64,
+      "key": "medium-64",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 65,
+      "key": "medium-65",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 66,
+      "key": "medium-66",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 67,
+      "key": "medium-67",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 68,
+      "key": "medium-68",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 69,
+      "key": "long-69",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 70,
+      "key": "long-70",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 71,
+      "key": "long-71",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 72,
+      "key": "long-72",
+      "entities_exact": false,
+      "entities_denoted": false,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 73,
+      "key": "long-73",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 74,
+      "key": "long-74",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 75,
+      "key": "long-75",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 76,
+      "key": "long-76",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": true,
+      "event_date_within_1d": true
+    },
+    {
+      "index": 77,
+      "key": "time-distractor",
+      "entities_exact": true,
+      "entities_denoted": true,
+      "subject_exact": true,
+      "attribute_exact": true,
+      "event_date_exact": false,
+      "event_date_within_1d": true
+    }
+  ],
+  "displacement": [
+    {
+      "query_id": "ent-pg",
+      "kind": "entity",
+      "variant": "plain",
+      "query": "PostgreSQL",
+      "ids_A": [
+        4,
+        1,
+        2,
+        3
+      ],
+      "ids_B": [
+        4,
+        1
+      ],
+      "pool_A": 4,
+      "pool_B": 2,
+      "ids_identical": false,
+      "top1_changed": false,
+      "top3_set_changed": true,
+      "positions_differing": 2,
+      "set_jaccard": 0.5
+    },
+    {
+      "query_id": "ent-redis",
+      "kind": "entity",
+      "variant": "plain",
+      "query": "Redis",
+      "ids_A": [
+        8,
+        5,
+        6,
+        7
+      ],
+      "ids_B": [
+        8,
+        6
+      ],
+      "pool_A": 4,
+      "pool_B": 2,
+      "ids_identical": false,
+      "top1_changed": false,
+      "top3_set_changed": true,
+      "positions_differing": 3,
+      "set_jaccard": 0.5
+    },
+    {
+      "query_id": "ent-pandoc",
+      "kind": "entity",
+      "variant": "plain",
+      "query": "pandoc",
+      "ids_A": [
+        9,
+        10,
+        11
+      ],
+      "ids_B": [
+        9,
+        10,
+        11
+      ],
+      "pool_A": 3,
+      "pool_B": 3,
+      "ids_identical": true,
+      "top1_changed": false,
+      "top3_set_changed": false,
+      "positions_differing": 0,
+      "set_jaccard": 1
+    },
+    {
+      "query_id": "ent-sqlite",
+      "kind": "entity",
+      "variant": "plain",
+      "query": "SQLite",
+      "ids_A": [
+        12,
+        13,
+        14
+      ],
+      "ids_B": [
+        12,
+        14
+      ],
+      "pool_A": 3,
+      "pool_B": 2,
+      "ids_identical": false,
+      "top1_changed": false,
+      "top3_set_changed": true,
+      "positions_differing": 2,
+      "set_jaccard": 0.6667
+    },
+    {
+      "query_id": "ent-xianliu",
+      "kind": "entity",
+      "variant": "plain",
+      "query": "限流",
+      "ids_A": [
+        18,
+        15,
+        16,
+        17
+      ],
+      "ids_B": [
+        18,
+        16
+      ],
+      "pool_A": 4,
+      "pool_B": 2,
+      "ids_identical": false,
+      "top1_changed": false,
+      "top3_set_changed": true,
+      "positions_differing": 3,
+      "set_jaccard": 0.5
+    },
+    {
+      "query_id": "ent-bge",
+      "kind": "entity",
+      "variant": "plain",
+      "query": "bge-base-zh-v1.5",
+      "ids_A": [
+        19,
+        20,
+        21
+      ],
+      "ids_B": [
+        19,
+        20,
+        21
+      ],
+      "pool_A": 3,
+      "pool_B": 3,
+      "ids_identical": true,
+      "top1_changed": false,
+      "top3_set_changed": false,
+      "positions_differing": 0,
+      "set_jaccard": 1
+    },
+    {
+      "query_id": "ent-kafka",
+      "kind": "entity",
+      "variant": "plain",
+      "query": "Kafka",
+      "ids_A": [
+        22,
+        23,
+        24
+      ],
+      "ids_B": [
+        23,
+        22,
+        24
+      ],
+      "pool_A": 3,
+      "pool_B": 3,
+      "ids_identical": false,
+      "top1_changed": true,
+      "top3_set_changed": false,
+      "positions_differing": 2,
+      "set_jaccard": 1
+    },
+    {
+      "query_id": "ent-nginx",
+      "kind": "entity",
+      "variant": "plain",
+      "query": "nginx",
+      "ids_A": [
+        25,
+        26,
+        27
+      ],
+      "ids_B": [
+        25,
+        26,
+        27
+      ],
+      "pool_A": 3,
+      "pool_B": 3,
+      "ids_identical": true,
+      "top1_changed": false,
+      "top3_set_changed": false,
+      "positions_differing": 0,
+      "set_jaccard": 1
+    },
+    {
+      "query_id": "self-0",
+      "kind": "self",
+      "variant": "groupleg",
+      "query": "我是谁？",
+      "ids_A": [
+        28,
+        29,
+        30
+      ],
+      "ids_B": [
+        28,
+        29,
+        30
+      ],
+      "pool_A": 3,
+      "pool_B": 3,
+      "ids_identical": true,
+      "top1_changed": false,
+      "top3_set_changed": false,
+      "positions_differing": 0,
+      "set_jaccard": 1
+    },
+    {
+      "query_id": "self-1",
+      "kind": "self",
+      "variant": "groupleg",
+      "query": "我叫什么",
+      "ids_A": [
+        28,
+        29
+      ],
+      "ids_B": [
+        28,
+        29
+      ],
+      "pool_A": 2,
+      "pool_B": 2,
+      "ids_identical": true,
+      "top1_changed": false,
+      "top3_set_changed": false,
+      "positions_differing": 0,
+      "set_jaccard": 1
+    },
+    {
+      "query_id": "self-2",
+      "kind": "self",
+      "variant": "groupleg",
+      "query": "我的名字",
+      "ids_A": [
+        28,
+        29
+      ],
+      "ids_B": [
+        28,
+        29
+      ],
+      "pool_A": 2,
+      "pool_B": 2,
+      "ids_identical": true,
+      "top1_changed": false,
+      "top3_set_changed": false,
+      "positions_differing": 0,
+      "set_jaccard": 1
+    },
+    {
+      "query_id": "time-0",
+      "kind": "time",
+      "variant": "window",
+      "query": "缓存 前天",
+      "ids_A": [
+        39,
+        32,
+        36,
+        45,
+        43
+      ],
+      "ids_B": [
+        39,
+        45,
+        43,
+        32,
+        22
+      ],
+      "pool_A": 7,
+      "pool_B": 6,
+      "ids_identical": false,
+      "top1_changed": false,
+      "top3_set_changed": true,
+      "positions_differing": 4,
+      "set_jaccard": 0.6667
+    },
+    {
+      "query_id": "time-1",
+      "kind": "time",
+      "variant": "window",
+      "query": "部署 上个月",
+      "ids_A": [
+        78,
+        35,
+        33,
+        38,
+        32
+      ],
+      "ids_B": [
+        78,
+        35,
+        33,
+        38,
+        32
+      ],
+      "pool_A": 9,
+      "pool_B": 9,
+      "ids_identical": true,
+      "top1_changed": false,
+      "top3_set_changed": false,
+      "positions_differing": 0,
+      "set_jaccard": 1
+    },
+    {
+      "query_id": "time-2",
+      "kind": "time",
+      "variant": "window",
+      "query": "备份 2026年9月18日",
+      "ids_A": [
+        38,
+        43,
+        12,
+        13,
+        14
+      ],
+      "ids_B": [
+        38,
+        43,
+        40,
+        12,
+        13
+      ],
+      "pool_A": 7,
+      "pool_B": 7,
+      "ids_identical": false,
+      "top1_changed": false,
+      "top3_set_changed": true,
+      "positions_differing": 3,
+      "set_jaccard": 0.6667
+    }
+  ],
+  "displacement_summary": {
+    "all": {
+      "queries": 14,
+      "ids_identical": 7,
+      "top1_changed": 1,
+      "top3_set_changed": 6,
+      "mean_positions_differing": 1.3571
+    },
+    "entity": {
+      "queries": 8,
+      "ids_identical": 3,
+      "top1_changed": 1,
+      "top3_set_changed": 4,
+      "mean_positions_differing": 1.5,
+      "mean_set_jaccard": 0.7708
+    },
+    "self": {
+      "queries": 3,
+      "ids_identical": 3,
+      "top1_changed": 0,
+      "top3_set_changed": 0,
+      "mean_positions_differing": 0,
+      "mean_set_jaccard": 1
+    },
+    "time": {
+      "queries": 3,
+      "ids_identical": 1,
+      "top1_changed": 0,
+      "top3_set_changed": 2,
+      "mean_positions_differing": 2.3333,
+      "mean_set_jaccard": 0.7778
+    }
+  },
+  "subject_group_size": {
+    "A": 2,
+    "B": 2
+  },
+  "answered_question": "Two annotations of the same corpus do NOT produce the same retrieval: the exact field difference rate is high, the denotation-folded rate is lower, and the returned id lists move on a measurable share of queries.",
+  "reproduction": "node mem/scripts/spikes/bench-r3-2-variance.mjs --json mem/docs/spikes/raw/round3-s3-variance.json",
+  "privacy_selfcheck": {
+    "text_or_content_keys": [],
+    "strings_over_300": [],
+    "clean": true
+  }
+}

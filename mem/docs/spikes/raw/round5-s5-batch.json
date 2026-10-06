@@ -1,0 +1,254 @@
+{
+  "card": "R5-S5",
+  "measured_at": "2026-10-05T17:54:50.700Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    4.34,
+    3.33,
+    2.17
+  ],
+  "identity": {
+    "applicable": false,
+    "note": "mechanism card — the production write path is exercised directly; no retrieval pass to identity-check (R2-5/R2-7 convention)"
+  },
+  "mechanics": {
+    "n": 20,
+    "separate_calls": {
+      "total_ms": 1189.179,
+      "per_row_ms": 59.4589,
+      "returned_ids": 20,
+      "db_bytes": 0,
+      "wal_bytes": 2875760,
+      "shm_bytes": 0
+    },
+    "one_transaction": {
+      "tx_ms": 29.1863,
+      "per_row_ms": 1.4593,
+      "index_ms": 1080.6523,
+      "total_ms": 1109.8386,
+      "returned_ids": 20,
+      "db_bytes": 0,
+      "wal_bytes": 1087680,
+      "shm_bytes": 0
+    },
+    "speedup_tx_only": 40.7444,
+    "speedup_total": 1.0715,
+    "journal_mode": "wal",
+    "note": "the batch path is the production preparation + private persistFact inside ONE outer transaction; the adapter turns the nested per-row transaction into a SAVEPOINT, so this is the real row+entity+triple+FTS write, and the semantic index is filled after the commit in both arms"
+  },
+  "partial_failure": {
+    "production_skip": {
+      "items": 4,
+      "new_rows": 3,
+      "returned_ids": 4,
+      "rows_total": 4,
+      "note": "INSERT OR IGNORE + findByContent: the duplicate returns the existing row id, is_new=false, the transaction COMMITS"
+    },
+    "plain_insert_rollback": {
+      "items": 3,
+      "inserted_before_error": 1,
+      "error_thrown": true,
+      "rows_after_rollback": 0,
+      "note": "a batch that used a plain INSERT would raise UNIQUE at item k and roll the whole transaction back to 0 new rows"
+    },
+    "n_separate_calls": {
+      "items": 4,
+      "new_rows": 3,
+      "rows_total": 4,
+      "is_new_flags": [
+        true,
+        false,
+        true,
+        true
+      ],
+      "note": "N calls keep partial progress and never raise; the duplicate is a silent no-op"
+    }
+  },
+  "invariants": {
+    "created_at": {
+      "distinct_values": 1,
+      "rows": 5,
+      "monotonic_non_decreasing": true,
+      "note": "CURRENT_TIMESTAMP is second-resolution, so a batch written inside one second SHARES created_at"
+    },
+    "trust_first_settlement": {
+      "start_trust": 0.5,
+      "rows_at_start_trust": 5,
+      "rows_with_settle_clock": 5,
+      "rows_with_bonus_window": 5,
+      "rows_bonus_count_zero": 5,
+      "rows_pinned_zero": 5
+    },
+    "revision_chain_in_one_transaction": {
+      "base_status": "archived",
+      "base_supersedes": null,
+      "next_status": "active",
+      "next_supersedes": 6,
+      "linked": true
+    },
+    "reindex": {
+      "entities_stale_after_batch": 0,
+      "sweep": {
+        "rebuilt": 0,
+        "deferred": 0,
+        "skipped": false
+      },
+      "sweep_ms": 0.2138,
+      "budget": "ENTITY_SWEEP_BATCH = 2000 (read from the built store module default)"
+    },
+    "dbPath": "/tmp/avantf-r54-kHsleV/invariants/memory.db"
+  },
+  "contract_tax": {
+    "baseline": {
+      "chars": 2623,
+      "tokens": 917,
+      "brief_expectation": {
+        "chars": 2623,
+        "tokens": 917
+      },
+      "matches_brief": true
+    },
+    "shapes": [
+      {
+        "id": "facts-array-concise",
+        "chars": 3213,
+        "chars_delta": 590,
+        "tokens": 1080,
+        "tokens_delta": 163
+      },
+      {
+        "id": "facts-array-verbose",
+        "chars": 3403,
+        "chars_delta": 780,
+        "tokens": 1202,
+        "tokens_delta": 285
+      },
+      {
+        "id": "facts+relations-index-verbose",
+        "chars": 4293,
+        "chars_delta": 1670,
+        "tokens": 1479,
+        "tokens_delta": 562
+      },
+      {
+        "id": "facts+relations-key-verbose",
+        "chars": 4191,
+        "chars_delta": 1568,
+        "tokens": 1460,
+        "tokens_delta": 543
+      }
+    ],
+    "full_spec_description_chars": 255,
+    "note": "the schema increment is paid per TURN by a host that re-sends tool definitions; a host that caches them pays it once. It is not paid per item — the payload is."
+  },
+  "payload_tokens": {
+    "atoms": 450,
+    "n_single_calls_args_chars": 39771,
+    "one_batch_call_args_chars": 48429,
+    "single_calls_args_tokens": 16119,
+    "one_batch_call_args_tokens": 18283,
+    "one_batch_call_no_relations_args_chars": 35239,
+    "one_batch_call_no_relations_tokens": 14986,
+    "args_saved_tokens_with_relations": -2164,
+    "args_saved_tokens_without_relations": 1133,
+    "note": "argument payloads only (the content is written either way). Relations are declaration text and they COST tokens; the turn/tool-result saving is separate and not counted here."
+  },
+  "cap": {
+    "rows": [
+      {
+        "n": 1,
+        "tx_ms": 3.459,
+        "tx_ms_per_row": 3.459,
+        "encode_ms": 32.8096,
+        "db_bytes_delta": 0,
+        "wal_bytes_delta": 127720,
+        "response_ids_json_chars": 3,
+        "args_json_chars": 115
+      },
+      {
+        "n": 5,
+        "tx_ms": 6.9914,
+        "tx_ms_per_row": 1.3983,
+        "encode_ms": 244.576,
+        "db_bytes_delta": 0,
+        "wal_bytes_delta": 300760,
+        "response_ids_json_chars": 11,
+        "args_json_chars": 471
+      },
+      {
+        "n": 10,
+        "tx_ms": 11.2351,
+        "tx_ms_per_row": 1.1235,
+        "encode_ms": 361.1813,
+        "db_bytes_delta": 0,
+        "wal_bytes_delta": 568560,
+        "response_ids_json_chars": 22,
+        "args_json_chars": 926
+      },
+      {
+        "n": 20,
+        "tx_ms": 21.1827,
+        "tx_ms_per_row": 1.0591,
+        "encode_ms": 714.2044,
+        "db_bytes_delta": 0,
+        "wal_bytes_delta": 1071200,
+        "response_ids_json_chars": 52,
+        "args_json_chars": 1836
+      },
+      {
+        "n": 50,
+        "tx_ms": 45.1037,
+        "tx_ms_per_row": 0.9021,
+        "encode_ms": 2033.3864,
+        "db_bytes_delta": 0,
+        "wal_bytes_delta": 2595600,
+        "response_ids_json_chars": 142,
+        "args_json_chars": 4566
+      },
+      {
+        "n": 100,
+        "tx_ms": 107.5817,
+        "tx_ms_per_row": 1.0758,
+        "encode_ms": 4966.7086,
+        "db_bytes_delta": 1388544,
+        "wal_bytes_delta": 3827480,
+        "response_ids_json_chars": 293,
+        "args_json_chars": 9216
+      },
+      {
+        "n": 200,
+        "tx_ms": 207.6004,
+        "tx_ms_per_row": 1.038,
+        "encode_ms": 8284.6341,
+        "db_bytes_delta": 2654208,
+        "wal_bytes_delta": 3831600,
+        "response_ids_json_chars": 693,
+        "args_json_chars": 18516
+      }
+    ],
+    "decision": {
+      "cap_n_measured_ceiling": 200,
+      "criteria": "largest N whose single-transaction row write stays under 250 ms and whose returned-id array stays under 2 000 chars",
+      "recommended_cap_n": 20,
+      "recommendation": "observed max atoms for one source fact = 18 (split A) / 18 — a cap of 20 covers every real batch in this corpus with one slot of headroom; the measured ceiling under the latency/response criteria is 200",
+      "observed": {
+        "max_atoms_in_split_a": 18,
+        "p95_atoms_per_fact": 10
+      },
+      "note": "encode time is per row and is NOT saved by batching a single embedder call; it is reported separately"
+    },
+    "constants": {
+      "ENTITY_SWEEP_BATCH": 2000,
+      "PENDING_CONFLICT_BATCH": 2000
+    }
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r5-4-batch.mjs --json mem/docs/spikes/raw/round5-s5-batch.json",
+  "privacy": {
+    "clean": true,
+    "forbidden_keys": [],
+    "strings_over_max": [],
+    "sensitive_pattern_hits": [],
+    "cjk_runs_over_7_not_whitelisted": [],
+    "keys_checked": true
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "card": "R2-5",
+  "measured_at": "2026-10-05T16:13:01.373Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    2.92,
+    1.96,
+    1.65
+  ],
+  "counts": {
+    "active_facts": 85,
+    "facts_with_mirror_source": 85,
+    "mirror_source_distinct_values": 1,
+    "mirror_source_max_length": 4,
+    "facts_with_path_like_text": 19
+  },
+  "knowledge": {
+    "exists": true,
+    "documents": 0,
+    "doc_chunks": 0,
+    "chunk_entities": 0,
+    "documents_with_source_uri": 0,
+    "distinct_chunk_entity_names": 0
+  },
+  "proxy": {
+    "definition": "share of active facts whose entity names OR 12-char text shingles overlap a managed kb document (source inferable)",
+    "overlapping_facts": 0,
+    "share": 0,
+    "by_entity": 0,
+    "by_shingle": 0
+  },
+  "instrumentation": {
+    "metric": "stats.facts_with_source_ref / stats.total_active_facts",
+    "where": "admin.stats payload (the panel's polling shape), no new tool",
+    "secondary": [
+      "facts_with_valid_to / total (G-A1/A2 usefulness)",
+      "facts_with_assert_count_gt1 / total (G-A6 usefulness)",
+      "entities_with_constrained_type / total entities (G-A8 coverage)",
+      "mirror_source is set / total (the existing precedent, measured here)"
+    ],
+    "acceptance_threshold": ">= 0.30 of active facts carrying source_ref within 2 weeks of the write-side parameter shipping; below that the field is the next mirror_source (a column that exists and is always empty) and should be dropped rather than kept",
+    "why_offline_cannot_decide": "no session traffic is available offline: whether a caller passes source_ref is a write-side behaviour, and the managed kb corpus here is empty, so even the overlap upper bound is 0 by construction"
+  },
+  "identity": {
+    "applicable": false,
+    "note": "this card counts coverage; it runs no retrieval pass, so there is no production arm to identity-check"
+  },
+  "verdict": {
+    "proxy_measured": true,
+    "proxy_upper_bound_share": 0,
+    "decision": "production-period only",
+    "reason": "the managed kb corpus is empty and there is no session traffic, so neither the overlap upper bound nor the behavioural question can be measured offline",
+    "instrument": {
+      "metric": "stats.facts_with_source_ref / stats.total_active_facts",
+      "where": "admin.stats payload (the panel's polling shape), no new tool",
+      "secondary": [
+        "facts_with_valid_to / total (G-A1/A2 usefulness)",
+        "facts_with_assert_count_gt1 / total (G-A6 usefulness)",
+        "entities_with_constrained_type / total entities (G-A8 coverage)",
+        "mirror_source is set / total (the existing precedent, measured here)"
+      ],
+      "acceptance_threshold": ">= 0.30 of active facts carrying source_ref within 2 weeks of the write-side parameter shipping; below that the field is the next mirror_source (a column that exists and is always empty) and should be dropped rather than kept",
+      "why_offline_cannot_decide": "no session traffic is available offline: whether a caller passes source_ref is a write-side behaviour, and the managed kb corpus here is empty, so even the overlap upper bound is 0 by construction"
+    }
+  },
+  "privacy_note": "counts and shares only; fact and document text are read for the overlap computation and never written",
+  "reproduction": "node mem/scripts/spikes/bench-r2-5-source-coverage.mjs --json mem/docs/spikes/raw/round2-r2-5-source-coverage.json"
+}

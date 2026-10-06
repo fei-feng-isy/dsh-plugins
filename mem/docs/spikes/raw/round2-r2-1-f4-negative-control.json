@@ -1,0 +1,5382 @@
+{
+  "card": "R2-1",
+  "measured_at": "2026-10-05T16:11:42.214Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    2.04,
+    1.44,
+    1.46
+  ],
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85,
+    "median_len": 313
+  },
+  "networks": {
+    "degraded": {
+      "note": "production DEGRADED_WEIGHTS",
+      "sem_available": false,
+      "weights": {
+        "semantic": 0,
+        "fts": 0.65,
+        "jaccard": 0.35
+      },
+      "queries": [
+        {
+          "id": "real-self-who",
+          "query": "我是谁？",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-name",
+          "query": "我叫什么",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": false,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": true,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1,
+                0.2372,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1,
+                0.3217,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1,
+                0.1491,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                116,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.755,
+                0.4822,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-myname",
+          "query": "我的名字",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": false,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": true,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                116,
+                95,
+                101,
+                107
+              ],
+              "scores": [
+                1,
+                0.2634,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                116,
+                95,
+                101,
+                107
+              ],
+              "scores": [
+                1,
+                0.4563,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                116,
+                95,
+                101,
+                107
+              ],
+              "scores": [
+                1,
+                0.3459,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                116,
+                4,
+                95,
+                101,
+                107
+              ],
+              "scores": [
+                0.7813,
+                0.4822,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "4@6.9969,116@4.6207",
+            "coverage": "4@0.5,116@0.5",
+            "hybrid": "4@0.5,116@0.3302",
+            "inverted": "116@6.9969,4@4.6207"
+          }
+        },
+        {
+          "id": "real-self-do",
+          "query": "我是做什么的",
+          "kind": "self",
+          "gold": [
+            5
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "coverage": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "hybrid": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "inverted": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "160@15.7347",
+            "coverage": "160@0.75",
+            "hybrid": "160@0.75",
+            "inverted": "160@15.7347"
+          }
+        },
+        {
+          "id": "real-self-what",
+          "query": "我叫啥",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": false,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": true,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1,
+                0.2372,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1,
+                0.3217,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1,
+                0.1491,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                116,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.755,
+                0.4822,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-benren",
+          "query": "本人是谁",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                0.9125,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-nonself-install",
+          "query": "插件的安装方法",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": false,
+          "prod_arms_same_scores": false,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": true,
+          "arms": {
+            "bm25": {
+              "ids": [
+                122,
+                144,
+                147,
+                98,
+                120
+              ],
+              "scores": [
+                0.896,
+                0.65,
+                0.5364,
+                0.5348,
+                0.5276
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                122,
+                96,
+                98,
+                99,
+                116
+              ],
+              "scores": [
+                1,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                122,
+                144,
+                147,
+                98,
+                120
+              ],
+              "scores": [
+                0.896,
+                0.65,
+                0.5364,
+                0.5348,
+                0.5276
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                122,
+                148,
+                99,
+                96,
+                116
+              ],
+              "scores": [
+                0.8927,
+                0.65,
+                0.6454,
+                0.634,
+                0.5959
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "144@3.0205,122@2.5373,147@2.4926,98@2.4853,120@2.4517",
+            "coverage": "96@0.2,98@0.2,99@0.2,116@0.2,120@0.2",
+            "hybrid": "144@0.2,122@0.168,147@0.165,98@0.1646,120@0.1623",
+            "inverted": "148@3.0205,99@2.999,96@2.9459,116@2.7688,123@2.638"
+          }
+        },
+        {
+          "id": "real-nonself-deploy",
+          "query": "生产环境的部署流程",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-nonself-lag",
+          "query": "数据库主从延迟",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-2char-plugin",
+          "query": "插件",
+          "kind": "entity2",
+          "gold": [
+            29,
+            64,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            104,
+            109,
+            116,
+            118,
+            119,
+            120,
+            122,
+            123,
+            135,
+            140,
+            144,
+            147,
+            148,
+            159,
+            162,
+            163
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                0.65,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                0.65,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                0.65,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                0.65,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "29@1,64@1,94@1,95@1,96@1",
+            "coverage": "29@1,64@1,94@1,95@1,96@1",
+            "hybrid": "29@1,64@1,94@1,95@1,96@1",
+            "inverted": "29@1,64@1,94@1,95@1,96@1"
+          }
+        },
+        {
+          "id": "real-2char-task",
+          "query": "任务",
+          "kind": "entity2",
+          "gold": [
+            95,
+            96,
+            97,
+            112,
+            116,
+            125,
+            128,
+            134,
+            135,
+            137,
+            138,
+            140,
+            141,
+            142,
+            143,
+            144,
+            145,
+            160
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                0.65,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                0.65,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                0.65,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                0.65,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "95@1,96@1,97@1,112@1,116@1",
+            "coverage": "95@1,96@1,97@1,112@1,116@1",
+            "hybrid": "95@1,96@1,97@1,112@1,116@1",
+            "inverted": "95@1,96@1,97@1,112@1,116@1"
+          }
+        },
+        {
+          "id": "real-2char-version",
+          "query": "版本",
+          "kind": "entity2",
+          "gold": [
+            21,
+            23,
+            72,
+            101,
+            108,
+            110,
+            114,
+            116,
+            120,
+            124,
+            132,
+            144,
+            148,
+            155,
+            159,
+            160
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "21@1,23@1,72@1,101@1,103@1",
+            "coverage": "21@1,23@1,72@1,101@1,103@1",
+            "hybrid": "21@1,23@1,72@1,101@1,103@1",
+            "inverted": "21@1,23@1,72@1,101@1,103@1"
+          }
+        },
+        {
+          "id": "real-2char-host",
+          "query": "宿主",
+          "kind": "entity2",
+          "gold": [
+            29,
+            33,
+            63,
+            94,
+            104,
+            110,
+            122,
+            140,
+            142,
+            144,
+            148
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "29@1,33@1,63@1,94@1,104@1",
+            "coverage": "29@1,33@1,63@1,94@1,104@1",
+            "hybrid": "29@1,33@1,63@1,94@1,104@1",
+            "inverted": "29@1,33@1,63@1,94@1,104@1"
+          }
+        },
+        {
+          "id": "real-2char-session",
+          "query": "会话",
+          "kind": "entity2",
+          "gold": [
+            25,
+            62,
+            116,
+            121,
+            128,
+            134,
+            135
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "25@1,36@1,62@1,63@1,97@1",
+            "coverage": "25@1,36@1,62@1,63@1,97@1",
+            "hybrid": "25@1,36@1,62@1,63@1,97@1",
+            "inverted": "25@1,36@1,62@1,63@1,97@1"
+          }
+        },
+        {
+          "id": "extra-install-how",
+          "query": "插件怎么安装",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                163
+              ],
+              "scores": [
+                0.65
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                163
+              ],
+              "scores": [
+                0.65
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                163
+              ],
+              "scores": [
+                0.65
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                163
+              ],
+              "scores": [
+                0.65
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "163@21.8338",
+            "coverage": "163@1",
+            "hybrid": "163@1",
+            "inverted": "163@21.8338"
+          }
+        },
+        {
+          "id": "extra-db-where",
+          "query": "记忆库在哪",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                1,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                1,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                1,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                1,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "89@5.0875",
+            "coverage": "89@0.3333",
+            "hybrid": "89@0.3333",
+            "inverted": "89@5.0875"
+          }
+        },
+        {
+          "id": "extra-weights",
+          "query": "检索权重是多少",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-model-swap",
+          "query": "模型怎么换",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-datahome",
+          "query": "数据根在哪",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-schedule",
+          "query": "任务怎么调度",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                141,
+                151
+              ],
+              "scores": [
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                141,
+                151
+              ],
+              "scores": [
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                141,
+                151
+              ],
+              "scores": [
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                141,
+                151
+              ],
+              "scores": [
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        }
+      ],
+      "diagnostics": {
+        "queries_total": 20,
+        "prod_arms_identical_ids": 19,
+        "prod_arms_identical_scores": 16,
+        "queries_where_fts_leg_head_differs": 5,
+        "queries_where_control_ids_differ": 4,
+        "divergent_queries": [
+          {
+            "id": "real-nonself-install",
+            "query": "插件的安装方法",
+            "gold": null,
+            "ids_by_arm": {
+              "bm25": [
+                122,
+                144,
+                147,
+                98,
+                120
+              ],
+              "coverage": [
+                122,
+                96,
+                98,
+                99,
+                116
+              ],
+              "hybrid": [
+                122,
+                144,
+                147,
+                98,
+                120
+              ]
+            },
+            "scores_by_arm": {
+              "bm25": [
+                0.896,
+                0.65,
+                0.5364,
+                0.5348,
+                0.5276
+              ],
+              "coverage": [
+                1,
+                0.65,
+                0.65,
+                0.65,
+                0.65
+              ],
+              "hybrid": [
+                0.896,
+                0.65,
+                0.5364,
+                0.5348,
+                0.5276
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "fts_only": {
+      "note": "semantic 0 / fts 1",
+      "sem_available": false,
+      "weights": {
+        "semantic": 0,
+        "fts": 1,
+        "jaccard": 0.35
+      },
+      "queries": [
+        {
+          "id": "real-self-who",
+          "query": "我是谁？",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-name",
+          "query": "我叫什么",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": false,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": true,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.35,
+                0.3083,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.35,
+                0.4383,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.35,
+                0.1728,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                116,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.105,
+                0.5533,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-myname",
+          "query": "我的名字",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": false,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": true,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                116,
+                95,
+                101,
+                107
+              ],
+              "scores": [
+                1.35,
+                0.3346,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                116,
+                95,
+                101,
+                107
+              ],
+              "scores": [
+                1.35,
+                0.6313,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                116,
+                95,
+                101,
+                107
+              ],
+              "scores": [
+                1.35,
+                0.4614,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                116,
+                4,
+                95,
+                101,
+                107
+              ],
+              "scores": [
+                1.1313,
+                0.5533,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "4@6.9969,116@4.6207",
+            "coverage": "4@0.5,116@0.5",
+            "hybrid": "4@0.5,116@0.3302",
+            "inverted": "116@6.9969,4@4.6207"
+          }
+        },
+        {
+          "id": "real-self-do",
+          "query": "我是做什么的",
+          "kind": "self",
+          "gold": [
+            5
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "coverage": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "hybrid": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "inverted": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "160@15.7347",
+            "coverage": "160@0.75",
+            "hybrid": "160@0.75",
+            "inverted": "160@15.7347"
+          }
+        },
+        {
+          "id": "real-self-what",
+          "query": "我叫啥",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": false,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": true,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.35,
+                0.3083,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.35,
+                0.4383,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                116,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.35,
+                0.1728,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                116,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.105,
+                0.5533,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-benren",
+          "query": "本人是谁",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-nonself-install",
+          "query": "插件的安装方法",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": false,
+          "prod_arms_same_scores": false,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": true,
+          "arms": {
+            "bm25": {
+              "ids": [
+                122,
+                144,
+                147,
+                98,
+                120
+              ],
+              "scores": [
+                1.1901,
+                1,
+                0.8252,
+                0.8228,
+                0.8117
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                122,
+                96,
+                98,
+                99,
+                116
+              ],
+              "scores": [
+                1.35,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                122,
+                144,
+                147,
+                98,
+                120
+              ],
+              "scores": [
+                1.1901,
+                1,
+                0.8252,
+                0.8228,
+                0.8117
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                122,
+                148,
+                99,
+                96,
+                116
+              ],
+              "scores": [
+                1.185,
+                1,
+                0.9929,
+                0.9753,
+                0.9167
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "144@3.0205,122@2.5373,147@2.4926,98@2.4853,120@2.4517",
+            "coverage": "96@0.2,98@0.2,99@0.2,116@0.2,120@0.2",
+            "hybrid": "144@0.2,122@0.168,147@0.165,98@0.1646,120@0.1623",
+            "inverted": "148@3.0205,99@2.999,96@2.9459,116@2.7688,123@2.638"
+          }
+        },
+        {
+          "id": "real-nonself-deploy",
+          "query": "生产环境的部署流程",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-nonself-lag",
+          "query": "数据库主从延迟",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-2char-plugin",
+          "query": "插件",
+          "kind": "entity2",
+          "gold": [
+            29,
+            64,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            104,
+            109,
+            116,
+            118,
+            119,
+            120,
+            122,
+            123,
+            135,
+            140,
+            144,
+            147,
+            148,
+            159,
+            162,
+            163
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "29@1,64@1,94@1,95@1,96@1",
+            "coverage": "29@1,64@1,94@1,95@1,96@1",
+            "hybrid": "29@1,64@1,94@1,95@1,96@1",
+            "inverted": "29@1,64@1,94@1,95@1,96@1"
+          }
+        },
+        {
+          "id": "real-2char-task",
+          "query": "任务",
+          "kind": "entity2",
+          "gold": [
+            95,
+            96,
+            97,
+            112,
+            116,
+            125,
+            128,
+            134,
+            135,
+            137,
+            138,
+            140,
+            141,
+            142,
+            143,
+            144,
+            145,
+            160
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "95@1,96@1,97@1,112@1,116@1",
+            "coverage": "95@1,96@1,97@1,112@1,116@1",
+            "hybrid": "95@1,96@1,97@1,112@1,116@1",
+            "inverted": "95@1,96@1,97@1,112@1,116@1"
+          }
+        },
+        {
+          "id": "real-2char-version",
+          "query": "版本",
+          "kind": "entity2",
+          "gold": [
+            21,
+            23,
+            72,
+            101,
+            108,
+            110,
+            114,
+            116,
+            120,
+            124,
+            132,
+            144,
+            148,
+            155,
+            159,
+            160
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "21@1,23@1,72@1,101@1,103@1",
+            "coverage": "21@1,23@1,72@1,101@1,103@1",
+            "hybrid": "21@1,23@1,72@1,101@1,103@1",
+            "inverted": "21@1,23@1,72@1,101@1,103@1"
+          }
+        },
+        {
+          "id": "real-2char-host",
+          "query": "宿主",
+          "kind": "entity2",
+          "gold": [
+            29,
+            33,
+            63,
+            94,
+            104,
+            110,
+            122,
+            140,
+            142,
+            144,
+            148
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "29@1,33@1,63@1,94@1,104@1",
+            "coverage": "29@1,33@1,63@1,94@1,104@1",
+            "hybrid": "29@1,33@1,63@1,94@1,104@1",
+            "inverted": "29@1,33@1,63@1,94@1,104@1"
+          }
+        },
+        {
+          "id": "real-2char-session",
+          "query": "会话",
+          "kind": "entity2",
+          "gold": [
+            25,
+            62,
+            116,
+            121,
+            128,
+            134,
+            135
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "25@1,36@1,62@1,63@1,97@1",
+            "coverage": "25@1,36@1,62@1,63@1,97@1",
+            "hybrid": "25@1,36@1,62@1,63@1,97@1",
+            "inverted": "25@1,36@1,62@1,63@1,97@1"
+          }
+        },
+        {
+          "id": "extra-install-how",
+          "query": "插件怎么安装",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                163
+              ],
+              "scores": [
+                1
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                163
+              ],
+              "scores": [
+                1
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                163
+              ],
+              "scores": [
+                1
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                163
+              ],
+              "scores": [
+                1
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "163@21.8338",
+            "coverage": "163@1",
+            "hybrid": "163@1",
+            "inverted": "163@21.8338"
+          }
+        },
+        {
+          "id": "extra-db-where",
+          "query": "记忆库在哪",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                1.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                1.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                1.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                1.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "89@5.0875",
+            "coverage": "89@0.3333",
+            "hybrid": "89@0.3333",
+            "inverted": "89@5.0875"
+          }
+        },
+        {
+          "id": "extra-weights",
+          "query": "检索权重是多少",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-model-swap",
+          "query": "模型怎么换",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-datahome",
+          "query": "数据根在哪",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-schedule",
+          "query": "任务怎么调度",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                141,
+                151
+              ],
+              "scores": [
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                141,
+                151
+              ],
+              "scores": [
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                141,
+                151
+              ],
+              "scores": [
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                141,
+                151
+              ],
+              "scores": [
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        }
+      ],
+      "diagnostics": {
+        "queries_total": 20,
+        "prod_arms_identical_ids": 19,
+        "prod_arms_identical_scores": 16,
+        "queries_where_fts_leg_head_differs": 5,
+        "queries_where_control_ids_differ": 4,
+        "divergent_queries": [
+          {
+            "id": "real-nonself-install",
+            "query": "插件的安装方法",
+            "gold": null,
+            "ids_by_arm": {
+              "bm25": [
+                122,
+                144,
+                147,
+                98,
+                120
+              ],
+              "coverage": [
+                122,
+                96,
+                98,
+                99,
+                116
+              ],
+              "hybrid": [
+                122,
+                144,
+                147,
+                98,
+                120
+              ]
+            },
+            "scores_by_arm": {
+              "bm25": [
+                1.1901,
+                1,
+                0.8252,
+                0.8228,
+                0.8117
+              ],
+              "coverage": [
+                1.35,
+                1,
+                1,
+                1,
+                1
+              ],
+              "hybrid": [
+                1.1901,
+                1,
+                0.8252,
+                0.8228,
+                0.8117
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "live_sem0": {
+      "note": "semantic available but weight 0",
+      "sem_available": true,
+      "weights": {
+        "semantic": 0,
+        "fts": 1,
+        "jaccard": 0.35
+      },
+      "queries": [
+        {
+          "id": "real-self-who",
+          "query": "我是谁？",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 1,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-name",
+          "query": "我叫什么",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                1.35,
+                0.105,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                1.35,
+                0.105,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                1.35,
+                0.105,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                1.35,
+                0.105,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-myname",
+          "query": "我的名字",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                95,
+                101,
+                107,
+                116
+              ],
+              "scores": [
+                1.35,
+                0.1312,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                95,
+                101,
+                107,
+                116
+              ],
+              "scores": [
+                1.35,
+                0.1312,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                95,
+                101,
+                107,
+                116
+              ],
+              "scores": [
+                1.35,
+                0.1312,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                4,
+                95,
+                101,
+                107,
+                116
+              ],
+              "scores": [
+                1.35,
+                0.1312,
+                0.1312,
+                0.1312,
+                0.1312
+              ],
+              "top1": 1,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-do",
+          "query": "我是做什么的",
+          "kind": "self",
+          "gold": [
+            5
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "coverage": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "hybrid": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            },
+            "inverted": {
+              "ids": [
+                160,
+                4,
+                25,
+                36,
+                43
+              ],
+              "scores": [
+                1.2625,
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 0,
+              "top3": 0
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "160@15.7347",
+            "coverage": "160@0.75",
+            "hybrid": "160@0.75",
+            "inverted": "160@15.7347"
+          }
+        },
+        {
+          "id": "real-self-what",
+          "query": "我叫啥",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                1.35,
+                0.105,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                1.35,
+                0.105,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                1.35,
+                0.105,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                1.35,
+                0.105,
+                0.105,
+                0.105,
+                0.105
+              ],
+              "top1": 1,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-self-benren",
+          "query": "本人是谁",
+          "kind": "self",
+          "gold": [
+            4
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "coverage": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "hybrid": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 1,
+              "top3": 1
+            },
+            "inverted": {
+              "ids": [
+                4,
+                25,
+                36,
+                43,
+                64
+              ],
+              "scores": [
+                0.35,
+                0.2625,
+                0.2625,
+                0.2625,
+                0.2625
+              ],
+              "top1": 1,
+              "top3": 1
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-nonself-install",
+          "query": "插件的安装方法",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                122,
+                29,
+                99,
+                101,
+                108
+              ],
+              "scores": [
+                0.35,
+                0,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                122,
+                29,
+                99,
+                101,
+                108
+              ],
+              "scores": [
+                0.35,
+                0,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                122,
+                29,
+                99,
+                101,
+                108
+              ],
+              "scores": [
+                0.35,
+                0,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                122,
+                29,
+                99,
+                101,
+                108
+              ],
+              "scores": [
+                0.35,
+                0,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-nonself-deploy",
+          "query": "生产环境的部署流程",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-nonself-lag",
+          "query": "数据库主从延迟",
+          "kind": "nonself",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                25,
+                29,
+                43,
+                63,
+                72
+              ],
+              "scores": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                25,
+                29,
+                43,
+                63,
+                72
+              ],
+              "scores": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                25,
+                29,
+                43,
+                63,
+                72
+              ],
+              "scores": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                25,
+                29,
+                43,
+                63,
+                72
+              ],
+              "scores": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "real-2char-plugin",
+          "query": "插件",
+          "kind": "entity2",
+          "gold": [
+            29,
+            64,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            104,
+            109,
+            116,
+            118,
+            119,
+            120,
+            122,
+            123,
+            135,
+            140,
+            144,
+            147,
+            148,
+            159,
+            162,
+            163
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                29,
+                64,
+                94,
+                95,
+                96
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "29@1,64@1,94@1,95@1,96@1",
+            "coverage": "29@1,64@1,94@1,95@1,96@1",
+            "hybrid": "29@1,64@1,94@1,95@1,96@1",
+            "inverted": "29@1,64@1,94@1,95@1,96@1"
+          }
+        },
+        {
+          "id": "real-2char-task",
+          "query": "任务",
+          "kind": "entity2",
+          "gold": [
+            95,
+            96,
+            97,
+            112,
+            116,
+            125,
+            128,
+            134,
+            135,
+            137,
+            138,
+            140,
+            141,
+            142,
+            143,
+            144,
+            145,
+            160
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                95,
+                96,
+                97,
+                112,
+                116
+              ],
+              "scores": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "95@1,96@1,97@1,112@1,116@1",
+            "coverage": "95@1,96@1,97@1,112@1,116@1",
+            "hybrid": "95@1,96@1,97@1,112@1,116@1",
+            "inverted": "95@1,96@1,97@1,112@1,116@1"
+          }
+        },
+        {
+          "id": "real-2char-version",
+          "query": "版本",
+          "kind": "entity2",
+          "gold": [
+            21,
+            23,
+            72,
+            101,
+            108,
+            110,
+            114,
+            116,
+            120,
+            124,
+            132,
+            144,
+            148,
+            155,
+            159,
+            160
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                21,
+                23,
+                72,
+                101,
+                108
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "21@1,23@1,72@1,101@1,103@1",
+            "coverage": "21@1,23@1,72@1,101@1,103@1",
+            "hybrid": "21@1,23@1,72@1,101@1,103@1",
+            "inverted": "21@1,23@1,72@1,101@1,103@1"
+          }
+        },
+        {
+          "id": "real-2char-host",
+          "query": "宿主",
+          "kind": "entity2",
+          "gold": [
+            29,
+            33,
+            63,
+            94,
+            104,
+            110,
+            122,
+            140,
+            142,
+            144,
+            148
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                29,
+                33,
+                63,
+                94,
+                104
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "29@1,33@1,63@1,94@1,104@1",
+            "coverage": "29@1,33@1,63@1,94@1,104@1",
+            "hybrid": "29@1,33@1,63@1,94@1,104@1",
+            "inverted": "29@1,33@1,63@1,94@1,104@1"
+          }
+        },
+        {
+          "id": "real-2char-session",
+          "query": "会话",
+          "kind": "entity2",
+          "gold": [
+            25,
+            62,
+            116,
+            121,
+            128,
+            134,
+            135
+          ],
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "coverage": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "hybrid": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            },
+            "inverted": {
+              "ids": [
+                25,
+                62,
+                116,
+                121,
+                128
+              ],
+              "scores": [
+                1.35,
+                1.35,
+                1.35,
+                1.35,
+                1.35
+              ],
+              "top1": 1,
+              "top3": 3
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "25@1,36@1,62@1,63@1,97@1",
+            "coverage": "25@1,36@1,62@1,63@1,97@1",
+            "hybrid": "25@1,36@1,62@1,63@1,97@1",
+            "inverted": "25@1,36@1,62@1,63@1,97@1"
+          }
+        },
+        {
+          "id": "extra-install-how",
+          "query": "插件怎么安装",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": true,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                163,
+                108
+              ],
+              "scores": [
+                1,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                163,
+                108
+              ],
+              "scores": [
+                1,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                163,
+                108
+              ],
+              "scores": [
+                1,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                163,
+                108
+              ],
+              "scores": [
+                1,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "163@21.8338",
+            "coverage": "163@1",
+            "hybrid": "163@1",
+            "inverted": "163@21.8338"
+          }
+        },
+        {
+          "id": "extra-db-where",
+          "query": "记忆库在哪",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                89,
+                125,
+                133,
+                164
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-weights",
+          "query": "检索权重是多少",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [],
+              "scores": [],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-model-swap",
+          "query": "模型怎么换",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                25,
+                33,
+                96,
+                109,
+                153
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-datahome",
+          "query": "数据根在哪",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                62,
+                63,
+                87,
+                89,
+                154
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0.35,
+                0.35,
+                0.35
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        },
+        {
+          "id": "extra-schedule",
+          "query": "任务怎么调度",
+          "kind": "extra",
+          "gold": null,
+          "prod_arms_same_ids": true,
+          "prod_arms_same_scores": true,
+          "fts_leg_head_differs": false,
+          "control_ids_differ": false,
+          "arms": {
+            "bm25": {
+              "ids": [
+                141,
+                151,
+                95,
+                96,
+                97
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "coverage": {
+              "ids": [
+                141,
+                151,
+                95,
+                96,
+                97
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "hybrid": {
+              "ids": [
+                141,
+                151,
+                95,
+                96,
+                97
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            },
+            "inverted": {
+              "ids": [
+                141,
+                151,
+                95,
+                96,
+                97
+              ],
+              "scores": [
+                0.35,
+                0.35,
+                0,
+                0,
+                0
+              ],
+              "top1": null,
+              "top3": null
+            }
+          },
+          "fts_leg_top": {
+            "bm25": "",
+            "coverage": "",
+            "hybrid": "",
+            "inverted": ""
+          }
+        }
+      ],
+      "diagnostics": {
+        "queries_total": 20,
+        "prod_arms_identical_ids": 20,
+        "prod_arms_identical_scores": 20,
+        "queries_where_fts_leg_head_differs": 2,
+        "queries_where_control_ids_differ": 0,
+        "divergent_queries": []
+      }
+    }
+  },
+  "quality_by_network": {
+    "degraded": {
+      "bm25": {
+        "gold_queries": 11,
+        "top1_ok": 8,
+        "top3_relevant_mean": 1.8182
+      },
+      "coverage": {
+        "gold_queries": 11,
+        "top1_ok": 8,
+        "top3_relevant_mean": 1.8182
+      },
+      "hybrid": {
+        "gold_queries": 11,
+        "top1_ok": 8,
+        "top3_relevant_mean": 1.8182
+      }
+    },
+    "fts_only": {
+      "bm25": {
+        "gold_queries": 11,
+        "top1_ok": 8,
+        "top3_relevant_mean": 1.8182
+      },
+      "coverage": {
+        "gold_queries": 11,
+        "top1_ok": 8,
+        "top3_relevant_mean": 1.8182
+      },
+      "hybrid": {
+        "gold_queries": 11,
+        "top1_ok": 8,
+        "top3_relevant_mean": 1.8182
+      }
+    },
+    "live_sem0": {
+      "bm25": {
+        "gold_queries": 11,
+        "top1_ok": 10,
+        "top3_relevant_mean": 1.8182
+      },
+      "coverage": {
+        "gold_queries": 11,
+        "top1_ok": 10,
+        "top3_relevant_mean": 1.8182
+      },
+      "hybrid": {
+        "gold_queries": 11,
+        "top1_ok": 10,
+        "top3_relevant_mean": 1.8182
+      }
+    }
+  },
+  "identity": {
+    "runtime": "degraded",
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "verdict": {
+    "positive_control_passed": true,
+    "any_production_arm_divergence": true,
+    "call": "conditional_adopt_only_on_lexically_dominated_networks"
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r2-1-f4-negative-control.mjs --json mem/docs/spikes/raw/round2-r2-1-f4-negative-control.json"
+}

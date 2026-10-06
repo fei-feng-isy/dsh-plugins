@@ -1,0 +1,1472 @@
+{
+  "card": "A5",
+  "measured_at": "2026-10-05T15:46:16.357Z",
+  "node": "v22.23.2",
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85
+  },
+  "alphas": [
+    0.1,
+    0.2
+  ],
+  "signals": {
+    "recency": "min-max(updated_at ?? created_at) over active corpus",
+    "trust": "facts.trust_score",
+    "proof": "skipped — mem has no proof field"
+  },
+  "identity": {
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "real_summary": {
+    "recency_a0.1": {
+      "top1_ok": 10,
+      "base_top1_ok": 10,
+      "top3_relevant_mean": 1.8182,
+      "base_top3_relevant_mean": 1.8182,
+      "queries_with_order_changed": 15
+    },
+    "recency_a0.2": {
+      "top1_ok": 10,
+      "base_top1_ok": 10,
+      "top3_relevant_mean": 1.8182,
+      "base_top3_relevant_mean": 1.8182,
+      "queries_with_order_changed": 16
+    },
+    "trust_a0.1": {
+      "top1_ok": 10,
+      "base_top1_ok": 10,
+      "top3_relevant_mean": 1.8182,
+      "base_top3_relevant_mean": 1.8182,
+      "queries_with_order_changed": 13
+    },
+    "trust_a0.2": {
+      "top1_ok": 10,
+      "base_top1_ok": 10,
+      "top3_relevant_mean": 1.8182,
+      "base_top3_relevant_mean": 1.8182,
+      "queries_with_order_changed": 13
+    }
+  },
+  "real": [
+    {
+      "id": "real-self-who",
+      "query": "我是谁？",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "base_top1": 1,
+      "base_top3": 1,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            160
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            160
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            97
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            97
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-self-name",
+      "query": "我叫什么",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "base_top1": 1,
+      "base_top3": 1,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            160
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            160
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            97
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            97
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-self-myname",
+      "query": "我的名字",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        95,
+        101
+      ],
+      "base_top1": 1,
+      "base_top3": 1,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            107,
+            116
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            107,
+            116
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            101,
+            107
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            101,
+            107
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-self-do",
+      "query": "我是做什么的",
+      "kind": "self",
+      "gold": [
+        5
+      ],
+      "base_ids": [
+        4,
+        117,
+        133,
+        103,
+        160
+      ],
+      "base_top1": 0,
+      "base_top3": 0,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "top1": 0,
+          "top3": 0,
+          "order_changed": false
+        },
+        "recency_a0.2": {
+          "ids": [
+            117,
+            133,
+            103,
+            4,
+            160
+          ],
+          "top1": 0,
+          "top3": 0,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "top1": 0,
+          "top3": 0,
+          "order_changed": false
+        },
+        "trust_a0.2": {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "top1": 0,
+          "top3": 0,
+          "order_changed": false
+        }
+      }
+    },
+    {
+      "id": "real-self-what",
+      "query": "我叫啥",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "base_top1": 1,
+      "base_top3": 1,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            160
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            160
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            97
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            97
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-self-benren",
+      "query": "本人是谁",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "base_top1": 1,
+      "base_top3": 1,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            160
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            160
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            97
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            4,
+            117,
+            103,
+            165,
+            97
+          ],
+          "top1": 1,
+          "top3": 1,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-nonself-install",
+      "query": "插件的安装方法",
+      "kind": "nonself",
+      "gold": null,
+      "base_ids": [
+        122,
+        108,
+        159,
+        29,
+        109
+      ],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            122,
+            108,
+            159,
+            156,
+            109
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            122,
+            108,
+            159,
+            156,
+            109
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            122,
+            108,
+            159,
+            29,
+            109
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.2": {
+          "ids": [
+            122,
+            108,
+            159,
+            29,
+            109
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        }
+      }
+    },
+    {
+      "id": "real-nonself-deploy",
+      "query": "生产环境的部署流程",
+      "kind": "nonself",
+      "gold": null,
+      "base_ids": [],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "recency_a0.2": {
+          "ids": [],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.1": {
+          "ids": [],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.2": {
+          "ids": [],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        }
+      }
+    },
+    {
+      "id": "real-nonself-lag",
+      "query": "数据库主从延迟",
+      "kind": "nonself",
+      "gold": null,
+      "base_ids": [
+        72,
+        151,
+        128,
+        138,
+        63
+      ],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            151,
+            138,
+            128,
+            115,
+            119
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            151,
+            138,
+            128,
+            144,
+            115
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            72,
+            151,
+            128,
+            138,
+            63
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.2": {
+          "ids": [
+            72,
+            151,
+            128,
+            138,
+            63
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        }
+      }
+    },
+    {
+      "id": "real-2char-plugin",
+      "query": "插件",
+      "kind": "entity2",
+      "gold": [
+        29,
+        64,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        104,
+        109,
+        116,
+        118,
+        119,
+        120,
+        122,
+        123,
+        135,
+        140,
+        144,
+        147,
+        148,
+        159,
+        162,
+        163
+      ],
+      "base_ids": [
+        29,
+        64,
+        94,
+        95,
+        96
+      ],
+      "base_top1": 1,
+      "base_top3": 3,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            162,
+            163,
+            159,
+            148,
+            147
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            162,
+            163,
+            159,
+            148,
+            147
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            123,
+            162,
+            163,
+            147,
+            97
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            123,
+            162,
+            163,
+            147,
+            97
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-2char-task",
+      "query": "任务",
+      "kind": "entity2",
+      "gold": [
+        95,
+        96,
+        97,
+        112,
+        116,
+        125,
+        128,
+        134,
+        135,
+        137,
+        138,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        160
+      ],
+      "base_ids": [
+        95,
+        96,
+        97,
+        112,
+        116
+      ],
+      "base_top1": 1,
+      "base_top3": 3,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            160,
+            145,
+            144,
+            143,
+            142
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            160,
+            145,
+            144,
+            143,
+            142
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            125,
+            134,
+            97,
+            128,
+            160
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            125,
+            134,
+            97,
+            128,
+            160
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-2char-version",
+      "query": "版本",
+      "kind": "entity2",
+      "gold": [
+        21,
+        23,
+        72,
+        101,
+        108,
+        110,
+        114,
+        116,
+        120,
+        124,
+        132,
+        144,
+        148,
+        155,
+        159,
+        160
+      ],
+      "base_ids": [
+        21,
+        23,
+        72,
+        101,
+        108
+      ],
+      "base_top1": 1,
+      "base_top3": 3,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            160,
+            159,
+            155,
+            148,
+            144
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            160,
+            159,
+            155,
+            148,
+            144
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            72,
+            101,
+            108,
+            120,
+            132
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            72,
+            101,
+            108,
+            120,
+            132
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-2char-host",
+      "query": "宿主",
+      "kind": "entity2",
+      "gold": [
+        29,
+        33,
+        63,
+        94,
+        104,
+        110,
+        122,
+        140,
+        142,
+        144,
+        148
+      ],
+      "base_ids": [
+        29,
+        33,
+        63,
+        94,
+        104
+      ],
+      "base_top1": 1,
+      "base_top3": 3,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            148,
+            144,
+            142,
+            140,
+            122
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            148,
+            144,
+            142,
+            140,
+            122
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            29,
+            122,
+            104,
+            33,
+            110
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            29,
+            122,
+            104,
+            33,
+            110
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "real-2char-session",
+      "query": "会话",
+      "kind": "entity2",
+      "gold": [
+        25,
+        62,
+        116,
+        121,
+        128,
+        134,
+        135
+      ],
+      "base_ids": [
+        25,
+        62,
+        116,
+        121,
+        128
+      ],
+      "base_top1": 1,
+      "base_top3": 3,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            135,
+            134,
+            128,
+            121,
+            116
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            135,
+            134,
+            128,
+            121,
+            116
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            134,
+            128,
+            116,
+            135,
+            62
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            134,
+            128,
+            116,
+            135,
+            62
+          ],
+          "top1": 1,
+          "top3": 3,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "extra-install-how",
+      "query": "插件怎么安装",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        108,
+        163
+      ],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            108,
+            163
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "recency_a0.2": {
+          "ids": [
+            108,
+            163
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.1": {
+          "ids": [
+            108,
+            163
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.2": {
+          "ids": [
+            108,
+            163
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        }
+      }
+    },
+    {
+      "id": "extra-db-where",
+      "query": "记忆库在哪",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        89,
+        125,
+        133,
+        164
+      ],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            164,
+            133,
+            125,
+            89
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            164,
+            133,
+            125,
+            89
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            125,
+            164,
+            133,
+            89
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            125,
+            164,
+            133,
+            89
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "extra-weights",
+      "query": "检索权重是多少",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "recency_a0.2": {
+          "ids": [],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.1": {
+          "ids": [],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.2": {
+          "ids": [],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        }
+      }
+    },
+    {
+      "id": "extra-model-swap",
+      "query": "模型怎么换",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        25,
+        33,
+        96,
+        109,
+        153
+      ],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            162,
+            153,
+            109,
+            96,
+            33
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            162,
+            153,
+            109,
+            96,
+            33
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            162,
+            109,
+            153,
+            33,
+            96
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            162,
+            109,
+            153,
+            33,
+            96
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "extra-datahome",
+      "query": "数据根在哪",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        62,
+        63,
+        87,
+        89,
+        154
+      ],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            154,
+            89,
+            87,
+            62,
+            63
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "recency_a0.2": {
+          "ids": [
+            154,
+            89,
+            87,
+            62,
+            63
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "trust_a0.1": {
+          "ids": [
+            89,
+            154,
+            87,
+            62,
+            63
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        },
+        "trust_a0.2": {
+          "ids": [
+            89,
+            154,
+            87,
+            62,
+            63
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": true
+        }
+      }
+    },
+    {
+      "id": "extra-schedule",
+      "query": "任务怎么调度",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        141,
+        128,
+        95,
+        97,
+        116
+      ],
+      "base_top1": null,
+      "base_top3": null,
+      "arms": {
+        "recency_a0.1": {
+          "ids": [
+            141,
+            128,
+            95,
+            97,
+            116
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "recency_a0.2": {
+          "ids": [
+            141,
+            128,
+            95,
+            97,
+            116
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.1": {
+          "ids": [
+            141,
+            128,
+            95,
+            97,
+            116
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        },
+        "trust_a0.2": {
+          "ids": [
+            141,
+            128,
+            95,
+            97,
+            116
+          ],
+          "top1": null,
+          "top3": null,
+          "order_changed": false
+        }
+      }
+    }
+  ],
+  "frozen": {
+    "base": {
+      "must_include_pass": 40,
+      "must_include": 0.9756,
+      "must_exclude_pass": 27,
+      "must_exclude": 0.6585,
+      "top3_relevant_mean": 1.0244,
+      "empty_rate": 0,
+      "identity_failures": 0
+    },
+    "recency_a0.1": {
+      "must_include_pass": 40,
+      "must_include": 0.9756,
+      "must_exclude_pass": 27,
+      "must_exclude": 0.6585,
+      "top3_relevant_mean": 1.0244,
+      "empty_rate": 0,
+      "identity_failures": 0
+    },
+    "recency_a0.2": {
+      "must_include_pass": 40,
+      "must_include": 0.9756,
+      "must_exclude_pass": 27,
+      "must_exclude": 0.6585,
+      "top3_relevant_mean": 1.0244,
+      "empty_rate": 0,
+      "identity_failures": 0
+    },
+    "trust_a0.1": {
+      "must_include_pass": 40,
+      "must_include": 0.9756,
+      "must_exclude_pass": 27,
+      "must_exclude": 0.6585,
+      "top3_relevant_mean": 1.0244,
+      "empty_rate": 0,
+      "identity_failures": 0
+    },
+    "trust_a0.2": {
+      "must_include_pass": 40,
+      "must_include": 0.9756,
+      "must_exclude_pass": 27,
+      "must_exclude": 0.6585,
+      "top3_relevant_mean": 1.0244,
+      "empty_rate": 0,
+      "identity_failures": 0
+    }
+  },
+  "verdicts": {
+    "recency_a0.1": {
+      "must_include_not_lower": true,
+      "frozen_strictly_up": false,
+      "real_strictly_up": false,
+      "delta": {
+        "frozen_must_include": 0,
+        "frozen_must_exclude": 0,
+        "frozen_top3": 0,
+        "real_top1": 0,
+        "real_top3": 0
+      },
+      "verdict": "reject"
+    },
+    "recency_a0.2": {
+      "must_include_not_lower": true,
+      "frozen_strictly_up": false,
+      "real_strictly_up": false,
+      "delta": {
+        "frozen_must_include": 0,
+        "frozen_must_exclude": 0,
+        "frozen_top3": 0,
+        "real_top1": 0,
+        "real_top3": 0
+      },
+      "verdict": "reject"
+    },
+    "trust_a0.1": {
+      "must_include_not_lower": true,
+      "frozen_strictly_up": false,
+      "real_strictly_up": false,
+      "delta": {
+        "frozen_must_include": 0,
+        "frozen_must_exclude": 0,
+        "frozen_top3": 0,
+        "real_top1": 0,
+        "real_top3": 0
+      },
+      "verdict": "reject"
+    },
+    "trust_a0.2": {
+      "must_include_not_lower": true,
+      "frozen_strictly_up": false,
+      "real_strictly_up": false,
+      "delta": {
+        "frozen_must_include": 0,
+        "frozen_must_exclude": 0,
+        "frozen_top3": 0,
+        "real_top1": 0,
+        "real_top3": 0
+      },
+      "verdict": "reject"
+    }
+  },
+  "reproduction": "node mem/scripts/spikes/bench-a5-multiplicative-boost.mjs"
+}

@@ -1,0 +1,1046 @@
+{
+  "card": "R2-2",
+  "measured_at": "2026-10-05T16:11:47.570Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    2.44,
+    1.53,
+    1.49
+  ],
+  "model": "Xenova/bge-base-zh-v1.5",
+  "now": "2026-10-05T16:11:43.096Z",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85,
+    "median_len": 313
+  },
+  "derivation": {
+    "topic_df_range": [
+      2,
+      8
+    ],
+    "windows_tried": [
+      "今天",
+      "昨天",
+      "前天",
+      "本周",
+      "上周",
+      "这个月",
+      "上个月",
+      "今年",
+      "2026年9月18日"
+    ],
+    "window_coverage": {
+      "今天": {
+        "rule": "今天",
+        "candidates": 0,
+        "picked": 0
+      },
+      "昨天": {
+        "rule": "昨天",
+        "candidates": 13,
+        "picked": 2
+      },
+      "前天": {
+        "rule": "前天",
+        "candidates": 30,
+        "picked": 2
+      },
+      "本周": {
+        "rule": "本周",
+        "candidates": 11,
+        "picked": 2
+      },
+      "上周": {
+        "rule": "上周",
+        "candidates": 58,
+        "picked": 2
+      },
+      "这个月": {
+        "rule": "这个月",
+        "candidates": 53,
+        "picked": 2
+      },
+      "上个月": {
+        "rule": "上个月",
+        "candidates": 61,
+        "picked": 2
+      },
+      "今年": {
+        "rule": "今年",
+        "candidates": 0,
+        "picked": 0
+      },
+      "2026年9月18日": {
+        "rule": "yyyy年m月d日",
+        "candidates": 55,
+        "picked": 2
+      }
+    },
+    "note": "query = <topic entity> <window word>; gold = the single active fact carrying that entity whose created_at falls in the window; guard = the topic alone"
+  },
+  "rows": [
+    {
+      "id": "r2t-1",
+      "topic": "产品",
+      "topic_df": 2,
+      "window_word": "昨天",
+      "window_rule": "昨天",
+      "window_start": "2026-10-04",
+      "window_end": "2026-10-05",
+      "gold": 165,
+      "facts_with_topic": 2,
+      "query": "产品 昨天",
+      "guard_query": "产品",
+      "parser_correct": true,
+      "window_fact_count": 2,
+      "baseline": {
+        "ids": [
+          123,
+          165
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            165,
+            164,
+            123
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            165,
+            164,
+            123
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            165,
+            164
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-2",
+      "topic": "入库",
+      "topic_df": 2,
+      "window_word": "昨天",
+      "window_rule": "昨天",
+      "window_start": "2026-10-04",
+      "window_end": "2026-10-05",
+      "gold": 165,
+      "facts_with_topic": 2,
+      "query": "入库 昨天",
+      "guard_query": "入库",
+      "parser_correct": true,
+      "window_fact_count": 2,
+      "baseline": {
+        "ids": [
+          106,
+          165
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            165,
+            164,
+            106
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            165,
+            164,
+            106
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            165,
+            164
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-3",
+      "topic": "代价",
+      "topic_df": 2,
+      "window_word": "前天",
+      "window_rule": "前天",
+      "window_start": "2026-10-03",
+      "window_end": "2026-10-04",
+      "gold": 162,
+      "facts_with_topic": 2,
+      "query": "代价 前天",
+      "guard_query": "代价",
+      "parser_correct": true,
+      "window_fact_count": 7,
+      "baseline": {
+        "ids": [
+          36,
+          162
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            162,
+            157,
+            158,
+            159,
+            160
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            162,
+            157,
+            158,
+            159,
+            160
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            162,
+            157,
+            158,
+            159,
+            160
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-4",
+      "topic": "单方",
+      "topic_df": 2,
+      "window_word": "前天",
+      "window_rule": "前天",
+      "window_start": "2026-10-03",
+      "window_end": "2026-10-04",
+      "gold": 163,
+      "facts_with_topic": 2,
+      "query": "单方 前天",
+      "guard_query": "单方",
+      "parser_correct": true,
+      "window_fact_count": 7,
+      "baseline": {
+        "ids": [
+          143,
+          163
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            163,
+            157,
+            158,
+            159,
+            160
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            163,
+            157,
+            158,
+            159,
+            160
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            163,
+            157,
+            158,
+            159,
+            160
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-5",
+      "topic": "模式",
+      "topic_df": 2,
+      "window_word": "本周",
+      "window_rule": "本周",
+      "window_start": "2026-10-04",
+      "window_end": "2026-10-11",
+      "gold": 164,
+      "facts_with_topic": 2,
+      "query": "模式 本周",
+      "guard_query": "模式",
+      "parser_correct": true,
+      "window_fact_count": 2,
+      "baseline": {
+        "ids": [
+          87,
+          164
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            164,
+            165,
+            87
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            164,
+            165,
+            87
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            164,
+            165
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-6",
+      "topic": "用例",
+      "topic_df": 2,
+      "window_word": "本周",
+      "window_rule": "本周",
+      "window_start": "2026-10-04",
+      "window_end": "2026-10-11",
+      "gold": 164,
+      "facts_with_topic": 2,
+      "query": "用例 本周",
+      "guard_query": "用例",
+      "parser_correct": true,
+      "window_fact_count": 2,
+      "baseline": {
+        "ids": [
+          150,
+          164
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            164,
+            165,
+            150
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            164,
+            165,
+            150
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            164,
+            165
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-7",
+      "topic": "中文",
+      "topic_df": 2,
+      "window_word": "上周",
+      "window_rule": "上周",
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "gold": 142,
+      "facts_with_topic": 2,
+      "query": "中文 上周",
+      "guard_query": "中文",
+      "parser_correct": true,
+      "window_fact_count": 44,
+      "baseline": {
+        "ids": [
+          33,
+          142
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            142,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            142,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            142,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-8",
+      "topic": "健康",
+      "topic_df": 2,
+      "window_word": "上周",
+      "window_rule": "上周",
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "gold": 117,
+      "facts_with_topic": 2,
+      "query": "健康 上周",
+      "guard_query": "健康",
+      "parser_correct": true,
+      "window_fact_count": 44,
+      "baseline": {
+        "ids": [
+          104,
+          117
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            117,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            117,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            117,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-9",
+      "topic": "全量",
+      "topic_df": 2,
+      "window_word": "这个月",
+      "window_rule": "这个月",
+      "window_start": "2026-09-30",
+      "window_end": "2026-10-31",
+      "gold": 143,
+      "facts_with_topic": 2,
+      "query": "全量 这个月",
+      "guard_query": "全量",
+      "parser_correct": true,
+      "window_fact_count": 46,
+      "baseline": {
+        "ids": [
+          25,
+          143
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            143,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            143,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            143,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-10",
+      "topic": "内置",
+      "topic_df": 2,
+      "window_word": "这个月",
+      "window_rule": "这个月",
+      "window_start": "2026-09-30",
+      "window_end": "2026-10-31",
+      "gold": 125,
+      "facts_with_topic": 2,
+      "query": "内置 这个月",
+      "guard_query": "内置",
+      "parser_correct": true,
+      "window_fact_count": 46,
+      "baseline": {
+        "ids": [
+          108,
+          125
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            125,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            125,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            125,
+            87,
+            89,
+            94,
+            103
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-11",
+      "topic": "原生",
+      "topic_df": 2,
+      "window_word": "上个月",
+      "window_rule": "上个月",
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "gold": 118,
+      "facts_with_topic": 2,
+      "query": "原生 上个月",
+      "guard_query": "原生",
+      "parser_correct": true,
+      "window_fact_count": 39,
+      "baseline": {
+        "ids": [
+          118,
+          159
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            118,
+            4,
+            5,
+            19,
+            21
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            118,
+            4,
+            5,
+            19,
+            21
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            118,
+            4,
+            5,
+            19,
+            21
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-12",
+      "topic": "回滚",
+      "topic_df": 2,
+      "window_word": "上个月",
+      "window_rule": "上个月",
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "gold": 119,
+      "facts_with_topic": 2,
+      "query": "回滚 上个月",
+      "guard_query": "回滚",
+      "parser_correct": true,
+      "window_fact_count": 39,
+      "baseline": {
+        "ids": [
+          119,
+          128
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            119,
+            4,
+            5,
+            19,
+            21
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            119,
+            4,
+            5,
+            19,
+            21
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            119,
+            4,
+            5,
+            19,
+            21
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-13",
+      "topic": "地板",
+      "topic_df": 2,
+      "window_word": "2026年9月18日",
+      "window_rule": "yyyy年m月d日",
+      "window_start": "2026-09-17",
+      "window_end": "2026-09-18",
+      "gold": 110,
+      "facts_with_topic": 2,
+      "query": "地板 2026年9月18日",
+      "guard_query": "地板",
+      "parser_correct": true,
+      "window_fact_count": 18,
+      "baseline": {
+        "ids": [
+          110,
+          124
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            110,
+            43,
+            62,
+            63,
+            64
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            110,
+            43,
+            62,
+            63,
+            64
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            110,
+            43,
+            62,
+            63,
+            64
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    },
+    {
+      "id": "r2t-14",
+      "topic": "库里",
+      "topic_df": 2,
+      "window_word": "2026年9月18日",
+      "window_rule": "yyyy年m月d日",
+      "window_start": "2026-09-17",
+      "window_end": "2026-09-18",
+      "gold": 107,
+      "facts_with_topic": 2,
+      "query": "库里 2026年9月18日",
+      "guard_query": "库里",
+      "parser_correct": true,
+      "window_fact_count": 18,
+      "baseline": {
+        "ids": [
+          87,
+          127,
+          107
+        ],
+        "gold_rank": 3,
+        "in_top3": true,
+        "missing": false
+      },
+      "arms": {
+        "w0.3": {
+          "ids": [
+            107,
+            87,
+            43,
+            62,
+            63
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "w1.0": {
+          "ids": [
+            107,
+            43,
+            62,
+            63,
+            64
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        },
+        "hard": {
+          "ids": [
+            107,
+            43,
+            62,
+            63,
+            64
+          ],
+          "gold_rank": 1,
+          "in_top3": true,
+          "missing": false
+        }
+      },
+      "guard": {
+        "parsed": false,
+        "ids_equal": true
+      }
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "queries": 14,
+      "missing": 0,
+      "in_top3": 14,
+      "top1": 3,
+      "found": 14,
+      "avg_rank": 1.8571
+    },
+    "w0.3": {
+      "queries": 14,
+      "missing": 0,
+      "in_top3": 14,
+      "top1": 14,
+      "found": 14,
+      "avg_rank": 1
+    },
+    "w1.0": {
+      "queries": 14,
+      "missing": 0,
+      "in_top3": 14,
+      "top1": 14,
+      "found": 14,
+      "avg_rank": 1
+    },
+    "hard": {
+      "queries": 14,
+      "missing": 0,
+      "in_top3": 14,
+      "top1": 14,
+      "found": 14,
+      "avg_rank": 1
+    }
+  },
+  "guards": {
+    "total": 14,
+    "identical": 14
+  },
+  "parsers": {
+    "total": 14,
+    "correct": 14
+  },
+  "identity": {
+    "checked": 14,
+    "passed": 14,
+    "failures": []
+  },
+  "verdict": {
+    "parse_correct": true,
+    "parser_false_positives_on_guards": 0,
+    "guard_injury": 0,
+    "in_top3_baseline": 14,
+    "in_top3_w1": 14,
+    "top1_baseline": 3,
+    "top1_w1": 14,
+    "avg_rank_baseline": 1.8571,
+    "avg_rank_w1": 1,
+    "missing_baseline": 0,
+    "missing_w1": 0,
+    "preregistered_in_top3_criterion_met": false,
+    "rank_criterion_met": true,
+    "condition_lifted": true,
+    "call": "A2 condition lifted on rank evidence (pre-registered in_top3 axis saturated at 14/14)"
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r2-2-real-time-queries.mjs --json mem/docs/spikes/raw/round2-r2-2-real-time-queries.json"
+}

@@ -1,0 +1,1199 @@
+{
+  "card": "R4-S7-fix_or",
+  "measured_at": "2026-10-05T17:02:46.935Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    1.65,
+    1.61,
+    1.14
+  ],
+  "identity": {
+    "applicable": true,
+    "note": "all end-to-end runs go through runScript on a production runtime; S3/S5 report the identity check for the same scaffolding (86/86 and 34/34)"
+  },
+  "definition": {
+    "defect": "a 2-char CJK run beside an index-expressible term is invisible to the trigram leg (relevanceTerms emits nothing for it, so the substring fallback never fires)",
+    "fix_naive": "union terms, then grade the union — RAISES the clamp from indexed count to union count",
+    "fix_or": "search the union, grade max(indexed matches, substring matches) against the PRODUCTION clamp (effectiveTermFloor(min_fts_terms, indexed.length))",
+    "hard_constraint": "whenever relevanceTerms is non-empty the effective clamp and the indexed search path must be byte-identical to production; a query with no invisible 2-char run must return byte-identical ids AND scores"
+  },
+  "leg_level": {
+    "queries": 20,
+    "floor_config": 2,
+    "summary": {
+      "production": {
+        "queries": 20,
+        "hits": 0,
+        "hit_rate": 0
+      },
+      "fix_naive": {
+        "queries": 20,
+        "hits": 0,
+        "hit_rate": 0
+      },
+      "fix_or": {
+        "queries": 20,
+        "hits": 20,
+        "hit_rate": 1
+      }
+    },
+    "naive_raises_clamp": 20,
+    "or_changes_clamp": 0,
+    "rows": [
+      {
+        "topic_len": 2,
+        "topic_df": 6,
+        "word3_df": 1,
+        "gold_count": 5,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 10,
+        "word3_df": 1,
+        "gold_count": 9,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 7,
+        "word3_df": 1,
+        "gold_count": 6,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 4,
+        "word3_df": 1,
+        "gold_count": 3,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 8,
+        "word3_df": 1,
+        "gold_count": 7,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 2,
+        "word3_df": 1,
+        "gold_count": 1,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 2,
+        "word3_df": 1,
+        "gold_count": 1,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 2,
+        "word3_df": 1,
+        "gold_count": 1,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 4,
+        "word3_df": 1,
+        "gold_count": 4,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 4,
+        "word3_df": 1,
+        "gold_count": 4,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 4,
+        "word3_df": 1,
+        "gold_count": 4,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 2,
+        "word3_df": 1,
+        "gold_count": 2,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 4,
+        "word3_df": 1,
+        "gold_count": 4,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 2,
+        "word3_df": 1,
+        "gold_count": 2,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 6,
+        "word3_df": 1,
+        "gold_count": 6,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 5,
+        "word3_df": 1,
+        "gold_count": 5,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 2,
+        "word3_df": 1,
+        "gold_count": 2,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 6,
+        "word3_df": 1,
+        "gold_count": 6,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 2,
+        "word3_df": 1,
+        "gold_count": 2,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      },
+      {
+        "topic_len": 2,
+        "topic_df": 3,
+        "word3_df": 1,
+        "gold_count": 3,
+        "indexed_terms": 1,
+        "substring_terms": 1,
+        "prod_leg_size": 1,
+        "prod_effective_floor": 1,
+        "naive_effective_floor": 2,
+        "or_effective_floor": 1,
+        "production_hits_gold": false,
+        "fix_naive_hits_gold": false,
+        "fix_or_hits_gold": true,
+        "production_raw_has_gold": false,
+        "fix_or_raw_has_gold": true
+      }
+    ]
+  },
+  "end_to_end": {
+    "derived_and_real": [
+      {
+        "id": "derived-0",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 5,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-1",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 9,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-2",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 6,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-3",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 3,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-4",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 7,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-5",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 1,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-6",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 1,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-7",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 1,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-8",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 4,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-9",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 4,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-10",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 4,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-11",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 2,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-12",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 4,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-13",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 2,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-14",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 6,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-15",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 5,
+        "base_hits_gold": 0,
+        "fixed_hits_gold": 0
+      },
+      {
+        "id": "derived-16",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 2,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-17",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 6,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-18",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": false,
+        "scores_equal": false,
+        "gold_total": 2,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "derived-19",
+        "set": "derived_2char",
+        "blind_spot_shape": true,
+        "ids_equal": true,
+        "scores_equal": false,
+        "gold_total": 3,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-self-who",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 1,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-self-name",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 1,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-self-myname",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 1,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-self-do",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 1,
+        "base_hits_gold": 0,
+        "fixed_hits_gold": 0
+      },
+      {
+        "id": "real-self-what",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 1,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-self-benren",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 1,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-nonself-install",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      },
+      {
+        "id": "real-nonself-deploy",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      },
+      {
+        "id": "real-nonself-lag",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      },
+      {
+        "id": "real-2char-plugin",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 25,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-2char-task",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 18,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-2char-version",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 16,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-2char-host",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 11,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "real-2char-session",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 7,
+        "base_hits_gold": 1,
+        "fixed_hits_gold": 1
+      },
+      {
+        "id": "extra-install-how",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      },
+      {
+        "id": "extra-db-where",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      },
+      {
+        "id": "extra-weights",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      },
+      {
+        "id": "extra-model-swap",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      },
+      {
+        "id": "extra-datahome",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      },
+      {
+        "id": "extra-schedule",
+        "set": "real_20",
+        "blind_spot_shape": false,
+        "ids_equal": true,
+        "scores_equal": true,
+        "gold_total": 0,
+        "base_hits_gold": null,
+        "fixed_hits_gold": null
+      }
+    ],
+    "summary": {
+      "queries": 40,
+      "blind_spot_queries": 20,
+      "byte_identical_ids": 31,
+      "byte_identical_scores": 20,
+      "changed_ids": 9,
+      "gold_gained": 0,
+      "gold_lost": 0,
+      "clamp_changed": 0
+    },
+    "no_blind_spot_byte_identical": true
+  },
+  "frozen_41": {
+    "direct_rows": [
+      {
+        "case": "zh-rel-01-管理方向",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-01-管理方向",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-01-管理方向",
+        "query_index": 2,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-02-技术选型",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-02-技术选型",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-02-技术选型",
+        "query_index": 2,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-03-加入与离开",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-03-加入与离开",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-03-加入与离开",
+        "query_index": 2,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-04-用户偏好",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-04-用户偏好",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-05-两跳",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-05-两跳",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-06-站点负责人",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-06-站点负责人",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-07-会议时间",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-07-会议时间",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-08-依赖方向",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-08-依赖方向",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-08-依赖方向",
+        "query_index": 2,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-09-语义对照组",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-09-语义对照组",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-09-语义对照组",
+        "query_index": 2,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-10-审核方向",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-10-审核方向",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-11-项目归属",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-11-项目归属",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-12-版本约束",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-rel-12-版本约束",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": true,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-2char-name-lookup",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-2char-name-lookup",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-2char-name-lookup",
+        "query_index": 2,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-2char-term-lookup",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-2char-term-lookup",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-2char-shared-entity",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-self-01-自指身份",
+        "query_index": 0,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-self-01-自指身份",
+        "query_index": 1,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-self-01-自指身份",
+        "query_index": 2,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-self-01-自指身份",
+        "query_index": 3,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-self-01-自指身份",
+        "query_index": 4,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      },
+      {
+        "case": "zh-self-01-自指身份",
+        "query_index": 5,
+        "ids_equal": true,
+        "scores_equal": true,
+        "blind_spot_shape": false,
+        "base_hits_expected": 1,
+        "fixed_hits_expected": 1
+      }
+    ],
+    "summary": {
+      "queries": 41,
+      "blind_spot_queries": 1,
+      "byte_identical_ids": 41,
+      "byte_identical_scores": 41,
+      "changed": 0,
+      "expected_gained": 0,
+      "expected_lost": 0
+    },
+    "note": "the frozen set is driven through runScript per case (fresh temp store per case, real remember), so each query gets a direct production-vs-fix comparison"
+  },
+  "verdict": {
+    "fix_or_recovers_leg": true,
+    "fix_naive_hurts": false,
+    "clamp_preserved": true,
+    "frozen_no_regression": true,
+    "changed_only_on_blind_spot_shape": true
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r4-5-sweep-fixor.mjs",
+  "privacy": {
+    "clean": true,
+    "forbidden_keys": [],
+    "strings_over_max": [],
+    "sensitive_pattern_hits": [],
+    "cjk_runs_over_7_not_whitelisted": [],
+    "keys_checked": true
+  }
+}

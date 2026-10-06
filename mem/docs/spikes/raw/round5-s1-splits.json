@@ -1,0 +1,197 @@
+{
+  "card": "R5-S1b/S4/S6a",
+  "measured_at": "2026-10-05T17:47:07.361Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    1.6,
+    1.46,
+    0.82
+  ],
+  "identity": {
+    "applicable": false,
+    "note": "split-statistics card — no retrieval pass; the S2 card identity-checks the passes it runs"
+  },
+  "validation": {
+    "split_a_ok": true,
+    "split_b_ok": true,
+    "split_a_problems": [],
+    "split_b_problems": [],
+    "problem_kinds_a": [],
+    "problem_kinds_b": []
+  },
+  "yield": {
+    "split_a": {
+      "atoms": 450,
+      "edges": 246,
+      "facts_with_single_atom": 0,
+      "atoms_per_fact": {
+        "min": 3,
+        "median": 6,
+        "max": 18,
+        "mean": 6.6176
+      },
+      "atom_len": {
+        "min": 8,
+        "median": 50,
+        "max": 263,
+        "mean": 59.1489
+      },
+      "source_chars": 25723,
+      "atom_chars": 26617,
+      "atom_char_ratio": 1.0348,
+      "atoms_with_edge": 360,
+      "edges_per_atom": 0.5467,
+      "relation_types": {
+        "same_topic": 142,
+        "causal": 100,
+        "subsumes": 2,
+        "temporal": 1,
+        "contradicts": 1
+      },
+      "source_sentence_verbatim": 449,
+      "source_sentence_verbatim_share": 0.9978
+    },
+    "split_b": {
+      "atoms": 389,
+      "edges": 177,
+      "facts_with_single_atom": 0,
+      "atoms_per_fact": {
+        "min": 3,
+        "median": 6,
+        "max": 10,
+        "mean": 5.7206
+      },
+      "atom_len": {
+        "min": 12,
+        "median": 58,
+        "max": 263,
+        "mean": 66.1774
+      },
+      "source_chars": 25723,
+      "atom_chars": 25743,
+      "atom_char_ratio": 1.0008,
+      "atoms_with_edge": 291,
+      "edges_per_atom": 0.455,
+      "relation_types": {
+        "same_topic": 119,
+        "causal": 58
+      },
+      "source_sentence_verbatim": 389,
+      "source_sentence_verbatim_share": 1
+    }
+  },
+  "consistency": {
+    "alignment_rule": "greedy one-to-one on 3-gram Jaccard >= 0.35",
+    "count_equal_facts": 26,
+    "count_differ_facts": 42,
+    "count_diff_rate": 0.6176,
+    "mean_relative_count_diff": 0.1381,
+    "atom_match_rate_a": 0.8267,
+    "atom_match_rate_b": 0.9563,
+    "edge_overlap_rate_a": 0.5652,
+    "edge_overlap_rate_b": 0.642,
+    "edges_compared_a": 184,
+    "edges_compared_b": 162,
+    "edge_type_agreement_rate": 0.8365
+  },
+  "relation_derivability": {
+    "rule": "an edge is engine-derivable when the two atoms share an engine-extracted entity name (shared_entity) and/or the same parseable time expression (shared_time)",
+    "totals": {
+      "edges": 246,
+      "shared_entity": 180,
+      "shared_time": 0,
+      "both": 2,
+      "neither": 64
+    },
+    "derivable_share": 0.7398,
+    "non_derivable_share": 0.2602,
+    "by_type": {
+      "same_topic": {
+        "edges": 142,
+        "shared_entity": 112,
+        "shared_time": 0,
+        "both": 2,
+        "neither": 28
+      },
+      "causal": {
+        "edges": 100,
+        "shared_entity": 65,
+        "shared_time": 0,
+        "both": 0,
+        "neither": 35
+      },
+      "subsumes": {
+        "edges": 2,
+        "shared_entity": 2,
+        "shared_time": 0,
+        "both": 0,
+        "neither": 0
+      },
+      "temporal": {
+        "edges": 1,
+        "shared_entity": 1,
+        "shared_time": 0,
+        "both": 0,
+        "neither": 0
+      },
+      "contradicts": {
+        "edges": 1,
+        "shared_entity": 0,
+        "shared_time": 0,
+        "both": 0,
+        "neither": 1
+      }
+    }
+  },
+  "failure_modes": {
+    "self_containment_loss_selfreported": {
+      "atoms": 5,
+      "share": 0.0111
+    },
+    "self_containment_loss_heuristic": {
+      "rule": "atom contains one of 18 demonstrative/pronoun tokens",
+      "atoms": 63,
+      "share": 0.14
+    },
+    "row_inflation": {
+      "active_before": 85,
+      "selected_rewritten": 68,
+      "atoms_a": 450,
+      "rows_after_a": 467,
+      "row_factor_a": 5.4941,
+      "atoms_b": 389,
+      "rows_after_b": 406,
+      "row_factor_b": 4.7765
+    },
+    "orphan_atoms": {
+      "facts_with_single_atom": 0,
+      "share": 0,
+      "note": "an atom whose siblings are all archived becomes the sole survivor of its source fact; measured as the share of facts split into exactly one atom (no sibling to lose)"
+    },
+    "over_split_audit": {
+      "judged": 25,
+      "verdicts": {
+        "faithful": 23,
+        "drifted": 1,
+        "vacuous": 1
+      },
+      "drifted_share": 0.08,
+      "judged_self_containment_false": 2,
+      "judged_self_containment_false_share": 0.08
+    }
+  },
+  "derived_inputs": {
+    "split_a": "/tmp/dsh-r5/split-a.json",
+    "split_b": "/tmp/dsh-r5/split-b.json",
+    "over_split_sample": "/tmp/dsh-r5/oversplit-sample.json"
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r5-1-splits.mjs --json mem/docs/spikes/raw/round5-s1-splits.json",
+  "privacy": {
+    "clean": true,
+    "forbidden_keys": [],
+    "strings_over_max": [],
+    "sensitive_pattern_hits": [],
+    "cjk_runs_over_7_not_whitelisted": [],
+    "keys_checked": true
+  }
+}

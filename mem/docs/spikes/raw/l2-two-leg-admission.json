@@ -1,0 +1,1563 @@
+{
+  "card": "L2",
+  "measured_at": "2026-10-05T15:45:46.695Z",
+  "node": "v22.23.2",
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85
+  },
+  "rule": "keep = (#legs with evidence >= 2) OR score >= top1*(1-delta)",
+  "deltas": [
+    0.2,
+    0.4
+  ],
+  "identity": {
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "evidence_histogram_returned_hits": {
+    "1": 49,
+    "2": 34,
+    "3": 3
+  },
+  "real_summary": {
+    "d0.2": {
+      "gold_queries": 11,
+      "gold_removed_total": 0,
+      "gold_removed_detail": [],
+      "top3_relevant_mean": 1.8182,
+      "base_top3_relevant_mean": 1.8182,
+      "hits_removed_total": 18,
+      "single_leg_hits_removed_total": 18
+    },
+    "d0.4": {
+      "gold_queries": 11,
+      "gold_removed_total": 0,
+      "gold_removed_detail": [],
+      "top3_relevant_mean": 1.8182,
+      "base_top3_relevant_mean": 1.8182,
+      "hits_removed_total": 11,
+      "single_leg_hits_removed_total": 11
+    }
+  },
+  "real": [
+    {
+      "id": "real-self-who",
+      "query": "我是谁？",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "base_top3": 1,
+      "returned_evidence": [
+        {
+          "id": 4,
+          "evidence": 2,
+          "score": 0.7
+        },
+        {
+          "id": 117,
+          "evidence": 2,
+          "score": 0.5328
+        },
+        {
+          "id": 103,
+          "evidence": 2,
+          "score": 0.5315
+        },
+        {
+          "id": 25,
+          "evidence": 1,
+          "score": 0.1125
+        },
+        {
+          "id": 36,
+          "evidence": 1,
+          "score": 0.1125
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            25,
+            36
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            25,
+            36
+          ]
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            25,
+            36
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            25,
+            36
+          ]
+        }
+      }
+    },
+    {
+      "id": "real-self-name",
+      "query": "我叫什么",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "base_top3": 1,
+      "returned_evidence": [
+        {
+          "id": 4,
+          "evidence": 3,
+          "score": 1
+        },
+        {
+          "id": 117,
+          "evidence": 2,
+          "score": 0.4577
+        },
+        {
+          "id": 103,
+          "evidence": 2,
+          "score": 0.419
+        },
+        {
+          "id": 25,
+          "evidence": 1,
+          "score": 0.045
+        },
+        {
+          "id": 36,
+          "evidence": 1,
+          "score": 0.045
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            25,
+            36
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            25,
+            36
+          ]
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            25,
+            36
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            25,
+            36
+          ]
+        }
+      }
+    },
+    {
+      "id": "real-self-myname",
+      "query": "我的名字",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        95,
+        101
+      ],
+      "base_top3": 1,
+      "returned_evidence": [
+        {
+          "id": 4,
+          "evidence": 3,
+          "score": 1
+        },
+        {
+          "id": 117,
+          "evidence": 2,
+          "score": 0.4577
+        },
+        {
+          "id": 103,
+          "evidence": 2,
+          "score": 0.419
+        },
+        {
+          "id": 95,
+          "evidence": 1,
+          "score": 0.0563
+        },
+        {
+          "id": 101,
+          "evidence": 1,
+          "score": 0.0563
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            95,
+            101
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            95,
+            101
+          ]
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            95,
+            101
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            95,
+            101
+          ]
+        }
+      }
+    },
+    {
+      "id": "real-self-do",
+      "query": "我是做什么的",
+      "kind": "self",
+      "gold": [
+        5
+      ],
+      "base_ids": [
+        4,
+        117,
+        133,
+        103,
+        160
+      ],
+      "base_top3": 0,
+      "returned_evidence": [
+        {
+          "id": 4,
+          "evidence": 2,
+          "score": 0.7
+        },
+        {
+          "id": 117,
+          "evidence": 2,
+          "score": 0.6236
+        },
+        {
+          "id": 133,
+          "evidence": 2,
+          "score": 0.6023
+        },
+        {
+          "id": 103,
+          "evidence": 2,
+          "score": 0.5978
+        },
+        {
+          "id": 160,
+          "evidence": 2,
+          "score": 0.4125
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "top3": 0,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "top3": 0,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "real-self-what",
+      "query": "我叫啥",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "base_top3": 1,
+      "returned_evidence": [
+        {
+          "id": 4,
+          "evidence": 3,
+          "score": 1
+        },
+        {
+          "id": 117,
+          "evidence": 2,
+          "score": 0.4577
+        },
+        {
+          "id": 103,
+          "evidence": 2,
+          "score": 0.419
+        },
+        {
+          "id": 25,
+          "evidence": 1,
+          "score": 0.045
+        },
+        {
+          "id": 36,
+          "evidence": 1,
+          "score": 0.045
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            25,
+            36
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            25,
+            36
+          ]
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            25,
+            36
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            25,
+            36
+          ]
+        }
+      }
+    },
+    {
+      "id": "real-self-benren",
+      "query": "本人是谁",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "base_ids": [
+        4,
+        117,
+        103,
+        25,
+        36
+      ],
+      "base_top3": 1,
+      "returned_evidence": [
+        {
+          "id": 4,
+          "evidence": 2,
+          "score": 0.7
+        },
+        {
+          "id": 117,
+          "evidence": 2,
+          "score": 0.5328
+        },
+        {
+          "id": 103,
+          "evidence": 2,
+          "score": 0.5315
+        },
+        {
+          "id": 25,
+          "evidence": 1,
+          "score": 0.1125
+        },
+        {
+          "id": 36,
+          "evidence": 1,
+          "score": 0.1125
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            25,
+            36
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            25,
+            36
+          ]
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            4,
+            117,
+            103
+          ],
+          "top3": 1,
+          "removed_from_top5": [
+            25,
+            36
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            25,
+            36
+          ]
+        }
+      }
+    },
+    {
+      "id": "real-nonself-install",
+      "query": "插件的安装方法",
+      "kind": "nonself",
+      "gold": null,
+      "base_ids": [
+        122,
+        108,
+        159,
+        29,
+        109
+      ],
+      "base_top3": null,
+      "returned_evidence": [
+        {
+          "id": 122,
+          "evidence": 2,
+          "score": 0.6573
+        },
+        {
+          "id": 108,
+          "evidence": 1,
+          "score": 0.55
+        },
+        {
+          "id": 159,
+          "evidence": 1,
+          "score": 0.4872
+        },
+        {
+          "id": 29,
+          "evidence": 1,
+          "score": 0.4856
+        },
+        {
+          "id": 109,
+          "evidence": 1,
+          "score": 0.481
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            122,
+            108
+          ],
+          "top3": null,
+          "removed_from_top5": [
+            159,
+            29,
+            109
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            159,
+            29,
+            109
+          ]
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            122,
+            108,
+            159,
+            29,
+            109
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "real-nonself-deploy",
+      "query": "生产环境的部署流程",
+      "kind": "nonself",
+      "gold": null,
+      "base_ids": [],
+      "base_top3": null,
+      "returned_evidence": [],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "real-nonself-lag",
+      "query": "数据库主从延迟",
+      "kind": "nonself",
+      "gold": null,
+      "base_ids": [
+        72,
+        151,
+        128,
+        138,
+        63
+      ],
+      "base_top3": null,
+      "returned_evidence": [
+        {
+          "id": 72,
+          "evidence": 1,
+          "score": 0.55
+        },
+        {
+          "id": 151,
+          "evidence": 1,
+          "score": 0.5349
+        },
+        {
+          "id": 128,
+          "evidence": 1,
+          "score": 0.5331
+        },
+        {
+          "id": 138,
+          "evidence": 1,
+          "score": 0.5326
+        },
+        {
+          "id": 63,
+          "evidence": 1,
+          "score": 0.5307
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            72,
+            151,
+            128,
+            138,
+            63
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            72,
+            151,
+            128,
+            138,
+            63
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "real-2char-plugin",
+      "query": "插件",
+      "kind": "entity2",
+      "gold": [
+        29,
+        64,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        104,
+        109,
+        116,
+        118,
+        119,
+        120,
+        122,
+        123,
+        135,
+        140,
+        144,
+        147,
+        148,
+        159,
+        162,
+        163
+      ],
+      "base_ids": [
+        29,
+        64,
+        94,
+        95,
+        96
+      ],
+      "base_top3": 3,
+      "returned_evidence": [
+        {
+          "id": 29,
+          "evidence": 1,
+          "score": 0.3
+        },
+        {
+          "id": 64,
+          "evidence": 1,
+          "score": 0.3
+        },
+        {
+          "id": 94,
+          "evidence": 1,
+          "score": 0.3
+        },
+        {
+          "id": 95,
+          "evidence": 1,
+          "score": 0.3
+        },
+        {
+          "id": 96,
+          "evidence": 1,
+          "score": 0.3
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            29,
+            64,
+            94,
+            95,
+            96
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            29,
+            64,
+            94,
+            95,
+            96
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "real-2char-task",
+      "query": "任务",
+      "kind": "entity2",
+      "gold": [
+        95,
+        96,
+        97,
+        112,
+        116,
+        125,
+        128,
+        134,
+        135,
+        137,
+        138,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        160
+      ],
+      "base_ids": [
+        95,
+        96,
+        97,
+        112,
+        116
+      ],
+      "base_top3": 3,
+      "returned_evidence": [
+        {
+          "id": 95,
+          "evidence": 1,
+          "score": 0.3
+        },
+        {
+          "id": 96,
+          "evidence": 1,
+          "score": 0.3
+        },
+        {
+          "id": 97,
+          "evidence": 1,
+          "score": 0.3
+        },
+        {
+          "id": 112,
+          "evidence": 1,
+          "score": 0.3
+        },
+        {
+          "id": 116,
+          "evidence": 1,
+          "score": 0.3
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            95,
+            96,
+            97,
+            112,
+            116
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            95,
+            96,
+            97,
+            112,
+            116
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "real-2char-version",
+      "query": "版本",
+      "kind": "entity2",
+      "gold": [
+        21,
+        23,
+        72,
+        101,
+        108,
+        110,
+        114,
+        116,
+        120,
+        124,
+        132,
+        144,
+        148,
+        155,
+        159,
+        160
+      ],
+      "base_ids": [
+        21,
+        23,
+        72,
+        101,
+        108
+      ],
+      "base_top3": 3,
+      "returned_evidence": [
+        {
+          "id": 21,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 23,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 72,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 101,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 108,
+          "evidence": 2,
+          "score": 0.45
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            21,
+            23,
+            72,
+            101,
+            108
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            21,
+            23,
+            72,
+            101,
+            108
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "real-2char-host",
+      "query": "宿主",
+      "kind": "entity2",
+      "gold": [
+        29,
+        33,
+        63,
+        94,
+        104,
+        110,
+        122,
+        140,
+        142,
+        144,
+        148
+      ],
+      "base_ids": [
+        29,
+        33,
+        63,
+        94,
+        104
+      ],
+      "base_top3": 3,
+      "returned_evidence": [
+        {
+          "id": 29,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 33,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 63,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 94,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 104,
+          "evidence": 2,
+          "score": 0.45
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            29,
+            33,
+            63,
+            94,
+            104
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            29,
+            33,
+            63,
+            94,
+            104
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "real-2char-session",
+      "query": "会话",
+      "kind": "entity2",
+      "gold": [
+        25,
+        62,
+        116,
+        121,
+        128,
+        134,
+        135
+      ],
+      "base_ids": [
+        25,
+        62,
+        116,
+        121,
+        128
+      ],
+      "base_top3": 3,
+      "returned_evidence": [
+        {
+          "id": 25,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 62,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 116,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 121,
+          "evidence": 2,
+          "score": 0.45
+        },
+        {
+          "id": 128,
+          "evidence": 2,
+          "score": 0.45
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            25,
+            62,
+            116,
+            121,
+            128
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            25,
+            62,
+            116,
+            121,
+            128
+          ],
+          "top3": 3,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "extra-install-how",
+      "query": "插件怎么安装",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        108,
+        163
+      ],
+      "base_top3": null,
+      "returned_evidence": [
+        {
+          "id": 108,
+          "evidence": 1,
+          "score": 0.55
+        },
+        {
+          "id": 163,
+          "evidence": 1,
+          "score": 0.3
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            108
+          ],
+          "top3": null,
+          "removed_from_top5": [
+            163
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            163
+          ]
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            108
+          ],
+          "top3": null,
+          "removed_from_top5": [
+            163
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            163
+          ]
+        }
+      }
+    },
+    {
+      "id": "extra-db-where",
+      "query": "记忆库在哪",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        89,
+        125,
+        133,
+        164
+      ],
+      "base_top3": null,
+      "returned_evidence": [
+        {
+          "id": 89,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 125,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 133,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 164,
+          "evidence": 1,
+          "score": 0.15
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            89,
+            125,
+            133,
+            164
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            89,
+            125,
+            133,
+            164
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "extra-weights",
+      "query": "检索权重是多少",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [],
+      "base_top3": null,
+      "returned_evidence": [],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "extra-model-swap",
+      "query": "模型怎么换",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        25,
+        33,
+        96,
+        109,
+        153
+      ],
+      "base_top3": null,
+      "returned_evidence": [
+        {
+          "id": 25,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 33,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 96,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 109,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 153,
+          "evidence": 1,
+          "score": 0.15
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            25,
+            33,
+            96,
+            109,
+            153
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            25,
+            33,
+            96,
+            109,
+            153
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "extra-datahome",
+      "query": "数据根在哪",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        62,
+        63,
+        87,
+        89,
+        154
+      ],
+      "base_top3": null,
+      "returned_evidence": [
+        {
+          "id": 62,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 63,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 87,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 89,
+          "evidence": 1,
+          "score": 0.15
+        },
+        {
+          "id": 154,
+          "evidence": 1,
+          "score": 0.15
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            62,
+            63,
+            87,
+            89,
+            154
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            62,
+            63,
+            87,
+            89,
+            154
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    },
+    {
+      "id": "extra-schedule",
+      "query": "任务怎么调度",
+      "kind": "extra",
+      "gold": null,
+      "base_ids": [
+        141,
+        128,
+        95,
+        97,
+        116
+      ],
+      "base_top3": null,
+      "returned_evidence": [
+        {
+          "id": 141,
+          "evidence": 2,
+          "score": 0.7
+        },
+        {
+          "id": 128,
+          "evidence": 1,
+          "score": 0.5382
+        },
+        {
+          "id": 95,
+          "evidence": 1,
+          "score": 0.5295
+        },
+        {
+          "id": 97,
+          "evidence": 1,
+          "score": 0.5277
+        },
+        {
+          "id": 116,
+          "evidence": 1,
+          "score": 0.5262
+        }
+      ],
+      "arms": {
+        "d0.2": {
+          "delta": 0.2,
+          "ids": [
+            141
+          ],
+          "top3": null,
+          "removed_from_top5": [
+            128,
+            95,
+            97,
+            116
+          ],
+          "gold_removed": [],
+          "single_leg_hits_removed": [
+            128,
+            95,
+            97,
+            116
+          ]
+        },
+        "d0.4": {
+          "delta": 0.4,
+          "ids": [
+            141,
+            128,
+            95,
+            97,
+            116
+          ],
+          "top3": null,
+          "removed_from_top5": [],
+          "gold_removed": [],
+          "single_leg_hits_removed": []
+        }
+      }
+    }
+  ],
+  "frozen_base": {
+    "must_include_pass": 40,
+    "must_include": 0.9756,
+    "top3_relevant_mean": 1.0244,
+    "identity_failures": 0
+  },
+  "frozen": {
+    "d0.2": {
+      "must_include": 0.9756,
+      "must_include_pass": 40,
+      "must_exclude": 0.7073,
+      "empty_rate": 0,
+      "top3_relevant_mean": 1.0244,
+      "identity_failures": 0,
+      "blocked_missing_expected": [
+        {
+          "query": "张伟管理的人负责什么",
+          "actual": [
+            0
+          ],
+          "expected": [
+            0,
+            1
+          ]
+        }
+      ]
+    },
+    "d0.4": {
+      "must_include": 0.9756,
+      "must_include_pass": 40,
+      "must_exclude": 0.7073,
+      "empty_rate": 0,
+      "top3_relevant_mean": 1.0244,
+      "identity_failures": 0,
+      "blocked_missing_expected": [
+        {
+          "query": "张伟管理的人负责什么",
+          "actual": [
+            0
+          ],
+          "expected": [
+            0,
+            1
+          ]
+        }
+      ]
+    }
+  },
+  "verdicts": {
+    "d0.2": {
+      "gold_removed": 0,
+      "must_include_frozen": "40/41 (base 40/41)",
+      "top3_up": false,
+      "verdict": "reject",
+      "reason": "no gain"
+    },
+    "d0.4": {
+      "gold_removed": 0,
+      "must_include_frozen": "40/41 (base 40/41)",
+      "top3_up": false,
+      "verdict": "reject",
+      "reason": "no gain"
+    }
+  },
+  "reproduction": "node mem/scripts/spikes/bench-l2-two-leg-admission.mjs"
+}

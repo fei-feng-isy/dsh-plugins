@@ -1,0 +1,3709 @@
+{
+  "card": "F4",
+  "measured_at": "2026-10-05T15:45:40.722Z",
+  "node": "v22.23.2",
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85,
+    "median_len": 313
+  },
+  "limit": 5,
+  "arms": {
+    "bm25": "production -bm25",
+    "coverage": "countMatchedTerms/terms.length",
+    "hybrid": "normalized bm25 x coverage"
+  },
+  "identity": {
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "real_summary": {
+    "bm25": {
+      "gold_queries": 11,
+      "top1_ok": 10,
+      "top3_relevant_mean": 1.8182,
+      "self_ranks": [
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            95,
+            101
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "ranks": {
+            "103": 4,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        }
+      ]
+    },
+    "coverage": {
+      "gold_queries": 11,
+      "top1_ok": 10,
+      "top3_relevant_mean": 1.8182,
+      "self_ranks": [
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            95,
+            101
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "ranks": {
+            "103": 4,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        }
+      ]
+    },
+    "hybrid": {
+      "gold_queries": 11,
+      "top1_ok": 10,
+      "top3_relevant_mean": 1.8182,
+      "self_ranks": [
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            95,
+            101
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "ranks": {
+            "103": 4,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        }
+      ]
+    }
+  },
+  "diagnostics": {
+    "queries_with_same_candidate_set": 20,
+    "queries_where_fts_leg_head_differs": 2,
+    "queries_where_fused_scores_differ": 0,
+    "queries_where_returned_ids_differ": 0
+  },
+  "real": [
+    {
+      "id": "real-self-who",
+      "query": "我是谁？",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            0.7,
+            0.5328,
+            0.5315,
+            0.1125,
+            0.1125
+          ],
+          "pool_size": 15,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            0.7,
+            0.5328,
+            0.5315,
+            0.1125,
+            0.1125
+          ],
+          "pool_size": 15,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            0.7,
+            0.5328,
+            0.5315,
+            0.1125,
+            0.1125
+          ],
+          "pool_size": 15,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-name",
+      "query": "我叫什么",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.045,
+            0.045
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.045,
+            0.045
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.045,
+            0.045
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-myname",
+      "query": "我的名字",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            4,
+            117,
+            103,
+            95,
+            101
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.0563,
+            0.0563
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            4,
+            117,
+            103,
+            95,
+            101
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.0563,
+            0.0563
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            4,
+            117,
+            103,
+            95,
+            101
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.0563,
+            0.0563
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-do",
+      "query": "我是做什么的",
+      "kind": "self",
+      "gold": [
+        5
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": true,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "160@15.7347",
+        "coverage": "160@0.75",
+        "hybrid": "160@0.75"
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "scores": [
+            0.7,
+            0.6236,
+            0.6023,
+            0.5978,
+            0.4125
+          ],
+          "pool_size": 15,
+          "top1": 0,
+          "top3": 0,
+          "ranks": {
+            "103": 4,
+            "117": 2,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "scores": [
+            0.7,
+            0.6236,
+            0.6023,
+            0.5978,
+            0.4125
+          ],
+          "pool_size": 15,
+          "top1": 0,
+          "top3": 0,
+          "ranks": {
+            "103": 4,
+            "117": 2,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            4,
+            117,
+            133,
+            103,
+            160
+          ],
+          "scores": [
+            0.7,
+            0.6236,
+            0.6023,
+            0.5978,
+            0.4125
+          ],
+          "pool_size": 15,
+          "top1": 0,
+          "top3": 0,
+          "ranks": {
+            "103": 4,
+            "117": 2,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-what",
+      "query": "我叫啥",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.045,
+            0.045
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.045,
+            0.045
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            1,
+            0.4577,
+            0.419,
+            0.045,
+            0.045
+          ],
+          "pool_size": 19,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-benren",
+      "query": "本人是谁",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            0.7,
+            0.5328,
+            0.5315,
+            0.1125,
+            0.1125
+          ],
+          "pool_size": 15,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            0.7,
+            0.5328,
+            0.5315,
+            0.1125,
+            0.1125
+          ],
+          "pool_size": 15,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            4,
+            117,
+            103,
+            25,
+            36
+          ],
+          "scores": [
+            0.7,
+            0.5328,
+            0.5315,
+            0.1125,
+            0.1125
+          ],
+          "pool_size": 15,
+          "top1": 1,
+          "top3": 1,
+          "ranks": {
+            "103": 3,
+            "117": 2,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-nonself-install",
+      "query": "插件的安装方法",
+      "kind": "nonself",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            122,
+            108,
+            159,
+            29,
+            109
+          ],
+          "scores": [
+            0.6573,
+            0.55,
+            0.4872,
+            0.4856,
+            0.481
+          ],
+          "pool_size": 12,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            122,
+            108,
+            159,
+            29,
+            109
+          ],
+          "scores": [
+            0.6573,
+            0.55,
+            0.4872,
+            0.4856,
+            0.481
+          ],
+          "pool_size": 12,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            122,
+            108,
+            159,
+            29,
+            109
+          ],
+          "scores": [
+            0.6573,
+            0.55,
+            0.4872,
+            0.4856,
+            0.481
+          ],
+          "pool_size": 12,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-nonself-deploy",
+      "query": "生产环境的部署流程",
+      "kind": "nonself",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [],
+          "scores": [],
+          "pool_size": 0,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [],
+          "scores": [],
+          "pool_size": 0,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [],
+          "scores": [],
+          "pool_size": 0,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-nonself-lag",
+      "query": "数据库主从延迟",
+      "kind": "nonself",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            72,
+            151,
+            128,
+            138,
+            63
+          ],
+          "scores": [
+            0.55,
+            0.5349,
+            0.5331,
+            0.5326,
+            0.5307
+          ],
+          "pool_size": 25,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            72,
+            151,
+            128,
+            138,
+            63
+          ],
+          "scores": [
+            0.55,
+            0.5349,
+            0.5331,
+            0.5326,
+            0.5307
+          ],
+          "pool_size": 25,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            72,
+            151,
+            128,
+            138,
+            63
+          ],
+          "scores": [
+            0.55,
+            0.5349,
+            0.5331,
+            0.5326,
+            0.5307
+          ],
+          "pool_size": 25,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-plugin",
+      "query": "插件",
+      "kind": "entity2",
+      "gold": [
+        29,
+        64,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        104,
+        109,
+        116,
+        118,
+        119,
+        120,
+        122,
+        123,
+        135,
+        140,
+        144,
+        147,
+        148,
+        159,
+        162,
+        163
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "29@1,64@1,94@1,95@1,96@1",
+        "coverage": "29@1,64@1,94@1,95@1,96@1",
+        "hybrid": "29@1,64@1,94@1,95@1,96@1"
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            29,
+            64,
+            94,
+            95,
+            96
+          ],
+          "scores": [
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "pool_size": 25,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            29,
+            64,
+            94,
+            95,
+            96
+          ],
+          "scores": [
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "pool_size": 25,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            29,
+            64,
+            94,
+            95,
+            96
+          ],
+          "scores": [
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "pool_size": 25,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-task",
+      "query": "任务",
+      "kind": "entity2",
+      "gold": [
+        95,
+        96,
+        97,
+        112,
+        116,
+        125,
+        128,
+        134,
+        135,
+        137,
+        138,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        160
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "95@1,96@1,97@1,112@1,116@1",
+        "coverage": "95@1,96@1,97@1,112@1,116@1",
+        "hybrid": "95@1,96@1,97@1,112@1,116@1"
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            95,
+            96,
+            97,
+            112,
+            116
+          ],
+          "scores": [
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "pool_size": 18,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            95,
+            96,
+            97,
+            112,
+            116
+          ],
+          "scores": [
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "pool_size": 18,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            95,
+            96,
+            97,
+            112,
+            116
+          ],
+          "scores": [
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "pool_size": 18,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-version",
+      "query": "版本",
+      "kind": "entity2",
+      "gold": [
+        21,
+        23,
+        72,
+        101,
+        108,
+        110,
+        114,
+        116,
+        120,
+        124,
+        132,
+        144,
+        148,
+        155,
+        159,
+        160
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "21@1,23@1,72@1,101@1,103@1",
+        "coverage": "21@1,23@1,72@1,101@1,103@1",
+        "hybrid": "21@1,23@1,72@1,101@1,103@1"
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            21,
+            23,
+            72,
+            101,
+            108
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 18,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            21,
+            23,
+            72,
+            101,
+            108
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 18,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            21,
+            23,
+            72,
+            101,
+            108
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 18,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-host",
+      "query": "宿主",
+      "kind": "entity2",
+      "gold": [
+        29,
+        33,
+        63,
+        94,
+        104,
+        110,
+        122,
+        140,
+        142,
+        144,
+        148
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "29@1,33@1,63@1,94@1,104@1",
+        "coverage": "29@1,33@1,63@1,94@1,104@1",
+        "hybrid": "29@1,33@1,63@1,94@1,104@1"
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            29,
+            33,
+            63,
+            94,
+            104
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 11,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            29,
+            33,
+            63,
+            94,
+            104
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 11,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            29,
+            33,
+            63,
+            94,
+            104
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 11,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-session",
+      "query": "会话",
+      "kind": "entity2",
+      "gold": [
+        25,
+        62,
+        116,
+        121,
+        128,
+        134,
+        135
+      ],
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "25@1,36@1,62@1,63@1,97@1",
+        "coverage": "25@1,36@1,62@1,63@1,97@1",
+        "hybrid": "25@1,36@1,62@1,63@1,97@1"
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            25,
+            62,
+            116,
+            121,
+            128
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 12,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            25,
+            62,
+            116,
+            121,
+            128
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 12,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            25,
+            62,
+            116,
+            121,
+            128
+          ],
+          "scores": [
+            0.45,
+            0.45,
+            0.45,
+            0.45,
+            0.45
+          ],
+          "pool_size": 12,
+          "top1": 1,
+          "top3": 3,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-install-how",
+      "query": "插件怎么安装",
+      "kind": "extra",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": true,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "163@21.8338",
+        "coverage": "163@1",
+        "hybrid": "163@1"
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            108,
+            163
+          ],
+          "scores": [
+            0.55,
+            0.3
+          ],
+          "pool_size": 2,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            108,
+            163
+          ],
+          "scores": [
+            0.55,
+            0.3
+          ],
+          "pool_size": 2,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            108,
+            163
+          ],
+          "scores": [
+            0.55,
+            0.3
+          ],
+          "pool_size": 2,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-db-where",
+      "query": "记忆库在哪",
+      "kind": "extra",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            89,
+            125,
+            133,
+            164
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 4,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": 2
+          }
+        },
+        "coverage": {
+          "ids": [
+            89,
+            125,
+            133,
+            164
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 4,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": 2
+          }
+        },
+        "hybrid": {
+          "ids": [
+            89,
+            125,
+            133,
+            164
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 4,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-weights",
+      "query": "检索权重是多少",
+      "kind": "extra",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [],
+          "scores": [],
+          "pool_size": 0,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [],
+          "scores": [],
+          "pool_size": 0,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [],
+          "scores": [],
+          "pool_size": 0,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-model-swap",
+      "query": "模型怎么换",
+      "kind": "extra",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            25,
+            33,
+            96,
+            109,
+            153
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 6,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            25,
+            33,
+            96,
+            109,
+            153
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 6,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            25,
+            33,
+            96,
+            109,
+            153
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 6,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-datahome",
+      "query": "数据根在哪",
+      "kind": "extra",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            62,
+            63,
+            87,
+            89,
+            154
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 5,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            62,
+            63,
+            87,
+            89,
+            154
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 5,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            62,
+            63,
+            87,
+            89,
+            154
+          ],
+          "scores": [
+            0.15,
+            0.15,
+            0.15,
+            0.15,
+            0.15
+          ],
+          "pool_size": 5,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-schedule",
+      "query": "任务怎么调度",
+      "kind": "extra",
+      "gold": null,
+      "same_fts_candidate_set": true,
+      "fts_leg_head_differs": false,
+      "fused_scores_differ": false,
+      "fts_leg_top": {
+        "bm25": "",
+        "coverage": "",
+        "hybrid": ""
+      },
+      "arms": {
+        "bm25": {
+          "ids": [
+            141,
+            128,
+            95,
+            97,
+            116
+          ],
+          "scores": [
+            0.7,
+            0.5382,
+            0.5295,
+            0.5277,
+            0.5262
+          ],
+          "pool_size": 10,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "coverage": {
+          "ids": [
+            141,
+            128,
+            95,
+            97,
+            116
+          ],
+          "scores": [
+            0.7,
+            0.5382,
+            0.5295,
+            0.5277,
+            0.5262
+          ],
+          "pool_size": 10,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        },
+        "hybrid": {
+          "ids": [
+            141,
+            128,
+            95,
+            97,
+            116
+          ],
+          "scores": [
+            0.7,
+            0.5382,
+            0.5295,
+            0.5277,
+            0.5262
+          ],
+          "pool_size": 10,
+          "top1": null,
+          "top3": null,
+          "ranks": {
+            "103": null,
+            "117": null,
+            "125": null
+          }
+        }
+      }
+    }
+  ],
+  "frozen": {
+    "bm25": {
+      "precision_at_k": 0.6423,
+      "recall_at_k": 0.9878,
+      "mrr": 1,
+      "must_include": 0.9756,
+      "must_include_pass": 40,
+      "must_include_total": 41,
+      "must_exclude": 0.6585,
+      "must_exclude_pass": 27,
+      "empty_rate": 0,
+      "top3_relevant_mean": 1.0244,
+      "identity_failures": 0,
+      "blocked": [
+        "张伟管理的人负责什么"
+      ],
+      "per_query": [
+        {
+          "query": "李娜管理谁",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁管理李娜",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "王强管理谁",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "订单服务的主库是什么",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "哪个服务使用 MySQL",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "订单服务的缓存用什么",
+          "k": 2,
+          "actual": [
+            2,
+            0
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "陈静加入了哪个组",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁加入了风控组",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "陈静离开了哪个组",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "老王喜欢什么风格",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "谁喜欢详细的推导过程",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "谁负责支付网关",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "张伟管理的人负责什么",
+          "k": 3,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0,
+            1
+          ],
+          "must_include": false,
+          "must_exclude": false
+        },
+        {
+          "query": "上海站谁负责部署",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "刘洋负责哪个站点",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "周会什么时候开",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "架构评审几点开始",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "支付网关依赖什么",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "什么依赖风控引擎",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "风控引擎依赖什么",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "监控方案是什么",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "项目部署在哪里",
+          "k": 2,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "日志怎么收集",
+          "k": 2,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "李娜审核了谁的方案",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁审核了王强的方案",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "统一网关是哪个组负责的",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "数据组负责什么",
+          "k": 2,
+          "actual": [
+            2,
+            0
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "生产环境的 Python 版本要求",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "CI 用哪个 Python 版本",
+          "k": 2,
+          "actual": [
+            1,
+            2
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "李娜",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "张伟",
+          "k": 1,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "王强",
+          "k": 1,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "网关",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "数据库",
+          "k": 1,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "风控",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0,
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我是谁？",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我叫什么",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我的名字",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我是做什么的",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我叫啥",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "本人是谁",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        }
+      ]
+    },
+    "coverage": {
+      "precision_at_k": 0.6423,
+      "recall_at_k": 0.9878,
+      "mrr": 1,
+      "must_include": 0.9756,
+      "must_include_pass": 40,
+      "must_include_total": 41,
+      "must_exclude": 0.6585,
+      "must_exclude_pass": 27,
+      "empty_rate": 0,
+      "top3_relevant_mean": 1.0244,
+      "identity_failures": 0,
+      "blocked": [
+        "张伟管理的人负责什么"
+      ],
+      "per_query": [
+        {
+          "query": "李娜管理谁",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁管理李娜",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "王强管理谁",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "订单服务的主库是什么",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "哪个服务使用 MySQL",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "订单服务的缓存用什么",
+          "k": 2,
+          "actual": [
+            2,
+            0
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "陈静加入了哪个组",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁加入了风控组",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "陈静离开了哪个组",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "老王喜欢什么风格",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "谁喜欢详细的推导过程",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "谁负责支付网关",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "张伟管理的人负责什么",
+          "k": 3,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0,
+            1
+          ],
+          "must_include": false,
+          "must_exclude": false
+        },
+        {
+          "query": "上海站谁负责部署",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "刘洋负责哪个站点",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "周会什么时候开",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "架构评审几点开始",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "支付网关依赖什么",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "什么依赖风控引擎",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "风控引擎依赖什么",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "监控方案是什么",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "项目部署在哪里",
+          "k": 2,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "日志怎么收集",
+          "k": 2,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "李娜审核了谁的方案",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁审核了王强的方案",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "统一网关是哪个组负责的",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "数据组负责什么",
+          "k": 2,
+          "actual": [
+            2,
+            0
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "生产环境的 Python 版本要求",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "CI 用哪个 Python 版本",
+          "k": 2,
+          "actual": [
+            1,
+            2
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "李娜",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "张伟",
+          "k": 1,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "王强",
+          "k": 1,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "网关",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "数据库",
+          "k": 1,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "风控",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0,
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我是谁？",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我叫什么",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我的名字",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我是做什么的",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我叫啥",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "本人是谁",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        }
+      ]
+    },
+    "hybrid": {
+      "precision_at_k": 0.6423,
+      "recall_at_k": 0.9878,
+      "mrr": 1,
+      "must_include": 0.9756,
+      "must_include_pass": 40,
+      "must_include_total": 41,
+      "must_exclude": 0.6585,
+      "must_exclude_pass": 27,
+      "empty_rate": 0,
+      "top3_relevant_mean": 1.0244,
+      "identity_failures": 0,
+      "blocked": [
+        "张伟管理的人负责什么"
+      ],
+      "per_query": [
+        {
+          "query": "李娜管理谁",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁管理李娜",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "王强管理谁",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "订单服务的主库是什么",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "哪个服务使用 MySQL",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "订单服务的缓存用什么",
+          "k": 2,
+          "actual": [
+            2,
+            0
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "陈静加入了哪个组",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁加入了风控组",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "陈静离开了哪个组",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "老王喜欢什么风格",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "谁喜欢详细的推导过程",
+          "k": 2,
+          "actual": [
+            2,
+            1
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "谁负责支付网关",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "张伟管理的人负责什么",
+          "k": 3,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0,
+            1
+          ],
+          "must_include": false,
+          "must_exclude": false
+        },
+        {
+          "query": "上海站谁负责部署",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "刘洋负责哪个站点",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "周会什么时候开",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "架构评审几点开始",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "支付网关依赖什么",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "什么依赖风控引擎",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "风控引擎依赖什么",
+          "k": 2,
+          "actual": [
+            1,
+            0
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "监控方案是什么",
+          "k": 2,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "项目部署在哪里",
+          "k": 2,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "日志怎么收集",
+          "k": 2,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "李娜审核了谁的方案",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "谁审核了王强的方案",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "统一网关是哪个组负责的",
+          "k": 2,
+          "actual": [
+            0,
+            2
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "数据组负责什么",
+          "k": 2,
+          "actual": [
+            2,
+            0
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "生产环境的 Python 版本要求",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": false
+        },
+        {
+          "query": "CI 用哪个 Python 版本",
+          "k": 2,
+          "actual": [
+            1,
+            2
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "李娜",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "张伟",
+          "k": 1,
+          "actual": [
+            1
+          ],
+          "expected": [
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "王强",
+          "k": 1,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "网关",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "数据库",
+          "k": 1,
+          "actual": [
+            2
+          ],
+          "expected": [
+            2
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "风控",
+          "k": 2,
+          "actual": [
+            0,
+            1
+          ],
+          "expected": [
+            0,
+            1
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我是谁？",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我叫什么",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我的名字",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我是做什么的",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "我叫啥",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        },
+        {
+          "query": "本人是谁",
+          "k": 1,
+          "actual": [
+            0
+          ],
+          "expected": [
+            0
+          ],
+          "must_include": true,
+          "must_exclude": true
+        }
+      ]
+    }
+  },
+  "verdicts": {
+    "coverage": {
+      "must_include_not_lower": true,
+      "must_exclude_strictly_up": false,
+      "frozen_top3_up": false,
+      "real_top3_up": false,
+      "candidate_union_not_narrowed": true,
+      "verdict": "reject",
+      "delta": {
+        "froze_must_include": 0,
+        "frozen_must_exclude": 0,
+        "frozen_top3": 0,
+        "real_top1": 0,
+        "real_top3": 0
+      }
+    },
+    "hybrid": {
+      "must_include_not_lower": true,
+      "must_exclude_strictly_up": false,
+      "frozen_top3_up": false,
+      "real_top3_up": false,
+      "candidate_union_not_narrowed": true,
+      "verdict": "reject",
+      "delta": {
+        "froze_must_include": 0,
+        "frozen_must_exclude": 0,
+        "frozen_top3": 0,
+        "real_top1": 0,
+        "real_top3": 0
+      }
+    }
+  },
+  "reproduction": "node mem/scripts/spikes/bench-f4-fts-score.mjs --json mem/docs/spikes/raw/f4-fts-score.json"
+}

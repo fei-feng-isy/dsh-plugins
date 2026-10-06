@@ -1,0 +1,101 @@
+{
+  "card": "R5-privacy",
+  "measured_at": "2026-10-05T18:01:56.271Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    1.26,
+    3.04,
+    2.59
+  ],
+  "identity": {
+    "applicable": false,
+    "note": "audit card — no retrieval pass, so there is no production arm to identity-check (R2-5/R2-7 convention)"
+  },
+  "pattern_source": "bench-r4-lib.mjs SENSITIVE_PATTERNS (memory_defense.py `_REDACTION_PATTERNS` 167-238 + the module UUID pattern)",
+  "pattern_count": 47,
+  "brief_says": 44,
+  "artifacts_scanned": [
+    "raw/round5-privacy-scan.json",
+    "raw/round5-s1-corpus.json",
+    "raw/round5-s1-splits.json",
+    "raw/round5-s2-quality.json",
+    "raw/round5-s3-dedup.json",
+    "raw/round5-s5-batch.json",
+    "docs/spikes/IMPROVEMENT_SPIKE_RESULTS_ROUND5.md"
+  ],
+  "per_artifact": [
+    {
+      "artifact": "raw/round5-privacy-scan.json",
+      "bytes": 2795,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round5-s1-corpus.json",
+      "bytes": 2699,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round5-s1-splits.json",
+      "bytes": 5001,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round5-s2-quality.json",
+      "bytes": 1447818,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round5-s3-dedup.json",
+      "bytes": 37257,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round5-s5-batch.json",
+      "bytes": 7615,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    }
+  ],
+  "forbidden_key_violations": [],
+  "strings_over_300": [],
+  "sensitive_pattern_hits": [],
+  "cjk_runs_over_7_not_in_repo_whitelist": [],
+  "cjk_runs_over_7_not_in_rounds_1_4_vocabulary": {
+    "count": 0,
+    "examples": []
+  },
+  "cjk_runs_over_7_found_in_active_corpus_text": [],
+  "whitelist_size": 1316,
+  "prior_vocabulary_size": 1085,
+  "static_write_check": {
+    "writable_call_sites": [],
+    "violations": [],
+    "note": "every writable open in the round-5 scripts targets a VACUUM INTO copy under the OS temp dir"
+  },
+  "live_store_fingerprint": {
+    "path": "/home/ffeng/.avantf/memory/memory.db",
+    "mtime_ms": 1791212154122.2869,
+    "size": 3715072,
+    "sha256_16": "0cf402f937a89732"
+  },
+  "verdict": {
+    "clean_keys": true,
+    "clean_patterns": true,
+    "clean_cjk": true,
+    "clean_containment": true,
+    "live_store_written": false,
+    "overall": true
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r5-5-privacy.mjs --report mem/docs/spikes/IMPROVEMENT_SPIKE_RESULTS_ROUND5.md"
+}

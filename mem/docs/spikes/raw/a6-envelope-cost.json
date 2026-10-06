@@ -1,0 +1,254 @@
+{
+  "card": "A6",
+  "measured_at": "2026-10-05T15:45:07.357Z",
+  "node": "v22.23.2",
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85
+  },
+  "envelope": "legs: { semantic|fts|jaccard: { raw, norm } } per hit (norm = fuse’s max-normalized value)",
+  "reps": 200,
+  "identity": {
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "summary": {
+    "queries": 20,
+    "hits": 86,
+    "plain_bytes_total": 87554,
+    "enveloped_bytes_total": 96907,
+    "added_bytes_total": 9353,
+    "added_bytes_per_hit_mean": 108.7558,
+    "added_pct_of_payload": 10.6826,
+    "plain_json_ms_total": 0.2585,
+    "enveloped_json_ms_total": 0.3418,
+    "added_json_ms_per_hit": 0.001,
+    "admin_stats_bytes": 481,
+    "note": "A6 changes retrieval quality by construction (no A/B): these are pure cost numbers for scheduling."
+  },
+  "rows": [
+    {
+      "id": "real-self-who",
+      "query": "我是谁？",
+      "hits": 5,
+      "plain_bytes": 4744,
+      "enveloped_bytes": 5304,
+      "added_bytes": 560,
+      "added_bytes_per_hit": 112,
+      "plain_tokens": 1313,
+      "enveloped_tokens": 1453
+    },
+    {
+      "id": "real-self-name",
+      "query": "我叫什么",
+      "hits": 5,
+      "plain_bytes": 4729,
+      "enveloped_bytes": 5280,
+      "added_bytes": 551,
+      "added_bytes_per_hit": 110.2,
+      "plain_tokens": 1310,
+      "enveloped_tokens": 1447
+    },
+    {
+      "id": "real-self-myname",
+      "query": "我的名字",
+      "hits": 5,
+      "plain_bytes": 3775,
+      "enveloped_bytes": 4332,
+      "added_bytes": 557,
+      "added_bytes_per_hit": 111.4,
+      "plain_tokens": 1042,
+      "enveloped_tokens": 1182
+    },
+    {
+      "id": "real-self-do",
+      "query": "我是做什么的",
+      "hits": 5,
+      "plain_bytes": 3101,
+      "enveloped_bytes": 3665,
+      "added_bytes": 564,
+      "added_bytes_per_hit": 112.8,
+      "plain_tokens": 878,
+      "enveloped_tokens": 1019
+    },
+    {
+      "id": "real-self-what",
+      "query": "我叫啥",
+      "hits": 5,
+      "plain_bytes": 4729,
+      "enveloped_bytes": 5280,
+      "added_bytes": 551,
+      "added_bytes_per_hit": 110.2,
+      "plain_tokens": 1310,
+      "enveloped_tokens": 1447
+    },
+    {
+      "id": "real-self-benren",
+      "query": "本人是谁",
+      "hits": 5,
+      "plain_bytes": 4744,
+      "enveloped_bytes": 5304,
+      "added_bytes": 560,
+      "added_bytes_per_hit": 112,
+      "plain_tokens": 1313,
+      "enveloped_tokens": 1453
+    },
+    {
+      "id": "real-nonself-install",
+      "query": "插件的安装方法",
+      "hits": 5,
+      "plain_bytes": 4693,
+      "enveloped_bytes": 5259,
+      "added_bytes": 566,
+      "added_bytes_per_hit": 113.2,
+      "plain_tokens": 1275,
+      "enveloped_tokens": 1416
+    },
+    {
+      "id": "real-nonself-deploy",
+      "query": "生产环境的部署流程",
+      "hits": 0,
+      "plain_bytes": 2,
+      "enveloped_bytes": 2,
+      "added_bytes": 0,
+      "added_bytes_per_hit": null,
+      "plain_tokens": 1,
+      "enveloped_tokens": 1
+    },
+    {
+      "id": "real-nonself-lag",
+      "query": "数据库主从延迟",
+      "hits": 5,
+      "plain_bytes": 4851,
+      "enveloped_bytes": 5421,
+      "added_bytes": 570,
+      "added_bytes_per_hit": 114,
+      "plain_tokens": 1355,
+      "enveloped_tokens": 1497
+    },
+    {
+      "id": "real-2char-plugin",
+      "query": "插件",
+      "hits": 5,
+      "plain_bytes": 5549,
+      "enveloped_bytes": 6074,
+      "added_bytes": 525,
+      "added_bytes_per_hit": 105,
+      "plain_tokens": 1522,
+      "enveloped_tokens": 1653
+    },
+    {
+      "id": "real-2char-task",
+      "query": "任务",
+      "hits": 5,
+      "plain_bytes": 5020,
+      "enveloped_bytes": 5545,
+      "added_bytes": 525,
+      "added_bytes_per_hit": 105,
+      "plain_tokens": 1403,
+      "enveloped_tokens": 1534
+    },
+    {
+      "id": "real-2char-version",
+      "query": "版本",
+      "hits": 5,
+      "plain_bytes": 5331,
+      "enveloped_bytes": 5841,
+      "added_bytes": 510,
+      "added_bytes_per_hit": 102,
+      "plain_tokens": 1456,
+      "enveloped_tokens": 1583
+    },
+    {
+      "id": "real-2char-host",
+      "query": "宿主",
+      "hits": 5,
+      "plain_bytes": 6105,
+      "enveloped_bytes": 6615,
+      "added_bytes": 510,
+      "added_bytes_per_hit": 102,
+      "plain_tokens": 1675,
+      "enveloped_tokens": 1803
+    },
+    {
+      "id": "real-2char-session",
+      "query": "会话",
+      "hits": 5,
+      "plain_bytes": 6036,
+      "enveloped_bytes": 6546,
+      "added_bytes": 510,
+      "added_bytes_per_hit": 102,
+      "plain_tokens": 1672,
+      "enveloped_tokens": 1800
+    },
+    {
+      "id": "extra-install-how",
+      "query": "插件怎么安装",
+      "hits": 2,
+      "plain_bytes": 1865,
+      "enveloped_bytes": 2086,
+      "added_bytes": 221,
+      "added_bytes_per_hit": 110.5,
+      "plain_tokens": 517,
+      "enveloped_tokens": 572
+    },
+    {
+      "id": "extra-db-where",
+      "query": "记忆库在哪",
+      "hits": 4,
+      "plain_bytes": 4666,
+      "enveloped_bytes": 5098,
+      "added_bytes": 432,
+      "added_bytes_per_hit": 108,
+      "plain_tokens": 1356,
+      "enveloped_tokens": 1464
+    },
+    {
+      "id": "extra-weights",
+      "query": "检索权重是多少",
+      "hits": 0,
+      "plain_bytes": 2,
+      "enveloped_bytes": 2,
+      "added_bytes": 0,
+      "added_bytes_per_hit": null,
+      "plain_tokens": 1,
+      "enveloped_tokens": 1
+    },
+    {
+      "id": "extra-model-swap",
+      "query": "模型怎么换",
+      "hits": 5,
+      "plain_bytes": 5984,
+      "enveloped_bytes": 6524,
+      "added_bytes": 540,
+      "added_bytes_per_hit": 108,
+      "plain_tokens": 1693,
+      "enveloped_tokens": 1828
+    },
+    {
+      "id": "extra-datahome",
+      "query": "数据根在哪",
+      "hits": 5,
+      "plain_bytes": 6762,
+      "enveloped_bytes": 7297,
+      "added_bytes": 535,
+      "added_bytes_per_hit": 107,
+      "plain_tokens": 1871,
+      "enveloped_tokens": 2005
+    },
+    {
+      "id": "extra-schedule",
+      "query": "任务怎么调度",
+      "hits": 5,
+      "plain_bytes": 4866,
+      "enveloped_bytes": 5432,
+      "added_bytes": 566,
+      "added_bytes_per_hit": 113.2,
+      "plain_tokens": 1357,
+      "enveloped_tokens": 1499
+    }
+  ],
+  "reproduction": "node mem/scripts/spikes/bench-a6-envelope-cost.mjs"
+}

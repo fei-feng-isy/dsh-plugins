@@ -373,6 +373,21 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
 - 知识库侧（`doc_chunks`）目前**只检测 + 提示**，不会自动重算：按提示跑 `avantf-mem kb reindex`（MCP/插件 `kb_reindex`）。
 - **模型 revision 读不到时只降级**：没有家族旁车（`<模型缓存根>/.envinit/models--<owner>--<name>/record.json`，例如模型由 transformers.js 自己下载）时，指纹**不含 revision**；**权重已在本地**而旁车缺失时，启动日志会有一条 `semantic: no model revision …` 的 WARNING 说明这一盲区："同名仓库换了权重"检测不到。其余旋钮照常覆盖，绝不会因此报错或拒绝打开库；模型还没装好（首次安装进行中）时不报这条——那时还没有可指纹化的东西。
 
+### 7.0.1 数据根备份纪律（WAL / `-shm`）
+
+`~/.avantf/memory/memory.db` 与 `~/.avantf/knowledge/knowledge.db` 工作在 **WAL 模式**：库文件旁边还会有**瞬态**的 `*.db-wal` 与 `*.db-shm`。
+
+- **不要版本化** `*-wal` / `*-shm`（把它们写进 `.gitignore`），也**不要**在复制/打包时把它们与 `*.db` 分开——混搭的 db 与 WAL 会让恢复失败或回退到旧状态。要入库的只有 `*.db` 本身。
+- 提交/打包/复制数据根之前，先停掉插件（没有写者），对每个库执行一次 checkpoint：
+
+  ```bash
+  sqlite3 ~/.avantf/memory/memory.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+  sqlite3 ~/.avantf/knowledge/knowledge.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+  ```
+
+  `wal_checkpoint(TRUNCATE)` 把 WAL 内容回写进主库，并把 `-wal` **截断到 0 字节**（文件可能仍在，这是正常状态）。
+- `mem_admin stats` 的 `wal` 字段（面板「检索健康度」块同样显示）就地报告 `-wal` 是否存在、当前多少字节，非 0 时给出上面的提醒。它**只做一次 `statSync`**，不调用 git、不起子进程、离线可用——"这些瞬态文件有没有被版本化"由你按本节规则检查，不由运行期探测。
+
 ---
 
 ## 7.1 放宽摄入/选择器的目录范围

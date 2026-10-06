@@ -1,0 +1,1107 @@
+{
+  "card": "round6-privacy",
+  "measured_at": "2026-10-05T18:19:36.408Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    8.73,
+    3.18,
+    2.22
+  ],
+  "identity": {
+    "applicable": false,
+    "note": "audit card — no retrieval pass, so there is no production arm to identity-check (R2-5/R2-7 convention)"
+  },
+  "pattern_source": "hindsight-api-slim/hindsight_api/extensions/memory_defense.py `_REDACTION_PATTERNS` (lines 167-238) + the module-level UUID pattern",
+  "pattern_count": 47,
+  "named_redaction_patterns": 46,
+  "uuid_pattern": 1,
+  "brief_says": 47,
+  "note": "the brief says the union scan compiles 47 regexes; this run compiles the same superset and keeps the `credit_card` Luhn second pass.",
+  "artifacts_scanned": [
+    "raw/round6-s0-pin.json",
+    "raw/round6-s1-triples.json",
+    "raw/round6-s2-actions.json",
+    "raw/round6-s3-needs.json",
+    "docs/spikes/RELATION_QUALITY_RESULTS.md",
+    "raw/round6-privacy-scan.json"
+  ],
+  "per_artifact": [
+    {
+      "artifact": "raw/round6-s0-pin.json",
+      "bytes": 791,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean": true
+    },
+    {
+      "artifact": "raw/round6-s1-triples.json",
+      "bytes": 6329,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean": true
+    },
+    {
+      "artifact": "raw/round6-s2-actions.json",
+      "bytes": 28097,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean": true
+    },
+    {
+      "artifact": "raw/round6-s3-needs.json",
+      "bytes": 40318,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean": true
+    }
+  ],
+  "forbidden_key_violations": [],
+  "strings_over_300": [],
+  "sensitive_pattern_hits": [],
+  "cjk_runs_over_7_not_in_repo_whitelist": [],
+  "cjk_runs_over_7_not_in_pre_round6_vocabulary": [
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "关系能力的需求侧基线"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "未改前五轮的报告与脚本"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "真实语料测量与隐私协议"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "隐私协议复用第四"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "事后只做逐条裁决"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "但四类引擎可派生边"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "且缺口主要是不可派生类型"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "活库在本轮自身运行期间从"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "故本轮先钉一份快照"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "之后所有卡都读它"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "条分层抽样人工判定"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "两端都能对上实体名的只有"
+    },
+    {
+      "artifact": "report",
+      "length": 15,
+      "run": "两端都不在该事实自己实体袋里的"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "不是实体层的补充"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "五个关系动作零基线"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "生产配置默认参数"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "曾经相关但已断开"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "次是三条检索腿并集的真子集"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "几乎不产生新候选"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "它按设计返回实体"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "结构上给不出事实"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "条无任何机制能答的多跳问题"
+    },
+    {
+      "artifact": "report",
+      "length": 14,
+      "run": "都已在三条检索腿的原始并集里"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "不是可达性或关系类型"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "引擎可派生边覆盖"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "条只是共享泛化字面"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "五块必答数字全部有数"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "活库由并发会话持续写入"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "本轮自身两次运行之间"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "读同一份冻结副本"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "有活库指纹与静态写点检查"
+    },
+    {
+      "artifact": "report",
+      "length": 15,
+      "run": "所有检索都用生产配置与默认参数"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "只影响池宽不影响"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "脚本对每条事实把副本产出与"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "正文只在进程内读"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "一切从正文派生的字符串"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "每条事实三元组数"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "谓词字符串本身是正文派生的"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "这里能公开说的是形状"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "没有一个是动词短语"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "存下来的三元组里含"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "它不是三元组低质的原因"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "谓词标签把名词当动词"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "的合并规则把从句尾巴切进来"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "是实体名还是片段"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "该事实自己的实体袋"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "该事实自己的袋里"
+    },
+    {
+      "artifact": "report",
+      "length": 14,
+      "run": "给两个已知实体加一条有向关系"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "条有三元组的事实做等距分层"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "位置居中的那条三元组"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "整条来源事实正文"
+    },
+    {
+      "artifact": "report",
+      "length": 18,
+      "run": "判定由本次执行者在进程内读该文件完成"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "表达的是事实真的断言"
+    },
+    {
+      "artifact": "report",
+      "length": 14,
+      "run": "两个论元都是可辨识的名词短语"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "允许轻微标点噪声"
+    },
+    {
+      "artifact": "report",
+      "length": 16,
+      "run": "但某个论元边界吞进了额外从句材料"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "至少一个论元不是论元"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "或谓词是被误标的关系外成分"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "三元组是噪声载体"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "三条互相独立的证据同向"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "都不在自己事实的实体袋里"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "能给两个已知实体连边"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "这个袋表达不了的东西的"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "而实体层本身是宽的"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "五个关系动作的零基线"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "全部来自真实语料"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "三元组里找真实两跳"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "只在已归档事实里共现"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "同时含两个实体的事实"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "还和哪些实体相关"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "一句话与其显式否定"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "每对一份临时副本"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "语义腿都吃这个名字"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "两条必须同读的诚实边界"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "由它自己走的那条三元组派生"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "它的正确答案就是它自己的"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "实体名同时是词法"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "实体三条腿的强信号"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "全是该实体的事实"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "它是五个动作里唯一一个"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "给一个已知实体名检索"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "执行者在进程内读它并判定"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "返回集确实回答了问题"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "问题本身是片段汤"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "版本的不动的引导"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "答案是被同一片段凑上的事实"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "里混进了泛化实体的事实"
+    },
+    {
+      "artifact": "report",
+      "length": 16,
+      "run": "同一自然语言问句在三条生产检索腿"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "即动作真的加了候选"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "它按设计返回实体名"
+    },
+    {
+      "artifact": "report",
+      "length": 18,
+      "run": "答案几乎总落在三条腿已经给出的候选里"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "这五个动作不提供"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "它们要么是图上精确"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "现有机制能答多少"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "第四轮派生引擎的两条硬规则"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "否则词法腿单独就能答"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "还要求至少共享一个这样的"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "查询不得解析出时间窗"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "如果全部从共享实体派生"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "共享一个非枢纽实体"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "个候选对里没有一条通过守卫"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "多跳查询里没有可解析的"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "每次都走它的兜底"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "的关系浏览需求都答不了"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "按构造全共享浏览实体"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "关系层面的成因不适用"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "或枢轴是实体名的三元组链"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "但没有任何受测机制走通"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "载体存在但全是虚假的"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "或三元组链的枢轴是片段"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "没有一对同时满足"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "类样本在本语料上采不到"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "比四类更重要的一个读数"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "已经在三条腿原始并集里"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "都在并集里的失败问题"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "实体腿也确实把两条"
+    },
+    {
+      "artifact": "report",
+      "length": 16,
+      "run": "但融合排序从来没有把两条同时放进"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "不在关系类型或可达性"
+    },
+    {
+      "artifact": "report",
+      "length": 14,
+      "run": "是两个片段字符串碰巧首尾相接"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "引擎可派生边的覆盖"
+    },
+    {
+      "artifact": "report",
+      "length": 18,
+      "run": "两条事实都有可解析时间表达且窗口相差"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "写入时间是会话产物"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "条事实共享同一天"
+    },
+    {
+      "artifact": "report",
+      "length": 17,
+      "run": "必须两条都带内容里的可解析时间表达"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "四类可派生边能连通"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "取代链不连接本轮"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "条各需要什么类型"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "三元组链的枢轴是片段"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "两条事实不是同一个话题"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "都不是真关系需求"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "四类可派生边在全样本上覆盖"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "确实存在真实共享实体"
+    },
+    {
+      "artifact": "report",
+      "length": 14,
+      "run": "而是派生器自己造出来的巧合对"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "而引擎派生不出来"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "两端都是实体名的"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "两端都不在自己袋里的"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "五个动作的成功率"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "多跳与浏览在现有机制下"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "全在三条腿并集里"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "四类可派生边覆盖"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "预注册判据的逐条裁决"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "四类可派生边能把"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "缺口主要是不可派生类型"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "三条一起读的结论"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "现有机制答不出多跳"
+    },
+    {
+      "artifact": "report",
+      "length": 14,
+      "run": "但答不出不等于需要新关系类型"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "只在真有共享实体的层上成立"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "条是派生器的巧合对"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "非真关系的巧合对也不计入"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "预注册的三档都没有被触发"
+    },
+    {
+      "artifact": "report",
+      "length": 15,
+      "run": "没有任何数字支持新增一个关系层"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "是派生器用同一条共享实体"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "这不是预注册判据的结果"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "真正被本轮测出来"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "预注册三档没有覆盖"
+    },
+    {
+      "artifact": "report",
+      "length": 14,
+      "run": "已经在三条检索腿的原始并集里"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "从不把它们同时放进去"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "它和已有证据连得上"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "写者声明的边若当成一条腿用"
+    },
+    {
+      "artifact": "report",
+      "length": 17,
+      "run": "能把写者本想成对出现的两条原子召回"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "而那条腿的作用恰恰是"
+    },
+    {
+      "artifact": "report",
+      "length": 12,
+      "run": "让原本够不到的变得够得到"
+    },
+    {
+      "artifact": "report",
+      "length": 17,
+      "run": "给第五轮那个观察补上了需求侧的解释"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "正确的立项形状是"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "而且它的评测必须报"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "第五轮已经实测过"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "靠过滤实现的形态会收窄并集"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "隐私协议执行证据"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "的注入只写每对一份的"
+    },
+    {
+      "artifact": "report",
+      "length": 15,
+      "run": "抽样各自在进程内读正文用于判定"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "派生字符串一律落"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "仓库产物只放聚合"
+    },
+    {
+      "artifact": "report",
+      "length": 13,
+      "run": "既有公开仓库文档里已出现的"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "报告自身从白名单里剔除"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "不提交任何真实派生数据"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "均已由仓库既有词汇"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "本报告白名单覆盖"
+    },
+    {
+      "artifact": "report",
+      "length": 15,
+      "run": "该产物自身也会被下一遍扫描覆盖"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "用户自己的工程笔记"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "包名与工具名本身可识别"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "复现命令与仓库卫生"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "模型只读本机缓存"
+    },
+    {
+      "artifact": "report",
+      "length": 15,
+      "run": "判定口径写在各自脚本与本报告里"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "里与本轮有关的新增只有"
+    },
+    {
+      "artifact": "report",
+      "length": 10,
+      "run": "有另一个并发任务在改"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "本轮所有命令只碰"
+    },
+    {
+      "artifact": "report",
+      "length": 9,
+      "run": "本轮零生产代码改动"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "拉进候选但排不进"
+    },
+    {
+      "artifact": "report",
+      "length": 22,
+      "run": "类的共定位缺口与第五轮的关系腿增益是同一件事"
+    },
+    {
+      "artifact": "report",
+      "length": 11,
+      "run": "两轮没有共用同一批查询"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "真实用户提问分布"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "语料里有什么连接"
+    },
+    {
+      "artifact": "report",
+      "length": 15,
+      "run": "类的人工判定只覆盖了连不上的那"
+    },
+    {
+      "artifact": "report",
+      "length": 8,
+      "run": "条没有逐条人工核"
+    }
+  ],
+  "cjk_runs_over_7_found_in_active_corpus_text": [],
+  "whitelist_vocabulary_size": 1527,
+  "pre_round6_vocabulary_size": 1333,
+  "static_write_check": {
+    "call_sites": [
+      {
+        "script": "bench-r6-0-pin.mjs",
+        "call": "snapshotDb",
+        "dst": "pinned"
+      },
+      {
+        "script": "bench-r6-1-triples.mjs",
+        "call": "snapshotDb"
+      },
+      {
+        "script": "bench-r6-2-actions.mjs",
+        "call": "snapshotDb"
+      },
+      {
+        "script": "bench-r6-2-actions.mjs",
+        "call": "snapshotDb"
+      },
+      {
+        "script": "bench-r6-3-needs.mjs",
+        "call": "snapshotDb"
+      },
+      {
+        "script": "bench-r6-9-privacy.mjs",
+        "call": "snapshotDb",
+        "dst": "snap"
+      }
+    ],
+    "write_json_targets": [
+      {
+        "script": "bench-r6-0-pin.mjs",
+        "target": "outPath"
+      },
+      {
+        "script": "bench-r6-1-triples.mjs",
+        "target": "outPath"
+      },
+      {
+        "script": "bench-r6-2-actions.mjs",
+        "target": "outPath"
+      },
+      {
+        "script": "bench-r6-3-needs.mjs",
+        "target": "outPath"
+      },
+      {
+        "script": "bench-r6-9-privacy.mjs",
+        "target": "outPath"
+      }
+    ],
+    "violations": [],
+    "note": "every writable open in the round-6 scripts targets a VACUUM INTO copy under the OS temp dir; the live store is opened read-only by snapshotDb/openReadOnly. The contradict card writes only to its own per-pair temp copies."
+  },
+  "live_store_fingerprint": {
+    "path": "/home/ffeng/.avantf/memory/memory.db",
+    "mtime_ms": 1791212154122.2869,
+    "mtime": "2026-10-05T14:55:54.122Z",
+    "size": 3715072,
+    "sha256_16": "0cf402f937a89732"
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r6-9-privacy.mjs --report mem/docs/spikes/RELATION_QUALITY_RESULTS.md",
+  "verdict": {
+    "clean_keys": true,
+    "clean_patterns": true,
+    "clean_cjk": true,
+    "clean_containment": true,
+    "live_store_written": false,
+    "overall": true
+  }
+}

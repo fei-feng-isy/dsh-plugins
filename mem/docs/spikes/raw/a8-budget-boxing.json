@@ -1,0 +1,2597 @@
+{
+  "card": "A8",
+  "measured_at": "2026-10-05T15:46:19.309Z",
+  "node": "v22.23.2",
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85
+  },
+  "arms": {
+    "truncate": "production fitToTokenBudget (text degraded, entry kept)",
+    "box": "whole-entry packing, skip what does not fit, top-1 fallback"
+  },
+  "real_budgets": [
+    80,
+    150,
+    300,
+    600
+  ],
+  "frozen_budgets": [
+    10,
+    30
+  ],
+  "identity": {
+    "checked": 100,
+    "passed": 100,
+    "failures": []
+  },
+  "real_summary": {
+    "80": {
+      "truncate": {
+        "returned_total": 86,
+        "truncated_total": 80,
+        "empty_text_total": 21,
+        "gold_kept": 30,
+        "used_tokens_total": 1426
+      },
+      "box": {
+        "returned_total": 24,
+        "truncated_total": 0,
+        "empty_text_total": 0,
+        "gold_kept": 10,
+        "used_tokens_total": 2312
+      }
+    },
+    "150": {
+      "truncate": {
+        "returned_total": 86,
+        "truncated_total": 73,
+        "empty_text_total": 10,
+        "gold_kept": 30,
+        "used_tokens_total": 2683
+      },
+      "box": {
+        "returned_total": 30,
+        "truncated_total": 0,
+        "empty_text_total": 0,
+        "gold_kept": 10,
+        "used_tokens_total": 2299
+      }
+    },
+    "300": {
+      "truncate": {
+        "returned_total": 86,
+        "truncated_total": 62,
+        "empty_text_total": 10,
+        "gold_kept": 30,
+        "used_tokens_total": 5309
+      },
+      "box": {
+        "returned_total": 39,
+        "truncated_total": 0,
+        "empty_text_total": 0,
+        "gold_kept": 14,
+        "used_tokens_total": 3879
+      }
+    },
+    "600": {
+      "truncate": {
+        "returned_total": 86,
+        "truncated_total": 26,
+        "empty_text_total": 2,
+        "gold_kept": 30,
+        "used_tokens_total": 10142
+      },
+      "box": {
+        "returned_total": 62,
+        "truncated_total": 0,
+        "empty_text_total": 0,
+        "gold_kept": 21,
+        "used_tokens_total": 8423
+      }
+    }
+  },
+  "real": [
+    {
+      "id": "real-self-who",
+      "query": "我是谁？",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 79,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 73,
+            "gold_kept": 1,
+            "skipped": 3
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 0,
+            "used_tokens": 149,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 285,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 1,
+            "empty_text": 0,
+            "used_tokens": 582,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103,
+              25
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 342,
+            "gold_kept": 1,
+            "skipped": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-name",
+      "query": "我叫什么",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 79,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 73,
+            "gold_kept": 1,
+            "skipped": 3
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 0,
+            "used_tokens": 149,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 285,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 1,
+            "empty_text": 0,
+            "used_tokens": 582,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103,
+              25
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 342,
+            "gold_kept": 1,
+            "skipped": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-myname",
+      "query": "我的名字",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              95,
+              101
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 0,
+            "used_tokens": 80,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 73,
+            "gold_kept": 1,
+            "skipped": 3
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              95,
+              101
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 0,
+            "used_tokens": 150,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              95,
+              101
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 299,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103,
+              95
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 289,
+            "gold_kept": 1,
+            "skipped": 1
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              95,
+              101
+            ],
+            "returned": 5,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 523,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103,
+              95,
+              101
+            ],
+            "returned": 5,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 523,
+            "gold_kept": 1,
+            "skipped": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-do",
+      "query": "我是做什么的",
+      "kind": "self",
+      "gold": [
+        5
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              133,
+              103,
+              160
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 79,
+            "gold_kept": 0
+          },
+          "box": {
+            "ids": [
+              4,
+              117
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 73,
+            "gold_kept": 0,
+            "skipped": 3
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              133,
+              103,
+              160
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 0,
+            "used_tokens": 150,
+            "gold_kept": 0
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 0,
+            "skipped": 2
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              133,
+              103,
+              160
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 298,
+            "gold_kept": 0
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              133,
+              103
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 269,
+            "gold_kept": 0,
+            "skipped": 1
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              133,
+              103,
+              160
+            ],
+            "returned": 5,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 429,
+            "gold_kept": 0
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              133,
+              103,
+              160
+            ],
+            "returned": 5,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 429,
+            "gold_kept": 0,
+            "skipped": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-what",
+      "query": "我叫啥",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 79,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 73,
+            "gold_kept": 1,
+            "skipped": 3
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 0,
+            "used_tokens": 149,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 285,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 1,
+            "empty_text": 0,
+            "used_tokens": 582,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103,
+              25
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 342,
+            "gold_kept": 1,
+            "skipped": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "real-self-benren",
+      "query": "本人是谁",
+      "kind": "self",
+      "gold": [
+        4
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 79,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 73,
+            "gold_kept": 1,
+            "skipped": 3
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 0,
+            "used_tokens": 149,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 285,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 123,
+            "gold_kept": 1,
+            "skipped": 2
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              4,
+              117,
+              103,
+              25,
+              36
+            ],
+            "returned": 5,
+            "truncated": 1,
+            "empty_text": 0,
+            "used_tokens": 582,
+            "gold_kept": 1
+          },
+          "box": {
+            "ids": [
+              4,
+              117,
+              103,
+              25
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 342,
+            "gold_kept": 1,
+            "skipped": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "real-nonself-install",
+      "query": "插件的安装方法",
+      "kind": "nonself",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              122,
+              108,
+              159,
+              29,
+              109
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 79,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              122
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 148,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              122,
+              108,
+              159,
+              29,
+              109
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 149,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              122
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 148,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              122,
+              108,
+              159,
+              29,
+              109
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 299,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              122,
+              108
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 254,
+            "gold_kept": null,
+            "skipped": 3
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              122,
+              108,
+              159,
+              29,
+              109
+            ],
+            "returned": 5,
+            "truncated": 1,
+            "empty_text": 0,
+            "used_tokens": 599,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              122,
+              108,
+              159,
+              29
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 573,
+            "gold_kept": null,
+            "skipped": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "real-nonself-deploy",
+      "query": "生产环境的部署流程",
+      "kind": "nonself",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "real-nonself-lag",
+      "query": "数据库主从延迟",
+      "kind": "nonself",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              72,
+              151,
+              128,
+              138,
+              63
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 80,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              72
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 82,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              72,
+              151,
+              128,
+              138,
+              63
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 150,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              72
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 82,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              72,
+              151,
+              128,
+              138,
+              63
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 0,
+            "used_tokens": 300,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              72,
+              151
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 186,
+            "gold_kept": null,
+            "skipped": 3
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              72,
+              151,
+              128,
+              138,
+              63
+            ],
+            "returned": 5,
+            "truncated": 1,
+            "empty_text": 0,
+            "used_tokens": 598,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              72,
+              151,
+              128,
+              138
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 533,
+            "gold_kept": null,
+            "skipped": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-plugin",
+      "query": "插件",
+      "kind": "entity2",
+      "gold": [
+        29,
+        64,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        104,
+        109,
+        116,
+        118,
+        119,
+        120,
+        122,
+        123,
+        135,
+        140,
+        144,
+        147,
+        148,
+        159,
+        162,
+        163
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              29,
+              64,
+              94,
+              95,
+              96
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 80,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              64
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 54,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              29,
+              64,
+              94,
+              95,
+              96
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 2,
+            "used_tokens": 149,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              29
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 132,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              29,
+              64,
+              94,
+              95,
+              96
+            ],
+            "returned": 5,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 299,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              29,
+              64
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 186,
+            "gold_kept": 2,
+            "skipped": 3
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              29,
+              64,
+              94,
+              95,
+              96
+            ],
+            "returned": 5,
+            "truncated": 1,
+            "empty_text": 0,
+            "used_tokens": 593,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              29,
+              64,
+              94,
+              95
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 573,
+            "gold_kept": 4,
+            "skipped": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-task",
+      "query": "任务",
+      "kind": "entity2",
+      "gold": [
+        95,
+        96,
+        97,
+        112,
+        116,
+        125,
+        128,
+        134,
+        135,
+        137,
+        138,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        160
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              95,
+              96,
+              97,
+              112,
+              116
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 2,
+            "used_tokens": 79,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              112
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 71,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              95,
+              96,
+              97,
+              112,
+              116
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 150,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              97
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 120,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              95,
+              96,
+              97,
+              112,
+              116
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 300,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              95,
+              97
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 286,
+            "gold_kept": 2,
+            "skipped": 3
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              95,
+              96,
+              97,
+              112,
+              116
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 599,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              95,
+              96,
+              97
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 575,
+            "gold_kept": 3,
+            "skipped": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-version",
+      "query": "版本",
+      "kind": "entity2",
+      "gold": [
+        21,
+        23,
+        72,
+        101,
+        108,
+        110,
+        114,
+        116,
+        120,
+        124,
+        132,
+        144,
+        148,
+        155,
+        159,
+        160
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              21,
+              23,
+              72,
+              101,
+              108
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 2,
+            "used_tokens": 79,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              21
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 175,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              21,
+              23,
+              72,
+              101,
+              108
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 0,
+            "used_tokens": 150,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              72
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 82,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              21,
+              23,
+              72,
+              101,
+              108
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 299,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              21,
+              72
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 257,
+            "gold_kept": 2,
+            "skipped": 3
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              21,
+              23,
+              72,
+              101,
+              108
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 599,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              21,
+              23,
+              72,
+              108
+            ],
+            "returned": 4,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 546,
+            "gold_kept": 4,
+            "skipped": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-host",
+      "query": "宿主",
+      "kind": "entity2",
+      "gold": [
+        29,
+        33,
+        63,
+        94,
+        104,
+        110,
+        122,
+        140,
+        142,
+        144,
+        148
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              29,
+              33,
+              63,
+              94,
+              104
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 80,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              29
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 132,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              29,
+              33,
+              63,
+              94,
+              104
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 149,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              29
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 132,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              29,
+              33,
+              63,
+              94,
+              104
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 300,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              29,
+              104
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 274,
+            "gold_kept": 2,
+            "skipped": 3
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              29,
+              33,
+              63,
+              94,
+              104
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 599,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              29,
+              33,
+              63
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 549,
+            "gold_kept": 3,
+            "skipped": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "real-2char-session",
+      "query": "会话",
+      "kind": "entity2",
+      "gold": [
+        25,
+        62,
+        116,
+        121,
+        128,
+        134,
+        135
+      ],
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              25,
+              62,
+              116,
+              121,
+              128
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 2,
+            "used_tokens": 79,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              25
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 219,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              25,
+              62,
+              116,
+              121,
+              128
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 0,
+            "used_tokens": 149,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              116
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 136,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              25,
+              62,
+              116,
+              121,
+              128
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 0,
+            "used_tokens": 299,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              25
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 219,
+            "gold_kept": 1,
+            "skipped": 4
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              25,
+              62,
+              116,
+              121,
+              128
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 1,
+            "used_tokens": 599,
+            "gold_kept": 5
+          },
+          "box": {
+            "ids": [
+              25,
+              62
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 483,
+            "gold_kept": 2,
+            "skipped": 3
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-install-how",
+      "query": "插件怎么安装",
+      "kind": "extra",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              108,
+              163
+            ],
+            "returned": 2,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 79,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              108
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 106,
+            "gold_kept": null,
+            "skipped": 1
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              108,
+              163
+            ],
+            "returned": 2,
+            "truncated": 1,
+            "empty_text": 0,
+            "used_tokens": 144,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              108
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 106,
+            "gold_kept": null,
+            "skipped": 1
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              108,
+              163
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 280,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              108,
+              163
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 280,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              108,
+              163
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 280,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              108,
+              163
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 280,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-db-where",
+      "query": "记忆库在哪",
+      "kind": "extra",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              89,
+              125,
+              133,
+              164
+            ],
+            "returned": 4,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 79,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              89
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 222,
+            "gold_kept": null,
+            "skipped": 3
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              89,
+              125,
+              133,
+              164
+            ],
+            "returned": 4,
+            "truncated": 4,
+            "empty_text": 0,
+            "used_tokens": 149,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              133
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 146,
+            "gold_kept": null,
+            "skipped": 3
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              89,
+              125,
+              133,
+              164
+            ],
+            "returned": 4,
+            "truncated": 4,
+            "empty_text": 1,
+            "used_tokens": 299,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              89
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 222,
+            "gold_kept": null,
+            "skipped": 3
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              89,
+              125,
+              133,
+              164
+            ],
+            "returned": 4,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 598,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              89,
+              125
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 494,
+            "gold_kept": null,
+            "skipped": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-weights",
+      "query": "检索权重是多少",
+      "kind": "extra",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [],
+            "returned": 0,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 0,
+            "gold_kept": null,
+            "skipped": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-model-swap",
+      "query": "模型怎么换",
+      "kind": "extra",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              25,
+              33,
+              96,
+              109,
+              153
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 2,
+            "used_tokens": 79,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              25
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 219,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              25,
+              33,
+              96,
+              109,
+              153
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 150,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              109
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 93,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              25,
+              33,
+              96,
+              109,
+              153
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 2,
+            "used_tokens": 299,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              25
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 219,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              25,
+              33,
+              96,
+              109,
+              153
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 1,
+            "used_tokens": 599,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              25,
+              33,
+              109
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 539,
+            "gold_kept": null,
+            "skipped": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-datahome",
+      "query": "数据根在哪",
+      "kind": "extra",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              62,
+              63,
+              87,
+              89,
+              154
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 79,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              62
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 264,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              62,
+              63,
+              87,
+              89,
+              154
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 2,
+            "used_tokens": 149,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              62
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 264,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              62,
+              63,
+              87,
+              89,
+              154
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 299,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              62
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 264,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              62,
+              63,
+              87,
+              89,
+              154
+            ],
+            "returned": 5,
+            "truncated": 3,
+            "empty_text": 0,
+            "used_tokens": 600,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              62,
+              63
+            ],
+            "returned": 2,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 454,
+            "gold_kept": null,
+            "skipped": 3
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-schedule",
+      "query": "任务怎么调度",
+      "kind": "extra",
+      "gold": null,
+      "budgets": {
+        "80": {
+          "truncate": {
+            "ids": [
+              141,
+              128,
+              95,
+              97,
+              116
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 2,
+            "used_tokens": 79,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              141
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 182,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "150": {
+          "truncate": {
+            "ids": [
+              141,
+              128,
+              95,
+              97,
+              116
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 149,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              97
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 120,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "300": {
+          "truncate": {
+            "ids": [
+              141,
+              128,
+              95,
+              97,
+              116
+            ],
+            "returned": 5,
+            "truncated": 5,
+            "empty_text": 1,
+            "used_tokens": 299,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              141
+            ],
+            "returned": 1,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 182,
+            "gold_kept": null,
+            "skipped": 4
+          }
+        },
+        "600": {
+          "truncate": {
+            "ids": [
+              141,
+              128,
+              95,
+              97,
+              116
+            ],
+            "returned": 5,
+            "truncated": 2,
+            "empty_text": 0,
+            "used_tokens": 599,
+            "gold_kept": null
+          },
+          "box": {
+            "ids": [
+              141,
+              128,
+              95
+            ],
+            "returned": 3,
+            "truncated": 0,
+            "empty_text": 0,
+            "used_tokens": 504,
+            "gold_kept": null,
+            "skipped": 2
+          }
+        }
+      }
+    }
+  ],
+  "frozen": {
+    "truncate_10": {
+      "must_include_pass": 40,
+      "must_include": 0.9756,
+      "empty_rate": 0,
+      "identity_failures": 0,
+      "blocked": [
+        "张伟管理的人负责什么"
+      ]
+    },
+    "box_10": {
+      "must_include_pass": 36,
+      "must_include": 0.878,
+      "empty_rate": 0,
+      "identity_failures": 0,
+      "blocked": [
+        "老王喜欢什么风格",
+        "谁喜欢详细的推导过程",
+        "张伟管理的人负责什么",
+        "生产环境的 Python 版本要求",
+        "风控"
+      ]
+    },
+    "truncate_30": {
+      "must_include_pass": 40,
+      "must_include": 0.9756,
+      "empty_rate": 0,
+      "identity_failures": 0,
+      "blocked": [
+        "张伟管理的人负责什么"
+      ]
+    },
+    "box_30": {
+      "must_include_pass": 40,
+      "must_include": 0.9756,
+      "empty_rate": 0,
+      "identity_failures": 0,
+      "blocked": [
+        "张伟管理的人负责什么"
+      ]
+    }
+  },
+  "verdicts": {
+    "real_80": {
+      "gold_not_lower": false,
+      "half_text_zero": true,
+      "gold_delta": -20,
+      "returned_delta": -62,
+      "verdict": "reject"
+    },
+    "real_150": {
+      "gold_not_lower": false,
+      "half_text_zero": true,
+      "gold_delta": -20,
+      "returned_delta": -56,
+      "verdict": "reject"
+    },
+    "real_300": {
+      "gold_not_lower": false,
+      "half_text_zero": true,
+      "gold_delta": -16,
+      "returned_delta": -47,
+      "verdict": "reject"
+    },
+    "real_600": {
+      "gold_not_lower": false,
+      "half_text_zero": true,
+      "gold_delta": -9,
+      "returned_delta": -24,
+      "verdict": "reject"
+    },
+    "frozen_10": {
+      "must_include_not_lower": false,
+      "delta": -4,
+      "verdict": "reject"
+    },
+    "frozen_30": {
+      "must_include_not_lower": true,
+      "delta": 0,
+      "verdict": "adopt"
+    }
+  },
+  "reproduction": "node mem/scripts/spikes/bench-a8-budget-boxing.mjs"
+}

@@ -1,0 +1,128 @@
+{
+  "card": "R4-privacy",
+  "measured_at": "2026-10-05T17:05:34.277Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    0.58,
+    1.3,
+    1.1
+  ],
+  "identity": {
+    "applicable": false,
+    "note": "audit card — no retrieval pass, so there is no production arm to identity-check (R2-5/R2-7 convention)"
+  },
+  "pattern_source": "hindsight-api-slim/hindsight_api/extensions/memory_defense.py `_REDACTION_PATTERNS` (lines 167-238) + the module-level `_UUID_PATTERN`",
+  "pattern_count": 47,
+  "named_redaction_patterns": 46,
+  "uuid_pattern": 1,
+  "brief_says": 44,
+  "note": "the brief cites 44 patterns; the cited block carries 46 named patterns and the module adds one separate UUID pattern, so this scan compiles 47 regexes — a superset either way. The credit_card rule keeps the source Luhn second pass.",
+  "artifacts_scanned": [
+    "raw/round4-privacy-scan.json",
+    "raw/round4-s1-corpus.json",
+    "raw/round4-s2-annotation.json",
+    "raw/round4-s3-supplier.json",
+    "raw/round4-s4-queries.json",
+    "raw/round4-s5-time.json",
+    "raw/round4-s6-attribute-sources.json",
+    "raw/round4-s7-fixor.json",
+    "raw/round4-s7-sweep.json",
+    "docs/spikes/IMPROVEMENT_SPIKE_RESULTS_ROUND4.md"
+  ],
+  "per_artifact": [
+    {
+      "artifact": "raw/round4-privacy-scan.json",
+      "bytes": 3557,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round4-s1-corpus.json",
+      "bytes": 4482,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round4-s2-annotation.json",
+      "bytes": 142624,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round4-s3-supplier.json",
+      "bytes": 364119,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round4-s4-queries.json",
+      "bytes": 219575,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round4-s5-time.json",
+      "bytes": 20832,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round4-s6-attribute-sources.json",
+      "bytes": 26861,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round4-s7-fixor.json",
+      "bytes": 32339,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    },
+    {
+      "artifact": "raw/round4-s7-sweep.json",
+      "bytes": 144348,
+      "forbidden_keys": [],
+      "strings_over_max": 0,
+      "clean_keys": true
+    }
+  ],
+  "forbidden_key_violations": [],
+  "strings_over_300": [],
+  "sensitive_pattern_hits": [],
+  "cjk_runs_over_7_not_in_repo_whitelist": [],
+  "cjk_runs_over_7_found_in_active_corpus_text": [],
+  "whitelist_vocabulary_size": 1049,
+  "static_write_check": {
+    "writable_call_sites": [
+      {
+        "script": "bench-r4-3-supplier.mjs",
+        "arg": "snap"
+      }
+    ],
+    "violations": [],
+    "note": "every writable open in the round-4 scripts targets a VACUUM INTO copy under the OS temp dir; the live store is opened read-only by snapshotDb/openReadOnly"
+  },
+  "live_store_fingerprint": {
+    "path": "/home/ffeng/.avantf/memory/memory.db",
+    "mtime_ms": 1791212154122.2869,
+    "size": 3715072,
+    "sha256_16": "0cf402f937a89732"
+  },
+  "verdict": {
+    "clean_keys": true,
+    "clean_patterns": true,
+    "clean_cjk": true,
+    "clean_containment": true,
+    "live_store_written": false,
+    "overall": true
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r4-6-privacy.mjs"
+}

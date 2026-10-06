@@ -1,0 +1,79 @@
+{
+  "card": "R2-8",
+  "measured_at": "2026-10-05T16:12:33.420Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    3.86,
+    2.03,
+    1.66
+  ],
+  "model": "Xenova/bge-base-zh-v1.5",
+  "snapshot": {
+    "source": "/home/ffeng/.avantf/memory/memory.db",
+    "active_facts": 85,
+    "median_len": 313
+  },
+  "simulation": {
+    "column": "facts.index_text = content + entity names + date tokens",
+    "fts_table": "facts_fts2 (external content, trigram)",
+    "triggers": 3,
+    "date_token_forms": [
+      "YYYY-MM-DD",
+      "YYYYMMDD",
+      "YYYY年M月D日",
+      "YYYY MM DD",
+      "M月D日"
+    ],
+    "on_copy_only": true
+  },
+  "population": {
+    "fact_entity_pairs": 2803,
+    "entity_names_not_verbatim_in_content": 0,
+    "entity_name_examples": [],
+    "facts_missing_own_date_literal": 60
+  },
+  "costs": {
+    "bytes": {
+      "baseline_bytes": 3555328,
+      "modified_bytes": 3887104,
+      "ratio": 1.0933,
+      "facts_fts2_index_bytes": 282624,
+      "facts_table_bytes_after": 2109440
+    },
+    "latency": {
+      "repeats": 3,
+      "queries": 20,
+      "sample_ms": 60,
+      "baseline_p50_ms": 25.4012,
+      "with_fts2_p50_ms": 28.0298,
+      "delta_pct": 0.1035,
+      "under_20pct": true
+    }
+  },
+  "recall": {
+    "entity_name_queries": {
+      "queries": 10,
+      "production_fts_hits": 9,
+      "fts2_hits": 9
+    },
+    "date_queries": {
+      "queries": 10,
+      "production_fts_hits": 9,
+      "fts2_hits": 10
+    }
+  },
+  "identity": {
+    "checked": 20,
+    "passed": 20,
+    "failures": []
+  },
+  "verdict": {
+    "entity_name_population_zero": true,
+    "entity_queries_improved": false,
+    "index_under_2x": true,
+    "p50_under_20pct": true,
+    "adopt": false,
+    "call": "reject — no entity-name query can improve: every extracted entity name is already verbatim in its fact content"
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r2-8-index-text-merge.mjs --json mem/docs/spikes/raw/round2-r2-8-index-text-merge.json"
+}

@@ -1,0 +1,1126 @@
+{
+  "card": "R4-S5",
+  "measured_at": "2026-10-05T17:01:10.926Z",
+  "node": "v22.23.2",
+  "loadavg": [
+    2.22,
+    1.76,
+    1.14
+  ],
+  "identity": {
+    "checked": 34,
+    "passed": 34,
+    "failures": []
+  },
+  "demand_upper_bound": {
+    "annotation_event_date_share": 0.2813,
+    "annotation_event_date_share_independent_pass": 0.2969,
+    "s1_text_parseable_share": null,
+    "note": "S1 measured 34/85 facts whose TEXT carries a parseable expression; the annotation says 18/64 (29.7% A-ext) facts have an explicit event date. The smaller number is the A2 demand bound: an explicit EVENT date, not a date-shaped string."
+  },
+  "derivation": {
+    "source": "queries.json form=time (window chosen from the annotated event date, narrowest first)",
+    "queries": 16,
+    "guards": 18,
+    "event_dates_available": 19
+  },
+  "summary": {
+    "baseline": {
+      "queries": 16,
+      "missing": 0,
+      "in_top3": 16,
+      "top1": 11,
+      "avg_rank": 1.3125
+    },
+    "window_created_at": {
+      "queries": 16,
+      "missing": 1,
+      "in_top3": 14,
+      "top1": 11,
+      "avg_rank": 1.4667
+    },
+    "window_event_date": {
+      "queries": 16,
+      "missing": 0,
+      "in_top3": 16,
+      "top1": 15,
+      "avg_rank": 1.125
+    },
+    "window_event_date_hard": {
+      "queries": 16,
+      "missing": 1,
+      "in_top3": 15,
+      "top1": 15,
+      "avg_rank": 1
+    }
+  },
+  "guards": {
+    "total": 18,
+    "parsed_as_time": 0,
+    "byte_identical": 18
+  },
+  "rows": [
+    {
+      "id": "time-97",
+      "gold": [
+        97,
+        43,
+        119,
+        150,
+        23,
+        95,
+        33
+      ],
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 7,
+      "created_at_facts_in_window": 39,
+      "baseline": {
+        "ids": [
+          33,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          33,
+          97,
+          4,
+          5,
+          19
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          33,
+          97,
+          23,
+          43,
+          95
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          33,
+          97,
+          23,
+          43,
+          95
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-43",
+      "gold": [
+        97,
+        43,
+        119,
+        150,
+        23,
+        95,
+        33
+      ],
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 7,
+      "created_at_facts_in_window": 39,
+      "baseline": {
+        "ids": [
+          21,
+          43
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          21,
+          43,
+          4,
+          5,
+          19
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          43,
+          23,
+          33,
+          95,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          43,
+          23,
+          33,
+          95,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-165",
+      "gold": [
+        165
+      ],
+      "window_start": "2026-10-04",
+      "window_end": "2026-10-05",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 1,
+      "created_at_facts_in_window": 7,
+      "baseline": {
+        "ids": [
+          123,
+          165
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          157,
+          158,
+          159,
+          160,
+          161
+        ],
+        "gold_rank": null,
+        "in_top3": false,
+        "missing": true
+      },
+      "window_event": {
+        "ids": [
+          163,
+          123,
+          165
+        ],
+        "gold_rank": 3,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          163
+        ],
+        "gold_rank": null,
+        "in_top3": false,
+        "missing": true
+      }
+    },
+    {
+      "id": "time-141",
+      "gold": [
+        141,
+        155,
+        143,
+        98,
+        137,
+        87,
+        163,
+        125,
+        144,
+        131
+      ],
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 10,
+      "created_at_facts_in_window": 37,
+      "baseline": {
+        "ids": [
+          141,
+          138
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          141,
+          138,
+          87,
+          89,
+          94
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          141,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          141,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-155",
+      "gold": [
+        141,
+        155,
+        143,
+        98,
+        137,
+        87,
+        163,
+        125,
+        144,
+        131
+      ],
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 10,
+      "created_at_facts_in_window": 37,
+      "baseline": {
+        "ids": [
+          155,
+          94
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          155,
+          94,
+          87,
+          89,
+          103
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          155,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          155,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-119",
+      "gold": [
+        97,
+        43,
+        119,
+        150,
+        23,
+        95,
+        33
+      ],
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 7,
+      "created_at_facts_in_window": 39,
+      "baseline": {
+        "ids": [
+          119,
+          148
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          119,
+          4,
+          5,
+          19,
+          21
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          119,
+          23,
+          33,
+          43,
+          95
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          119,
+          23,
+          33,
+          43,
+          95
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-143",
+      "gold": [
+        141,
+        155,
+        143,
+        98,
+        137,
+        87,
+        163,
+        125,
+        144,
+        131
+      ],
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 10,
+      "created_at_facts_in_window": 37,
+      "baseline": {
+        "ids": [
+          143,
+          156
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          143,
+          156,
+          87,
+          89,
+          94
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          143,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          143,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-150",
+      "gold": [
+        97,
+        43,
+        119,
+        150,
+        23,
+        95,
+        33
+      ],
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 7,
+      "created_at_facts_in_window": 39,
+      "baseline": {
+        "ids": [
+          150,
+          152
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          4,
+          5,
+          19,
+          21,
+          23
+        ],
+        "gold_rank": 5,
+        "in_top3": false,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          150,
+          23,
+          33,
+          43,
+          95
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          150,
+          23,
+          33,
+          43,
+          95
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-137",
+      "gold": [
+        141,
+        155,
+        143,
+        98,
+        137,
+        87,
+        163,
+        125,
+        144,
+        131
+      ],
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 10,
+      "created_at_facts_in_window": 37,
+      "baseline": {
+        "ids": [
+          137,
+          164
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          137,
+          87,
+          89,
+          94,
+          103
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          137,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          137,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-87",
+      "gold": [
+        141,
+        155,
+        143,
+        98,
+        137,
+        87,
+        163,
+        125,
+        144,
+        131
+      ],
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 10,
+      "created_at_facts_in_window": 37,
+      "baseline": {
+        "ids": [
+          87,
+          89
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          87,
+          89,
+          94,
+          103,
+          115
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          87,
+          98,
+          125,
+          127,
+          131
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          87,
+          98,
+          125,
+          127,
+          131
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-125",
+      "gold": [
+        141,
+        155,
+        143,
+        98,
+        137,
+        87,
+        163,
+        125,
+        144,
+        131
+      ],
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 10,
+      "created_at_facts_in_window": 37,
+      "baseline": {
+        "ids": [
+          33,
+          125
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          125,
+          87,
+          89,
+          94,
+          103
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          125,
+          87,
+          98,
+          127,
+          131
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          125,
+          87,
+          98,
+          127,
+          131
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-23",
+      "gold": [
+        97,
+        43,
+        119,
+        150,
+        23,
+        95,
+        33
+      ],
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 7,
+      "created_at_facts_in_window": 39,
+      "baseline": {
+        "ids": [
+          23,
+          33
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          23,
+          33,
+          4,
+          5,
+          19
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          23,
+          33,
+          43,
+          95,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          23,
+          33,
+          43,
+          95,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-95",
+      "gold": [
+        97,
+        43,
+        119,
+        150,
+        23,
+        95,
+        33
+      ],
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 7,
+      "created_at_facts_in_window": 39,
+      "baseline": {
+        "ids": [
+          95,
+          123
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          95,
+          4,
+          5,
+          19,
+          21
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          95,
+          23,
+          33,
+          43,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          95,
+          23,
+          33,
+          43,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-144",
+      "gold": [
+        141,
+        155,
+        143,
+        98,
+        137,
+        87,
+        163,
+        125,
+        144,
+        131
+      ],
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 10,
+      "created_at_facts_in_window": 37,
+      "baseline": {
+        "ids": [
+          134,
+          144,
+          157,
+          148
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          134,
+          144,
+          148,
+          87,
+          89
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          144,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          144,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-131",
+      "gold": [
+        141,
+        155,
+        143,
+        98,
+        137,
+        87,
+        163,
+        125,
+        144,
+        131
+      ],
+      "window_start": "2026-09-27",
+      "window_end": "2026-10-04",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 10,
+      "created_at_facts_in_window": 37,
+      "baseline": {
+        "ids": [
+          131,
+          154
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          154,
+          87,
+          89,
+          94,
+          103
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          131,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          131,
+          87,
+          98,
+          125,
+          127
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    },
+    {
+      "id": "time-33",
+      "gold": [
+        97,
+        43,
+        119,
+        150,
+        23,
+        95,
+        33
+      ],
+      "window_start": "2026-08-31",
+      "window_end": "2026-09-30",
+      "window_word_present": true,
+      "annotated_event_facts_in_window": 7,
+      "created_at_facts_in_window": 39,
+      "baseline": {
+        "ids": [
+          132,
+          33
+        ],
+        "gold_rank": 2,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_created": {
+        "ids": [
+          33,
+          4,
+          5,
+          19,
+          21
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event": {
+        "ids": [
+          33,
+          23,
+          43,
+          95,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      },
+      "window_event_hard": {
+        "ids": [
+          33,
+          23,
+          43,
+          95,
+          97
+        ],
+        "gold_rank": 1,
+        "in_top3": true,
+        "missing": false
+      }
+    }
+  ],
+  "cross_validation_r2_2": {
+    "available": true,
+    "r22_now": "2026-10-05T16:11:43.096Z",
+    "r22_queries": 14,
+    "rederived_queries": 14,
+    "same_query_count": true,
+    "mine": {
+      "queries": 14,
+      "baseline": {
+        "queries": 14,
+        "missing": 0,
+        "in_top3": 14,
+        "top1": 3,
+        "found": 14,
+        "avg_rank": 1.8571
+      },
+      "w1": {
+        "queries": 14,
+        "missing": 0,
+        "in_top3": 14,
+        "top1": 14,
+        "found": 14,
+        "avg_rank": 1
+      },
+      "guards_identical": 14
+    },
+    "theirs": {
+      "baseline": {
+        "queries": 14,
+        "missing": 0,
+        "in_top3": 14,
+        "top1": 3,
+        "found": 14,
+        "avg_rank": 1.8571
+      },
+      "w1": {
+        "queries": 14,
+        "missing": 0,
+        "in_top3": 14,
+        "top1": 14,
+        "found": 14,
+        "avg_rank": 1
+      },
+      "guards_identical": 14
+    },
+    "conclusion_matches": true
+  },
+  "reproduction": "node mem/scripts/spikes/bench-r4-4-time-attribute.mjs",
+  "privacy": {
+    "clean": true,
+    "forbidden_keys": [],
+    "strings_over_max": [],
+    "sensitive_pattern_hits": [],
+    "cjk_runs_over_7_not_whitelisted": [],
+    "keys_checked": true
+  }
+}
