@@ -1,0 +1,42 @@
+name: Derived-query eval (real model)
+
+# The reporting-only half of P-02's regression net. The GATING half is the deterministic stub arm,
+# which runs on every PR inside `ci.yml` (`build-test` job). This workflow exists for the arm the stub
+# cannot be: the real embedder, whose numbers move when a model is updated rather than when the
+# product is. It therefore REPORTS, and never blocks a merge:
+#
+#   - it only runs on the nightly schedule or by hand (a model download has no place in PR latency);
+#   - the eval step is `continue-on-error`, so a flaky model fetch is not a red CI;
+#   - the JSON lands as an artifact to diff by hand against the previous night.
+#
+# Local equivalent: `pnpm -C mem eval:derived:real` (see mem/docs/EVAL_REGRESSION_NET.md).
+
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  derived-eval-real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build (all workspace packages)
+        run: pnpm -r build
+      - name: Derived-query eval (real embedder; downloads the model)
+        continue-on-error: true
+        run: node mem/packages/core/scripts/derived_eval.mjs --mode real --out derived-real.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: derived-eval-real
+          path: derived-real.json
+          if-no-files-found: warn

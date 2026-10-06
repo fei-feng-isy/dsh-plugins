@@ -52,6 +52,13 @@ jobs:
         run: pnpm -r typecheck
       - name: Test (all packages)
         run: pnpm -r test
+      # P-02's deterministic arm: the derived-query regression net. Stub mode needs no model and no
+      # network, and it is the arm that proves the FIXTURE (a planted carrier outranks the gold;
+      # removing it restores the gold) rather than the product. The real-model arm is reporting-only
+      # and runs nightly — see `.github/workflows/derived-eval-real.yml`. Needs the build above,
+      # because the runner imports the emitted `lib/`.
+      - name: Derived-query regression net (deterministic stub)
+        run: node mem/packages/core/scripts/derived_eval.mjs --mode stub
       # The root gates' own logic, replayed on constructed input: group-scoped version
       # materialization (M7), the base peer↔devDependencies pair, per-tree dsh-line coverage (M8)
       # and the plugin prepublishOnly wiring (M10). No build, no registry — the dsh-line half uses
