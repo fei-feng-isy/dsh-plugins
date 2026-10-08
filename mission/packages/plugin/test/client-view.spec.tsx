@@ -722,6 +722,39 @@ describe('opening the session that ran a mission', () => {
     expect(entryFailures.at(-1)).toContain('打开失败')
   })
 
+  it('a stale HANDLE whose session was released costs no lookup and never opens an empty session', async () => {
+    // The combination the L17 test above does not cover: there the record named no executor, so the
+    // failure came out of the resolver half. Here the record ALREADY names its executor — the ordinary
+    // shape of a completed sub-task — and retention has since released that very session (measured on
+    // a live store: an evicted worker loses both its session log and its projection-cache entry, while
+    // the node keeps the persisted handle as audit). Two invariants must hold at once, and each one is
+    // a real requirement rather than a nicety:
+    //   ① NO lookup. A handle short-circuits the resolver (`workerSessionOpen`'s documented ①→②→③),
+    //      so clicking an old node must not pay for a session-log scan even though the open then fails;
+    //   ② no blank panel. The host's refusal becomes a sentence naming WHY, never an empty session view.
+    let lookups = 0
+    const outcome = await workerSessionOpen({
+      nodeId: 'n1',
+      parentSessionId: 'owner-1',
+      workerSessionId: WORKER,
+      open: () => Promise.reject(new Error('subagent/not-found: 子会话不存在')),
+      resolveSession: () => {
+        lookups += 1
+        return Promise.resolve({ status: 'not-found' })
+      },
+    })
+    expect(lookups).toBe(0)
+    expect(outcome.opened).toBe(false)
+    expect(outcome.opened ? '' : outcome.reason).toBe('open')
+    expect(outcome.opened ? '' : outcome.message).toContain('子会话不存在')
+    // …and that sentence is what a reader gets: the hint carries the host's own detail through instead
+    // of rendering an empty frame where the session used to be.
+    const html = renderToStaticMarkup(
+      <WorkerSessionHint message={outcome.opened ? '' : outcome.message} />,
+    )
+    expect(html).toContain('子会话不存在')
+  })
+
   it('asks the host for uiWorkspace on EVERY render, and never injects it', () => {
     // The client half's own wiring. `uiWorkspace` is fetched with `ctx.get` (never `inject`: a host
     // without it must still mount this half), and the view only receives an opener when the service is
