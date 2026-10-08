@@ -165,6 +165,12 @@ function cannotDetermine(error: unknown, log: CompatLogger, prefix: string): Com
  * Run the gate. Call this FIRST in `apply()`: on a refusal nothing has been registered yet, so
  * "do not load" costs nothing to unwind. Never throws — not even with a throwing logger, because
  * "cannot tell" is not "incompatible".
+ *
+ * The check itself is the BASE's `provision` (gather + verdict + logging, one call). The local
+ * fallback stays on purpose (option A): the interface-generation axis cannot gate this dependency
+ * (same-generation bases never read as `incompatible`), and raising the peer floor would degrade
+ * every host on a base that predates the fix — so a `provision` that cannot be performed still
+ * leaves the plugin loading.
  * @param ctx - the plugin's context.
  * @param log - the plugin's logger.
  * @param compat - the loaded gate runtime (see `src/envinit.ts`).
@@ -178,26 +184,11 @@ export function provision(
   compat: CompatRuntime,
   spec: CompatSpec = compat.spec,
 ): CompatRun {
-  let evidence: CompatEvidence
   try {
-    evidence = compat.module.gatherEvidence(ctx, spec)
+    return { verdict: compat.module.provision(ctx, log, spec) }
   } catch (error) {
     return cannotDetermine(error, log, compat.prefix)
   }
-  let verdict: CompatVerdict
-  try {
-    verdict = compat.module.verdictOf(evidence)
-  } catch (error) {
-    return cannotDetermine(error, log, compat.prefix)
-  }
-  for (const line of verdict.lines) {
-    try {
-      log[line.level](line.message)
-    } catch {
-      // A logger that throws must not turn a verdict into a crash.
-    }
-  }
-  return { verdict }
 }
 
 /**
