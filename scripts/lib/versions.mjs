@@ -4,16 +4,17 @@
  * A version group is a top-level subtree (`base` | `mem` | `mission`) and its version lives in exactly one
  * place: the manifest of that group's **publishable** package —
  *
- *   base → base/plugin-base/package.json
- *   mem  → mem/packages/plugin/package.json
- *   work → work/packages/plugin/package.json
+ *   base    → base/plugin-base/package.json
+ *   mem     → mem/packages/plugin/package.json
+ *   mission → mission/packages/plugin/package.json
  *
  * Everything else in the group (the subtree root manifest and the private engine packages) carries **no
  * `version` field at all**. They are never published — the plugins inline their engines and are linked by
  * path inside the workspace — so a second copy of the number would only be a second thing to update and
  * a second thing to drift. This was not always so: the group's version used to be repeated in every
- * manifest (nine for mem, three for work) and kept in step by hand or by a stamping command; the tests
- * here are what stopped that (`pnpm version:check` fails if a private manifest grows a `version` again).
+ * manifest (nine for mem, three for the mission tree, then still called `work`) and kept in step by hand
+ * or by a stamping command; the tests here are what stopped that (`pnpm version:check` fails if a private
+ * manifest grows a `version` again).
  *
  * The one thing that still needs a version at pack time is a private target of the `workspace:` protocol:
  * `pnpm pack` rewrites `workspace:*` into the TARGET's version, so `withWorkspaceVersions()` materializes
