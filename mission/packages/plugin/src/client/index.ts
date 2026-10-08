@@ -29,7 +29,7 @@ import {
 } from './api.js'
 import type { MissionSnapshot, MissionSnapshotState, WorkerSessionTarget } from './contract.js'
 import { isRunning, queuedCount, type SeatSessionView } from './seat.js'
-import { createMissionStatusSignal, mainSessionId, missionTabLabel } from './status.js'
+import { createMissionStatusSignal, mainSessionId, missionTabLabel, selectedSessionId, subscribeSessionSwitch } from './status.js'
 /** Cordis plugin name; matches the host half. */
 export const name = 'avantf-mission'
 
@@ -106,9 +106,11 @@ interface UiWorkspaceLike {
 
 /**
  * The host's session catalog, read structurally and OPTIONALLY for the same reason as
- * {@link UiWorkspaceLike}: it is the only body-level way to know WHICH session the 「任务」 tab's
- * marker should speak for. Only the one read this half performs is declared; the row shape itself is
- * decoded by `mainSessionId` (see `status.ts`), which owns the defensive reading.
+ * {@link UiWorkspaceLike}: it is the FALLBACK way to know WHICH session the 「任务」 tab's marker
+ * should speak for, used only when the `uiSession` service (the primary answer — see
+ * `docs/TAB_STATUS_INDICATOR.md` §「语义与已知边界」) is absent or does not publish a current
+ * selection. Only the one read this half performs is declared; the row shape itself is decoded by
+ * `mainSessionId` (see `status.ts`), which owns the defensive reading.
  */
 interface SessionsLike {
   readonly list?: { getSnapshot?: () => unknown }
@@ -346,20 +348,49 @@ export function apply(ctx: ClientContext): void {
   }
 
   /**
+   * Resolve the optional `uiSession` service, never throwing on a host that serves it differently.
+   * Resolved on every read, for the same reason `uiWorkspace` is: cordis reports a service absent
+   * until its own fiber is active, so a late-mounted `uiSession` must still be found.
+   */
+  const uiSessionService = (): unknown => {
+    try {
+      return ctx.get('uiSession')
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Attach the session-switch subscription as soon as the optional `uiSession` service is readable.
+   *
+   * Declared HERE (before `currentSessionId`, which retries the attach on every body-level read) and
+   * filled in once the signal exists below, because the handler needs `status`/`rearmSeat`. The retry
+   * is what makes a LATE-mounted service work without a second timer: `apply` tries once, and each
+   * body-level read retries until the service's fiber is active. At most one subscription is live.
+   */
+  let attachSessionSwitch: (() => void) | undefined
+
+  /**
    * WHICH session the tab marker speaks for.
    *
    * The tab's `label` is projected GLOBALLY by the host (one label list shared by every
-   * conversation), so the marker answers for the session the reader is looking at — the row the host
-   * itself retains for the main view. Resolved through `ctx.get` on EVERY read for the same reason
-   * `uiWorkspace` is: a service that mounts after this plugin must still be found. Absent / blank /
+   * conversation), so the marker must answer for the session the reader is LOOKING AT. That is the
+   * `uiSession` service's current selection (`selectedSessionId`, resolved through `ctx.get` on
+   * EVERY read — a service that mounts after this plugin must still be found, and one that vanishes
+   * must not throw). Only when it is absent / blank (no selection, an older host) does this fall
+   * back to the catalog heuristic `mainSessionId` — the host's own second branch. Absent / blank /
    * malformed ⇒ `undefined`, which the signal reads as "no marker".
    */
   const currentSessionId = (): string | undefined => {
+    // The body-level read is also the natural "a service may have appeared by now" moment.
+    try { attachSessionSwitch?.() } catch { /* the read must not fail over the subscription */ }
+    const selected = selectedSessionId(uiSessionService())
+    if (selected !== undefined) return selected
     try {
       const service = ctx.get('sessions') as SessionsLike | undefined
       return mainSessionId(service?.list?.getSnapshot?.())
     } catch {
-      // A host that exposes the catalog differently is a fact, not a failure: no marker.
+      // Neither service is readable: no marker rather than a throw out of the poll.
       return undefined
     }
   }
@@ -382,6 +413,11 @@ export function apply(ctx: ClientContext): void {
     log,
     // A flipped verdict must reach the tab, and only a registry change re-projects it (see below).
     onRunningChange: () => { rearmSeat?.() },
+    // The bounded backstop for a MISSED flip: while the verdict stays running the signal asks for one
+    // more re-registration about every 2 minutes, so a projection the host never picked up is
+    // corrected instead of standing forever (see `TAB_STATUS_REARM_MS`). Entering running is already
+    // covered by the flip above; idle never calls this.
+    onRearm: () => { rearmSeat?.() },
   })
   ctx.effect(() => () => status.dispose(), 'avantf-mission: conversation.view running marker')
 
@@ -485,10 +521,10 @@ export function apply(ctx: ClientContext): void {
      * and the label is resolved again. This is the ONLY reason the tab ever updates: a verdict change
      * alone is invisible (see `docs/TAB_STATUS_INDICATOR_FIX.md`).
      *
-     * Bounded by construction — at most one pair per FLIP and at most two flips per mission
-     * lifecycle — because the signal announces a flip and never a repeated read (`status.ts`). The
-     * host's `refreshViews` only READS the label thunk, so nothing here can call back into the
-     * registry: no loop.
+     * Bounded by construction — at most one pair per FLIP, one per SESSION SWITCH, and one per
+     * bounded self-heal window — because the signal announces flips rather than every read
+     * (`status.ts`). The host's `refreshViews` only READS the label thunk, so nothing here can call
+     * back into the registry: no loop.
      */
     rearmSeat = (): void => {
       if (!live) return
@@ -512,5 +548,47 @@ export function apply(ctx: ClientContext): void {
       disposeSeat()
     }
   })
+
+  /**
+   * A session SWITCH must re-project the label near-instantly.
+   *
+   * Switching sessions changes which session the marker speaks for, but it is NOT one of the host's
+   * three `refreshViews` triggers (registry change / locale / config) — so without this the label
+   * would stay at the old session's value until the next verdict flip happens to touch the registry.
+   * Subscribing to `uiSession.current` and re-arming the seat once per change closes that gap.
+   *
+   * Fallback, not a requirement: a host that publishes no such store answers `undefined` and the
+   * body-level 30 s poll remains the only trigger (today's behaviour). `attachSessionSwitch` is
+   * fillable from `currentSessionId` as well, so a service whose fiber activates after `apply` is
+   * still subscribed; the disposer is held here and released by the effect below, so unloading the
+   * plugin releases the subscription. The listener only re-reads the verdict and re-arms the seat — it
+   * can neither throw into the host's notify loop nor loop back into the store.
+   *
+   * WHY THE EXTRA `refresh`. The verdict in hand belongs to the session we just LEFT, so re-projecting
+   * it alone would put the OLD session's marker on the new one for up to a poll interval — exactly the
+   * leak this change removes. The re-read resolves the verdict for the session now selected; if it
+   * differs, the signal's flip announces its own (correct) re-registration, and the re-arm here makes
+   * sure the switch itself always reaches the host even when the verdict happens to be unchanged.
+   */
+  let disposeSessionSwitch: (() => void) | undefined
+  let sessionSwitchLive = true
+  attachSessionSwitch = (): void => {
+    if (!sessionSwitchLive || disposeSessionSwitch !== undefined) return
+    disposeSessionSwitch = subscribeSessionSwitch(uiSessionService(), () => {
+      void status.refresh()
+      rearmSeat?.()
+    })
+  }
+  ctx.effect(
+    () => () => {
+      sessionSwitchLive = false
+      disposeSessionSwitch?.()
+      disposeSessionSwitch = undefined
+    },
+    'avantf-mission: conversation.view session switch',
+  )
+  // The first attempt happens now (a service already active at apply time subscribes immediately);
+  // later attempts ride the body-level reads.
+  attachSessionSwitch()
   log('log', 'registered the conversation.view seat: id=missions order=20')
 }

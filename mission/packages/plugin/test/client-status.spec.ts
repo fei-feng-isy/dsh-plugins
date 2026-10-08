@@ -15,10 +15,13 @@ import type { MissionNodeView, MissionSnapshot } from '../src/client/contract.js
 import {
   RUNNING_MARKER,
   TAB_STATUS_POLL_MS,
+  TAB_STATUS_REARM_MS,
   createMissionStatusSignal,
   mainSessionId,
   missionTabLabel,
+  selectedSessionId,
   snapshotHasRunning,
+  subscribeSessionSwitch,
   type MissionStatusDeps,
 } from '../src/client/status.js'
 
@@ -138,6 +141,77 @@ describe('reading which session the marker speaks for', () => {
   })
 })
 
+/**
+ * The PRIMARY session answer: the client `uiSession` service's current selection. The host's tab
+ * strip is global, so a marker that reads "the first main-view-retained session" leaks into every
+ * other conversation (see the module docs in `status.ts`).
+ */
+describe('reading the CURRENTLY SELECTED session out of uiSession', () => {
+  /** The live host's shape: one binding source with BOTH `value` and `getSnapshot()`. */
+  function bindingSource(key: string | undefined): unknown {
+    const value = { key, hooks: {}, keyedHooks: {}, props: {} }
+    return { current: { value, getSnapshot: () => value, subscribe: () => () => undefined } }
+  }
+
+  it('prefers the current selection, in either published shape', () => {
+    // `current.value.key` — what the host's own `publishMain()` reads.
+    expect(selectedSessionId({ current: { value: { key: 'looking-at-this' } } })).toBe('looking-at-this')
+    // `current.getSnapshot?.().key` — the snapshot accessor form.
+    expect(selectedSessionId({ current: { getSnapshot: () => ({ key: 'snap-2' }) } })).toBe('snap-2')
+    // Both present (the live host): any hit answers, and the answer is not blank.
+    expect(selectedSessionId(bindingSource('both'))).toBe('both')
+  })
+
+  it('answers undefined for absent / blank / malformed / hostile services, and never throws', () => {
+    expect(selectedSessionId(undefined)).toBeUndefined()
+    expect(selectedSessionId({})).toBeUndefined()
+    expect(selectedSessionId({ current: undefined })).toBeUndefined()
+    // The absent-session binding the host publishes when nothing is selected.
+    expect(selectedSessionId({ current: { value: { key: undefined } } })).toBeUndefined()
+    expect(selectedSessionId({ current: { value: { key: 42 } } })).toBeUndefined()
+    expect(selectedSessionId('nonsense')).toBeUndefined()
+    // A throwing `getSnapshot` still falls through to `value`.
+    expect(selectedSessionId({
+      current: { value: { key: 'from-value' }, getSnapshot: () => { throw new Error('shape mismatch') } },
+    })).toBe('from-value')
+    // A whole service that throws on access.
+    const hostile = new Proxy({}, { get: () => { throw new Error('shape mismatch') } })
+    expect(selectedSessionId(hostile)).toBeUndefined()
+  })
+
+  it('subscribes to session switches and releases the subscription, and stays undefined without a store', () => {
+    let listener: (() => void) | undefined
+    let released = 0
+    const store = {
+      current: {
+        value: { key: 'a' },
+        subscribe: (next: () => void): (() => void) => {
+          listener = next
+          return () => { released += 1 }
+        },
+      },
+    }
+    let switches = 0
+    const dispose = subscribeSessionSwitch(store, () => { switches += 1 })
+    expect(typeof dispose).toBe('function')
+    listener?.()
+    expect(switches).toBe(1)
+    dispose?.()
+    expect(released).toBe(1)
+    // No store / no `subscribe` ⇒ the caller keeps its poll; nothing is returned and nothing throws.
+    expect(subscribeSessionSwitch({ current: { value: { key: 'a' } } }, () => undefined)).toBeUndefined()
+    expect(subscribeSessionSwitch(undefined, () => undefined)).toBeUndefined()
+    const hostile = new Proxy({}, { get: () => { throw new Error('shape mismatch') } })
+    expect(subscribeSessionSwitch(hostile, () => undefined)).toBeUndefined()
+    // A THROWING listener must not escape into the host's notify loop.
+    let throwing: (() => void) | undefined
+    subscribeSessionSwitch({
+      current: { subscribe: (next: () => void) => { throwing = next; return () => undefined } },
+    }, () => { throw new Error('listener down') })
+    expect(() => { throwing?.() }).not.toThrow()
+  })
+})
+
 describe('the body-level status signal', () => {
   /**
    * Deps whose single read answers from `remote` (defaulting to a running tree); `calls` records the
@@ -150,6 +224,7 @@ describe('the body-level status signal', () => {
     sessionId?: string | undefined
     mounted?: Promise<void>
     timer?: ReturnType<typeof fakeTimer>
+    onRearm?: () => void
   } = {}): { deps: MissionStatusDeps; calls: string[]; errors: string[] } {
     const calls: string[] = []
     const errors: string[] = []
@@ -168,8 +243,15 @@ describe('the body-level status signal', () => {
         getSessionId: () => ('sessionId' in options ? options.sessionId : 'owner-1'),
         getTimer: () => (options.timer ?? fakeTimer()).service,
         log: (_level, message) => { errors.push(message) },
+        ...options.onRearm === undefined ? {} : { onRearm: options.onRearm },
       },
     }
+  }
+
+  /** Let one poll tick (which awaits a read) run to completion. */
+  const flushTick = async (timer: ReturnType<typeof fakeTimer>): Promise<void> => {
+    timer.intervals[0]?.callback()
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
   }
 
   it('reports running only after a settled read proves it, and polls no faster than 30 s', async () => {
@@ -241,6 +323,79 @@ describe('the body-level status signal', () => {
     signal.dispose()
     expect(timer.disposed()).toBe(1)
   })
+
+  /**
+   * The bounded self-heal (H1): a flip can be MISSED, and then the host's projected label stands
+   * wrong with nobody to correct it. While — and only while — the verdict stays `running`, the signal
+   * asks for one extra re-registration per {@link TAB_STATUS_REARM_MS}, riding the poll's own ticks.
+   * The assertions below are all about BOUNDEDNESS: a per-tick (or per-second) rearm must fail them.
+   */
+  describe('the bounded self-heal while running', () => {
+    const TICKS_PER_WINDOW = Math.round(TAB_STATUS_REARM_MS / TAB_STATUS_POLL_MS)
+
+    it('re-arms at most once per heal window while running, never per poll tick', async () => {
+      const timer = fakeTimer()
+      let rearms = 0
+      const { deps: d } = deps({ timer, onRearm: () => { rearms += 1 } })
+      const signal = createMissionStatusSignal(d)
+      await signal.refresh()
+      expect(signal.isRunning()).toBe(true)
+      // Entering running is the FLIP's job (`onRunningChange`), not the self-heal's.
+      expect(rearms).toBe(0)
+      expect(TICKS_PER_WINDOW).toBeGreaterThan(1)
+
+      // The first window: the last tick of it is the first heal, no earlier.
+      for (let tick = 1; tick < TICKS_PER_WINDOW; tick += 1) {
+        await flushTick(timer)
+        expect(rearms).toBe(0)
+      }
+      await flushTick(timer)
+      expect(rearms).toBe(1)
+
+      // Bounded, not per-tick: a second window buys exactly one more, however many ticks it takes.
+      for (let tick = 0; tick < TICKS_PER_WINDOW; tick += 1) await flushTick(timer)
+      expect(rearms).toBe(2)
+      signal.dispose()
+    })
+
+    it('never re-arms while the verdict is idle', async () => {
+      const timer = fakeTimer()
+      let rearms = 0
+      const idle = remoteWith(async (): Promise<unknown> => ({ ok: true, value: snapshot('done', 'ready') }))
+      const { deps: d } = deps({ remote: idle, timer, onRearm: () => { rearms += 1 } })
+      const signal = createMissionStatusSignal(d)
+      await signal.refresh()
+      expect(signal.isRunning()).toBe(false)
+      for (let tick = 0; tick < TICKS_PER_WINDOW * 2; tick += 1) await flushTick(timer)
+      expect(rearms).toBe(0)
+      signal.dispose()
+    })
+
+    it('stops re-arming once disposed — a late tick cannot resurrect the heal', async () => {
+      const timer = fakeTimer()
+      let rearms = 0
+      const { deps: d } = deps({ timer, onRearm: () => { rearms += 1 } })
+      const signal = createMissionStatusSignal(d)
+      await signal.refresh()
+      expect(signal.isRunning()).toBe(true)
+      signal.dispose()
+      for (let tick = 0; tick < TICKS_PER_WINDOW * 2; tick += 1) await flushTick(timer)
+      expect(rearms).toBe(0)
+    })
+
+    it('a failing heal listener is logged, never thrown into the timer callback', async () => {
+      const timer = fakeTimer()
+      const { deps: d, errors } = deps({
+        timer,
+        onRearm: () => { throw new Error('rearm down') },
+      })
+      const signal = createMissionStatusSignal(d)
+      await signal.refresh()
+      for (let tick = 0; tick < TICKS_PER_WINDOW; tick += 1) await flushTick(timer)
+      expect(errors.some((message) => message.includes('rearm down'))).toBe(true)
+      signal.dispose()
+    })
+  })
 })
 
 /**
@@ -255,6 +410,8 @@ describe('the conversation.view label thunk', () => {
     omitRemote?: boolean
     sessions?: unknown
     timer?: ReturnType<typeof fakeTimer>
+    /** The `uiSession` service, or a getter so a suite can make its fiber activate late. */
+    uiSession?: unknown
   } = {}): {
     label: () => string | undefined
     projected: () => string | undefined
@@ -339,6 +496,9 @@ describe('the conversation.view label thunk', () => {
         if (name === 'remote.avantfMission') return remote
         if (name === 'timer') return timer.service
         if (name === 'sessions') return options.sessions
+        if (name === 'uiSession') {
+          return typeof options.uiSession === 'function' ? (options.uiSession as () => unknown)() : options.uiSession
+        }
         return undefined
       },
       slots,
@@ -387,6 +547,151 @@ describe('the conversation.view label thunk', () => {
     expect(booted.label()).toBe('任务')
     expect(asked).toBe(0)
     booted.unload()
+  })
+
+  /**
+   * A `uiSession` store in the live host's shape: one `current` binding source with `value`,
+   * `getSnapshot()` and `subscribe`, plus a test-side `push` that notifies exactly like the host's
+   * `notifySubscribers(this.current.listeners, …)` does on a real session switch.
+   */
+  function fakeUiSession(initial: string | undefined): {
+    service: unknown
+    push: (key: string | undefined) => void
+    listenerCount: () => number
+  } {
+    let key = initial
+    const listeners = new Set<() => void>()
+    return {
+      service: {
+        current: {
+          get value(): { key: string | undefined } { return { key } },
+          getSnapshot: (): { key: string | undefined } => ({ key }),
+          subscribe: (listener: () => void): (() => void) => {
+            listeners.add(listener)
+            return () => { listeners.delete(listener) }
+          },
+        },
+      },
+      push: (next: string | undefined): void => {
+        key = next
+        for (const listener of [...listeners]) listener()
+      },
+      listenerCount: (): number => listeners.size,
+    }
+  }
+
+  /** The heuristic this suite's catalog would answer (owner-1) is a RUNNING session on purpose. */
+  const runningOwner = async (args: { sessionId: string }): Promise<unknown> =>
+    ({ ok: true, value: snapshot(args.sessionId === 'owner-1' ? 'running' : 'done') })
+
+  it('① marks the CURRENTLY SELECTED session, even when another retained session is running too', async () => {
+    const store = fakeUiSession('owner-1')
+    const booted = boot({ sessions: MAIN, uiSession: store.service, snapshot: runningOwner })
+    await settle()
+    expect(booted.label()).toBe(`任务 ${RUNNING_MARKER}`)
+    booted.unload()
+  })
+
+  it('② shows 任务 VERBATIM when the current session is idle although ANOTHER session runs', async () => {
+    const store = fakeUiSession('user-b')
+    const asked: string[] = []
+    const booted = boot({
+      // `MAIN` would answer owner-1 (running); only the current selection may win.
+      sessions: MAIN,
+      uiSession: store.service,
+      snapshot: async (args: { sessionId: string }): Promise<unknown> => {
+        asked.push(args.sessionId)
+        return runningOwner(args)
+      },
+    })
+    await settle()
+    expect(booted.label()).toBe('任务')
+    expect(booted.label()).not.toContain(RUNNING_MARKER)
+    expect(asked).toContain('user-b')
+    expect(asked).not.toContain('owner-1')
+    booted.unload()
+  })
+
+  it('③ re-registers the seat EXACTLY once when the selected session changes', async () => {
+    const store = fakeUiSession('user-a')
+    const booted = boot({ sessions: MAIN, uiSession: store.service })
+    await settle()
+    expect(booted.calls).toEqual(['register#1'])
+    store.push('user-b')
+    expect(booted.calls).toEqual(['register#1', 'dispose#1', 'register#2'])
+    // The host's notify loop is not pumped further by one switch.
+    expect(booted.calls).toHaveLength(3)
+    // Unloading releases the subscription: a later push cannot resurrect the seat.
+    booted.unload()
+    expect(store.listenerCount()).toBe(0)
+    store.push('user-c')
+    // Only the unload's own seat teardown follows: the push after it registered nothing.
+    expect(booted.calls).toEqual(['register#1', 'dispose#1', 'register#2', 'dispose#2'])
+  })
+
+  it('subscribes to a uiSession service whose fiber activates only after apply', async () => {
+    const store = fakeUiSession('user-a')
+    let service: unknown
+    const timer = fakeTimer()
+    const booted = boot({ sessions: MAIN, timer, uiSession: () => service })
+    await settle()
+    // Not there at apply time ⇒ the poll is the only trigger, and no subscription exists yet.
+    expect(store.listenerCount()).toBe(0)
+    expect(booted.calls).toEqual(['register#1'])
+    // The service's fiber activates; the next body-level read attaches the subscription.
+    service = store.service
+    timer.intervals[0]?.callback()
+    await settle()
+    expect(store.listenerCount()).toBe(1)
+    store.push('user-b')
+    expect(booted.calls).toEqual(['register#1', 'dispose#1', 'register#2'])
+    // Still exactly one subscription, however many reads retried the attach.
+    timer.intervals[0]?.callback()
+    await settle()
+    expect(store.listenerCount()).toBe(1)
+    booted.unload()
+    expect(store.listenerCount()).toBe(0)
+  })
+
+  it('re-reads for the newly selected session on a switch, so the marker follows it', async () => {
+    const store = fakeUiSession('user-a')
+    const booted = boot({
+      sessions: MAIN,
+      uiSession: store.service,
+      snapshot: async (args: { sessionId: string }): Promise<unknown> =>
+        ({ ok: true, value: snapshot(args.sessionId === 'user-b' ? 'running' : 'done') }),
+    })
+    await settle()
+    expect(booted.label()).toBe('任务')
+    store.push('user-b')
+    await settle()
+    // The fresh read flips the verdict and reaches the host; the display follows the selection.
+    expect(booted.label()).toBe(`任务 ${RUNNING_MARKER}`)
+    store.push('user-a')
+    await settle()
+    expect(booted.label()).toBe('任务')
+    booted.unload()
+  })
+
+  it('⑤ falls back to the catalog heuristic, without throwing, when uiSession is absent or hostile', async () => {
+    // Absent: the catalog (owner-1) still answers.
+    const absent = boot({ sessions: MAIN, snapshot: runningOwner })
+    await settle()
+    expect(absent.label()).toBe(`任务 ${RUNNING_MARKER}`)
+    absent.unload()
+
+    // A service that throws on every access, and one with no store: no throw, heuristic fallback.
+    for (const hostile of [
+      new Proxy({}, { get: () => { throw new Error('shape mismatch') } }),
+      { current: { value: { key: undefined } } },
+      { current: { value: 'nonsense' } },
+    ]) {
+      const booted = boot({ sessions: MAIN, uiSession: hostile, snapshot: runningOwner })
+      await settle()
+      expect(booted.label()).toBe(`任务 ${RUNNING_MARKER}`)
+      expect(booted.errors).toEqual([])
+      booted.unload()
+    }
   })
 
     /**
