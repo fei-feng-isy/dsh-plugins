@@ -52,7 +52,7 @@ import { envAutoDownload, expandHome } from '@avantf/mem-contract'
 import { PANDOC_ARTIFACT_ID, PANDOC_BINARY, PANDOC_PACKS, PANDOC_VERSION } from '@avantf/mem-provision'
 import type { ProvisionItem, ProvisionReportEntry, Provisioner } from '@avantf/dsh-plugin-base'
 import { loadFramework, readDependencyRange } from './envinit-bootstrap.js'
-import { baseIsUsable, interfaceVerdict } from './interface_gate.js'
+import { createLoadCache, gateOrDegrade, loadGuarded, type DegradeWords } from './interface_gate.js'
 import {
   COMPAT_PACKAGE,
   reasonOf,
@@ -369,8 +369,25 @@ function modelItem(framework: EnvinitModule, model: NonNullable<ResourcePlan['mo
   }
 }
 
-let loaded: EnvinitRuntime | undefined
-let loading: Promise<EnvinitRuntime | undefined> | undefined
+/**
+ * The plugin-specific halves of the shared loader's sentences: mem says the FRAMEWORK is skipped and
+ * names the legacy provisioning path among the withheld capabilities. The mechanism is the shim's
+ * (`interface_gate.ts`), the wording is this plugin's.
+ */
+const DEGRADE_WORDS: DegradeWords = {
+  prefix: OWN_PREFIX,
+  loadFailure: 'the framework is SKIPPED and the plugin will mount anyway',
+  withheld: 'own prompt defaults, gate skipped, legacy provisioning',
+}
+
+/**
+ * The loaded runtime, cached once per process through the shared cache discipline: a FAILED load is
+ * NOT cached, so a profile reload retries instead of replaying the first failure for the whole
+ * process lifetime.
+ */
+const cache = createLoadCache<EnvinitLoadOptions, EnvinitRuntime>((options) =>
+  loadGuarded(options, loadOnce, options.log, DEGRADE_WORDS),
+)
 
 /**
  * Ensure the framework, then the compatibility base, then dispatch the expensive resources.
@@ -381,43 +398,11 @@ let loading: Promise<EnvinitRuntime | undefined> | undefined
  * base still returns a runtime, with `compat: undefined`: the mount must continue, and the resource
  * items are still worth dispatching.
  *
- * The result is cached per process; a FAILED load is not, so a profile reload retries instead of
- * replaying the first failure for the whole process lifetime.
- *
  * @param options - logger, family root, download policy and the test seams.
  * @returns the loaded runtime, or `undefined` when the framework itself is unavailable.
  */
-export async function loadEnvinit(options: EnvinitLoadOptions = {}): Promise<EnvinitRuntime | undefined> {
-  if (loaded !== undefined) return loaded
-  if (loading !== undefined) return loading
-  loading = loadGuarded(options).then(
-    (runtime) => {
-      // A failure is "cannot tell", not a verdict — and it may be transient (offline at boot,
-      // registry hiccup). Drop the cache so a profile reload, or a second instance in the same
-      // process, retries instead of replaying the first failure for the whole process lifetime.
-      if (runtime === undefined) loading = undefined
-      else loaded = runtime
-      return runtime
-    },
-    () => {
-      loading = undefined
-      return undefined
-    },
-  )
-  return loading
-}
-
-/** The guard that makes "never throws" true: every failure is a warning plus `undefined`. */
-async function loadGuarded(options: EnvinitLoadOptions): Promise<EnvinitRuntime | undefined> {
-  try {
-    return await loadOnce(options)
-  } catch (error) {
-    warn(
-      options.log,
-      `${OWN_PREFIX} WARNING — environment initialisation failed (${reasonOf(error)}); the framework is SKIPPED and the plugin will mount anyway`,
-    )
-    return undefined
-  }
+export function loadEnvinit(options: EnvinitLoadOptions = {}): Promise<EnvinitRuntime | undefined> {
+  return cache.load(options)
 }
 
 /** The body of {@link loadEnvinit}; the cache above makes it run at most once per process. */
@@ -448,7 +433,8 @@ async function loadOnce(options: EnvinitLoadOptions): Promise<EnvinitRuntime | u
   // the one the loaded base reports. The DECISION is the base's (`checkInterface` together with its
   // one reader of the bake record); this plugin only consumes it. Package versions move every release
   // and stay the INSTALL-time gate (the peer range), so the generation number is the axis that means
-  // "the kit and gate helper set I was written against is the one I loaded".
+  // "the kit and gate helper set I was written against is the one I loaded". The step itself is the
+  // shared shim's (`gateOrDegrade`); this plugin supplies only its own wording (`DEGRADE_WORDS`).
   //
   // The verdict, and why it is a DEGRADATION now rather than the bare warning it used to be: the
   // interface is the family's MAIN contract, so a base from another generation is not a base whose
@@ -459,23 +445,7 @@ async function loadOnce(options: EnvinitLoadOptions): Promise<EnvinitRuntime | u
   // refused: the family invariant is that only a PROVEN host break refuses, and a generation mismatch
   // is not one. `cannot-tell` (no gate on the loaded base, no bake record) is a warning and nothing
   // else — "cannot tell" is never "incompatible".
-  {
-    const verdict = interfaceVerdict(framework)
-    if (!baseIsUsable(verdict)) {
-      warn(
-        options.log,
-        `${OWN_PREFIX} WARNING — interface: ${verdict.reason ?? 'the loaded base implements another interface generation'};`
-        + ' the base\'s shared capabilities are NOT used (own prompt defaults, gate skipped, legacy provisioning) and the plugin mounts anyway',
-      )
-      return undefined
-    }
-    if (verdict.status === 'cannot-tell') {
-      warn(
-        options.log,
-        `${OWN_PREFIX} WARNING — interface: ${verdict.reason ?? 'the interface generation cannot be told'}; using the loaded base anyway ("cannot tell" is never "incompatible")`,
-      )
-    }
-  }
+  if (!gateOrDegrade(framework, options.log, DEGRADE_WORDS)) return undefined
 
   // The compatibility gate is part of the base package and arrived WITH it: there is no `mem:compat`
   // item, no npm download and no managed `~/.avantf/env/compat/**` any more. `runtimeFromCompat`
@@ -564,8 +534,7 @@ async function loadOnce(options: EnvinitLoadOptions): Promise<EnvinitRuntime | u
           // Disposal is best-effort; a throwing release must not break unmount.
         }
       }
-      loaded = undefined
-      loading = undefined
+      cache.clear()
     },
   }
 }

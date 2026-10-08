@@ -20,6 +20,13 @@
  * `envinit.ts`, never here. `base/plugin-base/test/interface_consumers.spec.ts` pins the two copies
  * against each other, so a divergence is a red test instead of two shims that drifted.
  *
+ * The loader SKELETON the two startups share lives here too: the once-per-process cache
+ * ({@link createLoadCache}), the guard that turns any throw into one warning
+ * ({@link loadGuarded}), and the gate→decision step ({@link gateOrDegrade}). Those sentences are
+ * observably NOT the same in the two plugins, so every shared function takes them as
+ * {@link DegradeWords}: the shim owns the mechanism, the caller owns the wording, and the two trees'
+ * `envinit.spec.ts` pin each plugin's own text verbatim.
+ *
  * @module @avantf/dsh-mem/interface_gate
  */
 import type { InterfaceVerdict } from '@avantf/dsh-plugin-base'
@@ -119,6 +126,132 @@ export function interfaceVerdict(module: unknown, bakedUrl?: URL | string): Inte
     return cannotTell('the loaded base returned no usable interface verdict')
   }
   return verdict as InterfaceVerdict
+}
+
+/** The logging surface the shared loader helpers need; both plugins' loggers satisfy it. */
+export interface GateLogger {
+  warn(message: string): void
+}
+
+/** Emit a warning without ever letting the logger turn it into a crash. */
+function warn(log: GateLogger | undefined, message: string): void {
+  try {
+    log?.warn(message)
+  } catch {
+    // A logger that throws is not evidence of anything.
+  }
+}
+
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * The two sentences the shared loader may NOT own, because the plugins word them differently: mem
+ * says the FRAMEWORK is skipped and names legacy provisioning among the withheld capabilities,
+ * mission says the COMPATIBILITY GATE is skipped and names none. Neither is drift — both are read by
+ * an operator — so the caller passes them in and the shared code interpolates them verbatim.
+ */
+export interface DegradeWords {
+  /** This module's warning token, so one grep finds every startup line: `envinit:` / `compat:`. */
+  readonly prefix: string
+  /** The tail after "environment initialisation failed (...); " in the guarded-load failure line. */
+  readonly loadFailure: string
+  /** The parenthetical after "the base's shared capabilities are NOT used (" in the incompatible line. */
+  readonly withheld: string
+}
+
+/**
+ * Run the runtime interface gate and answer whether the loaded base's shared capabilities may be
+ * used.
+ *
+ * `false` is a DEGRADATION the caller answers by taking its own full-degradation route (no runtime,
+ * own prompt defaults, the compatibility gate skipped, legacy provisioning) — never a refused mount,
+ * and never a throw. `cannot-tell` warns and answers `true`: "cannot tell" is not a negative answer,
+ * so the base is used normally. The verdict's own reason is the base's; only the surrounding sentence
+ * is the caller's ({@link DegradeWords}).
+ */
+export function gateOrDegrade(module: unknown, log: GateLogger | undefined, words: DegradeWords): boolean {
+  const verdict = interfaceVerdict(module)
+  if (!baseIsUsable(verdict)) {
+    warn(
+      log,
+      `${words.prefix} WARNING — interface: ${verdict.reason ?? 'the loaded base implements another interface generation'};`
+      + ` the base's shared capabilities are NOT used (${words.withheld}) and the plugin mounts anyway`,
+    )
+    return false
+  }
+  if (verdict.status === 'cannot-tell') {
+    warn(
+      log,
+      `${words.prefix} WARNING — interface: ${verdict.reason ?? 'the interface generation cannot be told'}; using the loaded base anyway ("cannot tell" is never "incompatible")`,
+    )
+  }
+  return true
+}
+
+/**
+ * The guard that makes a loader's "never throws" true: every failure is one warning plus
+ * `undefined`. The caller owns the sentence's tail (`words`) and its own cache discipline — a
+ * FAILED load is not cached, so this must return `undefined` rather than reject (see
+ * {@link createLoadCache}).
+ */
+export async function loadGuarded<O, T>(
+  options: O,
+  loadOnce: (options: O) => Promise<T | undefined>,
+  log: GateLogger | undefined,
+  words: DegradeWords,
+): Promise<T | undefined> {
+  try {
+    return await loadOnce(options)
+  } catch (error) {
+    warn(
+      log,
+      `${words.prefix} WARNING — environment initialisation failed (${reasonOf(error)}); ${words.loadFailure}`,
+    )
+    return undefined
+  }
+}
+
+/** The per-process result of a guarded load: `load` is idempotent, `clear` is for disposal. */
+export interface LoadCache<O, T> {
+  load(options: O): Promise<T | undefined>
+  /** Drop the result and the in-flight promise, so the next `load` runs again (unmount/reload). */
+  clear(): void
+}
+
+/**
+ * Wrap a guarded loader in the cache discipline both startups share: the first call runs it, every
+ * later and concurrent call shares its result, and a FAILED load is NOT cached. A failure is "cannot
+ * tell", not a verdict — and it may be transient (offline at boot, a half-written install) — so a
+ * profile reload, or a second instance in the same process, retries instead of replaying the first
+ * failure for the whole process lifetime.
+ */
+export function createLoadCache<O, T>(guarded: (options: O) => Promise<T | undefined>): LoadCache<O, T> {
+  let loaded: T | undefined
+  let loading: Promise<T | undefined> | undefined
+  return {
+    load(options: O): Promise<T | undefined> {
+      if (loaded !== undefined) return Promise.resolve(loaded)
+      if (loading !== undefined) return loading
+      loading = guarded(options).then(
+        (runtime) => {
+          if (runtime === undefined) loading = undefined
+          else loaded = runtime
+          return runtime
+        },
+        () => {
+          loading = undefined
+          return undefined
+        },
+      )
+      return loading
+    },
+    clear(): void {
+      loaded = undefined
+      loading = undefined
+    },
+  }
 }
 
 /**

@@ -11,7 +11,7 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { loadFramework } from './envinit-bootstrap.js'
-import { baseIsUsable, interfaceVerdict } from './interface_gate.js'
+import { createLoadCache, gateOrDegrade, loadGuarded, type DegradeWords } from './interface_gate.js'
 import { hostContribution } from './wire.js'
 
 /** The framework package, as declared in this plugin's `peerDependencies`. */
@@ -238,48 +238,37 @@ function runtimeFrom(module: CompatModule, kit?: EnvinitModule): CompatRuntime {
   return { module, kit, prefix: module.COMPAT_PREFIX, spec, schemaNames }
 }
 
-let loaded: CompatRuntime | undefined
-let loading: Promise<CompatRuntime | undefined> | undefined
+/**
+ * The plugin-specific halves of the shared loader's sentences: mission says the COMPATIBILITY GATE
+ * is skipped and names no legacy provisioning path. The mechanism is the shim's (`interface_gate.ts`),
+ * the wording is this plugin's.
+ */
+const DEGRADE_WORDS: DegradeWords = {
+  prefix: OWN_PREFIX,
+  loadFailure: 'the compatibility gate is SKIPPED and the plugin will mount anyway',
+  withheld: 'own prompt defaults, gate skipped',
+}
 
+/**
+ * The gate runtime, cached once per process through the shared cache discipline: a FAILED load is
+ * NOT cached, so a reload or a second instance retries instead of replaying the first failure for
+ * the process lifetime.
+ *
+ * `loadGuarded` is what makes "never throws" true here: a shape mismatch or throw from a
+ * framework/base whose declarations this plugin does not own would otherwise reject `apply`, which
+ * Cordis answers by disposing the fiber — no service, no tools, not one warning.
+ */
+const cache = createLoadCache<CompatLoadOptions, CompatRuntime>((options) =>
+  loadGuarded(options, loadCompatOnce, options.log, DEGRADE_WORDS),
+)
 
 /**
  * Ensure the framework, then the base, then this plugin's gate runtime. Never throws: it returns
  * `undefined` when the gate cannot run, and the caller then warns and mounts because a missing gate
  * is "cannot tell". Cached, so the spec is built once per process.
  */
-export async function loadCompat(options: CompatLoadOptions = {}): Promise<CompatRuntime | undefined> {
-  if (loaded !== undefined) return loaded
-  if (loading !== undefined) return loading
-  loading = loadCompatGuarded(options).then(
-    (runtime) => {
-      // A failure is "cannot tell", not a verdict — and it may be transient. Drop the cache so a
-      // reload or a second instance retries instead of replaying it for the process lifetime.
-      if (runtime === undefined) loading = undefined
-      return runtime
-    },
-    () => {
-      loading = undefined
-      return undefined
-    },
-  )
-  return loading
-}
-
-/**
- * The guard that makes "Never throws" true: a shape mismatch or throw from a framework/base whose
- * declarations this plugin does not own would otherwise reject `apply`, which Cordis answers by
- * disposing the fiber — no service, no tools, not one warning.
- */
-async function loadCompatGuarded(options: CompatLoadOptions): Promise<CompatRuntime | undefined> {
-  try {
-    return await loadCompatOnce(options)
-  } catch (error) {
-    warn(
-      options.log,
-      `${OWN_PREFIX} WARNING — environment initialisation failed (${reasonOf(error)}); the compatibility gate is SKIPPED and the plugin will mount anyway`,
-    )
-    return undefined
-  }
+export function loadCompat(options: CompatLoadOptions = {}): Promise<CompatRuntime | undefined> {
+  return cache.load(options)
 }
 
 async function loadCompatOnce(options: CompatLoadOptions): Promise<CompatRuntime | undefined> {
@@ -302,7 +291,8 @@ async function loadCompatOnce(options: CompatLoadOptions): Promise<CompatRuntime
   // one the loaded base reports. The DECISION is the base's (`checkInterface` plus its one reader of
   // the bake record); this plugin only consumes it. Package versions move every release and stay the
   // install-time gate (the peer range), so the generation number is the axis that means "the kit and
-  // gate helper set I was written against is the one I loaded".
+  // gate helper set I was written against is the one I loaded". The step itself is the shared shim's
+  // (`gateOrDegrade`); this plugin supplies only its own wording (`DEGRADE_WORDS`).
   //
   // Why `incompatible` now DEGRADES rather than merely warning: the interface is the family's MAIN
   // contract, so a base from another generation is not one whose shared capabilities this build may
@@ -311,23 +301,7 @@ async function loadCompatOnce(options: CompatLoadOptions): Promise<CompatRuntime
   // service, prompt sections, Remote, UI) always continues: only a PROVEN host break refuses, and a
   // generation mismatch is not one. `cannot-tell` (no gate on the loaded base, no bake record) warns
   // and uses the base anyway; "cannot tell" is never "incompatible".
-  {
-    const verdict = interfaceVerdict(framework)
-    if (!baseIsUsable(verdict)) {
-      warn(
-        options.log,
-        `${OWN_PREFIX} WARNING — interface: ${verdict.reason ?? 'the loaded base implements another interface generation'};`
-        + ' the base\'s shared capabilities are NOT used (own prompt defaults, gate skipped) and the plugin mounts anyway',
-      )
-      return undefined
-    }
-    if (verdict.status === 'cannot-tell') {
-      warn(
-        options.log,
-        `${OWN_PREFIX} WARNING — interface: ${verdict.reason ?? 'the interface generation cannot be told'}; using the loaded base anyway ("cannot tell" is never "incompatible")`,
-      )
-    }
-  }
+  if (!gateOrDegrade(framework, options.log, DEGRADE_WORDS)) return undefined
   // The gate IS the base: `@avantf/dsh-plugin-base` carries the former environment framework AND the
   // former `@avantf/dsh-compat`. There is no `mission:compat` item to declare, nothing to download and
   // no managed `~/.avantf/env/compat/**`; a failure here degrades to a WARNING and the plugin still
@@ -342,7 +316,6 @@ async function loadCompatOnce(options: CompatLoadOptions): Promise<CompatRuntime
     // real structural check of mission's `CompatModule` against what base actually exports.
     const gate: CompatModule = options.compatModule ?? framework
     const runtime = runtimeFrom(gate, framework)
-    loaded = runtime
     return runtime
   } catch (error) {
     warn(
