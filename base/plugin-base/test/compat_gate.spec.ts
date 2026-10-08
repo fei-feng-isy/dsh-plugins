@@ -116,6 +116,43 @@ describe('reading a live context', () => {
     expect(verdict.status).toBe('probe-skipped')
     expect(lines.join('\n')).toContain('the compatibility check itself failed')
   })
+
+  it('never throws when the LOGGER itself explodes — the module header promises "Never throws"', () => {
+    // Two independent call sites reach the caller's logger: the verdict loop (one line per verdict,
+    // and a healthy verdict always has at least the `ok` line) and the catch branch that reports a
+    // check which could not run. A logger that throws is not evidence of anything, and the gate it
+    // exists to keep non-fatal must not become the crash — so neither call site may propagate.
+    const throwing = {
+      info: () => { throw new Error('logger exploded') },
+      warn: () => { throw new Error('logger exploded') },
+      error: () => { throw new Error('logger exploded') },
+    } satisfies CompatLogger
+    const ctx = new Context()
+    // A tools stub the probe can actually pass: register recorded, `get` answering. A stub that
+    // always answers `undefined` would make the probe fail and the verdict `load: false`, which is
+    // the wrong subject for this test.
+    const registered: { name: string }[] = []
+    ctx.provide('tools', {
+      register: (definition: { name: string }) => {
+        registered.push(definition)
+        return () => {
+          const index = registered.indexOf(definition)
+          if (index >= 0) registered.splice(index, 1)
+        }
+      },
+      get: (name: string) => registered.find((definition) => definition.name === name),
+    })
+    let healthy: CompatVerdict | undefined
+    expect(() => { healthy = provision(ctx, throwing, spec()) }).not.toThrow()
+    expect(healthy?.load).toBe(true)
+    expect(healthy?.status).toBe('ok')
+    // The catch branch logs the "the check itself failed" line through the same hostile logger.
+    const exploding = { get: () => { throw new Error('context is on fire') } }
+    let degraded: CompatVerdict | undefined
+    expect(() => { degraded = provision(exploding, throwing, spec()) }).not.toThrow()
+    expect(degraded?.load).toBe(true)
+    expect(degraded?.status).toBe('probe-skipped')
+  })
 })
 
 describe('the post-registration check', () => {

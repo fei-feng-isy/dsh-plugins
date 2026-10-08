@@ -230,6 +230,13 @@ describe('envinit loader', () => {
     expect(runtime).toBeUndefined()
     expect(lines.warn.join('\n')).toContain('compatibility gate could not be initialised')
     expect(lines.warn.join('\n')).toContain('mount anyway')
+    // VERBATIM: a base that cannot be READ as a gate is "absent", which is `cannot-tell`. Mission's
+    // prefix is `compat:` where mem's is `envinit:`; the sentence itself is shared.
+    expect(lines.warn).toContain(
+      'compat: WARNING — interface: the loaded base has no interface gate (checkInterface / readInterfaceRequirement missing)'
+      + ' — it predates the runtime interface contract, so which generation it implements cannot be told;'
+      + ' using the loaded base anyway ("cannot tell" is never "incompatible")',
+    )
   })
 
   it('degrades to undefined with its own WARNING when the base cannot be loaded at all', async () => {
@@ -288,13 +295,40 @@ describe('envinit loader', () => {
       },
     }
 
-    expect(await env.loadCompat({ log: recordingLogger().log, framework: flaky as never })).toBeUndefined()
+    const first = recordingLogger()
+    expect(await env.loadCompat({ log: first.log, framework: flaky as never })).toBeUndefined()
     expect(attempts).toBe(1)
+    // This failure is INSIDE `loadCompatOnce`'s own try/catch (the gate could not be built), which is
+    // the other degradation line — the outer guard's falls below.
+    expect(first.lines.warn).toContain(
+      'compat: WARNING — the @avantf/dsh-plugin-base compatibility gate could not be initialised'
+      + ' (half-written install); the compatibility gate is SKIPPED and the plugin will mount anyway',
+    )
 
     const runtime = await env.loadCompat({ log: recordingLogger().log, framework: flaky as never })
     expect(attempts).toBe(2)
     expect(runtime?.prefix).toBe('compat:')
     expect(runtime?.kit).toBe(flaky)
+  })
+
+  it('turns a throwing bootstrap into one WARNING and a degraded mount — never a rejection', async () => {
+    // The OUTER guard, whose wording differs between the two trees: mem says `the framework is
+    // SKIPPED`, mission says `the compatibility gate is SKIPPED`. A shared loader must receive that
+    // sentence, not own it. Reached only when the throw escapes `loadCompatOnce` — here the module
+    // loader itself, exactly like a missing, half-written install.
+    vi.resetModules()
+    vi.doMock('../src/envinit-bootstrap.js', () => ({ loadFramework: () => { throw new Error('offline') } }))
+    try {
+      const env = await import('../src/envinit.js')
+      const { log, lines } = recordingLogger()
+      expect(await env.loadCompat({ log })).toBeUndefined()
+      expect(lines.warn).toContain(
+        'compat: WARNING — environment initialisation failed (offline);'
+        + ' the compatibility gate is SKIPPED and the plugin will mount anyway',
+      )
+    } finally {
+      vi.doUnmock('../src/envinit-bootstrap.js')
+    }
   })
 })
 
@@ -373,6 +407,14 @@ describe('the interface generation gate', () => {
     // itself still happens: tools/service/Remote/UI are registered unconditionally by the caller.
     expect(runtime).toBeUndefined()
     expect(lines.warn.join('\n')).toContain('shared capabilities are NOT used')
+    // VERBATIM, reason and tail included. Mission's tail omits the `legacy provisioning` that mem's
+    // names; that one difference is what any shared loader has to receive as a parameter.
+    const expected = realBase.checkInterface(realBase.INTERFACE_VERSION + 1, frame as never)
+    expect(expected.status).toBe('incompatible')
+    expect(lines.warn).toContain(
+      `compat: WARNING — interface: ${expected.reason ?? 'the loaded base implements another interface generation'};`
+      + " the base's shared capabilities are NOT used (own prompt defaults, gate skipped) and the plugin mounts anyway",
+    )
     // Nothing was ever run through the withheld base's gate.
     expect(calls.provision).toEqual([])
   })
@@ -389,5 +431,11 @@ describe('the interface generation gate', () => {
     expect(runtime?.kit).toBe(frame)
     expect(lines.warn.join('\n')).toContain('no baked interface requirement')
     expect(lines.warn.join('\n')).toContain('using the loaded base anyway')
+    // VERBATIM: byte-identical to mem's line except the caller's `compat:` prefix, which is exactly
+    // why a shared loader must not own the prefix or the tail.
+    expect(lines.warn).toContain(
+      'compat: WARNING — interface: this build has no baked interface requirement (lib/interface-version.json is missing or malformed),'
+      + ' so the runtime interface gate cannot run; using the loaded base anyway ("cannot tell" is never "incompatible")',
+    )
   })
 })

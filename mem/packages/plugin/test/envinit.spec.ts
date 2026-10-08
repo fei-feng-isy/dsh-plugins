@@ -299,6 +299,14 @@ describe('envinit loader', () => {
     expect(lines.warn.join('\n')).toContain('compatibility gate could not be initialised')
     expect(lines.warn.join('\n')).toContain('shape mismatch')
     expect(lines.warn.join('\n')).toContain('interface:')
+    // VERBATIM: a base that cannot even be READ as a gate is "absent", which is `cannot-tell`, and the
+    // whole line — reason included — is pinned because a shared loader must not reword it (see the
+    // interface shim: the same sentence in both trees, the prefix and the tail are the caller's).
+    expect(lines.warn).toContain(
+      'envinit: WARNING — interface: the loaded base has no interface gate (checkInterface / readInterfaceRequirement missing)'
+      + ' — it predates the runtime interface contract, so which generation it implements cannot be told;'
+      + ' using the loaded base anyway ("cannot tell" is never "incompatible")',
+    )
   })
 
   it('withholds the base (never refuses the mount) when the interface generation differs', async () => {
@@ -322,6 +330,14 @@ describe('envinit loader', () => {
     expect(runtime).toBeUndefined()
     expect(lines.warn.join('\n')).toContain('interface:')
     expect(lines.warn.join('\n')).toContain('shared capabilities are NOT used')
+    // VERBATIM, reason and tail included. mem's tail names `legacy provisioning`; mission's does not.
+    // That one difference is why any shared loader must take the wording as a parameter.
+    const expected = base.checkInterface(base.INTERFACE_VERSION + 1, framework as never)
+    expect(expected.status).toBe('incompatible')
+    expect(lines.warn).toContain(
+      `envinit: WARNING — interface: ${expected.reason ?? 'the loaded base implements another interface generation'};`
+      + " the base's shared capabilities are NOT used (own prompt defaults, gate skipped, legacy provisioning) and the plugin mounts anyway",
+    )
     // Nothing was registered or declared through the withheld base.
     expect(calls.provision).toHaveLength(0)
     expect(calls.declare).toHaveLength(0)
@@ -371,6 +387,11 @@ describe('envinit loader', () => {
     expect(runtime?.compat).toBeDefined()
     expect(lines.warn.join('\n')).toContain('no baked interface requirement')
     expect(lines.warn.join('\n')).toContain('using the loaded base anyway')
+    // VERBATIM: this sentence is the one degradation line that is byte-identical in both trees.
+    expect(lines.warn).toContain(
+      'envinit: WARNING — interface: this build has no baked interface requirement (lib/interface-version.json is missing or malformed),'
+      + ' so the runtime interface gate cannot run; using the loaded base anyway ("cannot tell" is never "incompatible")',
+    )
   })
 
   it('retries after a failed load instead of caching "cannot tell" for the whole process', async () => {
@@ -384,8 +405,15 @@ describe('envinit loader', () => {
     // Fails once — an offline boot, a registry hiccup — then behaves. A cached rejection would make
     // the second call below return the first failure forever, even once the base is reachable.
     bootstrapControl.failLoads = 1
-    expect(await env.loadEnvinit({ ...options, framework: undefined })).toBeUndefined()
+    const failed = recordingLogger()
+    expect(await env.loadEnvinit({ ...options, log: failed.log, framework: undefined })).toBeUndefined()
     expect(bootstrapControl.failLoads).toBe(0)
+    // VERBATIM: the guard's fallback line — mem says `the framework is SKIPPED`, mission says
+    // `the compatibility gate is SKIPPED`. The difference is data for a shared helper, not drift.
+    expect(failed.lines.warn).toContain(
+      'envinit: WARNING — environment initialisation failed (offline);'
+      + ' the framework is SKIPPED and the plugin will mount anyway',
+    )
 
     const runtime = await env.loadEnvinit(options)
     expect(runtime?.compat?.prefix).toBe('compat:')

@@ -286,6 +286,23 @@ describe('the gate', () => {
     expect(run?.verdict.load).toBe(true)
     expect(run?.verdict.status).toBe('probe-skipped')
   })
+
+  it('delegates to the shared gate, and falls back to "cannot tell" when that gate throws', () => {
+    // After the convergence this plugin's `provision` IS the base's, called off the loaded module.
+    // The fallback stays LOCAL (option A): a shared gate that throws — a hostile member, a base that
+    // predates the shape — must still leave the plugin loading, with the same "cannot tell" verdict
+    // and the same warning line. Asserting `probe-skipped` (not merely `load`) is what makes this a
+    // falsifier: before the delegation the healthy spread below produced `ok`.
+    const hostileModule = { ...compat.module, provision: () => { throw new Error('shared gate exploded') } } as CompatModule
+    const hostileRuntime = { ...compat, module: hostileModule }
+    const throwingLogger = { info: () => { throw new Error('logger exploded') }, warn: () => { throw new Error('logger exploded') }, error: () => { throw new Error('logger exploded') } }
+    const { ctx } = fakeContext()
+    let run: ReturnType<typeof provision> | undefined
+    expect(() => { run = provision(ctx, throwingLogger, hostileRuntime) }).not.toThrow()
+    expect(run?.verdict.load).toBe(true)
+    expect(run?.verdict.status).toBe('probe-skipped')
+    expect(run?.verdict.warnings.join('\n')).toContain('the compatibility check itself failed')
+  })
 })
 
 describe('the refusal megaphone', () => {

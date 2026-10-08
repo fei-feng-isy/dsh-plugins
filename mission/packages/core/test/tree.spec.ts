@@ -482,6 +482,94 @@ describe('the parked-session address', () => {
     // Immediately dispatchable: no cooldown, because `spawnFailures` stayed at zero.
     expect(tree.nextDispatchable()?.id).toBe(id)
   })
+
+  // The three transitions INTO `running` share one patch shape, and each clears its OWN handle. This
+  // is the field matrix a shared `bindRunning` helper must preserve verbatim — including the parts
+  // that must NOT be unified: `adoptParked` is deliberately exempt from the failure budgets
+  // (`tree.ts:781-783`), so waking never charges `failures`/`spawnFailures`.
+  function runningFields(tree: MissionTree, id: string) {
+    const node = tree.node(id)
+    return {
+      status: node?.status,
+      claimedBy: node?.claimedBy,
+      attempts: node?.attempts,
+      executorSessionId: node?.executorSessionId,
+      executorReleasedAt: node?.executorReleasedAt,
+      parkedWorker: node?.parkedWorker,
+      lastWorkerId: node?.lastWorkerId,
+      progressAt: node?.progressAt,
+      activityAt: node?.activityAt,
+      dispatchedAt: node?.dispatchedAt,
+    }
+  }
+
+  it('dispatch clears `parkedWorker`, keeps the first queue clock, and charges `attempts`', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    const first = await tree.dispatch(id, 'mission-fresh')
+    expect(first.ok).toBe(true)
+    expect(runningFields(tree, id)).toMatchObject({
+      status: 'running',
+      claimedBy: 'mission-fresh',
+      attempts: 1,
+      executorSessionId: 'mission-fresh',
+      executorReleasedAt: null,
+      parkedWorker: null,
+      lastWorkerId: null,
+    })
+    const at = tree.node(id)?.dispatchedAt
+    // A re-dispatch keeps the FIRST dispatch's queue clock and clears the parked address.
+    await tree.reclaim(id, 'vanished')
+    const again = await tree.dispatch(id, 'mission-again')
+    expect(again.ok).toBe(true)
+    const fields = runningFields(tree, id)
+    expect(fields.attempts).toBe(2)
+    expect(fields.claimedBy).toBe('mission-again')
+    expect(fields.parkedWorker).toBeNull()
+    expect(fields.dispatchedAt).toBe(at)
+  })
+
+  it('adoptParked clears `parkedWorker`, keeps `dispatchedAt`, and charges no budget', async () => {
+    const { tree, id } = await parkedParent()
+    const at = tree.node(id)?.dispatchedAt
+    const adopted = await tree.adoptParked(id, 'mission-p1')
+    expect(adopted.ok).toBe(true)
+    expect(runningFields(tree, id)).toMatchObject({
+      status: 'running',
+      claimedBy: 'mission-p1',
+      attempts: 2,
+      executorSessionId: 'mission-p1',
+      executorReleasedAt: null,
+      parkedWorker: null,
+      dispatchedAt: at,
+    })
+    // The exemption that must survive the refactor: waking is not failing.
+    expect(tree.node(id)?.failures).toBe(0)
+    expect(tree.node(id)?.spawnFailures).toBe(0)
+  })
+
+  it('adoptContinuation clears `lastWorkerId`, keeps `dispatchedAt`, and charges `attempts`', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-lost')
+    const at = tree.node(id)?.dispatchedAt
+    // A restart that cannot see the worker parks the claimed session as the continuation handle.
+    const reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.status).toBe('interrupted')
+    expect(reopened.node(id)?.lastWorkerId).toBe('mission-lost')
+    const adopted = await reopened.adoptContinuation(id, 'mission-lost')
+    expect(adopted.ok).toBe(true)
+    expect(runningFields(reopened, id)).toMatchObject({
+      status: 'running',
+      claimedBy: 'mission-lost',
+      attempts: 2,
+      executorSessionId: 'mission-lost',
+      executorReleasedAt: null,
+      lastWorkerId: null,
+      dispatchedAt: at,
+    })
+  })
 })
 
 describe('progress and stalls', () => {
@@ -1905,6 +1993,105 @@ describe('the executor display handle', () => {
     // Rewritten as a running record: the display handle is recovered from the binding before the
     // demotion clears it, exactly as `lastWorkerId` is.
     expect(reopened.node(id)?.executorSessionId).toBe('mission-legacy')
+  })
+})
+
+/**
+ * A1: the release mark on the executor display handle. The handle is kept as AUDIT ("which session
+ * ran this node"), so the fact that the session was deleted has to be recorded BESIDE it — otherwise
+ * a click opens a session that is not there, and the failure surfaces late, in the chat view.
+ */
+describe('the executor release mark', () => {
+  it('reads a record written before the mark existed as "not released"', async () => {
+    // The compatibility half of the whole feature: an old document must behave EXACTLY as it does
+    // today. "Not released" is the permissive reading — the click tries the handle, which is the
+    // behaviour of the build that wrote the record.
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-legacy')
+    const state = store.documents.get(id)
+    if (state === undefined) throw new Error('nothing was persisted')
+    store.documents.set(id, withoutField(state, id, 'executorReleasedAt'))
+
+    const reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.executorReleasedAt).toBeNull()
+    // ...and the handle it describes is untouched: normalizing must not erase the audit field.
+    expect(reopened.node(id)?.executorSessionId).toBe('mission-legacy')
+  })
+
+  it('survives a round trip through the store, so the panel keeps the explanation after a restart', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-gone')
+    await tree.reclaim(id, 'vanished')
+    expect(await tree.markExecutorReleased(id, 'mission-gone')).toBe(true)
+    const at = tree.node(id)?.executorReleasedAt
+    expect(at).not.toBeNull()
+
+    const reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.executorReleasedAt).toBe(at)
+    // The audit handle survives it too — the mark is an addition, never a replacement.
+    expect(reopened.node(id)?.executorSessionId).toBe('mission-gone')
+  })
+
+  it('refuses a release receipt for a handle that has moved on, and one for an unknown node', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-second')
+    // The stale receipt names the FIRST attempt; marking it would judge a session that is running
+    // right now as gone. This is the guard the whole entry point exists for.
+    expect(await tree.markExecutorReleased(id, 'mission-first')).toBe(false)
+    expect(tree.node(id)?.executorReleasedAt).toBeNull()
+    // A node nobody dispatched has no handle to release either.
+    const bare = await tree.createRoot({ ownerSessionId: 'owner', title: 'Bare', description: 'd', analysis: [] })
+    if (!bare.ok) throw new Error('root creation failed')
+    expect(await tree.markExecutorReleased(bare.value.id, 'mission-first')).toBe(false)
+    expect(await tree.markExecutorReleased('n9999', 'mission-first')).toBe(false)
+  })
+
+  it('is idempotent: a second receipt for the same handle does not move the instant', async () => {
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-once')
+    expect(await tree.markExecutorReleased(id, 'mission-once')).toBe(true)
+    const at = tree.node(id)?.executorReleasedAt
+    expect(await tree.markExecutorReleased(id, 'mission-once')).toBe(false)
+    expect(tree.node(id)?.executorReleasedAt).toBe(at)
+  })
+
+  it('is RESET by every write that binds a new executor, so a re-dispatched node is not judged dead', async () => {
+    // The degenerate case this guards: without the reset, the SECOND execution of a node would be
+    // permanently rendered as "session gone" and the panel would refuse to open a live worker.
+    const { tree } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-first')
+    await tree.reclaim(id, 'vanished')
+    await tree.markExecutorReleased(id, 'mission-first')
+    expect(tree.node(id)?.executorReleasedAt).not.toBeNull()
+
+    await tree.dispatch(id, 'mission-second')
+    expect(tree.node(id)?.executorSessionId).toBe('mission-second')
+    expect(tree.node(id)?.executorReleasedAt).toBeNull()
+  })
+
+  it('is reset by the continuation adoption too, not only by a fresh dispatch', async () => {
+    const { tree, store } = makeTree()
+    const id = await rootOf(tree)
+    await tree.dispatch(id, 'mission-cold')
+    await tree.markExecutorReleased(id, 'mission-cold')
+    const state = store.documents.get(id)
+    if (state === undefined) throw new Error('nothing was persisted')
+    const nodes = new Map(state.nodes)
+    nodes.set(id, { ...nodes.get(id)!, status: 'interrupted' as const, claimedBy: null, lastWorkerId: 'mission-cold' })
+    store.documents.set(id, { tree: state.tree, nodes })
+
+    const reopened = reopen(store)
+    await reopened.open()
+    expect(reopened.node(id)?.executorReleasedAt).not.toBeNull()
+    await reopened.adoptContinuation(id, 'mission-cold')
+    expect(reopened.node(id)?.executorReleasedAt).toBeNull()
   })
 })
 
