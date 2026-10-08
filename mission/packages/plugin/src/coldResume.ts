@@ -193,24 +193,62 @@ async function wakeParkedWorker(deps: ColdResumeDeps, node: NodeRecord, workerId
   const view = tree.view(node.id)
   if (view === undefined) return false
   const prompt = buildWorkerPrompt(view, {}, deps.wellFormed)
-  try {
-    await deps.subagents.sendMessage(
-      parent,
-      SessionId(workerId),
-      [{ type: 'text', text: prompt }],
-      { signal: new AbortController().signal },
-    )
-    // A parked session is a continuation too: the round this prompt opens is what its NEXT cold
-    // wake must subtract from, not the dispatch that parked it. Stamped only now that it was read.
-    await deps.recordBaseline(node.id, workerId)
-    deps.log.info(`woke ${workerId} for ${node.id} (its children are all terminal)`)
-    return true
-  } catch (error: unknown) {
+  const delivered = await deliverPrompt(deps, {
+    parent,
+    workerId,
+    nodeId: node.id,
+    prompt,
     // A cleaned-up session or one the runtime refuses to resume: no retry and no failure counter is
     // touched — `note_mission` carries the hand-off, so a fresh session is a complete answer.
-    deps.log.warn(`wake of ${workerId} for ${node.id} failed; starting a fresh executor: ${String(error)}`)
+    failed: (error) => {
+      deps.log.warn(`wake of ${workerId} for ${node.id} failed; starting a fresh executor: ${String(error)}`)
+    },
+  })
+  if (delivered) {
+    deps.log.info(`woke ${workerId} for ${node.id} (its children are all terminal)`)
+  }
+  return delivered
+}
+
+/**
+ * The DELIVERY skeleton the two wakes share: send the prompt to the (possibly non-resident) child,
+ * then stamp the baseline the next wake will subtract from.
+ *
+ * What differs between the walks stays in the callers: the prompt itself (a parked wake reads the
+ * ordinary dispatch prompt; a continuation reduces corrections and prepends the delta), the failure
+ * wording (each walk names its own), and the continuation's extra durable mark. The ORDER does not
+ * differ and is the whole reason this is one function: the baseline is stamped only after the
+ * delivery resolved — a refused prompt was never read, and nothing may claim it was.
+ */
+async function deliverPrompt(
+  deps: ColdResumeDeps,
+  input: {
+    readonly parent: Agent
+    readonly workerId: string
+    readonly nodeId: string
+    readonly prompt: string
+    /** The caller's own failure line; the skeleton owns only that there IS one. */
+    readonly failed: (error: unknown) => void
+    /** Extra work once the prompt is known read; its own failures are its own concern. */
+    readonly afterBaseline?: () => Promise<void>
+  },
+): Promise<boolean> {
+  try {
+    await deps.subagents.sendMessage(
+      input.parent,
+      SessionId(input.workerId),
+      [{ type: 'text', text: input.prompt }],
+      { signal: new AbortController().signal },
+    )
+  } catch (error: unknown) {
+    input.failed(error)
     return false
   }
+  // A parked/resumed session is a continuation too: the round this prompt opens is what its NEXT
+  // wake must subtract from, not the dispatch that parked it. Stamped only now that it was read.
+  await deps.recordBaseline(input.nodeId, input.workerId)
+  await input.afterBaseline?.()
+  return true
 }
 
 /**
@@ -341,31 +379,27 @@ async function deliverContinuation(
     ...(drift === undefined ? {} : { delta: drift }),
     ...(waitedMs > 0 ? { capacityWaitedMs: waitedMs } : {}),
   }, deps.wellFormed)
-  // Stamped with the prompt itself: this session's NEXT wake subtracts from what it is being read
-  // here, not from the original dispatch, or the same drift would be reported to it twice. After
-  // the delivery resolved — a refused prompt was never read, and the delivery must not carry an
-  // extra awaited durable write.
-  try {
-    await deps.subagents.sendMessage(
-      parent,
-      SessionId(workerId),
-      [{ type: 'text', text: prompt }],
-      { signal: new AbortController().signal },
-    )
-  } catch (error: unknown) {
+  return await deliverPrompt(deps, {
+    parent,
+    workerId,
+    nodeId: node.id,
+    prompt,
     // A cleaned-up session or one the runtime refuses to resume: no retry and no failure counter
     // is touched — a fresh session is a complete answer.
-    deps.log.warn(`continuation of ${node.id} in ${workerId} failed; starting a fresh executor: ${String(error)}`)
-    return false
-  }
-  await deps.recordBaseline(node.id, workerId)
-  // Those corrections have now been READ by the session they were addressed to. Advancing the
-  // durable mark HERE (never when the prompt is merely built) is what keeps a later wake from
-  // repeating them; it is monotone, so a raced, older report cannot pull it back.
-  await deps.requireTree()
-    .markCorrectionsDelivered(node.id, node.corrections.length)
-    .catch((error: unknown) => {
-      deps.log.warn(`continuation of ${node.id}: could not record its correction mark — ${String(error)}`)
-    })
-  return true
+    failed: (error) => {
+      deps.log.warn(`continuation of ${node.id} in ${workerId} failed; starting a fresh executor: ${String(error)}`)
+    },
+    // Those corrections have now been READ by the session they were addressed to. Advancing the
+    // durable mark HERE (never when the prompt is merely built) is what keeps a later wake from
+    // repeating them; it is monotone, so a raced, older report cannot pull it back. Stamped with the
+    // prompt itself, after the baseline: this session's NEXT wake subtracts from what it is being
+    // read here, not from the original dispatch.
+    afterBaseline: async () => {
+      await deps.requireTree()
+        .markCorrectionsDelivered(node.id, node.corrections.length)
+        .catch((error: unknown) => {
+          deps.log.warn(`continuation of ${node.id}: could not record its correction mark — ${String(error)}`)
+        })
+    },
+  })
 }
