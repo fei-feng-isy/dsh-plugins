@@ -248,6 +248,7 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   const legacy = node as NodeRecord & {
     lastWorkerId?: string | null
     executorSessionId?: string | null
+    executorReleasedAt?: unknown
     correctionsDeliveredUpTo?: number
     dispatchBaseline?: unknown
     unit?: unknown
@@ -263,8 +264,16 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   // A record written before the display handle existed reads as "no executor to open"; the durable
   // side expresses that as `.catch(null)`, and the type check here is the same reading for a bare
   // record: a non-string is not a session id, and an invented id would be offered as a clickable
-  // address that goes nowhere.
+  // address that goes nowhere. `executorReleasedAt` beside it is permissive in the opposite
+  // direction — see its own comment below.
   const executorSessionId = typeof legacy.executorSessionId === 'string' ? legacy.executorSessionId : null
+  // A record written before the release mark existed reads as `null` = "the handle is not known to be
+  // released", i.e. exactly the previous build's behaviour (the click tries the handle). A dirty value
+  // reads the same way rather than as an instant nobody recorded: the two directions are NOT symmetric
+  // here — an invented mark would refuse to open a session that is still there, while a missing one
+  // merely falls back to the click that exists today. Same stored-timestamp reader as every other
+  // nullable durable instant, so this encoding cannot drift from the durable side's `.catch(null)`.
+  const executorReleasedAt = storedTimeOrNull(legacy.executorReleasedAt)
   const correctionsDeliveredUpTo = legacy.correctionsDeliveredUpTo ?? 0
   const dispatchBaseline = asBaseline(legacy.dispatchBaseline)
   // A record written before `unit` existed, or one whose value is not a string at all, reads as "no
@@ -327,6 +336,7 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
   if (
     lastWorkerId === node.lastWorkerId
     && executorSessionId === node.executorSessionId
+    && executorReleasedAt === node.executorReleasedAt
     && correctionsDeliveredUpTo === node.correctionsDeliveredUpTo
     && dispatchBaseline === node.dispatchBaseline
     && unit === node.unit
@@ -354,6 +364,7 @@ function normalizeLoaded(node: NodeRecord): NodeRecord {
     ...node,
     lastWorkerId,
     executorSessionId,
+    executorReleasedAt,
     correctionsDeliveredUpTo,
     dispatchBaseline,
     unit,
@@ -791,6 +802,10 @@ export class MissionTree {
         parkedWorker: null,
         // The display handle: kept after this dispatch ends, unlike `claimedBy`.
         executorSessionId: workerId,
+        // A NEW executor is not the released one, whatever the last attempt left behind. Without this
+        // reset a re-dispatched node would stay judged "released" forever, and the panel would refuse
+        // to open a session that is running right now.
+        executorReleasedAt: null,
         // FIRST dispatch wins: a parked adoption only ever runs on a node that already ran (it parked
         // itself by decomposing), but the `??` keeps the invariant true even for a hand-built record.
         dispatchedAt: node.dispatchedAt ?? at,
@@ -873,8 +888,10 @@ export class MissionTree {
         progressAt: at,
         activityAt: at,
         lastWorkerId: null,
-        // Last attempt wins: the continuation replaces the previous executor as the one to open.
+        // Last attempt wins: the continuation replaces the previous executor as the one to open — and
+        // with it, whatever was known about that previous address being released.
         executorSessionId: workerId,
+        executorReleasedAt: null,
         // The continuation is a re-dispatch of a node that already ran, so this never moves the clock.
         dispatchedAt: node.dispatchedAt ?? at,
       })
@@ -1092,8 +1109,10 @@ export class MissionTree {
       spawnFailures: 0,
       parkedWorker: null,
       lastWorkerId: null,
-      // Nothing has run this node yet, so there is no session to open.
+      // Nothing has run this node yet, so there is no session to open — and therefore none that could
+      // have been released either.
       executorSessionId: null,
+      executorReleasedAt: null,
       // No prompt has been built for this node yet, so there is nothing to subtract later.
       dispatchBaseline: null,
       progressAt: 0,
@@ -1165,6 +1184,8 @@ export class MissionTree {
         parkedWorker: null,
         // The display handle: last attempt wins, and it survives this attempt's terminal state.
         executorSessionId: claimId,
+        // ...and a fresh binding is never the released one (see `adoptParked`'s copy).
+        executorReleasedAt: null,
         // The FIRST dispatch of this node stops its queue clock; later dispatches leave it alone, so
         // "排队 = dispatchedAt − createdAt" keeps meaning the one wait before the first run.
         dispatchedAt: node.dispatchedAt ?? at,
@@ -1378,10 +1399,60 @@ export class MissionTree {
     })
   }
 
+  /**
+   * Mark the node's CURRENT executor handle as released: the session it names has been deleted off
+   * disk by the cleanup pipeline, so the panel must explain that instead of jumping into a session
+   * that is not there. The handle itself is KEPT — see {@link NodeRecord.executorReleasedAt}.
+   *
+   * GUARDED on identity, and that is the whole point of routing through here rather than patching the
+   * node from the cleanup pass: between a release and this call the node may have been RE-DISPATCHED,
+   * and a stale release receipt must not judge the NEW handle dead. Only
+   * `node.executorSessionId === sessionId` may be marked — the same "only the last attempt" rule
+   * every other writer of the field follows. `false` means "nothing was marked" (unknown node, a
+   * different executor now, no executor at all, or already marked), so the caller can skip its
+   * announcement; it is never an error.
+   *
+   * Idempotent by consequence rather than by check: a second call for the same session is refused
+   * because the first left the mark, and re-marking an already-marked node would move the instant
+   * without any new fact behind it.
+   */
+  async markExecutorReleased(nodeId: string, sessionId: string): Promise<boolean> {
+    return this.withLock(async () => {
+      const found = this.locate(nodeId)
+      if (found === undefined) return false
+      const { state, node } = found
+      // The guard, in one comparison: a blank or absent handle, or a handle that has moved on to
+      // another attempt, is not the session this receipt is about.
+      if (node.executorSessionId === null || node.executorSessionId !== sessionId) return false
+      // Already released: the receipt is spent, and moving the instant would claim a second release
+      // that never happened.
+      if (node.executorReleasedAt !== null) return false
+      this.replace(state, node, { executorReleasedAt: this.deps.now() })
+      await this.flush(state.tree.rootId)
+      return true
+    })
+  }
+
   nodeHeldBy(sessionId: string): NodeRecord | undefined {
     for (const state of this.states.values()) {
       for (const node of state.nodes.values()) {
         if (node.claimedBy === sessionId) return node
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * The node whose DISPLAY handle names this session, or `undefined`. The lookup behind the cleanup
+   * pass's release receipts: a released worker session id is the only thing that pass knows, and the
+   * node it must mark is the one still pointing at it. Read-only, and deliberately the CURRENT handle
+   * only (`claimedBy` is irrelevant — it is cleared long before retention runs), so a node that has
+   * since been dispatched elsewhere is simply not a match.
+   */
+  nodeByExecutor(sessionId: string): NodeRecord | undefined {
+    for (const state of this.states.values()) {
+      for (const node of state.nodes.values()) {
+        if (node.executorSessionId === sessionId) return node
       }
     }
     return undefined

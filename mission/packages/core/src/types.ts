@@ -270,6 +270,26 @@ export interface NodeRecord {
    * node that was never dispatched, which is also the value a record written before this field
    * existed loads as. Persisted, `DOMAIN_VERSION` stays 1. */
   readonly executorSessionId: string | null
+  /** When the session named by {@link executorSessionId} was RELEASED — deleted off disk by the
+   * cleanup pipeline (`cleanWorkers`' `cleaned` bucket) — or `null` while the handle still names a
+   * session this host can open.
+   *
+   * The audit handle is deliberately NOT cleared when the session goes: "which session executed this
+   * node" is the fact that field exists for, and deleting it would erase the only record of it. What
+   * the panel needs is the OTHER fact — whether the address still points at anything — so the two are
+   * kept apart instead of one being inferred from the other. Without this, a click went straight to
+   * `openSession` on a released session, which the host could only refuse later, as a skeleton error
+   * in the chat view (measured: `subagent/not-found`).
+   *
+   * Only a REAL release marks it. An archive that FAILED (`refused`) left the session in place, so
+   * the handle is still openable and must not be judged dead; the unarchive and projection-cache
+   * failures describe steps AFTER a successful deletion, so they are already covered by it. Written
+   * by the cleanup path through {@link MissionTree.markExecutorReleased}, and reset to `null` by
+   * every write that binds a NEW executor (`dispatch` / `adoptParked` / `adoptContinuation`), so a
+   * re-dispatched node is never permanently judged released. `null` for a node that was never
+   * dispatched, which is also the value a record written before this field existed loads as — "not
+   * released", i.e. today's behaviour. Persisted, `DOMAIN_VERSION` stays 1. */
+  readonly executorReleasedAt: number | null
   /** What the prompt of the LAST dispatch showed its session, stamped by the host the moment that
    * prompt was ACCEPTED (not when the node was bound: a dispatch whose prompt was never built or
    * never delivered must not leave a baseline claiming the session read something). The cold wake

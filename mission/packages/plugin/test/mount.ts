@@ -201,6 +201,12 @@ export interface Mounted {
   /** Session ids the workspace registry reports as archived. Mutable, for `/clean archive all`. */
   archivedSessions: Set<string>
   /**
+   * Session ids whose `archiveSession` call REJECTS, as a registry write refused at the wrong moment
+   * does. Mutable so a case can arm it after mount (a cleanup pass must survive one refusal and still
+   * release the rest) — which is the `refused` bucket the release mark must never touch.
+   */
+  unarchivableSessions: Set<string>
+  /**
    * Every `archiveSession` / `unarchiveSession` call the fake registry received, in order, as
    * `archive:<id>` / `unarchive:<id>` — the sequence the three-step cleanup lifecycle is asserted on.
    */
@@ -419,6 +425,8 @@ export async function mount(
   const sessions = new Set<string>(['owner', ...(options.sessions ?? [])])
   const unobservableSessions = new Set<string>(options.unobservableSessions ?? [])
   const archivedSessions = new Set<string>(options.archivedSessions ?? [])
+  /** Armed by a case; see `Mounted.unarchivableSessions`. */
+  const unarchivableSessions = new Set<string>()
   /** Registry calls in order, so the archive → release → unarchive lifecycle is assertable. */
   const registryCalls: string[] = []
   const seededRoots: string[] = []
@@ -699,6 +707,9 @@ export async function mount(
       },
       archiveSession: (id: string) => {
         registryCalls.push(`archive:${String(id)}`)
+        if (unarchivableSessions.has(String(id))) {
+          return Promise.reject(new Error('stubbed: registry write refused'))
+        }
         archivedSessions.add(String(id))
         return Promise.resolve()
       },
@@ -805,6 +816,7 @@ export async function mount(
     sessions,
     unobservableSessions,
     archivedSessions,
+    unarchivableSessions,
     registryCalls,
     seededRoots,
     dropLive: (sessionId: string) => {

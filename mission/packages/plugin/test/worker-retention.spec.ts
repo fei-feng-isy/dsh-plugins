@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount, type Mounted } from './mount.js'
+import { persistedTree } from './fixtures.js'
 
 const roots: string[] = []
 afterEach(() => {
@@ -173,6 +174,77 @@ describe('automatic retention on the sweep', () => {
     }, { timeout: 5_000 })
     for (const id of older) expect(existsSync(projectDir(root, id)), id).toBe(false)
     for (const id of newer) expect(existsSync(projectDir(root, id)), id).toBe(true)
+  })
+})
+
+describe('marking the released executor handles (A1)', () => {
+  it('marks the node whose worker the retention pass RELEASED, and leaves the kept one alone', async () => {
+    // Retention releases the OLDEST settled workers (keepWorkers keeps the newest). One node's
+    // `executorSessionId` is the released session — its panel entry must stop jumping — and the kept
+    // one's must stay untouched, because that session is still on disk and still openable.
+    const released = workerId(0)
+    const kept = workerId(1)
+    const releasedNodeId = 'released01'
+    const keptNodeId = 'kept000001'
+    const root = sessionRoot([released, kept])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      pluginConfig: { sessionsRoot: root, keepWorkers: 1 },
+      seedDocuments: [
+        await persistedTree({ workerId: released, nodeId: releasedNodeId }),
+        await persistedTree({ workerId: kept, nodeId: keptNodeId }),
+      ],
+      // `kept` carries the NEWER createdAt, so it is the one retention keeps.
+      seedListedSessions: [listed(released, OWNER, 0), listed(kept, OWNER, 1)],
+    })
+
+    await vi.waitFor(() => {
+      expect(mounted.registryCalls).toContain(`archive:${released}`)
+    }, { timeout: 5_000 })
+    expect(existsSync(projectDir(root, released))).toBe(false)
+    expect(existsSync(projectDir(root, kept))).toBe(true)
+
+    // Only the released handle is marked, and the mark is on the node the panel reads (the fixture's
+    // own node id, distinct per document so the two trees cannot collide).
+    expect(mounted.nodeFor(releasedNodeId)?.executorReleasedAt).not.toBeNull()
+    expect(mounted.nodeFor(releasedNodeId)?.executorSessionId).toBe(released)
+    expect(mounted.nodeFor(keptNodeId)?.executorReleasedAt).toBeNull()
+    expect(mounted.nodeFor(keptNodeId)?.executorSessionId).toBe(kept)
+  })
+
+  it('never marks a node whose archive was REFUSED — that session is still there', async () => {
+    // The one way to get the mark wrong in the dangerous direction: `refused` means step 1 failed, so
+    // the session was never deleted and the handle must keep opening. Manual `/clean archive all`
+    // (the same `cleanWorkers` call the automatic pass uses) with one armed archive failure.
+    const released = workerId(0)
+    const refused = workerId(1)
+    const releasedNodeId = 'released01'
+    const refusedNodeId = 'refused001'
+    const root = sessionRoot([released, refused])
+    const mounted = await mount({
+      workspaceRegistry: true,
+      // Retention off: this case is about the MANUAL pass, and an automatic one racing it would
+      // decide the buckets instead.
+      pluginConfig: { sessionsRoot: root, keepWorkers: 0 },
+      seedDocuments: [
+        await persistedTree({ workerId: released, nodeId: releasedNodeId }),
+        await persistedTree({ workerId: refused, nodeId: refusedNodeId }),
+      ],
+      // The listing is where `/clean` learns about the two records; only the ARCHIVE call is armed to
+      // fail, so this case exercises `refused` rather than "no candidates".
+      seedListedSessions: [listed(released, OWNER, 0), listed(refused, OWNER, 1)],
+    })
+    mounted.unarchivableSessions.add(refused)
+
+    const result = await mounted.runCommand('clean', 'archive all')
+    expect(result.kind).toBe('success')
+    expect(mounted.registryCalls).toContain(`archive:${released}`)
+    expect(mounted.registryCalls).toContain(`archive:${refused}`)
+    // The refused record is still on disk: nothing about it was released, so nothing may be marked.
+    expect(existsSync(projectDir(root, refused))).toBe(true)
+    expect(existsSync(projectDir(root, released))).toBe(false)
+    expect(mounted.nodeFor(releasedNodeId)?.executorReleasedAt).not.toBeNull()
+    expect(mounted.nodeFor(refusedNodeId)?.executorReleasedAt).toBeNull()
   })
 })
 

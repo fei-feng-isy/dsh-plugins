@@ -663,6 +663,38 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const NO_REGISTRY = '这个部署没有挂载 workspace registry，无法归档 ⇒ 无法清理。'
 
   /**
+   * Mark the NODES whose executor session a cleanup pass just RELEASED, so a click on such a node
+   * explains "that session is gone" instead of opening a session that is not there (A1).
+   *
+   * Called with `cleanWorkers`' `cleaned` bucket and NOTHING else — that is the one bucket that means
+   * "the files are gone". `refused` is an archive that FAILED, so the session is still on disk and its
+   * handle must stay openable; `unarchiveFailures` / `purgeFailures` describe steps AFTER a successful
+   * deletion and are therefore already covered by it.
+   *
+   * ONE helper for both callers (automatic retention and the manual `/clean archive`), because they
+   * share `cleanWorkers` and a second inline copy is exactly how "the manual path forgot to mark"
+   * comes back. Best-effort by construction: a node that refuses the receipt (it was re-dispatched
+   * while the pass was running, or no node ever named that session) is not an error, and nothing here
+   * may abort a cleanup whose files are already deleted.
+   */
+  const markReleasedExecutors = async (result: WorkerCleanup, ownerId: string): Promise<void> => {
+    if (result.cleaned.length === 0) return
+    const marked: string[] = []
+    for (const entry of result.cleaned) {
+      try {
+        if (await host.markExecutorReleased(entry.id)) marked.push(entry.id)
+      } catch (error: unknown) {
+        log.warn(`marking the released executor ${entry.id} on ${ownerId} failed: `
+          + `${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    if (marked.length === 0) return
+    // The SAME change notification the rest of the plugin uses (the host announced each node it
+    // marked); this line only says how many nodes the pass could claim.
+    log.info(`released executor handle(s) marked on ${ownerId}: ${marked.join(', ')}`)
+  }
+
+  /**
    * Automatic retention for ONE owner session: keep the newest `keepWorkers` SETTLED worker sessions
    * and release the rest through the same archive → delete → unarchive → projection-cache purge
    * pipeline `/clean archive` uses (`cleanWorkers` with `retain`). Live workers are excluded from the
@@ -694,6 +726,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       for (const failure of result.purgeFailures) {
         log.warn(`retention: ${failure.id} released, but projection cache purge failed — ${failure.reason}`)
       }
+      await markReleasedExecutors(result, ownerId)
       return result
     } catch (error: unknown) {
       log.warn(`retention pass for ${ownerId} failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -1193,6 +1226,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           + `ghosts released ${String(ghosts.released.length)}, cache purged ${String(purged.length)}, `
           + `running ${String(result.running.length)}, foreign ${String(result.foreign.length)}`,
         )
+        // Manual release marks the nodes too, through the SAME helper the automatic pass uses: the
+        // sessions `cleanWorkers` just deleted cannot be opened any more, whichever pass deleted them.
+        await markReleasedExecutors(result, agent.id)
         return {
           kind: result.cleaned.length === 0 ? 'error' : 'success',
           text: [...cleanupScopeLines(result), ...ghostScopeLines(ghosts), ...purgeScopeLines(purged)].join('\n'),
@@ -1213,6 +1249,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           log.warn(`/clean archive ${unarchiveFailure.id} from ${agent.id}: deleted, but unarchive failed — `
             + unarchiveFailure.reason)
         }
+        // A NAMED release marks its node too — same bucket (`cleaned`), same helper. Only `done`
+        // (the released record) can be marked: a refused one left its session on disk.
+        await markReleasedExecutors(named, agent.id)
         return {
           kind: 'success',
           text: [

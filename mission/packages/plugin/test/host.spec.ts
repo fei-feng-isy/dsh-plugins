@@ -914,6 +914,37 @@ describe('the worker session the panel can open', () => {
     expect(row?.workerLive).toBe(false)
     expect(mounted.nodeFor(queuedId)?.executorSessionId).toBeNull()
   })
+
+  it('projects the RELEASE mark, and a released handle still keeps its audit id', async () => {
+    // A1's projection half. The mark is what the client branches on, so it has to travel on BOTH
+    // reads the panel uses (the snapshot row and the detail), and it must not replace the handle:
+    // "which session ran this node" stays readable after the session itself is gone.
+    const mounted = await mount()
+    const root = await createTree(mounted, 'Released')
+    await mounted.flush()
+    const claim = String(mounted.dispatched[0]?.childId ?? '')
+    const worker = mounted.makeLive(claim)
+    await callTool(mounted, 'submit_mission', { node_id: root, result: 'done' }, worker)
+
+    // Before the cleanup: ended, still openable — NOT released.
+    const before = (await mounted.host.snapshot({ sessionId: mounted.owner.id })).trees[0]?.nodes[0]
+    expect(before?.workerSessionId).toBe(claim)
+    expect(before?.workerLive).toBe(false)
+    expect(before?.workerReleased).toBe(false)
+
+    expect(await mounted.host.markExecutorReleased(claim)).toBe(true)
+    const releaseRow = (await mounted.host.snapshot({ sessionId: mounted.owner.id })).trees[0]?.nodes[0]
+    expect(releaseRow?.workerReleased).toBe(true)
+    expect(releaseRow?.workerSessionId).toBe(claim)
+    const releaseDetail = await mounted.host.detail({ sessionId: mounted.owner.id, nodeId: root })
+    expect(releaseDetail.node?.workerReleased).toBe(true)
+    expect(releaseDetail.node?.workerSessionId).toBe(claim)
+
+    // A stale receipt — the session this node no longer names — marks nothing, and so does a session
+    // no node ever ran: neither may push the mark onto a live handle.
+    expect(await mounted.host.markExecutorReleased('mission-stranger')).toBe(false)
+    expect(mounted.nodeFor(root)?.executorReleasedAt).not.toBeNull()
+  })
 })
 
 /**
@@ -931,6 +962,7 @@ describe('resolving a historical executor on click', () => {
         [rootId]: {
           id: rootId, rootId, parentId: null, title: 'Historical', description: 'd',
           unit: null, weight: 1, roundMs: null, executorSessionId: null,
+          executorReleasedAt: null,
           context: [], corrections: [], correctionsDeliveredUpTo: 0, analysisNotes: [], analysisAttempt: 0,
           analysisAuthor: null,
           status: 'done', createdAt: at, depth: 1, claimedBy: null, claimedAt: at, attempts: 1,

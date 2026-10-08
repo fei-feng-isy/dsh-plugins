@@ -289,6 +289,7 @@ describe('outbound: the worker prompt boundary', () => {
       parkedWorker: null,
       lastWorkerId: null,
       executorSessionId: 'mission-1',
+      executorReleasedAt: null,
       dispatchBaseline: null,
       progressAt: 0,
       activityAt: 0,

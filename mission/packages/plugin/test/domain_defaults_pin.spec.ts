@@ -136,6 +136,10 @@ const NODE_DEFAULTS: Record<string, unknown> = {
   endedAt: null,
   lastWorkerId: null,
   executorSessionId: null,
+  // The release mark: a record written before it existed (and a dirty value) reads as "the handle is
+  // not known to be released" — the permissive direction, because the opposite would refuse to open a
+  // session that is still there.
+  executorReleasedAt: null,
   correctionsDeliveredUpTo: 0,
   dispatchBaseline: null,
   analysisAuthor: null,

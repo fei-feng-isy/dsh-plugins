@@ -171,6 +171,20 @@ function workerLiveOf(node: NodeRecord): boolean {
     && node.claimedBy === node.executorSessionId
 }
 
+/**
+ * Whether the executor handle above names a session that was RELEASED off disk, so the panel must
+ * explain that instead of jumping. Read from the persisted mark rather than derived: only the cleanup
+ * pipeline knows a session is gone, and a node that still names its executor is otherwise
+ * indistinguishable from one whose session has been deleted (the handle is kept either way — see
+ * `NodeRecord.executorReleasedAt`).
+ *
+ * `false` for every record written before the mark existed, which is the whole compatibility story:
+ * an old document reads as "not released", and the click behaves exactly as it does today.
+ */
+function workerReleasedOf(node: NodeRecord): boolean {
+  return node.executorReleasedAt !== null
+}
+
 /** One node as the browser half renders it — the ROW projection. Deliberately without `description`
  *  or the submitted result: both are re-sent on every engine change and a row renders neither. */
 interface NodeView {
@@ -211,6 +225,10 @@ interface NodeView {
   readonly workerSessionId: string | null
   /** Whether that handle is still running (see `workerLiveOf`), so the panel can say 进行中 / 已结束. */
   readonly workerLive: boolean
+  /** Whether that handle's session was RELEASED off disk by the cleanup pipeline (see
+   *  `workerReleasedOf`). The ROW carries it because the click it must change lives here: a released
+   *  handle is never opened, and the explanation is rendered beside the id that was clicked. */
+  readonly workerReleased: boolean
   /** Declared capacity weight (cores-equivalent); persisted, so it survives a restart. */
   readonly weight: number
   /** Why the engine has not dispatched this node yet, or `null`. Carried in the ROW projection
@@ -254,6 +272,9 @@ export interface NodeDetail {
   readonly workerSessionId: string | null
   /** Whether that handle is still running (see `workerLiveOf`), so the panel can say 进行中 / 已结束. */
   readonly workerLive: boolean
+  /** Whether that handle's session was released off disk (see the row projection's copy). Carried in
+   *  the detail too because the dialog's heading id is the same entry as the tree header's. */
+  readonly workerReleased: boolean
   /** Declared capacity weight (cores-equivalent). */
   readonly weight: number
   /** Why this node is queued rather than running, or `null`. */
@@ -1432,6 +1453,7 @@ export class AvantfMissionHost extends TypertRemoteService {
         resultPointer: node.resultRef === null ? null : spillPointer(node),
         workerSessionId: workerSessionIdOf(node),
         workerLive: workerLiveOf(node),
+        workerReleased: workerReleasedOf(node),
         weight: node.weight,
         waitingFor: this.waitingForOf(node.id),
       },
@@ -1515,6 +1537,30 @@ export class AvantfMissionHost extends TypertRemoteService {
     return query !== undefined && typeof query.listSessions === 'function'
       ? query as SessionQueryLike
       : undefined
+  }
+
+  /**
+   * Record that a node's CURRENT executor session was RELEASED off disk, so the panel explains that
+   * instead of opening a session that is not there. Called by the cleanup pipeline for every id in
+   * `cleanWorkers`' `cleaned` bucket — and ONLY for that bucket: a `refused` archive left the session
+   * in place, and its handle is still perfectly openable.
+   *
+   * The gate lives in the tree, not here: `MissionTree.markExecutorReleased` marks a node only when
+   * the released id is still the one the node names, so a stale receipt cannot judge a NEWLY
+   * dispatched handle dead. `false` here therefore means "nothing to mark" (the node moved on, or no
+   * node ever ran that session) and is an ordinary outcome the caller ignores; the return value
+   * exists so this is testable without reading logs.
+   */
+  async markExecutorReleased(sessionId: string): Promise<boolean> {
+    const tree = this.tree
+    if (tree === undefined) return false
+    const node = tree.nodeByExecutor(sessionId)
+    if (node === undefined) return false
+    const marked = await tree.markExecutorReleased(node.id, sessionId)
+    // Only when something changed: a release receipt that lost its race (or a second one for the same
+    // session) must not push a revision to every watching tab.
+    if (marked) this.announceNode(node.id)
+    return marked
   }
 
   /** Delete one WHOLE tree — the panel's "remove this mission" (the argument is a root id; a node is not an
@@ -1707,6 +1753,7 @@ export class AvantfMissionHost extends TypertRemoteService {
           resultRef: node.resultRef,
           workerSessionId: workerSessionIdOf(node),
           workerLive: workerLiveOf(node),
+          workerReleased: workerReleasedOf(node),
           weight: node.weight,
           waitingFor: this.waitingForOf(node.id),
         })),

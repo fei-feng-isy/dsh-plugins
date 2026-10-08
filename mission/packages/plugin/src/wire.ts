@@ -165,6 +165,12 @@ const nodeSchema = z.object({
   /** Whether that session is still running (`.default(false)`: absent on an older host), so the
    *  node-id link can say 进行中 rather than 已结束. */
   workerLive: z.boolean().default(false),
+  /** Whether that session has been RELEASED off disk by the cleanup pipeline. DECLARED here for the
+   *  same reason as `workerSessionId` — a `strict` codec drops keys it does not name, so the mark
+   *  would vanish between the two halves. `.default(false)` is the backward-compatible reading: an
+   *  older host (or a record written before the mark existed) knows of no release, and the client
+   *  then behaves exactly as it does today, trying the handle. */
+  workerReleased: z.boolean().default(false),
   /** Declared capacity weight; an older host omits it and the default 1 is the honest reading. */
   weight: z.number().default(1),
   /** Why the engine has not dispatched this node; `null` = nothing is holding it back. */
@@ -311,6 +317,9 @@ const detailNodeSchema = z.object({
    *  for the same reason as the id: an older host omits it, and "a stopped session" is the honest
    *  reading of a payload that cannot say otherwise. */
   workerLive: z.boolean().default(false),
+  /** Whether that session has been released off disk (see the row schema's copy); an older host
+   *  defaults to `false`, i.e. "try the handle", exactly today's behaviour. */
+  workerReleased: z.boolean().default(false),
   /** Declared capacity weight; older host → default 1. */
   weight: z.number().default(1),
   /** Why this node is queued; `null` = nothing holding it back. */

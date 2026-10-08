@@ -46,21 +46,28 @@ export function settle(): Promise<void> {
 /**
  * One durable document written by the REAL tree code, so the fixture cannot drift from the shape
  * the engine persists. `dispatched: false` leaves the node `ready` (a mission never started).
+ *
+ * `nodeId` exists for a case that seeds MORE than one document into one store: the default is fixed,
+ * and two documents sharing a node id would be two trees with colliding node ids (the store is keyed
+ * by ROOT id, so the trees themselves are distinct).
  */
 export async function persistedTree(input: {
   workerId: string
   dispatched?: boolean
   corrections?: readonly string[]
   deliveredUpTo?: number
+  /** The root/node id the fixture mints; default `root0001`. */
+  nodeId?: string
 }): Promise<TreeDocument> {
   const { store, latest } = memoryStore()
+  const newId = input.nodeId ?? 'root0001'
   const tree = new MissionTree(store, {
     // Nothing is materialized in this throwaway generation; it only writes the durable record.
     isAgentLive: () => false,
     probeOwner: () => Promise.resolve({ kind: 'exists' }),
     spill: () => Promise.resolve(null),
     now: () => 1,
-    newId: () => 'root0001',
+    newId: () => newId,
   })
   const created = await tree.createRoot({
     ownerSessionId: 'owner',

@@ -755,6 +755,109 @@ describe('opening the session that ran a mission', () => {
     expect(html).toContain('子会话不存在')
   })
 
+  it('a RELEASED handle opens nothing and looks nothing up — the panel explains it instead', async () => {
+    // A1. The node kept its `executorSessionId` for audit, and the host has since released that very
+    // session. Trying the handle is exactly the defect: `openSession` is fire-and-forget, so the
+    // refusal arrives later, in the CHAT view, as a skeleton host error. Both invariants at once:
+    //   ① zero I/O — neither `open` nor the resolver is called;
+    //   ② the panel renders the plugin's own sentence, not an empty frame.
+    const opened: WorkerSessionTarget[] = []
+    let lookups = 0
+    const outcome = await workerSessionOpen({
+      nodeId: 'n1',
+      parentSessionId: 'owner-1',
+      workerSessionId: WORKER,
+      workerSessionReleased: true,
+      open: (target) => { opened.push(target) },
+      resolveSession: () => {
+        lookups += 1
+        return Promise.resolve({ status: 'not-found' })
+      },
+    })
+    expect(opened).toEqual([])
+    expect(lookups).toBe(0)
+    expect(outcome.opened).toBe(false)
+    expect(outcome.opened ? '' : outcome.reason).toBe('not-found')
+    expect(outcome.opened ? '' : outcome.message).toContain('可能已被清理')
+    expect(outcome.opened ? '' : outcome.message).toContain('已被保留策略回收')
+
+    // The entry itself: same zero I/O, and the failure is what the caller renders.
+    const clickOpens: WorkerSessionTarget[] = []
+    const failures: string[] = []
+    const click = createWorkerSessionClick({
+      nodeId: 'n1',
+      parentSessionId: 'owner-1',
+      workerSessionId: WORKER,
+      workerSessionReleased: true,
+      open: (target) => { clickOpens.push(target) },
+      resolveSession: () => {
+        lookups += 1
+        return Promise.resolve({ status: 'not-found' })
+      },
+      busy: false,
+      setBusy: () => undefined,
+      setFailed: () => undefined,
+      onFailure: (message) => { failures.push(message) },
+    })
+    await click()
+    expect(clickOpens).toEqual([])
+    expect(lookups).toBe(0)
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toContain('可能已被清理')
+
+    // The rendered affordance: still an ENTRY (the explanation is one click away), labelled as its
+    // own state rather than as 已结束 — a stopped session is openable, a released one is not.
+    const data: MissionSnapshot = {
+      trees: [{
+        rootId: 'r1',
+        closedAt: null,
+        nodes: [{
+          id: 'r1', parentId: null, children: [], title: 'Ship it', context: [], corrections: [],
+          status: 'done', attempts: 1, depth: 1, createdAt: 1, hasResult: true, resultRef: null,
+          workerSessionId: WORKER, workerLive: false, workerReleased: true,
+        }],
+      }],
+    }
+    const html = renderToStaticMarkup(
+      <MissionTreeView
+        useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+        onDeleteTree={() => Promise.resolve()}
+        loadDetail={() => Promise.reject(new Error('not clicked'))}
+        loadResult={() => Promise.reject(new Error('not clicked'))}
+        sessionId="owner-1"
+        openWorkerSession={() => undefined}
+        resolveWorkerSession={() => Promise.resolve({ status: 'not-found' })}
+      />,
+    )
+    expect(html).toContain('avwf-worker-released')
+    expect(html).toContain('>r1</button>')
+    expect(html).toContain('执行者会话已被回收，点击看说明')
+    expect(html).not.toContain('打开执行这个任务的会话（已结束）')
+    // An older host that never sends the field is NOT this case: absence reads as "not released".
+    expect(nodeIdLinkLabel(WORKER, false, false)).toBe('打开执行这个任务的会话（已结束）')
+  })
+
+  it('a LIVE handle still opens directly, with no lookup — the zero-I/O invariant is unchanged', async () => {
+    // The other half of A1, pinned so the released branch cannot degrade the ordinary one: a handle
+    // that was never released must keep costing exactly one `open` and ZERO session reads.
+    const opened: WorkerSessionTarget[] = []
+    let lookups = 0
+    const outcome = await workerSessionOpen({
+      nodeId: 'n1',
+      parentSessionId: 'owner-1',
+      workerSessionId: WORKER,
+      workerSessionReleased: false,
+      open: (target) => { opened.push(target) },
+      resolveSession: () => {
+        lookups += 1
+        return Promise.resolve({ status: 'resolved', sessionId: WORKER })
+      },
+    })
+    expect(outcome).toEqual({ opened: true, workerSessionId: WORKER })
+    expect(opened).toEqual([{ parentSessionId: 'owner-1', childSessionId: WORKER, mode: 'continuable' }])
+    expect(lookups).toBe(0)
+  })
+
   it('asks the host for uiWorkspace on EVERY render, and never injects it', () => {
     // The client half's own wiring. `uiWorkspace` is fetched with `ctx.get` (never `inject`: a host
     // without it must still mount this half), and the view only receives an opener when the service is

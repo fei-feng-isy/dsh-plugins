@@ -442,11 +442,18 @@ export function workerSessionTarget(parentSessionId: string, workerSessionId: st
  * click TRIES, and a miss is explained by {@link workerFailureText} instead of being a dead link.
  * That is also why the two forms are not the same sentence — a reader can tell whether a lookup is
  * about to happen.
+ *
+ * A RELEASED handle is its own form, and the reason the state is a parameter rather than something
+ * inferred from `workerLive`: 已结束 still names an openable session (the whole point of keeping the
+ * display handle), while a released one names nothing. Labelling the second as the first would
+ * promise a jump that must not happen.
  */
 export function nodeIdLinkLabel(
   workerSessionId: string | null | undefined,
   workerLive: boolean | undefined,
+  workerReleased?: boolean,
 ): string {
+  if (workerReleased === true) return '执行者会话已被回收，点击看说明'
   const hasHandle = typeof workerSessionId === 'string' && workerSessionId !== ''
   if (!hasHandle) return '尝试打开执行这个任务的会话（记录里没有句柄，点击时查找）'
   return `打开执行这个任务的会话（${workerLive === true ? '进行中' : '已结束'}）`
@@ -503,6 +510,12 @@ export type WorkerSessionOpenOutcome =
  * never a blank panel. `onLookupStart` fires before the first await, which is what lets the button
  * say 查找中… instead of looking like it ignored the click.
  *
+ * ⓪ comes BEFORE all of them when the host marked the handle as RELEASED: that session was deleted
+ * off disk, so there is nothing to open and nothing to look up. It is deliberately not "try the
+ * handle and report the refusal": the refusal arrives asynchronously and late, from the chat view's
+ * history load, as a skeleton host error rather than the plugin's own sentence — which is the defect
+ * this branch exists to remove. Zero I/O either way, and the SAME sentence a lookup miss produces.
+ *
  * `open` may throw or answer with a rejected promise (the session really was cleaned up): both become
  * the `open` failure. The panel must never blank — or lose its place — because a link went stale,
  * which is the one failure a link invited by us can cause.
@@ -512,6 +525,8 @@ export async function workerSessionOpen(input: {
   readonly parentSessionId: string
   /** The handle already on the record, when there is one. */
   readonly workerSessionId?: string | null
+  /** Whether the host marked that handle's session as released off disk (see the client contract). */
+  readonly workerSessionReleased?: boolean
   readonly open?: (target: WorkerSessionTarget) => unknown
   readonly resolveSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
   readonly onLookupStart?: () => void
@@ -519,6 +534,13 @@ export async function workerSessionOpen(input: {
   const fail = (reason: WorkerSessionFailureReason, detail?: string): WorkerSessionOpenOutcome =>
     ({ opened: false, reason, message: workerFailureText(reason, detail) })
   const textOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause))
+
+  // ⓪ The host's mark: this handle names a session the cleanup pipeline deleted, so NOTHING is opened
+  // and nothing is looked up. Checked first so the released state cannot be mistaken for a refusable
+  // handle or validated away by a missing `open` — the reader gets the explanation either way.
+  if (input.workerSessionReleased === true) {
+    return fail('not-found', '执行者会话已被保留策略回收')
+  }
 
   // A host that cannot navigate cannot open ANY session, whatever the lookup says — so this is
   // checked first and reported as its own reason.
@@ -564,6 +586,8 @@ export function createWorkerSessionClick(input: {
   readonly nodeId: string
   readonly parentSessionId: string
   readonly workerSessionId?: string | null
+  /** The host's release mark for that handle; a released one explains itself instead of opening. */
+  readonly workerSessionReleased?: boolean
   readonly open?: (target: WorkerSessionTarget) => unknown
   readonly resolveSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
   /** Whether a click is already in flight; a second one is ignored rather than queued. */
@@ -579,6 +603,7 @@ export function createWorkerSessionClick(input: {
       nodeId: input.nodeId,
       parentSessionId: input.parentSessionId,
       workerSessionId: input.workerSessionId,
+      ...input.workerSessionReleased === undefined ? {} : { workerSessionReleased: input.workerSessionReleased },
       ...input.open === undefined ? {} : { open: input.open },
       ...input.resolveSession === undefined ? {} : { resolveSession: input.resolveSession },
       onLookupStart: () => { input.setBusy(true) },
@@ -604,14 +629,19 @@ export function createWorkerSessionClick(input: {
  *    explanation is one click away instead of a tooltip a reader has to go looking for;
  * ② `open` throws or rejects (the session really was cleaned up) → `onFailure` turns it into the
  *    caller's message; the panel never blanks and never loses its place.
+ *
+ * ③ the host marked the handle as RELEASED: the id is STILL an entry, and the click explains it —
+ *    `workerSessionOpen` answers without opening or looking anything up.
  */
 export function NodeIdEntry({
-  nodeId, workerSessionId, workerLive, sessionId, open, onFailure, resolveSession, className,
+  nodeId, workerSessionId, workerLive, workerReleased, sessionId, open, onFailure, resolveSession, className,
 }: {
   /** The MISSION's id — what is rendered; the session is only the destination. */
   nodeId: string
   workerSessionId: string | null | undefined
   workerLive?: boolean
+  /** Whether the host marked that handle's session as released off disk. */
+  workerReleased?: boolean
   /** The owner session the worker hangs under — the parent half of the address. */
   sessionId: string
   open?: (target: WorkerSessionTarget) => void
@@ -623,17 +653,23 @@ export function NodeIdEntry({
 }): ReactNode {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+  const released = workerReleased === true
   const hasHandle = typeof workerSessionId === 'string' && workerSessionId !== ''
-  const label = nodeIdLinkLabel(workerSessionId, workerLive)
-  const where = hasHandle
-    ? `执行这个任务的会话 ${workerSessionId}（${workerLive === true ? '进行中' : '已结束'}）`
-    : '执行这个任务的会话（记录里没有句柄，点击时按时间窗与首条提示词查找）'
+  const label = nodeIdLinkLabel(workerSessionId, workerLive, released)
+  const where = released
+    ? '执行这个任务的会话已被保留策略回收，点击只会给出说明'
+    : hasHandle
+      ? `执行这个任务的会话 ${workerSessionId}（${workerLive === true ? '进行中' : '已结束'}）`
+      : '执行这个任务的会话（记录里没有句柄，点击时按时间窗与首条提示词查找）'
   // No `uiWorkspace`: the id is STILL the entry, and the click explains why it cannot go anywhere.
-  const blocked = open === undefined ? '；当前宿主没有 uiWorkspace 服务，无法跳转' : ''
+  // A released handle is explained by its own state, so the missing service is not what a reader needs
+  // to hear first.
+  const blocked = open === undefined && !released ? '；当前宿主没有 uiWorkspace 服务，无法跳转' : ''
   const click = createWorkerSessionClick({
     nodeId,
     parentSessionId: sessionId,
     workerSessionId,
+    ...workerReleased === undefined ? {} : { workerSessionReleased: workerReleased },
     ...open === undefined ? {} : { open },
     ...resolveSession === undefined ? {} : { resolveSession },
     busy,
@@ -644,7 +680,7 @@ export function NodeIdEntry({
   return (
     <button
       type="button"
-      className={`${className} avwf-node-id avwf-worker-link${hasHandle ? '' : ' avwf-worker-lookup'}`}
+      className={`${className} avwf-node-id avwf-worker-link${hasHandle ? '' : ' avwf-worker-lookup'}${released ? ' avwf-worker-released' : ''}`}
       title={`${label}\n${where}；不是任务详情${blocked}`}
       aria-label={label}
       disabled={busy}
@@ -777,6 +813,7 @@ export function MissionDetailDialog({ nodeId, state, onClose, loadResult, sessio
                   nodeId={ready?.node.id ?? nodeId}
                   workerSessionId={ready?.node.workerSessionId}
                   workerLive={ready?.node.workerLive}
+                  workerReleased={ready?.node.workerReleased}
                   sessionId={sessionId}
                   onFailure={setWorkerFailure}
                   className="avwf-dialog-head-id"
@@ -837,6 +874,7 @@ function sameNode(a: MissionNodeView, b: MissionNodeView): boolean {
     && a.resultRef === b.resultRef
     && a.workerSessionId === b.workerSessionId
     && a.workerLive === b.workerLive
+    && a.workerReleased === b.workerReleased
     && a.weight === b.weight
     && (a.contextCount ?? a.context.length) === (b.contextCount ?? b.context.length)
     && (a.correctionCount ?? a.corrections.length) === (b.correctionCount ?? b.corrections.length)
@@ -1053,6 +1091,7 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession,
           nodeId={tree.rootId}
           workerSessionId={root?.workerSessionId}
           workerLive={root?.workerLive}
+          workerReleased={root?.workerReleased}
           sessionId={sessionId}
           onFailure={setWorkerFailure}
           className="avwf-root-id"

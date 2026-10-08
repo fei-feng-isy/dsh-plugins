@@ -108,6 +108,12 @@ export const nodeSchema = z.object({
   // one that offers no link; `.catch(null)` degrades a non-string the same way rather than failing
   // the whole document open over a field that only decides whether a link is rendered.
   executorSessionId: z.string().nullable().default(null).catch(null),
+  // Optional-with-default: a document written before the release mark existed reads as `null` =
+  // "the handle is not known to be released", i.e. the previous behaviour — the click tries the
+  // handle. `.catch(null)` degrades a dirty value the same way, and that direction is the deliberate
+  // one: an invented mark would refuse to open a session that may still be there, whereas a missing
+  // one falls back to the click that exists today. Never `.default(Date.now())`-style invention.
+  executorReleasedAt: z.number().nullable().default(null).catch(null),
   // Optional-with-default, and the default is UNKNOWN rather than "nothing changed": a wake that
   // cannot subtract a baseline renders an honest caveat instead of pretending the mission is
   // unchanged. `.catch(null)` covers the other direction — a baseline object that fails to parse

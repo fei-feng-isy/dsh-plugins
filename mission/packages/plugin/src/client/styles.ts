@@ -122,6 +122,10 @@ const CSS = `
    silently did nothing for a second reads as a broken button. The retry glyph marks an id whose
    last lookup missed; it is a hint, not a second control (the id itself is the only entry). */
 .avwf-worker-lookup { text-decoration-style: dashed; }
+/* A1: a handle whose session the cleanup pipeline released. It stays an ENTRY (the explanation is one
+   click away) but is no longer a promise of a jump, so it is dimmed and its underline dotted — closer
+   to the lookup form than to the live link, without becoming plain text. */
+.avwf-worker-released { color: var(--dsw-alias-label-secondary); text-decoration-style: dotted; }
 .avwf-worker-busy { color: var(--dsw-alias-label-secondary); }
 .avwf-worker-retry { color: var(--dsw-alias-label-secondary); }
 .avwf-worker-error { color: var(--dsw-alias-state-error-primary, #d9534f); }

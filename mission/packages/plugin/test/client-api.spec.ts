@@ -242,6 +242,39 @@ describe('the worker session id, through the strict codec', () => {
     expect(unbound?.workerSessionId).toBeNull()
     expect(unbound?.workerLive).toBe(false)
   })
+
+  it('carries the RELEASE mark, and reads a payload that has none as "not released"', () => {
+    // A1: the release mark is not derivable from `workerLive` (a finished mission is 已结束 yet still
+    // openable), so it travels as its own optional key — and an older host's absence must read as
+    // `false`, i.e. exactly today's "try the handle".
+    const rowWith = (extra: Record<string, unknown>): Record<string, unknown> => ({ ...row('mission-aaaa1111', false), ...extra })
+    expect(
+      Object.keys(snapshotResultSchema.shape.trees.element.shape.nodes.element.shape),
+    ).toContain('workerReleased')
+    expect(Object.keys(detailResultSchema.shape.node.unwrap().shape)).toContain('workerReleased')
+
+    const released = snapshotResultSchema.parse({
+      trees: [{ rootId: 'r1', closedAt: null, nodes: [rowWith({ workerReleased: true })] }],
+    })
+    expect(released.trees[0]?.nodes[0]?.workerReleased).toBe(true)
+    // 已结束 + 未回收: a stopped session whose handle still opens.
+    const stopped = snapshotResultSchema.parse({
+      trees: [{ rootId: 'r1', closedAt: null, nodes: [rowWith({})] }],
+    })
+    expect(stopped.trees[0]?.nodes[0]?.workerReleased).toBe(false)
+    // An older host omits the key entirely: "not released", not a failure of the whole read.
+    const legacy = snapshotResultSchema.parse({
+      trees: [{ rootId: 'r1', closedAt: null, nodes: [legacyRow] }],
+    })
+    expect(legacy.trees[0]?.nodes[0]?.workerReleased).toBe(false)
+    const detail = detailResultSchema.parse({
+      node: { ...row('mission-aaaa1111', false), rootId: 'r1', title: 't', description: 'd',
+        context: [], corrections: [], analysisNotes: [], analysisAttempt: 0, depth: 1,
+        result: null, resultPointer: null, workerReleased: true },
+      children: [],
+    }).node
+    expect(detail?.workerReleased).toBe(true)
+  })
 })
 
 describe('deleteWork', () => {

@@ -57,6 +57,15 @@ export interface MissionNodeView {
   /** Whether {@link workerSessionId} is still running: the node-id entry uses it to say 进行中 or
    *  已结束. Optional because an older host does not send it, and absence reads as "not live". */
   readonly workerLive?: boolean
+  /** Whether {@link workerSessionId} was RELEASED off disk by the host's cleanup pipeline. Optional
+   *  on purpose, and absence reads as `false` = "not known to be released", which is exactly today's
+   *  behaviour: the entry TRIES the handle. A host that does send it `true` means the session is gone,
+   *  so a click must not open anything — it renders the explanation instead.
+   *
+   *  Deliberately NOT derived from {@link workerLive}: a finished mission's session is not live but is
+   *  still perfectly openable (that is the whole point of the display handle), so "已结束" and "已被
+   *  回收" are two different states and the entry treats them differently. */
+  readonly workerReleased?: boolean
   /** Declared capacity weight (cores-equivalent); an older host omits it and reads as 1. */
   readonly weight?: number
   /** Why this node is queued; absent/`null` means nothing is holding it back. */
@@ -131,6 +140,9 @@ export interface MissionNodeDetailView {
   readonly workerSessionId: string | null
   /** Whether {@link workerSessionId} is still running (see the row projection's copy). */
   readonly workerLive?: boolean
+  /** Whether {@link workerSessionId} was released off disk (see the row projection's copy). Carried in
+   *  the detail too because the dialog's heading id is the same entry as the tree header's. */
+  readonly workerReleased?: boolean
   /** Declared capacity weight (cores-equivalent); an older host omits it and reads as 1. */
   readonly weight?: number
   /** Why this node is queued; absent/`null` means nothing is holding it back. */
