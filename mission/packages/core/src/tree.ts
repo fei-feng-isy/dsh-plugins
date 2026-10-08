@@ -1782,20 +1782,11 @@ export class MissionTree {
         // Reported INSIDE the lock: acting after the fact leaves a worker burning a model call
         // whose submission can only be refused, and a `decompose` could add a child nobody stopped.
         if (descendant.claimedBy !== null) onReclaim?.(descendant.claimedBy)
-        const updated: NodeRecord = {
-          ...descendant,
-          status: 'failed',
+        const updated = this.asCancelled(descendant, now, {
           // `hasResult` too, or the summary renders "（未提交结果）" and the reason never reaches the model.
           result: descendant.result ?? '被父任务取消',
           hasResult: true,
-          claimedBy: null,
-          // Terminal: a parked address on a cancelled node is spent.
-          parkedWorker: null,
-          // Cancellation is one of the paths into a terminal status, so it stops the clock too. The
-          // node may never have been dispatched; that is what `dispatchedAt: null` keeps saying.
-          endedAt: now,
-          updatedAt: now,
-        }
+        })
         next.set(id, updated)
         touched.push(updated)
       }
@@ -1873,20 +1864,12 @@ export class MissionTree {
       for (const [id, node] of next) {
         if (TERMINAL.has(node.status)) continue
         if (node.claimedBy !== null) onReclaim?.(node.claimedBy)
-        const updated: NodeRecord = {
-          ...node,
-          status: 'failed',
+        const updated = this.asCancelled(node, now, {
           // The reason IS a result: without this flag the summary renders "（未提交结果）" and the
           // model never learns it was cancelled.
           hasResult: true,
           result: node.result ?? '已取消',
-          claimedBy: null,
-          // The whole tree is voided: no session is waiting to converge on anything.
-          parkedWorker: null,
-          // Same terminal clock as `cancelSubworks`: a cancelled node's life ends here.
-          endedAt: now,
-          updatedAt: now,
-        }
+        })
         next.set(id, updated)
         touched.push(updated)
       }
@@ -1948,6 +1931,35 @@ export class MissionTree {
     next.set(node.id, updated)
     this.states.set(state.tree.rootId, { tree: state.tree, nodes: next })
     return updated
+  }
+
+  /**
+   * The terminal record both cancellations write — `cancelSubworks` ("被父任务取消") and `cancelTree`
+   * ("已取消") differ only in the reason and in how they spell the result pair. `result`/`hasResult`
+   * are handed in as the CALLER's one fragment rather than built here, so each call site keeps its
+   * own spelling of the pair (they write it in opposite order). The durable document is the record
+   * as it stands, and BOTH keys already exist on the node — overriding a key does not move it — so
+   * this helper cannot reorder the persisted fields either way; the fragment is the difference kept
+   * visible, not a load-bearing one. Flushing stays with each caller too (see the two call sites):
+   * only the record shape is shared.
+   */
+  private asCancelled(
+    node: NodeRecord,
+    now: number,
+    ended: Pick<NodeRecord, 'result' | 'hasResult'>,
+  ): NodeRecord {
+    return {
+      ...node,
+      status: 'failed',
+      ...ended,
+      claimedBy: null,
+      // Terminal: a parked address on a cancelled node is spent.
+      parkedWorker: null,
+      // Cancellation is one of the paths into a terminal status, so it stops the clock too. The node
+      // may never have been dispatched; that is what `dispatchedAt: null` keeps saying.
+      endedAt: now,
+      updatedAt: now,
+    }
   }
 
   /** A node's aggregate status: `ready` once every child is terminal. No children at all is also

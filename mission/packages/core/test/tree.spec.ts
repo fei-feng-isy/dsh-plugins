@@ -1381,6 +1381,46 @@ describe('corrections and sub-mission cancellation', () => {
     expect(tree.nextDispatchable()).toBeUndefined()
   })
 
+  it('gives both cancellation paths the SAME terminal record shape', async () => {
+    // #4 shares the node construction. `result`/`hasResult` are the one thing the two call sites
+    // spell in opposite order, and the persisted document is the record as it stands — so this pins
+    // what each path actually writes: the same keys in the same order (both already exist on the
+    // node, so overriding them cannot move them), the same terminal fields, the path's own reason.
+    const { tree } = makeTree()
+    const root = await rootOf(tree)
+    await tree.dispatch(root, 'mission-root')
+    await noteAndSplit(tree, root, 'mission-root', [{ title: 'A', description: 'a', context: ['why'] }])
+    const a = tree.nodesOf(root).find((node) => node.title === 'A')
+    if (a === undefined) throw new Error('child missing')
+    const sub = await tree.cancelSubworks(root, 'owner')
+    expect(sub.ok).toBe(true)
+    const viaSubworks = tree.node(a.id)
+
+    const other = makeTree()
+    const otherRoot = await rootOf(other.tree)
+    await other.tree.dispatch(otherRoot, 'mission-root')
+    const whole = await other.tree.cancelTree(otherRoot, 'owner')
+    expect(whole.ok).toBe(true)
+    const viaCancelTree = other.tree.node(otherRoot)
+    if (viaSubworks === undefined || viaCancelTree === undefined) throw new Error('cancelled node missing')
+
+    expect(Object.keys(viaSubworks)).toEqual(Object.keys(viaCancelTree))
+    for (const node of [viaSubworks, viaCancelTree]) {
+      expect(node.status).toBe('failed')
+      expect(node.claimedBy).toBeNull()
+      expect(node.parkedWorker).toBeNull()
+      expect(node.hasResult).toBe(true)
+      expect(node.endedAt).not.toBeNull()
+      // One terminal clock, written once: the cancellation stamp is the update stamp.
+      expect(node.updatedAt).toBe(node.endedAt)
+    }
+    expect(viaSubworks.result).toBe('被父任务取消')
+    expect(viaCancelTree.result).toBe('已取消')
+    // The pair stays adjacent in the record's own order (`createNode` writes `result` first).
+    const keys = Object.keys(viaCancelTree)
+    expect(keys.indexOf('hasResult')).toBe(keys.indexOf('result') + 1)
+  })
+
   it('refuses cancellation from anyone but the owner or the holder', async () => {
     const { tree } = makeTree()
     const root = await rootOf(tree)
