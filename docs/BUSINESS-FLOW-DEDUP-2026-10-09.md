@@ -171,4 +171,14 @@ check:release ok
 
 ## 补记：push
 
-（推送结果见下节。）
+**两个远端都推送成功**（先 origin/gitee、再 github；均非 force、无 tag、无 publish）：
+
+- `git push origin master`（`git@gitee.com:ffeng86/dsh-plugins.git`）→
+  `8eb5e16..36e6873  master -> master`，exit 0
+- `git push github master`（`git@github.com:fei-feng-isy/dsh-plugins.git`）→
+  `8eb5e16..36e6873  master -> master`，exit 0
+- `git status -sb` → `## master...origin/master`（工作树与远端一致）
+
+推送范围 `8eb5e16..36e6873` 覆盖本轮全部 `refactor(dedup):` commit 与本报告；**不含**
+`docs/review/**`（被 `.gitignore` 排除）。本补记是其后一个小 commit，按同一顺序再次推送（先
+origin、后 github）。
