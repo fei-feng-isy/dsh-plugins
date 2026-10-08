@@ -730,6 +730,23 @@ export function verdictOf(evidence: CompatEvidence): CompatVerdict {
 }
 
 /**
+ * Emit one verdict line through the caller's logger without letting a throwing logger become the
+ * crash this gate exists to prevent.
+ *
+ * The module's "Never throws" promise covers the LOGGER too, not just the probes: a logger that
+ * throws is not evidence of anything, and both call sites below (the verdict loop, which always has
+ * at least the `ok` line for a healthy verdict, and the "cannot tell" fallback) would otherwise
+ * propagate it out of `apply()`.
+ */
+function emit(log: CompatLogger, line: CompatLine): void {
+  try {
+    log[line.level](line.message)
+  } catch {
+    // A logger that throws is not evidence of anything.
+  }
+}
+
+/**
  * Run the check against a live context and log every line.
  *
  * Call this FIRST in `apply()`: on a refusal nothing has been registered yet, so "do not
@@ -748,7 +765,7 @@ export function provision(ctx: CompatContext, log: CompatLogger, spec: CompatSpe
       level: 'warn',
       message: `${COMPAT_PREFIX} WARNING — the compatibility check itself failed (${reasonOf(error)}); loading anyway`,
     }
-    log.warn(line.message)
+    emit(log, line)
     return {
       load: true,
       skipped: true,
@@ -760,7 +777,7 @@ export function provision(ctx: CompatContext, log: CompatLogger, spec: CompatSpe
       reason: '',
     }
   }
-  for (const line of verdict.lines) log[line.level](line.message)
+  for (const line of verdict.lines) emit(log, line)
   return verdict
 }
 
