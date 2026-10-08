@@ -357,3 +357,19 @@ old-dsh 下限门、pack、两树 mount smoke、根 `release-check`、prepublish
 推送范围 `8eb5e16..36e6873` 覆盖本轮全部 `refactor(dedup):` commit 与本报告；**不含**
 `docs/review/**`（被 `.gitignore` 排除）。本补记是其后一个小 commit，按同一顺序再次推送（先
 origin、后 github）。
+
+---
+
+## 补记：续做轮 push
+
+**两个远端都推送成功**（先 origin/gitee、再 github；均非 force、无 tag、无 publish）：
+
+- `git push origin master`（`git@gitee.com:ffeng86/dsh-plugins.git`）→
+  `6689ded..d50db6c  master -> master`
+- `git push github master`（`git@github.com:fei-feng-isy/dsh-plugins.git`）→
+  `6689ded..d50db6c  master -> master`
+- `git status -sb` → `## master...origin/master`，`git log github/master -1` = `d50db6c`
+
+推送范围 `6689ded..d50db6c` 覆盖续做轮全部 `refactor(dedup):` commit（`33bace7` / `3a65f18` /
+`ce5f1c0` / `db98ef1`）与本报告；**不含** `docs/review/**`（被 `.gitignore` 排除），也未提交任何
+既有未跟踪文件。本补记是其后一个小 commit，按同一顺序再次推送（先 origin、后 github）。
