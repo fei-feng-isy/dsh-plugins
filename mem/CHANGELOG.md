@@ -4,6 +4,20 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-08
+
+### Fixed（知识库也进自动自愈；实体清扫不再因单行失败整趟失败）
+- **知识库的向量自愈**：换嵌入空间（模型 / 维度 / 池化 / 归一化 / 输入窗口 / 权重）后，`doc_chunks` 的旧空间
+  向量过去只做"检测 + 响亮告警"，要靠人手动跑 `kb_reindex` 才修；现在它与记忆库**共用同一套后台自愈流程**
+  （有界分批、可续跑、不阻塞查询、`semantic.auto_migrate` 可关闭、日志带库名），启动后自动重编码进当前空间。
+  实测：本机 21 条 512 维切片在重启后自动迁到 768 维，全程无人工入口。`kb_reindex` 语义不变（仍是
+  FTS + 实体 + 向量的手动全量入口）。
+- **`mem_admin vectors_fix` 覆盖两库**：默认同时修记忆与知识库，并新增 `store` 过滤（`memory` / `knowledge`）；
+  报告按库分组（公共子集 `{stale, space_stale, dropped, encoded, failed, semantic_available}`，记忆库另有
+  `missing` / `unindexed` / `reindexed` / `would_warm`）。CLI 对应 `avantf-mem vectors --fix --store`。
+- **实体重建清扫不再因单行写失败整趟失败**：单个事实的实体/三元组写失败改为"记一条告警、跳过该行、
+  计入 `deferred`"（该行仍是 stale，下一趟重试），而不是抛出中断整趟；幂等可续。
+
 ## [0.6.0] - 2026-10-07
 
 ### Added（新能力）
