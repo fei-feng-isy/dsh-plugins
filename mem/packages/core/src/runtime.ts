@@ -9,6 +9,7 @@ import type {
   RecallRequest,
   RecallResult,
   RememberRequest,
+  VectorsFixReport,
 } from '@avantf/mem-contract'
 import {
   defaultLogger,
@@ -36,6 +37,7 @@ import { selfQueryRewrite } from './store/self_query.js'
 import { droppedLegs, emptyFloorDrops, totalFloorDrops, type FloorLeg } from './store/floors.js'
 import { MemoryStore, type FactWriteOptions } from './store/memory.js'
 import { KnowledgeStore } from './store/knowledge.js'
+import { vectorsFix } from './store/vector_repair.js'
 import { crossQuery } from './router.js'
 
 /**
@@ -197,7 +199,7 @@ export type AdminDispatch = {
   (req: Extract<AdminRequest, { action: 'unpin' }>): StoreResult<MemoryStore, 'unpin'>
   (req: Extract<AdminRequest, { action: 'trust_diagnose' }>): StoreResult<MemoryStore, 'trustDiagnose'>
   (req: Extract<AdminRequest, { action: 'vectors_diagnose' }>): StoreResult<MemoryStore, 'vectorsDiagnose'>
-  (req: Extract<AdminRequest, { action: 'vectors_fix' }>): StoreResult<MemoryStore, 'vectorsFix'>
+  (req: Extract<AdminRequest, { action: 'vectors_fix' }>): Promise<VectorsFixReport>
   (req: Extract<AdminRequest, { action: 'contradict_check' }>): StoreResult<MemoryStore, 'checkContradictions'>
   (req: Extract<AdminRequest, { action: 'contradict_resolve' }>): StoreResult<MemoryStore, 'resolveContradiction'>
   (req: Extract<AdminRequest, { action: 'maintenance' }>): StoreResult<MemoryStore, 'maintenance'>
@@ -457,7 +459,13 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
         case 'vectors_diagnose':
           return this.memory.vectorsDiagnose()
         case 'vectors_fix':
-          return this.memory.vectorsFix(req.dry_run ?? false)
+          // ONE explicit repair covering BOTH stores (`store/vector_repair.ts`): a model swap leaves
+          // memory and knowledge in the same state, and `store` narrows the call when the operator
+          // wants one library. The report is per store.
+          return vectorsFix(
+            { memory: this.memory.vectorRepairTarget(), knowledge: this.knowledge.vectorRepairTarget() },
+            { dryRun: req.dry_run ?? false, ...(req.store === undefined ? {} : { store: req.store }) },
+          )
         default:
           return { error: `admin.${(req as { action: string }).action} not implemented` } satisfies DispatchError
       }

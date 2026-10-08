@@ -17,7 +17,7 @@ import {
   type VectorMigrationProgress,
   type VectorSpaceHealth,
   type VectorsDiagnostic,
-  type VectorsFixReport,
+  type VectorsFixStoreReport,
 } from '@avantf/mem-contract'
 import type { SemanticBackend, VectorStore } from '@avantf/mem-retrieval'
 import {
@@ -27,19 +27,32 @@ import {
   retrievalLogger,
 } from '@avantf/mem-retrieval'
 import {
-  hybridSearch,
-  RetrievalInputError,
+  makeHybridDeps,
+  runHybridSearch,
   type HybridContext,
   type HybridDeps,
   type HybridLeg,
 } from './hybrid.js'
-import { evictVectors as evictVectorsOf, normalizeWrite, reportStaleVectors, yieldToEventLoop, vectorSpaceOf, type StaleVectorCounts } from './common.js'
+import { ftsLeg, makeLegRunner, semanticLeg } from './legs.js'
+import { ENTITY_SWEEP_BATCH, sweepVersionedEntities, type EntitySweepReport, type EntitySweepTarget } from './entity_sweep.js'
+import { evictVectors as evictVectorsOf, normalizeWrite, vectorSpaceOf, type StaleVectorCounts } from './common.js'
+import {
+  DEFAULT_VECTOR_MIGRATION_BATCH,
+  driveVectorRepair,
+  encodeAndPersist,
+  loadVectorIndex,
+  migrateVectorSlice,
+  repairVectorSlice,
+  type EncodeWriteTarget,
+  type VectorRepairTarget,
+  type VectorsClassification,
+} from './vector_repair.js'
 import { detectSecretShape, secretRefusalMessage } from './secret_guard.js'
 import type { Db } from '../db/conn.js'
-import { bytesToFloat32, float32ToBytes, isPreFingerprintSpace, reloadVectorIndex, vectorCachePath } from '../db/vectors.js'
-import { buildFtsQuery, detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
-import { probeTerms, substringTerms, type LexicalProbe } from './lexical.js'
-import { applyScoreFloor, applyTermFloor, type FloorLeg } from './floors.js'
+import { bytesToFloat32, isPreFingerprintSpace, vectorCachePath } from '../db/vectors.js'
+import { detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
+import { probeStoreTerms, type LexicalProbe } from './lexical.js'
+import { type FloorLeg } from './floors.js'
 import { anchoredOverlap, ENTITY_UNION_CAP, selectAnchors } from './entity_leg.js'
 import { parseTimeWindow, windowDayBounds } from './time_window.js'
 import {
@@ -104,37 +117,24 @@ const NO_CHECK: { conflicts: DetectedContradiction[]; complete: boolean } = { co
 /**
  * Facts one derived-state sweep pass may rebuild (`reindexEntities`'s default budget).
  *
- * Bounds MEMORY, not only mission: the pass selects `content` for every row it takes, so an
- * "unbounded" pass (the CLI used to ask for `Number.MAX_SAFE_INTEGER`) builds an array of every
- * stale fact's text before rebuilding the first one. Callers that want the corpus drained loop
- * until `deferred === 0` instead.
+ * Re-exported from the shared sweep (`store/entity_sweep.ts`), which owns the loop and therefore the
+ * default: the public name has to keep working for the CLI (`cli/src/index.ts` passes it explicitly)
+ * and the plugin's heartbeat, but a second literal here would be a second answer to "how big is one
+ * pass".
  */
-export const ENTITY_SWEEP_BATCH = 2000
+export { ENTITY_SWEEP_BATCH }
 
 /**
  * Rows one background vector-space migration slice may drop + re-encode.
  *
- * Small on purpose: the point of batching is that a query arriving mid-migration waits for at most
- * one ONNX forward pass batch, not for a whole corpus. At ~30 ms per bge-base-zh encode a batch of 16
- * is well under a second of contested model time, and the event loop is yielded between batches
- * (`yieldToEventLoop`). The value is a default, not a promise — `migrateVectorsBatch(batchSize)` takes
- * whatever the caller needs.
+ * Re-exported from the shared repair flow (`store/vector_repair.ts`), which owns the loop and
+ * therefore the default: the public name has to keep working for callers that pass it explicitly,
+ * but a second literal here would be a second answer to "how big is one slice".
  */
-export const DEFAULT_VECTOR_MIGRATION_BATCH = 16
+export { DEFAULT_VECTOR_MIGRATION_BATCH }
 
-/** What one derived-state sweep pass did (see `MemoryStore.reindexEntities`). */
-export interface EntitySweepReport {
-  /**
-   * Facts this pass RE-EXTRACTED, i.e. its batch size when it filled it. Counts rows VISITED and
-   * re-stamped, not rows whose extraction output differs — the stamp is what makes the corpus
-   * current, so a row re-extracted to the same names still counts (and is not rebuilt again).
-   */
-  rebuilt: number
-  /** Facts still written by older rules after this pass. */
-  deferred: number
-  /** Another pass was already running, so this one did nothing (`deferred` is still current). */
-  skipped: boolean
-}
+/** What one derived-state sweep pass did — re-exported from the shared loop (`store/entity_sweep.ts`). */
+export type { EntitySweepReport }
 
 /** What one bounded conflict-drain pass did (see `MemoryStore.drainConflicts`). */
 export interface ConflictDrainReport {
@@ -301,8 +301,14 @@ export class MemoryStore {
    * and building MATCH expressions for the wrong one is silent zero recall (see `db/tokenizer.ts`).
    */
   private readonly ftsTokenizer: FtsTokenizer
-  /** In-flight guard for `reindexEntities` (see there: the periodic callers can overlap). */
-  private entitySweepInFlight = false
+  /**
+   * Identity object for the shared entity sweep's in-flight guard (`store/entity_sweep.ts`).
+   *
+   * The guard itself lives in that module; this is only the per-store identity it keys on. It keeps
+   * the rule where the loop is (the periodic callers can overlap), without a mutable field that two
+   * stores would each have to remember to hold.
+   */
+  private readonly entitySweepGuard = {}
   /**
    * Where the next conflict drain resumes (see `checkContradictions`). A scheduling cursor, not
    * derived state: nothing is lost when it resets, and the queue itself is in the database.
@@ -368,7 +374,7 @@ export class MemoryStore {
       ? advancePresence(this.db, { gapCapDays: trust.presence.gap_cap_days }).clock
       : readClock(this.db)
     const result = runTrustTick(this.db, this.config, { clock, budget: opts?.budget ?? trust.tick_max_facts })
-    this.evictVectors([...result.archived_ids, ...result.purged_ids])
+    evictVectorsOf(this.vstore, [...result.archived_ids, ...result.purged_ids])
     this.retireConflicts([...result.archived_ids, ...result.purged_ids])
     // Keep planner statistics current. Without them the contradiction candidate self-join
     // picked a covering scan of `facts` (measured 130 ms → 0.08 ms once analyzed), and the
@@ -388,30 +394,32 @@ export class MemoryStore {
   }
 
   /**
-   * Rebuild the in-memory vstore from persisted `facts.semantic_vector` BLOBs.
-   * Without this the semantic path is silently empty after every process restart
-   * (the DB is the authoritative vector store; the vstore is a derived read model).
+   * Rebuild the in-memory vstore from persisted `facts.semantic_vector` BLOBs, and say loudly what
+   * belongs to another vector space.
    *
-   * Only ACTIVE facts are indexed: archived facts are filtered out of every
-   * retrieval path anyway, so loading them would only grow the index forever.
-   * `archive()` evicts and `restore()` re-adds, keeping the invariant.
+   * Without this the semantic path is silently empty after every process restart (the DB is the
+   * authoritative vector store; the vstore is a derived read model). Only ACTIVE facts are indexed:
+   * archived facts are filtered out of every retrieval path anyway, so loading them would only grow
+   * the index forever — `archive()` evicts and `restore()` re-adds, keeping the invariant.
+   *
+   * The reload, the `{ stale, space_stale, legacy }` count and the warning are the SHARED open-time
+   * step (`store/vector_repair.ts`); this store's half is the row read. A dim-valid vector from
+   * another space is still RANKED (the reload cannot tell the difference), so a silent model swap
+   * would mix two spaces in one index — acting on it is the manual fix's job for the operator path
+   * and the bounded background migration's for the automatic one.
    */
   private reloadIndex(): void {
-    const space = this.vectorSpace()
-    const persisted = this.facts.activeVectorRows()
-    const rows = persisted.map((r) => ({ id: r.fact_id, vec: r.semantic_vector }))
-    reloadVectorIndex(this.vstore, rows, 'memory')
-    // A dim-valid vector from another space is still RANKED (the reload cannot tell the
-    // difference), so a silent model swap would mix two spaces in one index. Say so once per
-    // process, with the count and the manual entry; acting on it is `vectors_fix`'s job for the
-    // operator path, and the bounded background migration's for the automatic one (see
-    // `migrateVectors`).
-    reportStaleVectors(
-      'memory',
-      space,
-      this.vectorSpaceCounts(),
-      '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`)',
-    )
+    loadVectorIndex({
+      store: 'memory',
+      vstore: this.vstore,
+      rows: this.facts.activeVectorRows().map((r) => ({
+        id: r.fact_id,
+        vec: r.semantic_vector,
+        embedding_model: r.embedding_model,
+      })),
+      space: this.vectorSpace(),
+      manualEntry: '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`)',
+    })
   }
 
   /**
@@ -531,33 +539,52 @@ export class MemoryStore {
     }
   }
 
-  /** Best-effort semantic indexing: encode the fact and add it to the vstore. */
-  private async maybeIndexSemantic(factId: number, content: string): Promise<boolean> {
-    try {
-      if (!this.semantic.isAvailable()) {
-        // Observing call site: keep a failed bootstrap retryable so a recovered
-        // mirror is picked up without a restart (see warm_gate.ts).
-        this.semantic.ensureWarm?.()
-        return false
-      }
-      const vec = await this.semantic.encode(content)
-      this.vstore.add(factId, vec)
-      // Record the VECTOR SPACE, not just the backend name: a same-width model swap is
-      // otherwise indistinguishable from "already encoded" (DESIGN §20).
-      this.facts.setSemanticVector(factId, float32ToBytes(vec), this.vectorSpace(), this.vstore.name)
-      return true
-    } catch (error) {
+  /**
+   * This store's half of the shared encode-and-persist flow (`store/vector_repair.ts`): the backend
+   * call, the live index and the single-row write. The write records the VECTOR SPACE, not just the
+   * backend name — a same-width model swap is otherwise indistinguishable from "already encoded"
+   * (DESIGN §20) — and `setSemanticVector` re-queues the fact for the conflict check.
+   */
+  private vectorWriteTarget(space: string): EncodeWriteTarget {
+    return {
+      store: 'memory',
+      space,
+      encode: (text) => this.semantic.encode(text),
+      add: (id, vec) => { this.vstore.add(id, vec) },
+      write: (rows) => {
+        for (const r of rows) this.facts.setSemanticVector(r.id, r.bytes, space, this.vstore.name)
+      },
       // Not silent, and the two failures mean different things. An encode failure leaves the fact
       // unindexed, which `vectors_diagnose` reports as missing and `vectors_fix` repairs. A failure
       // in `setSemanticVector` (SQLITE_BUSY under multi-process contention) is worse: the vector IS
       // in the live index but was not persisted, so this process answers with it and the next one
-      // does not — a divergence nothing else would ever mention.
-      retrievalLogger().warn(
-        `memory index: fact ${String(factId)} was not semantically indexed (${describeError(error)}) — `
-        + 'run mem_admin vectors_diagnose to see the shortfall, vectors_fix to re-encode',
-      )
+      // does not — a divergence nothing else would ever mention. The write group is one row here,
+      // so both hooks say the same thing.
+      onRowError: (row, error) => { this.warnIndexFailure(row.id, error) },
+      onWriteError: (rows, error) => { for (const r of rows) this.warnIndexFailure(r.id, error) },
+    }
+  }
+
+  private warnIndexFailure(factId: number, error: unknown): void {
+    retrievalLogger().warn(
+      `memory index: fact ${String(factId)} was not semantically indexed (${describeError(error)}) — `
+      + 'run mem_admin vectors_diagnose to see the shortfall, vectors_fix to re-encode',
+    )
+  }
+
+  /** Best-effort semantic indexing: encode the fact and add it to the vstore. */
+  private async maybeIndexSemantic(factId: number, content: string): Promise<boolean> {
+    if (!this.semantic.isAvailable()) {
+      // Observing call site: keep a failed bootstrap retryable so a recovered
+      // mirror is picked up without a restart (see warm_gate.ts).
+      this.semantic.ensureWarm?.()
       return false
     }
+    const { encoded } = await encodeAndPersist(
+      [{ id: factId, text: content }],
+      this.vectorWriteTarget(this.vectorSpace()),
+    )
+    return encoded === 1
   }
 
   async update(fact_id: number, content: string, category?: string, ttlDays?: number, opts?: FactWriteOptions): Promise<RememberResult> {
@@ -697,7 +724,7 @@ export class MemoryStore {
       return null
     })
     const evict = tx.immediate()
-    if (evict !== null) this.evictVectors([evict])
+    if (evict !== null) evictVectorsOf(this.vstore, [evict])
     return (this.getRow(fact_id)?.helpful_count ?? 0) as number
   }
 
@@ -1019,196 +1046,111 @@ export class MemoryStore {
   }
 
   /**
-   * Repair the semantic read model, in ONE bounded slice or in full:
-   *  (a) reload persisted, dim-valid vectors missing from the live index
-   *      (restart / index loss — needs no model),
-   *  (b) drop persisted vectors whose dim no longer matches `semantic.dim` so a
-   *      re-encode can replace them (never `add()` a stale vector — the store
-   *      throws on dim mismatch),
-   *  (c) encode active facts that have no vector yet (needs the semantic backend),
-   *  (d) re-encode vectors written in ANOTHER vector space (a model swap, or the one-time
-   *      adoption of a store predating the space id).
-   *
-   * `limit` is what makes the SAME logic usable as a background migration: at most that many rows are
-   * dropped and at most that many are re-encoded, so one call is a bounded unit of work the caller can
-   * yield between. `vectorsFix` passes no limit (the explicit operator action drains everything);
-   * `migrateVectorsBatch` passes the migration's batch size.
+   * This store's half of the shared repair flow (`store/vector_repair.ts`): the primitives the flow
+   * steps. The flow itself — batch size, event-loop yield, stop / resume / no-progress rules,
+   * `semantic.auto_migrate`, the dry-run split and the drop-before-encode order — lives there once,
+   * for both stores.
    */
-  private async repairVectors(opts: { dryRun: boolean; limit?: number }): Promise<{ report: VectorsFixReport; remaining: number }> {
-    const limit = opts.limit ?? Number.POSITIVE_INFINITY
-    const c = this.classifyVectors()
-    const loadedNow = this.semantic.isAvailable()
-    let semAvailable = loadedNow
-    // An explicit repair is the one call site worth *waiting* for the model: a
-    // bare availability read would make `vectors_fix` a silent no-op right after
-    // a failed bootstrap — the incident that motivated the retry gate.
-    if (!semAvailable && !opts.dryRun) semAvailable = await this.warmupSemantic()
-    // Reported for BOTH modes, and computed before the warmup: a dry run cannot know whether a
-    // warmup would succeed (it must not download), so "the model is not loaded" is not the same
-    // answer as "the repair cannot run" — see the contract's `VectorsFixReport`.
-    const wouldWarm = !loadedNow
-    // What the semantic leg still cannot use, derived from THIS pass's classification (no second
-    // full scan per batch): dropped rows leave `stale` and enter `missing`, so only `fixed` moves the
-    // sum. `reindexed` rows had usable vectors all along and are not "remaining".
-    const remainingOf = (fixed: number): number =>
-      Math.max(0, c.staleIds.length + c.spaceStaleIds.length + c.missing - fixed)
-    if (opts.dryRun) {
-      return {
-        report: {
-          missing: c.missing,
-          stale: c.staleIds.length,
-          space_stale: c.spaceStaleIds.length,
-          unindexed: c.unindexed.length,
-          reindexed: 0,
-          dropped: 0,
-          fixed: 0,
-          semantic_available: semAvailable,
-          would_warm: wouldWarm,
-          dry_run: true,
-        },
-        remaining: remainingOf(0),
-      }
-    }
-
-    let reindexed = 0
-    for (const u of c.unindexed.slice(0, limit)) {
-      this.vstore.add(u.id, u.vec)
-      reindexed++
-    }
-
-    // Unusable bytes (dim mismatch) and foreign-space vectors both have to go before a re-encode
-    // can pick them up, and for the same reason: `add()` would keep ranking them otherwise. Only the
-    // slice we are about to re-encode is dropped, so a process that dies mid-migration leaves at most
-    // one batch vector-less — and those rows are exactly the `missing` rows the next run resumes on.
-    let dropped = 0
-    if (semAvailable) {
-      const toDrop = [...c.staleIds, ...c.spaceStaleIds].slice(0, limit)
-      if (toDrop.length) {
-        const spaceStale = new Set(c.spaceStaleIds)
-        dropped = this.facts.clearVectors(toDrop)
-        this.evictVectors(toDrop.filter((id) => spaceStale.has(id)))
-      }
-    }
-
-    let fixed = 0
-    if (semAvailable) {
-      const missingRows = this.facts.missingVectorRows().slice(0, limit)
-      for (const m of missingRows) {
-        // Every path here lands the vector through `setSemanticVector`, which re-queues the fact
-        // for the conflict check (`conflict_checked = 0`) — the same rule as `clearVectors`
-        // above: a fact whose vector the leg could not see when it ran has not been checked.
-        if (!await this.maybeIndexSemantic(m.fact_id, m.content)) continue
-        fixed++
-      }
-    }
+  vectorRepairTarget(): VectorRepairTarget {
     return {
-      report: {
-        missing: c.missing,
-        stale: c.staleIds.length,
-        space_stale: c.spaceStaleIds.length,
-        unindexed: c.unindexed.length,
-        reindexed,
-        dropped,
-        fixed,
-        semantic_available: semAvailable,
-        would_warm: wouldWarm,
-        dry_run: false,
-      },
-      remaining: remainingOf(fixed),
+      store: 'memory',
+      manualEntry: '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`)',
+      vectorSpace: () => this.vectorSpace(),
+      semanticAvailable: () => this.semantic.isAvailable(),
+      autoMigrate: () => this.config.semantic.auto_migrate,
+      vectorSpaceHealth: () => this.vectorSpaceHealth(),
+      missingVectorCount: () => this.facts.vectorCounts().missing,
+      classifyVectors: (limit) => this.classifyRepairVectors(limit),
+      reindexUsable: (rows) => this.reindexUsableVectors(rows),
+      dropVectors: (ids) => this.dropRepairVectors(ids),
+      reencodeVectors: (limit) => this.reencodeMissingVectors(limit),
+      warmup: () => this.warmupSemantic(),
     }
+  }
+
+  /**
+   * {@link classifyVectors} reduced to what the repair flow steps on: the counts, the ids to drop
+   * (bounded by `limit`) and the decoded vectors that can go back into a lost live index.
+   */
+  private classifyRepairVectors(limit: number): VectorsClassification {
+    const c = this.classifyVectors()
+    return {
+      stale: c.staleIds.length,
+      space_stale: c.spaceStaleIds.length,
+      missing: c.missing,
+      dropIds: [...c.staleIds, ...c.spaceStaleIds].slice(0, limit),
+      unindexed: c.unindexed,
+    }
+  }
+
+  /** Put usable persisted vectors missing from the live index back into it (no model needed). */
+  private reindexUsableVectors(rows: readonly { id: number; vec: Float32Array }[]): number {
+    for (const u of rows) this.vstore.add(u.id, u.vec)
+    return rows.length
+  }
+
+  /**
+   * Unusable bytes (dim mismatch) and foreign-space vectors both have to go before a re-encode can
+   * pick them up, and for the same reason: `add()` would keep ranking them otherwise. Only the slice
+   * the flow is about to re-encode is passed in, so a process that dies mid-migration leaves at most
+   * one batch vector-less — those rows are exactly the `missing` rows the next run resumes on.
+   *
+   * `clearVectors` re-queues each fact for the conflict check (`conflict_checked = 0`): the vector
+   * the embedding leg was checked against is gone, so the check has to run again.
+   */
+  private dropRepairVectors(ids: readonly number[]): number {
+    if (!ids.length) return 0
+    const dropped = this.facts.clearVectors(ids)
+    // Evict the whole slice, not only the foreign-space ids: a wrong-width vector is never in the
+    // live index (the reload skips it and every encode writes the current width), and eviction is
+    // idempotent for an id the index does not hold.
+    evictVectorsOf(this.vstore, ids)
+    return dropped
+  }
+
+  /**
+   * Encode the ACTIVE facts that still have no vector in this space (needs the semantic backend).
+   *
+   * Every row lands through `setSemanticVector`, which re-queues the fact for the conflict check —
+   * the same rule as {@link dropRepairVectors}: a fact whose vector the leg could not see when it
+   * ran has not been checked.
+   */
+  private async reencodeMissingVectors(limit: number): Promise<{ encoded: number; failed: number }> {
+    const rows = this.facts.missingVectorRows().slice(0, limit).map((m) => ({ id: m.fact_id, text: m.content }))
+    if (!rows.length) return { encoded: 0, failed: 0 }
+    return await encodeAndPersist(rows, this.vectorWriteTarget(this.vectorSpace()))
   }
 
   /**
    * The explicit, unbounded repair behind `mem_admin vectors_fix` / `avantf-mem vectors --fix`.
    * `dry_run` previews every count without writing — and without loading the model, which is why
-   * the preview also reports `would_warm` (see the contract's `VectorsFixReport`).
+   * the preview also reports `would_warm` (see the contract's `VectorsFixStoreReport`).
    */
-  async vectorsFix(dryRun = false): Promise<VectorsFixReport> {
-    return (await this.repairVectors({ dryRun })).report
+  async vectorsFix(dryRun = false): Promise<VectorsFixStoreReport> {
+    return (await repairVectorSlice(this.vectorRepairTarget(), { dryRun })).report
   }
 
   /**
    * ONE bounded slice of the vector-space migration: at most `batchSize` rows are dropped and
    * re-encoded, so the caller keeps control of the event loop between slices. This is the unit the
    * background migration ({@link migrateVectors}) and its tests drive.
-   *
-   * Resumability is a property of the DATABASE, not of this process: every slice re-derives what is
-   * stale from the persisted width/space, so a restart simply continues where the last slice stopped.
    */
   async migrateVectorsBatch(batchSize = DEFAULT_VECTOR_MIGRATION_BATCH): Promise<VectorMigrationProgress> {
-    const size = Math.max(1, Math.floor(batchSize))
-    const { report, remaining } = await this.repairVectors({ dryRun: false, limit: size })
-    return {
-      remaining,
-      migrated: report.fixed,
-      dropped: report.dropped,
-      reindexed: report.reindexed,
-      semantic_available: report.semantic_available,
-    }
+    return await migrateVectorSlice(this.vectorRepairTarget(), batchSize)
   }
 
   /**
    * Drive the bounded background migration until the store is current, the model is unavailable, or
-   * `shouldStop()` turns true (plugin unmount / process shutdown). A batch FAILURE never rejects: it is
-   * logged and reported as `remaining > 0`, which is what makes the next heartbeat a retry (the caller
-   * still owns the outer catch for a closed database, e.g. a shutdown racing the first read). Never
-   * blocks the event loop for longer than one batch.
-   *
-   * Honours `semantic.auto_migrate` (default on) — the switch exists so a host that must not spend CPU
-   * on background re-encoding can leave the loud warning and the manual entry as the only path.
+   * `shouldStop()` turns true (plugin unmount / process shutdown). The loop, the `semantic.auto_migrate`
+   * switch, the no-progress rule and the store-named logging all live in the shared flow
+   * (`store/vector_repair.ts`); this is the one-store entry callers (and its tests) already use.
    */
   async migrateVectors(opts: {
     batchSize?: number
     shouldStop?: () => boolean
     onProgress?: (progress: VectorMigrationOutcome) => void
   } = {}): Promise<VectorMigrationOutcome> {
-    const enabled = this.config.semantic.auto_migrate !== false
-    const snapshot = (): VectorMigrationOutcome => ({
-      enabled,
-      remaining: this.migrationRemaining(),
-      migrated: 0,
-      dropped: 0,
-      reindexed: 0,
-      semantic_available: this.semantic.isAvailable(),
-    })
-    if (!enabled) return snapshot()
-
-    let migrated = 0
-    let dropped = 0
-    let reindexed = 0
-    let last = snapshot()
-    const initial = last.remaining
-    if (initial === 0) return last
-    for (;;) {
-      if (opts.shouldStop?.() === true) break
-      let step: VectorMigrationProgress
-      try {
-        step = await this.migrateVectorsBatch(opts.batchSize)
-      } catch (error) {
-        retrievalLogger().warn(
-          `memory vector migration: batch failed (${describeError(error)}) — ${String(this.migrationRemaining())} `
-          + 'vector(s) still belong to an older embedding space; the next pass retries',
-        )
-        break
-      }
-      migrated += step.migrated
-      dropped += step.dropped
-      reindexed += step.reindexed
-      last = { ...step, enabled, migrated, dropped, reindexed }
-      opts.onProgress?.(last)
-      // No progress means the model is not available (or a write failed): stop this pass and let the
-      // caller's next heartbeat retry, instead of spinning on the same rows.
-      if (step.migrated === 0 && step.dropped === 0 && step.reindexed === 0) break
-      if (last.remaining === 0) break
-      await yieldToEventLoop()
-    }
-    return last
-  }
-
-  /** Active rows the semantic leg still cannot use (old width, old space, or no vector at all). */
-  private migrationRemaining(): number {
-    const health = this.vectorSpaceHealth()
-    return health.stale + health.space_stale + this.facts.vectorCounts().missing
+    return await driveVectorRepair(this.vectorRepairTarget(), opts)
   }
 
   /**
@@ -1224,7 +1166,7 @@ export class MemoryStore {
    */
   async maintenance(): Promise<MaintenanceResult & { entities: EntitySweepReport; conflicts: ConflictSweepCounts }> {
     const result = runMaintenance(this.db, this.config, { budget: 0 })
-    this.evictVectors([...result.archived_ids, ...result.purged_ids])
+    evictVectorsOf(this.vstore, [...result.archived_ids, ...result.purged_ids])
     this.retireConflicts([...result.archived_ids, ...result.purged_ids])
     // `admin maintenance` is the explicit "clean up now" command, so it is also where the vector
     // index reclaims tombstones that never reached the automatic compaction threshold (they can
@@ -1260,23 +1202,24 @@ export class MemoryStore {
    * loop until `deferred === 0` — `budget` bounds MEMORY as well as mission, since the pass reads
    * every selected row's `content` before rebuilding the first one.
    *
-   * The in-flight guard is here rather than at the callers because the callers CAN overlap: the
-   * plugin's heartbeat and `maintenance` are both periodic, and `staleEntityRows` is ORDERED, so
-   * two concurrent passes would select the same rows and re-tag them twice. Overlap is not
-   * corruption (each fact is stamped in its own transaction) — it is duplicated mission in a
-   * single-threaded process. A pass that finds one running reports `skipped` and does nothing.
-   *
-   * `budget` is clamped at 0: SQLite reads a negative LIMIT as "no limit" (`LIMIT -1`), so a
-   * caller asking for "-1 rows" would silently get the whole corpus — the opposite of bounded.
+   * The loop, the budget clamp, the in-flight guard and the `{rebuilt, deferred, skipped}` report all
+   * live in `store/entity_sweep.ts` now — this method is memory's adapter for it, so knowledge's
+   * entity leg and this one cannot drift apart again. What stays HERE is the domain half: the stale
+   * selection (`facts.staleEntityRows`, ACTIVE facts only) and the per-fact write below.
    */
   async reindexEntities(budget = ENTITY_SWEEP_BATCH): Promise<EntitySweepReport> {
-    if (this.entitySweepInFlight) {
-      return { rebuilt: 0, deferred: this.facts.countStaleEntities(ENTITY_EXTRACTOR_VERSION), skipped: true }
-    }
-    this.entitySweepInFlight = true
-    try {
-      const rows = this.facts.staleEntityRows(ENTITY_EXTRACTOR_VERSION, Math.max(0, Math.floor(budget)))
-      for (const row of rows) {
+    // The row type is spelled out (not inferred) because it IS the store's half of the contract: the
+    // shared loop never learns that this aggregate's id column is called `fact_id`.
+    // The stale selection is `facts.staleEntityRows`: `entities_version < ?` against the ACTIVE
+    // corpus (a range seek on `idx_facts_entities_version`; the column is NOT NULL, so `<` is the
+    // whole population). Its `countStaleEntities` is the same population's count.
+    const target: EntitySweepTarget<{ fact_id: number; content: string }> = {
+      staleEntityBatch: (limit) => ({
+        total: this.facts.countStaleEntities(ENTITY_EXTRACTOR_VERSION),
+        rows: this.facts.staleEntityRows(ENTITY_EXTRACTOR_VERSION, limit),
+      }),
+      staleEntityCount: () => this.facts.countStaleEntities(ENTITY_EXTRACTOR_VERSION),
+      extractAndWriteEntities: async (row) => {
         // Tag ONCE for both extractors (the write path does the same — see `tagText`).
         const tokens = await tagText(row.content)
         const entityWrites = normalizeEntityWrites(entitiesFromTokens(tokens, row.content))
@@ -1294,11 +1237,19 @@ export class MemoryStore {
           // produced is about a fact that no longer exists.
           this.facts.requeueConflictCheck([row.fact_id])
         })()
-      }
-      return { rebuilt: rows.length, deferred: this.facts.countStaleEntities(ENTITY_EXTRACTOR_VERSION), skipped: false }
-    } finally {
-      this.entitySweepInFlight = false
+      },
+      // Per-row, so one unwritable fact cannot abandon the rest of the batch. The previous
+      // fail-fast loop threw out of `reindexEntities` entirely, leaving the caller (a heartbeat or
+      // a settings-page button) with no report of what the pass had already done.
+      onRowError: (row, error) => {
+        retrievalLogger().warn(
+          `memory entity sweep: fact ${String(row.fact_id)} could not be rebuilt `
+          + `(${error instanceof Error ? error.message : String(error)}) — it keeps its old stamp; `
+          + 'the next pass retries it',
+        )
+      },
     }
+    return await sweepVersionedEntities(target, this.entitySweepGuard, { budget })
   }
 
   /**
@@ -1312,11 +1263,6 @@ export class MemoryStore {
     // thousands of rows in a single IMMEDIATE transaction, and the per-id loop was O(archived×log)
     // — measured 6.3 s for 999 ids at 99k open pairs, all of it holding the write lock.
     this.contradictions.resolveForFacts(factIds)
-  }
-
-  /** Drop vectors of archived/purged facts from the live index (batched). */
-  private evictVectors(factIds: number[]): void {
-    evictVectorsOf(this.vstore, factIds)
   }
 
   /**
@@ -1358,17 +1304,10 @@ export class MemoryStore {
 
   /** Hybrid search over the memory corpus (semantic + FTS + entity Jaccard [+ HRR probe] via fusion). */
   async search(input: SearchInput): Promise<RecallResult> {
-    const result = await hybridSearch<RecallHit>(this.hybridDeps(input), {
-      query: input.query,
-      limit: input.limit,
-      maxTokens: input.maxTokens,
-      queryVector: input.queryVector,
-      recordStats: input.recordStats,
-      floors: input.floors,
-      ...(input.includeScores === undefined ? {} : { includeScores: input.includeScores }),
-      ...(input.relaxLegs === undefined ? {} : { relaxLegs: input.relaxLegs }),
-      ...(input.rewriteQuery === undefined ? {} : { rewriteQuery: input.rewriteQuery }),
-    })
+    // The argument→`HybridPlan` mapping and the orchestrator call are shared with the knowledge
+    // store (`store/hybrid.ts`); this store's half is the projection below (its public shape is
+    // `RecallResult`, which drops `used_tokens`) and the deps in `hybridDeps`.
+    const result = await runHybridSearch(this.hybridDeps(input), input.query, input)
     return {
       hits: result.hits,
       degraded: result.degraded,
@@ -1384,10 +1323,7 @@ export class MemoryStore {
    * fact→hit mapping, and what to do with the hits the caller actually receives.
    */
   private hybridDeps(input: SearchInput): HybridDeps<RecallHit> {
-    return {
-      kind: 'memory',
-      config: this.config,
-      semantic: this.semantic,
+    return makeHybridDeps('memory', this.config, this.semantic, {
       legs: (ctx) => this.searchLegs(input, ctx),
       texts: (ids) => this.loadTexts(ids),
       hits: (ranked, texts) => {
@@ -1401,7 +1337,7 @@ export class MemoryStore {
       onReturn: (kept) => {
         if (input.track !== false) this.reinforce(kept.map((h) => h.ref_id))
       },
-    }
+    })
   }
 
   /**
@@ -1439,51 +1375,41 @@ export class MemoryStore {
     const candidates = anchors.length > 0
       ? this.entities.candidateFactsForAnyEntity(anchors, input.category, ctx.legCap, qEntities.length, ENTITY_UNION_CAP, input.source)
       : []
-    /**
-     * Wrap one leg's raw scores. `capped` must be measured on the RAW set (before the relevance
-     * floor): the floor removes the tail anyway, and deriving the flag from the floored size would
-     * erase the "this leg was cut at legCap" signal exactly when it bound.
-     */
-    const leg = (scores: Map<number, number>, weight: number, raw?: Map<number, number>): HybridLeg => ({
-      weight,
-      scores,
-      // `size === cap` is the only observable "this leg was cut" signal: a leg that finished under
-      // the cap cannot have been trimmed.
-      capped: (raw ?? scores).size === ctx.legCap,
-    })
+    // The leg WRAPPER (cap signal measured on the RAW pre-floor set), the floor application and the
+    // down-semantic fallback are shared with the knowledge store (`store/legs.ts`). What stays here
+    // is this store's leg LIST and the sources behind it — the leg order is part of the contract
+    // (`hybrid.ts`'s `unionLegs` merges the original and the self-reference rewrite runs BY INDEX).
+    const runner = makeLegRunner(ctx)
     // FTS floor: per ROW distinct-query-term coverage, on the terms `lexical.ts` defines. The texts
     // are loaded once for the capped candidate set (one batched query) — a row whose text is gone
     // scores 0 terms and is dropped, which the live filter would have done anyway.
     const ftsRaw = this.ftsPath(ctx.query, input.category, ctx.legCap, input.source)
-    const ftsFloored = applyTermFloor(ftsRaw, this.loadTexts([...ftsRaw.keys()]), ctx.query, ctx.floors.fts)
+    const ftsLeg = runner.term('fts', ftsRaw, this.loadTexts([...ftsRaw.keys()]), ctx.query, ctx.weights.fts, ctx.floors.fts)
     // Entity floor: applied to the shared candidate set, then the survivors are what the HRR probe
     // scores — an HRR bundle IS a bundle of entity atoms, so a candidate the entity floor rejected
-    // has no business in the probe either.
+    // has no business in the probe either. The runner's leg carries the floored map, which is what
+    // the HRR candidates are read from below.
     const jaccardRaw = this.jaccardPath(anchors, qEntities.length, candidates)
-    const jaccardFloored = applyScoreFloor(jaccardRaw, ctx.floors.jaccard)
-    const jaccardLeg = { ...leg(jaccardFloored.scores, ctx.weights.jaccard, jaccardRaw), leg: 'jaccard' as const, droppedByFloor: jaccardFloored.dropped }
+    const jaccardLeg = runner.scored('jaccard', jaccardRaw, ctx.weights.jaccard, ctx.floors.jaccard)
     const legs: (HybridLeg | Promise<HybridLeg>)[] = [
       // The async legs (model encode) are independent — the orchestrator awaits them concurrently.
       ctx.semAvail
         ? this.semanticPath(ctx.query, input.category, ctx.overFetch, ctx.queryVector, ctx.onQueryVector, input.source)
-            .then((raw) => {
-              const floored = applyScoreFloor(raw, ctx.floors.semantic)
-              return { weight: ctx.weights.semantic, scores: floored.scores, leg: 'semantic' as const, droppedByFloor: floored.dropped } satisfies HybridLeg
-            })
-        : { weight: ctx.weights.semantic, scores: new Map<number, number>(), leg: 'semantic', droppedByFloor: 0 },
+            .then((raw) => runner.semantic(raw, ctx.weights.semantic, ctx.floors.semantic))
+        : runner.semanticOff(ctx.weights.semantic),
       Promise.resolve(jaccardLeg),
-      { ...leg(ftsFloored.scores, ctx.weights.fts, ftsRaw), leg: 'fts', droppedByFloor: ftsFloored.dropped },
+      ftsLeg,
     ]
     if (input.includeHrr) {
       // The HRR probe is an entity-level leg; it shares the jaccard weight so the reported 3-key
       // weights contract stays stable. Its candidates are the Jaccard survivors; when the raw set
       // was non-empty but the floor emptied it, the recency fallback must NOT fire (that would
       // re-admit exactly the candidates the floor removed).
-      legs.push(Promise.resolve(leg(
+      legs.push(Promise.resolve(runner.plain(
         this.hrrPath(
           ctx.query,
           qEntities,
-          [...jaccardFloored.scores.keys()],
+          [...jaccardLeg.scores.keys()],
           input.category,
           ctx.legCap,
           candidates.length === 0,
@@ -1505,7 +1431,7 @@ export class MemoryStore {
       //
       // It shares the jaccard weight, exactly like the HRR probe: the reported 3-key weights
       // contract (`RecallResult.weights`) must not grow a fourth key for a default-OFF leg.
-      legs.push(Promise.resolve(leg(
+      legs.push(Promise.resolve(runner.plain(
         this.timeWindowPath(ctx.query, input.category, ctx.legCap, input.source),
         ctx.weights.jaccard,
       )))
@@ -1651,28 +1577,17 @@ export class MemoryStore {
    * Semantic leg. `queryVector` short-circuits the encode when the caller already
    * encoded this exact query (the cross-store router does, for both stores at once);
    * `onVector` publishes the vector this leg actually used, so the relaxed retry pass can reuse it
-   * instead of re-encoding (performance review §7.7 / P8).
+   * instead of re-encoding (performance review §7.7 / P8). The flow is shared
+   * (`store/legs.ts#semanticLeg`); the only memory-specific piece is the filter — the vstore has no
+   * notion of status/category/source, so candidates go through the DB and archived/purged facts,
+   * other categories and other sources never leak into the leg.
    */
   private async semanticPath(query: string, category: string | undefined, k: number, queryVector?: Float32Array, onVector?: (vec: Float32Array) => void, source?: string): Promise<Map<number, number>> {
-    const vec = queryVector ?? await this.semantic.encode(query)
-    // A caller-supplied vector is trusted to come from this backend (see `SearchInput`), but the
-    // dimension is cheap to check and a mismatch would otherwise score as garbage. It is an INPUT
-    // error, not a leg failure: the orchestrator isolates a dead leg so the query still answers, but
-    // a wrong width means the caller encoded with a different backend, and quietly answering from
-    // the other legs would hide that for the rest of the session.
-    if (vec.length !== this.vstore.dim) {
-      throw new RetrievalInputError(`queryVector 维度不符：${vec.length} != ${this.vstore.dim}`)
-    }
-    onVector?.(vec)
-    const topk = this.vstore.topk(vec, Math.max(50, k))
-    if (!topk.length) return new Map()
-    // The vstore has no notion of status/category/source — filter candidates through the DB
-    // so archived/purged facts, other categories and other sources never leak into the leg.
-    // The `topk` pool is over-fetched above `k`, so the filter happens before the leg's own cap.
-    const allowed = new Set(this.facts.activeIdsIn(topk.map((t) => t.id), category, source))
-    const out = new Map<number, number>()
-    for (const t of topk) if (allowed.has(t.id)) out.set(t.id, t.score)
-    return out
+    return semanticLeg({
+      query, k, queryVector, onVector, encode: (q) => this.semantic.encode(q),
+      dim: this.vstore.dim, topk: (vec, n) => this.vstore.topk(vec, n),
+      filterTopk: (ids) => new Set(this.facts.activeIdsIn(ids, category, source)),
+    })
   }
 
   /**
@@ -1776,32 +1691,24 @@ export class MemoryStore {
    * semantic, why it must be synchronous, and how the bar itself was measured.
    */
   lexicalProbe(text: string, stopAt = Number.POSITIVE_INFINITY): LexicalProbe {
-    return probeTerms(text, (term) => {
-      // One `LIMIT 1` per term, built for THIS table's tokenizer.
-      const fts = buildFtsQuery(term, this.ftsTokenizer)
-      return fts !== null && this.facts.ftsSearch(fts, undefined, 1).length > 0
-    }, stopAt)
+    // The term→MATCH build and the `probeTerms` loop are shared (`store/lexical.ts`); the only
+    // store-specific part is the table asked, one `LIMIT 1` per term.
+    return probeStoreTerms(
+      text,
+      this.ftsTokenizer,
+      (fts) => this.facts.ftsSearch(fts, undefined, 1).length > 0,
+      stopAt,
+    )
   }
 
   private ftsPath(query: string, category: string | undefined, cap: number, source?: string): Map<number, number> {
-    const ftsQuery = buildFtsQuery(query, this.ftsTokenizer)
-    if (ftsQuery) {
-      // ORDER BY bm25 + LIMIT: FTS5 still scores every match internally, but only the best `cap`
-      // rows cross into JS — which is what the old code paid for (33k rows through min-max + sort).
-      const rows = this.facts.ftsSearch(ftsQuery, category, cap, source)
-      // FTS5 bm25() is negative (more negative = better match); negate so higher = better.
-      return new Map(rows.map((r) => [r.id, -r.rank]))
-    }
-    // THE SHORT-QUERY FALLBACK. `null` here means the query carries no term the trigram index can
-    // express (measured: every term in `facts_fts` is 3 characters), which used to leave this leg
-    // empty by construction — the 2-char CJK shape. `substringTerms` is the one finer predicate the
-    // FTS5 trigram TABLE still answers (`LIKE '%…%'`), bounded by `cap`; the accuracy guard is the
-    // per-row floor in `applyTermFloor`, which requires the row to CONTAIN the run. `rank` counts
-    // the terms the row contains, so higher is better like the bm25 branch above.
-    const terms = substringTerms(query)
-    if (terms.length === 0) return new Map()
-    const rows = this.facts.ftsSubstringSearch(terms, category, cap, source)
-    return new Map(rows.map((r) => [r.id, r.rank]))
+    // The bm25-negation / short-query LIKE fallback flow is shared (`store/legs.ts#ftsLeg`); this
+    // store only names its DAO and its scope order `(category, cap, source)`.
+    return ftsLeg({
+      query, cap, scope: { category, source }, tokenizer: this.ftsTokenizer,
+      search: (ftsQuery, scope, limit) => this.facts.ftsSearch(ftsQuery, scope.category, limit, scope.source),
+      substringSearch: (terms, scope, limit) => this.facts.ftsSubstringSearch(terms, scope.category, limit, scope.source),
+    })
   }
 
   /**
@@ -1954,7 +1861,7 @@ export class MemoryStore {
     })
     const { supersededId, ...result } = tx()
     // After the commit (see `applySupersede`), never inside the transaction.
-    if (supersededId !== null) this.evictVectors([supersededId])
+    if (supersededId !== null) evictVectorsOf(this.vstore, [supersededId])
     return result
   }
 

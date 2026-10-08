@@ -7,7 +7,7 @@
  */
 import type { Db } from '../port.js'
 import { batches, inList } from '../chunk.js'
-import { likeSubstring } from '../tokenizer.js'
+import { likeSubstringLeg, setEntitiesVersionBatch } from './shared.js'
 import { ENTITY_EXTRACTOR_VERSION } from '../../entities/extract.js'
 
 /**
@@ -450,14 +450,7 @@ export class FactsDao {
 
   /** Stamp the rules that produced a batch of rows' entity/triple data. */
   setEntitiesVersion(ids: readonly number[], version: number): number {
-    let changes = 0
-    for (const batch of batches(ids)) {
-      const { placeholders, values } = inList(batch)
-      changes += this.db
-        .prepare(`UPDATE facts SET entities_version = ? WHERE fact_id IN (${placeholders})`)
-        .run(version, ...values).changes
-    }
-    return changes
+    return setEntitiesVersionBatch(this.db, 'facts', 'fact_id', ids, version)
   }
 
   /**
@@ -1019,22 +1012,24 @@ export class FactsDao {
    * alias, so the LIKE expressions are built once and bound twice — same fragment, same order.
    */
   ftsSubstringSearch(terms: readonly string[], category?: string, limit?: number, source?: string): { id: number; rank: number }[] {
-    const { any, count, params } = likeSubstring('fa.content', terms)
-    if (params.length === 0) return []
     // Same `EXISTS`-not-`JOIN` rule as {@link FTS_SEARCH_SQL_FILTERED}: multi-source facts must not
-    // fan out under the `LIMIT cap`.
+    // fan out under the `LIMIT cap`. The build/guard/double-bind protocol is shared with the
+    // knowledge store's sibling (`./shared.js`) — only this statement differs.
     const sourceClause = source === undefined
       ? ''
       : ' AND EXISTS (SELECT 1 FROM fact_sources fs WHERE fs.fact_id = fa.fact_id AND fs.ref = ?)'
-    return this.db
-      .prepare<{ id: number; rank: number }>(
-        `SELECT fa.fact_id AS id, ${count} AS rank
+    return likeSubstringLeg(
+      this.db,
+      'fa.content',
+      terms,
+      ({ any, count }) => `SELECT fa.fact_id AS id, ${count} AS rank
            FROM facts fa
           WHERE fa.status = 'active' AND (? IS NULL OR fa.category = ?)${sourceClause} AND (${any})
           ORDER BY rank DESC, fa.fact_id ASC
           LIMIT ?`,
-      )
-      .all(...params, category ?? null, category ?? null, ...(source === undefined ? [] : [source]), ...params, limit ?? -1)
+      source === undefined ? [category ?? null, category ?? null] : [category ?? null, category ?? null, source],
+      limit,
+    )
   }
 
   // ─── lifecycle tick (DESIGN §TRUST_MODEL §4) ─────────────────────────────

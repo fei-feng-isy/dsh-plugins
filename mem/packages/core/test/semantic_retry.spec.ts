@@ -87,10 +87,10 @@ describe('semantic bootstrap retry wiring', () => {
     expect(fake.warmUps).toBe(0)
 
     fake.succeedsOnWarm = true
-    const res = (await rt.admin({ action: 'vectors_fix' })) as { fixed: number; semantic_available: boolean }
+    const res = await rt.admin({ action: 'vectors_fix' })
     expect(fake.warmUps).toBe(1)
     expect(res.semantic_available).toBe(true)
-    expect(res.fixed).toBe(1)
+    expect(res.stores.memory?.encoded).toBe(1)
   })
 
   it('vectors_fix --dry-run never reaches for the model', async () => {

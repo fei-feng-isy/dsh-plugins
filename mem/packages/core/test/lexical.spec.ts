@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildRuntime, type AvantfRuntime } from '../src/index.js'
-import { gradedTerms, looksRelevant, relevanceTerms, substringTerms } from '../src/store/lexical.js'
+import { gradedTerms, looksRelevant, probeStoreTerms, relevanceTerms, substringTerms } from '../src/store/lexical.js'
 import { loadEvalCases } from '../src/eval/loader.js'
 import { allowAnyDomain } from './helpers.js'
 
@@ -116,6 +116,28 @@ describe('lexicalProbe short-circuit (R2-5)', () => {
       rt.shutdown()
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('probeStoreTerms (the shared skeleton both stores\' lexicalProbe now call)', () => {
+  it('asks the store once per expressible term, through its own MATCH builder', () => {
+    // "缓存失效" yields two trigrams (缓存失 / 存失效); the term set and the counting belong to
+    // `probeTerms`, the MATCH expression belongs to the store's tokenizer, and the store only has to
+    // say whether its table holds it.
+    const asked: string[] = []
+    const probe = probeStoreTerms('缓存失效', 'trigram', (fts) => {
+      asked.push(fts)
+      return true
+    })
+    expect(probe).toEqual({ terms: 2, matched: 2 })
+    expect(asked).toEqual(['"缓存失"', '"存失效"'])
+  })
+
+  it('keeps the stopAt short-circuit', () => {
+    let calls = 0
+    const probe = probeStoreTerms('缓存失效', 'trigram', () => { calls += 1; return true }, 1)
+    expect(probe).toMatchObject({ terms: 2, matched: 1 })
+    expect(calls).toBe(1)
   })
 })
 

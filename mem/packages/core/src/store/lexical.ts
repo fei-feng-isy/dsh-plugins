@@ -40,6 +40,7 @@
  * path. Behaviour is unchanged there: a 2-char query scored 0 matched terms before and still does
  * (`{terms: 0, matched: 0}`), so the hint stays silent exactly as it did.
  */
+import { buildFtsQuery, type FtsTokenizer } from '../db/tokenizer.js'
 
 /** How many of an input's terms a store holds. `terms === 0` means the input had nothing to test. */
 export interface LexicalProbe {
@@ -161,4 +162,22 @@ export function probeTerms(
     if (matched >= stopAt) break
   }
   return { terms: terms.length, matched }
+}
+
+/**
+ * The store probe both stores' `lexicalProbe` used to spell out verbatim: build THIS store's MATCH
+ * expression for one term (the tokenizer is a property of the store's FTS table) and ask that
+ * table whether anything holds it. `probeTerms` owns the term set and the counting; this owns the
+ * one part that has to differ, which is now a single `holds` closure per store.
+ */
+export function probeStoreTerms(
+  text: string,
+  tokenizer: FtsTokenizer,
+  holds: (ftsQuery: string) => boolean,
+  stopAt = Number.POSITIVE_INFINITY,
+): LexicalProbe {
+  return probeTerms(text, (term) => {
+    const fts = buildFtsQuery(term, tokenizer)
+    return fts !== null && holds(fts)
+  }, stopAt)
 }

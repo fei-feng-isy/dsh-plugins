@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { buildRuntime, type AvantfRuntime } from '../src/runtime.js'
 import type { Db } from '../src/db/port.js'
 import { openKnowledgeDb } from '../src/db/knowledge.js'
+import { ChunksDao } from '../src/db/dao/chunks.js'
 import { contentHash } from '../src/db/hash.js'
 import { float32ToBytes } from '../src/db/vectors.js'
 import { ENTITY_EXTRACTOR_VERSION } from '../src/entities/extract.js'
@@ -579,6 +580,40 @@ describe('reindex is incremental and can be planned', () => {
 
     const real = (await rt.kb({ action: 'reindex' })) as { entities_rebuilt: number; chunks: number }
     expect(real.entities_rebuilt).toBe(real.chunks)
+    expect(chunkState().every((r) => r.entities_version === ENTITY_EXTRACTOR_VERSION)).toBe(true)
+  })
+
+  it('selects the stale entity rows the way the shared sweep must (NULL, domain, order, bound)', async () => {
+    // The selection is the sweep's per-store primitive, so its semantics are pinned here rather than
+    // through `reindex`: a NULL version is the "predates the column" migration case and must be
+    // selected (a bare `<` would hide it), the domain argument must scope BOTH the rows and the
+    // count, the order must be the id's, and the limit must BOUND the read.
+    const chunks = new ChunksDao(kbDb)
+    await rt.kb({ action: 'ingest', text: '平台组负责统一网关。', domain: 'tech', source: 'a.md' })
+    await rt.kb({ action: 'ingest', text: '财务组负责报销流程。', domain: 'ops', source: 'b.md' })
+    const techId = (kbDb.prepare("SELECT dc.chunk_id AS id, dc.entities_version AS v FROM doc_chunks dc JOIN documents d ON d.doc_id = dc.doc_id WHERE d.domain = 'tech'").get() as { id: number; v: number | null }).id
+    const opsId = (kbDb.prepare("SELECT dc.chunk_id AS id FROM doc_chunks dc JOIN documents d ON d.doc_id = dc.doc_id WHERE d.domain = 'ops'").get() as { id: number }).id
+    // The ingest path already stamped both rows, so both are fresh to begin with.
+    expect(chunks.countStaleEntityChunks(ENTITY_EXTRACTOR_VERSION)).toBe(0)
+
+    kbDb.prepare('UPDATE doc_chunks SET entities_version = NULL WHERE chunk_id = ?').run(techId)
+    const unlistedDomain = chunks.chunkEntityRows(ENTITY_EXTRACTOR_VERSION, 10, 'tech')
+    expect(unlistedDomain.map((r) => r.chunk_id)).toEqual([techId]) // NULL version IS selected
+    expect(chunks.countStaleEntityChunks(ENTITY_EXTRACTOR_VERSION, 'tech')).toBe(1)
+    expect(chunks.countStaleEntityChunks(ENTITY_EXTRACTOR_VERSION, 'ops')).toBe(0) // scoped count, not the corpus
+    expect(chunks.countStaleEntityChunks(ENTITY_EXTRACTOR_VERSION)).toBe(1)
+
+    // An older-than-current version (not only NULL) is stale too, and the limit truncates the read.
+    kbDb.prepare('UPDATE doc_chunks SET entities_version = 0 WHERE chunk_id = ?').run(opsId)
+    expect(chunks.countStaleEntityChunks(ENTITY_EXTRACTOR_VERSION)).toBe(2)
+    const all = chunks.chunkEntityRows(ENTITY_EXTRACTOR_VERSION, 10)
+    expect(chunks.chunkEntityRows(ENTITY_EXTRACTOR_VERSION, 1)).toEqual([all[0]])
+    expect(all.map((r) => r.chunk_id)).toEqual([...all.map((r) => r.chunk_id)].sort((a, b) => a - b))
+
+    // After the sweep, nothing is left in either scope.
+    const swept = (await rt.kb({ action: 'reindex' })) as { entities_rebuilt: number }
+    expect(swept.entities_rebuilt).toBe(2)
+    expect(chunks.countStaleEntityChunks(ENTITY_EXTRACTOR_VERSION)).toBe(0)
     expect(chunkState().every((r) => r.entities_version === ENTITY_EXTRACTOR_VERSION)).toBe(true)
   })
 

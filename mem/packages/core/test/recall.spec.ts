@@ -205,9 +205,9 @@ describe('admin.vectors_*', () => {
     const diag = rt.admin({ action: 'vectors_diagnose' }) as { total: number; missing: number }
     expect(diag.total).toBeGreaterThan(0)
     expect(diag.missing).toBeGreaterThan(0)
-    const fix = (await rt.admin({ action: 'vectors_fix' })) as { semantic_available: boolean; fixed: number }
+    const fix = await rt.admin({ action: 'vectors_fix' })
     expect(fix.semantic_available).toBe(false) // no model in test env → degrade
-    expect(fix.fixed).toBe(0)
+    expect(fix.stores.memory?.encoded).toBe(0)
   })
 })
 

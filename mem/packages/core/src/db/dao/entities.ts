@@ -7,7 +7,8 @@
  * contradiction detection (see `db/chunk.ts`).
  */
 import type { Db } from '../port.js'
-import { batches, inList } from '../chunk.js'
+import { inList } from '../chunk.js'
+import { entityBags, entityCandidateTail, entityCandidates, queryDocFrequency } from './shared.js'
 import type { ExtractedEntity } from '../../entities/extract.js'
 
 export class EntitiesDao {
@@ -61,21 +62,15 @@ export class EntitiesDao {
 
   /** Batched entity bags for a candidate set: `Map<factId, names>` (ids with none get `[]`). */
   bagsForFacts(ids: readonly number[]): Map<number, string[]> {
-    const out = new Map<number, string[]>()
-    if (!ids.length) return out
-    for (const id of ids) out.set(id, [])
-    for (const batch of batches(ids)) {
-      const { placeholders, values } = inList(batch)
-      const rows = this.db
-        .prepare<{ fact_id: number; name: string }>(
-          `SELECT fe.fact_id AS fact_id, e.name AS name FROM fact_entities fe
-           JOIN entities e ON e.entity_id = fe.entity_id
-           WHERE fe.fact_id IN (${placeholders})`,
-        )
-        .all(...values)
-      for (const row of rows) out.get(row.fact_id)?.push(row.name)
-    }
-    return out
+    // The seed-empty default is memory's contract (see `shared.ts#entityBags`): callers here assume
+    // every requested id is present in the map.
+    return entityBags(this.db, ids, {
+      table: 'fact_entities fe',
+      keyColumn: 'fe.fact_id',
+      nameColumn: 'e.name',
+      joinEntities: 'JOIN entities e ON e.entity_id = fe.entity_id',
+      seedEmpty: true,
+    })
   }
 
   /** How many entities a fact is linked to — the scorer's `|A|`. */
@@ -94,21 +89,14 @@ export class EntitiesDao {
    * map has frequency 0, i.e. no active fact carries it and it can never be shared.
    */
   activeDocFrequency(names: readonly string[]): Map<string, number> {
-    const out = new Map<string, number>()
-    if (!names.length) return out
-    const { placeholders, values } = inList(names)
-    const rows = this.db
-      .prepare<{ name: string; df: number }>(
-        `SELECT e.name AS name, COUNT(*) AS df
+    return queryDocFrequency(this.db, names, {
+      from: `
            FROM entities e
            JOIN fact_entities fe ON fe.entity_id = e.entity_id
-           JOIN facts fa ON fa.fact_id = fe.fact_id
-          WHERE e.name IN (${placeholders}) AND fa.status = 'active'
-          GROUP BY e.name`,
-      )
-      .all(...values)
-    for (const row of rows) out.set(row.name, Number(row.df))
-    return out
+           JOIN facts fa ON fa.fact_id = fe.fact_id`,
+      nameExpr: 'e.name',
+      where: "fa.status = 'active'",
+    })
   }
 
   /**
@@ -198,11 +186,17 @@ export class EntitiesDao {
      */
     source?: string,
   ): number[] {
-    if (!names.length || limit <= 0) return []
-    const { placeholders, values } = inList(names)
-    return this.db
-      .prepare<{ id: number }>(
-        `SELECT fa.fact_id AS id, COUNT(*) AS shared,
+    // The score/order tail and the bind order come from `./shared.js` — the knowledge store's
+    // `candidatesByEntityNames` runs the same contract with its own table. No batching here: these
+    // names are request-bounded, so ONE `LIMIT` is already the exact top-N.
+    return entityCandidates(this.db, {
+      names,
+      filterParams: [category ?? null, category ?? null, source ?? null, source ?? null],
+      limit,
+      queryWidth,
+      widthCap,
+      batchNames: false,
+      sql: (placeholders) => `SELECT fa.fact_id AS id, COUNT(*) AS shared,
                 (SELECT COUNT(*) FROM fact_entities x WHERE x.fact_id = fa.fact_id) AS total
            FROM facts fa
            JOIN fact_entities fe ON fe.fact_id = fa.fact_id
@@ -211,11 +205,7 @@ export class EntitiesDao {
             AND (? IS NULL OR EXISTS (
                   SELECT 1 FROM fact_sources fs WHERE fs.fact_id = fa.fact_id AND fs.ref = ?
                 ))
-          GROUP BY fa.fact_id
-          ORDER BY (CAST(shared AS REAL) / (? + MIN(total - shared, ?))) DESC, total ASC, fa.fact_id ASC
-          LIMIT ?`,
-      )
-      .all(...values, category ?? null, category ?? null, source ?? null, source ?? null, queryWidth, widthCap, limit)
-      .map((row) => row.id)
+          ${entityCandidateTail('fa.fact_id')}`,
+    })
   }
 }

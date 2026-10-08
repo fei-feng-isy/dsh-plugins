@@ -16,8 +16,11 @@ import type { SemanticBackend } from '@avantf/mem-retrieval'
 import type { Config } from '@avantf/mem-contract'
 import { loadConfig } from '../src/config/loader.js'
 import {
+  hybridPlanOf,
   hybridSearch,
+  makeHybridDeps,
   RetrievalInputError,
+  runHybridSearch,
   type HybridContext,
   type HybridDeps,
   type HybridLeg,
@@ -276,5 +279,99 @@ describe('hybridSearch', () => {
     expect(encodes).toBe(1)
     expect(vectors[0]).toBeUndefined()
     expect(vectors[1]).toEqual(new Float32Array([0.25, 0.5, 0.75, 1]))
+  })
+})
+
+describe('search entry mapping (the ONE copy MemoryStore and KnowledgeStore call)', () => {
+  /** The six keys the mapping always emits, in both stores. */
+  const ALWAYS = ['floors', 'limit', 'maxTokens', 'query', 'queryVector', 'recordStats']
+
+  it('omits every optional plan key the caller did not set, including an explicit undefined', () => {
+    // `HybridPlan`'s optional keys are a contract: "absent" is what "use the default" means. The two
+    // stores used to spell these spreads out separately, so a field added to one entry point and not
+    // the other would silently make the stores query differently.
+    expect(Object.keys(hybridPlanOf('查询', undefined)).sort()).toEqual(ALWAYS)
+    expect(Object.keys(hybridPlanOf('查询', {
+      limit: undefined,
+      overFetch: undefined,
+      maxTokens: undefined,
+      queryVector: undefined,
+      recordStats: undefined,
+      floors: undefined,
+      includeScores: undefined,
+      relaxLegs: undefined,
+      rewriteQuery: undefined,
+    })).sort()).toEqual(ALWAYS)
+  })
+
+  it('adds exactly the conditional keys whose values were supplied', () => {
+    const plan = hybridPlanOf('查询', {
+      limit: 3,
+      overFetch: 7,
+      maxTokens: 9,
+      recordStats: false,
+      includeScores: true,
+      relaxLegs: ['fts'],
+    })
+    expect(plan).toMatchObject({
+      query: '查询',
+      limit: 3,
+      overFetch: 7,
+      maxTokens: 9,
+      recordStats: false,
+      includeScores: true,
+      relaxLegs: ['fts'],
+    })
+    expect(Object.keys(plan).sort()).toEqual([...ALWAYS, 'includeScores', 'overFetch', 'relaxLegs'].sort())
+  })
+
+  it('runs the same orchestrator for both store shapes; only overFetch differs', async () => {
+    // Memory's `SearchInput` has no `overFetch`, so its plan leaves the key out and the config-derived
+    // factor applies. Knowledge supplies it. Everything else is the same call.
+    const memorySeen: HybridContext[] = []
+    const knowledgeSeen: HybridContext[] = []
+    const memory = await runHybridSearch(
+      deps((ctx) => { memorySeen.push(ctx); return [leg({ 1: 0.9 })] }),
+      '查询词元',
+      { limit: 4 },
+    )
+    const knowledge = await runHybridSearch(
+      deps((ctx) => { knowledgeSeen.push(ctx); return [leg({ 1: 0.9 })] }),
+      '查询词元',
+      { limit: 4, overFetch: 6 },
+    )
+    expect(memorySeen[0].limit).toBe(4)
+    expect(memorySeen[0].overFetch).toBe(4 * config.retriever.over_fetch_factor)
+    expect(knowledgeSeen[0].overFetch).toBe(6)
+    expect(memory.hits).toEqual(knowledge.hits)
+  })
+
+  it('forwards the optional fields the stores used to spell out by hand', async () => {
+    const seen: string[] = []
+    await runHybridSearch(
+      deps((ctx) => { seen.push(ctx.query); return [] }),
+      '原查询',
+      { rewriteQuery: () => '改写后的查询', recordStats: false, includeScores: true },
+    )
+    // Both the original and the rewrite ran (方案 A), and `recordStats: false` reached the counter.
+    expect(seen).toHaveLength(2)
+    expect(seen).toEqual(expect.arrayContaining(['原查询', '改写后的查询']))
+    expect(retrievalHealth().queries).toBe(0)
+  })
+
+  it('builds deps through one factory, adding onReturn only when a store has one', () => {
+    const parts = {
+      legs: async (): Promise<readonly HybridLeg[]> => [],
+      texts: (): Map<number, string> => new Map(),
+      hits: (): TestHit[] => [],
+    }
+    const knowledge = makeHybridDeps<TestHit>('knowledge', config, semantic, parts)
+    expect(Object.keys(knowledge).sort()).toEqual(['config', 'hits', 'kind', 'legs', 'semantic', 'texts'])
+    const memory = makeHybridDeps<TestHit>('memory', config, semantic, {
+      ...parts,
+      onReturn: () => undefined,
+    })
+    expect(memory.kind).toBe('memory')
+    expect(typeof memory.onReturn).toBe('function')
   })
 })

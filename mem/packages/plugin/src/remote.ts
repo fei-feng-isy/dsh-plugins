@@ -167,6 +167,8 @@ export const descriptors: readonly InvocationDescriptor[] = [
     offset: count.optional(),
     reason: optionalText.optional(),
     dry_run: bool.optional(),
+    // `vectors_fix`: narrow the repair to one library (`memory` / `knowledge`); omitted = both.
+    store: optionalText.optional(),
     contradiction_id: count.optional(),
     resolution: optionalText.optional(),
     loser_fact_id: count.optional(),

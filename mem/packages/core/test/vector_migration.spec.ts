@@ -229,7 +229,7 @@ describe('vector-space migration (changing the embedding space is a data migrati
       expect(await topRef(rt, QUERY)).toBeNull()
       // The manual entry still works with the switch off.
       const fixed = await rt.memory.vectorsFix()
-      expect(fixed.fixed).toBe(FACT_COUNT)
+      expect(fixed.encoded).toBe(FACT_COUNT)
       expect(await topRef(rt, QUERY)).toBe(1)
     } finally {
       rt.shutdown()

@@ -259,6 +259,7 @@ export const AdminUnion = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('vectors_fix'),
     dry_run: z.boolean().optional().describe('true=只诊断不写入；可选，默认 false。'),
+    store: z.enum(['memory', 'knowledge']).optional().describe('只修某一个库（memory / knowledge）；省略=两库都修。'),
   }),
   z.object({ action: z.literal('contradict_check') }),
   z.object({

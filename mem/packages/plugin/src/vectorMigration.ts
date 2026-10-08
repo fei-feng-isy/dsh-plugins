@@ -1,30 +1,34 @@
 /**
- * The plugin's driver for the bounded, resumable background migration of persisted vectors into the
- * current embedding space.
+ * The plugin's lifecycle for the bounded, resumable background migration of persisted vectors into
+ * the current embedding space.
  *
- * Changing the embedding space (default model, width, pooling, normalization) is a DATA MIGRATION,
- * not a config tweak: every persisted vector still decodes, but in another model's coordinates, so
- * the semantic leg must not serve it. Measured on the real library after the 512→768 default-model
- * swap, 78 of 80 ACTIVE facts fell out of the semantic leg and retrieval degraded to lexical+entity
- * with no error anywhere — the store's open-time warning now says so, and this module is what
- * repairs it without the operator having to know `vectors --fix` exists.
+ * Changing the embedding space (default model, width, pooling, normalization, input window, weights)
+ * is a DATA MIGRATION, not a config tweak: every persisted vector still decodes, but in another
+ * model's coordinates, so the semantic leg must not serve it. Measured on the real library after the
+ * 512→768 default-model swap, 78 of 80 ACTIVE facts fell out of the semantic leg and retrieval
+ * degraded to lexical+entity with no error anywhere — the stores' open-time warning now says so, and
+ * this module is what repairs it without the operator having to know `vectors --fix` exists.
  *
- * It sits BEHIND the startup gate (`awaitStartupGate`, see index.ts): the model warm and this first
- * batch must not land in the boot window (DESIGN §20.14), and the tokenizer/model are the expensive
- * resources the gate exists to move out. The loop itself lives in the store
- * (`MemoryStore.migrateVectors`), which owns the batch size, the per-batch error handling and the
- * event-loop yield; this module owns the LOGGING (start / progress / end) and the lifecycle
- * (`shouldStop` = plugin disposed or runtime closed).
+ * The FLOW lives in the engine, once, for both stores (`@avantf/mem`'s `store/vector_repair.ts`:
+ * batch size, event-loop yield, stop / resume / no-progress rules, the `semantic.auto_migrate`
+ * decision and the four store-named log kinds). It is driven for BOTH stores — memory and knowledge
+ * — in one pass, because one embedding space is configured for the whole runtime: the knowledge
+ * store used to be left behind, silently, with only a manual `kb_reindex` able to fix it.
  *
- * Deliberately no new state in this file: what still needs migrating is derived from the database on
- * every pass, which is exactly what makes the migration resumable across a restart.
+ * This module owns only the process LIFECYCLE: one start, one stop, and "never an unhandled
+ * rejection". It sits BEHIND the startup gate (`awaitStartupGate`, see index.ts): the model warm and
+ * this first batch must not land in the boot window (DESIGN §20.14).
+ *
+ * Deliberately no state: what still needs migrating is derived from the databases on every pass —
+ * and the adapters are created ONCE so the shared flow's once-per-process `auto_migrate` warning is
+ * genuinely once per process, not once per heartbeat.
  */
-import { type AvantfRuntime } from '@avantf/mem'
+import { driveVectorRepairs, type AvantfRuntime } from '@avantf/mem'
 import type { AvantfLogger } from '@avantf/mem-contract'
 
 export interface VectorMigrationHandle {
   /**
-   * Run one migration pass. Quiet no-op when the store is already current, when a pass is already
+   * Run one migration pass. Quiet no-op when both stores are already current, when a pass is already
    * running, or after {@link stop}. Failures never escape: they are logged and left for the next
    * heartbeat to retry.
    */
@@ -40,61 +44,23 @@ export function createVectorMigration(opts: {
   logger: AvantfLogger
   /** False once the plugin's fiber is disposed (profile reload / unload). */
   isActive: () => boolean
-  /** Rows per batch; the store's `DEFAULT_VECTOR_MIGRATION_BATCH` when omitted. */
+  /** Rows per batch; the engine's `DEFAULT_VECTOR_MIGRATION_BATCH` when omitted. */
   batchSize?: number
 }): VectorMigrationHandle {
   const { rt, logger } = opts
+  // Created once: the flow keys its "already warned that auto_migrate is off" on the adapter
+  // identity, so a fresh adapter per heartbeat would repeat the warning on every beat.
+  const targets = [rt.memory.vectorRepairTarget(), rt.knowledge.vectorRepairTarget()]
   let running = false
   let stopped = false
-  let warnedDisabled = false
 
   const run = async (): Promise<void> => {
-    const health = rt.memory.vectorSpaceHealth()
-    const pending = health.stale + health.space_stale
-    if (pending === 0) return
     if (rt.closed || !opts.isActive()) return
-    if (rt.config.common.semantic.auto_migrate === false) {
-      // One warning per process: the store already emitted the loud startup line; this one names the
-      // switch that is holding the repair back, and the manual entry.
-      if (!warnedDisabled) {
-        warnedDisabled = true
-        logger.warn(
-          `vector migration: ${String(pending)} ACTIVE vector(s) belong to an older embedding space and `
-          + '`semantic.auto_migrate` is off — the semantic leg stays blind to them; run `avantf-mem vectors --fix` '
-          + '(MCP/plugin: `mem_admin vectors_fix`) or set `semantic.auto_migrate: true`',
-        )
-      }
-      return
-    }
-    const startedAt = Date.now()
-    logger.info(
-      `vector migration: ${String(pending)} ACTIVE vector(s) belong to an older embedding space `
-      + `(${String(health.space_stale)} same-width, another representation, ${String(health.stale)} wrong-width) — re-encoding in the background `
-      + '(a representation change — model, pooling, normalization, input window or weights — migrates the whole corpus once)',
-    )
-    const outcome = await rt.memory.migrateVectors({
+    await driveVectorRepairs(targets, {
       ...(opts.batchSize === undefined ? {} : { batchSize: opts.batchSize }),
       shouldStop: () => stopped || rt.closed || !opts.isActive(),
-      onProgress: (progress) => {
-        logger.info(
-          `vector migration: re-encoded ${String(progress.migrated)}/${String(pending)} `
-          + `(${String(progress.remaining)} left)`,
-        )
-      },
+      log: logger,
     })
-    if (outcome.remaining === 0) {
-      logger.info(
-        `vector migration: complete — ${String(outcome.migrated)} vector(s) re-encoded in `
-        + `${String(Date.now() - startedAt)}ms; the semantic leg is current`,
-      )
-      return
-    }
-    if (!stopped && !rt.closed && opts.isActive()) {
-      logger.warn(
-        `vector migration: ${String(outcome.remaining)} vector(s) still belong to an older embedding space `
-        + '(the embedding model may be unavailable) — the next heartbeat retries; manual entry `avantf-mem vectors --fix`',
-      )
-    }
   }
 
   return {
@@ -103,9 +69,9 @@ export function createVectorMigration(opts: {
       running = true
       void run()
         .catch((error: unknown) => {
-          // `migrateVectors` handles its own batch failures; this is the belt-and-braces catch for the
-          // detection read itself (a closed database during unmount). Never an unhandled rejection —
-          // that would take the host down (see AGENTS "家族的统一失败口径").
+          // The shared flow handles its own batch failures; this is the belt-and-braces catch for
+          // the detection read itself (a closed database during unmount). Never an unhandled
+          // rejection — that would take the host down (see AGENTS "家族的统一失败口径").
           logger.warn(`vector migration failed: ${error instanceof Error ? error.message : String(error)}`)
         })
         .finally(() => { running = false })

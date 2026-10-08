@@ -620,12 +620,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
 
   // ── bounding the "changed embedding space" repair ──────────────────────────────────────────
-  // A changed default model/width makes every persisted vector unusable by the semantic leg; the
-  // store says so LOUDLY at open (count + reason + manual entry) and this controller re-encodes them
+  // A changed default model/width makes every persisted vector unusable by the semantic leg; both
+  // stores say so LOUDLY at open (count + reason + manual entry) and this controller re-encodes them
   // in the background, in bounded batches, behind the startup gate below — never in the boot window
-  // (§20.14), never blocking a query, and resumable because "what is stale" is re-derived from the
-  // database on every pass. `semantic.auto_migrate: false` turns the automatic half off and leaves the
-  // warning + `vectors --fix`. The store's own `migrateVectors` catches per-batch failures.
+  // (§20.14), never blocking a query, and resumable because "what is stale" is re-derived from each
+  // database on every pass. ONE pass covers both libraries (`store/vector_repair.ts`).
+  // `semantic.auto_migrate: false` turns the automatic half off and leaves the warning + `vectors
+  // --fix`; the shared flow catches per-batch failures.
   const vectorMigration = createVectorMigration({
     rt,
     logger,

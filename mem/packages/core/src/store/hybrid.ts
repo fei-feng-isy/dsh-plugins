@@ -476,6 +476,94 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
 }
 
 /**
+ * The search-entry fields `MemoryStore.search` and `KnowledgeStore.search` hand to the orchestrator.
+ * Both stores' option types (`SearchInput` / `KnowledgeSearchOptions`) satisfy this structurally;
+ * everything else on them (`category` / `source` / `domain` / `includeHrr` / `track` / `onResult`) is
+ * leg- or domain-specific and stays at the store.
+ */
+export interface HybridSearchEntryFields {
+  limit?: number
+  /**
+   * Knowledge only: overrides the config-derived pool size. Memory's `SearchInput` has no such field
+   * and leaves the plan key absent (see {@link runHybridSearch}).
+   */
+  overFetch?: number
+  maxTokens?: number
+  queryVector?: Float32Array
+  recordStats?: boolean
+  floors?: FloorProfile
+  includeScores?: boolean
+  relaxLegs?: readonly FloorLeg[]
+  rewriteQuery?: (query: string) => string | undefined
+}
+
+/**
+ * Map a store's search arguments onto {@link HybridPlan} and run {@link hybridSearch}. ONE copy.
+ *
+ * Before this, `MemoryStore.search` and `KnowledgeStore.search` carried the mapping verbatim side by
+ * side: the same field list, the same conditional spreads, the same call. That list is part of the
+ * orchestrator's contract, so an option added to one entry point and not the other would silently
+ * make the two stores query differently — the same shape of drift this module already documents
+ * (`NaN` limit, `over_fetch_factor`, unrecorded capped legs).
+ *
+ * The conditional spreads are deliberate, not cosmetic: a caller that did not pass `overFetch` /
+ * `includeScores` / `relaxLegs` / `rewriteQuery` leaves the plan key ABSENT rather than
+ * present-with-`undefined`. The orchestrator reads all four through `??` / `=== true` today, so the
+ * two are indistinguishable now — but the plan is a contract, and widening it with keys the caller
+ * never set is how "absent means default" decays into "present-undefined means set to nothing".
+ */
+export async function runHybridSearch<H extends BudgetInput>(
+  deps: HybridDeps<H>,
+  query: string,
+  fields: HybridSearchEntryFields | undefined,
+): Promise<HybridResult<H>> {
+  return hybridSearch<H>(deps, hybridPlanOf(query, fields))
+}
+
+/**
+ * The mapping itself, separated from the call so it can be pinned directly: the contract here is
+ * the SHAPE of the plan (which keys exist), which no behavioural assertion inside `hybridSearch`
+ * could observe once every optional field is read through `??` / `=== true`.
+ */
+export function hybridPlanOf(query: string, fields: HybridSearchEntryFields | undefined): HybridPlan {
+  return {
+    query,
+    limit: fields?.limit,
+    ...(fields?.overFetch === undefined ? {} : { overFetch: fields.overFetch }),
+    maxTokens: fields?.maxTokens,
+    queryVector: fields?.queryVector,
+    recordStats: fields?.recordStats,
+    floors: fields?.floors,
+    ...(fields?.includeScores === undefined ? {} : { includeScores: fields.includeScores }),
+    ...(fields?.relaxLegs === undefined ? {} : { relaxLegs: fields.relaxLegs }),
+    ...(fields?.rewriteQuery === undefined ? {} : { rewriteQuery: fields.rewriteQuery }),
+  }
+}
+
+/**
+ * Build a store's {@link HybridDeps} — the ONE construction site for the contract fields both stores
+ * share (`kind` / `config` / `semantic` / `legs` / `texts` / `hits` / `onReturn`). The per-store half
+ * is `parts`; the stores used to spell the whole object out twice, so a new required `HybridDeps`
+ * field was a change to remember in two places.
+ */
+export function makeHybridDeps<H>(
+  kind: 'memory' | 'knowledge',
+  config: Config,
+  semantic: SemanticBackend,
+  parts: Pick<HybridDeps<H>, 'legs' | 'texts' | 'hits' | 'onReturn'>,
+): HybridDeps<H> {
+  return {
+    kind,
+    config,
+    semantic,
+    legs: parts.legs,
+    texts: parts.texts,
+    hits: parts.hits,
+    ...(parts.onReturn === undefined ? {} : { onReturn: parts.onReturn }),
+  }
+}
+
+/**
  * P-01: put the fused per-leg evidence onto the caller-facing hits.
  *
  * Matched by `ref_id`, not by array index: a store's `hits` mapper may legitimately drop an entry

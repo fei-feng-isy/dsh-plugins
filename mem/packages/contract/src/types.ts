@@ -566,22 +566,54 @@ export interface VectorMigrationOutcome extends VectorMigrationProgress {
 }
 
 /**
- * `mem_admin vectors_fix`: what a repair did, or — with `dry_run` — what it WOULD do.
+ * ONE store's part of a vector repair (`mem_admin vectors_fix`).
+ *
+ * The common subset (`stale` / `space_stale` / `dropped` / `encoded` / `failed` /
+ * `semantic_available`) is what both stores report; `missing` and `would_warm` are shared steps of
+ * the repair flow, and `unindexed` / `reindexed` are only meaningful to a store that tracks its live
+ * index (memory — knowledge rebuilds it at open and keeps it in sync on every write).
  *
  * `semantic_available` is "the model is loaded RIGHT NOW" (a dry run must not load it), so the
  * preview also carries `would_warm`: together they separate "unknown until you run it" from
  * "the warmup was attempted and failed".
  */
-export interface VectorsFixReport {
-  missing: number
+export interface VectorsFixStoreReport {
+  /** ACTIVE rows whose persisted vector has the wrong width. */
   stale: number
+  /** ACTIVE rows whose usable-width vector was recorded in another space. */
   space_stale: number
-  unindexed: number
-  reindexed: number
+  /** ACTIVE rows with no persisted vector at all (what the repair has to encode). */
+  missing: number
+  /** Rows whose unusable old-space bytes were cleared so a re-encode could replace them. */
   dropped: number
-  fixed: number
+  /** Rows re-encoded into the current space by this repair. */
+  encoded: number
+  /** Rows whose encode or write failed; they stay `missing` / `stale` for the next pass. */
+  failed: number
+  /** The model is loaded right now. */
   semantic_available: boolean
+  /** The model was NOT loaded at entry, so a real run would attempt a warmup. */
   would_warm: boolean
+  /** Usable persisted vectors absent from the live index (memory only). */
+  unindexed?: number
+  /** Usable persisted vectors put back into the live index by this repair (memory only). */
+  reindexed?: number
+}
+
+/**
+ * `mem_admin vectors_fix`: what a repair did, or — with `dry_run` — what it WOULD do, per store.
+ *
+ * The report is per-store because one switch and one call now cover BOTH libraries (a model swap
+ * leaves memory and knowledge in the same state, and the repair used to exist for memory only).
+ * `store` on the request narrows the call to one library; the top-level `semantic_available` is the
+ * AND over the stores actually repaired.
+ */
+export interface VectorsFixReport {
+  stores: {
+    memory?: VectorsFixStoreReport
+    knowledge?: VectorsFixStoreReport
+  }
+  semantic_available: boolean
   dry_run: boolean
 }
 

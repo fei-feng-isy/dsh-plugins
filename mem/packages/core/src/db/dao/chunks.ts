@@ -10,7 +10,7 @@ import type { DocumentChunk } from '@avantf/mem-contract'
 import type { Db } from '../port.js'
 import { batches, inList } from '../chunk.js'
 import { contentHash } from '../hash.js'
-import { likeSubstring } from '../tokenizer.js'
+import { entityBags, entityCandidateTail, entityCandidates, likeSubstringLeg, queryDocFrequency, setEntitiesVersionBatch } from './shared.js'
 
 /** One chunk to persist, in document order (`idx` is the position, not the array index). */
 interface ChunkInsert {
@@ -150,12 +150,7 @@ export class ChunksDao {
 
   /** Record which extraction rules produced a chunk's entity rows (see `ENTITY_EXTRACTOR_VERSION`). */
   setEntitiesVersion(ids: readonly number[], version: number): void {
-    for (const batch of batches(ids)) {
-      const { placeholders, values } = inList(batch)
-      this.db
-        .prepare(`UPDATE doc_chunks SET entities_version = ? WHERE chunk_id IN (${placeholders})`)
-        .run(version, ...values)
-    }
+    setEntitiesVersionBatch(this.db, 'doc_chunks', 'chunk_id', ids, version)
   }
 
   /** Every persisted chunk vector, for rebuilding the in-memory index at open. */
@@ -174,15 +169,74 @@ export class ChunksDao {
       .all()
   }
 
+  /**
+   * Vector-space health of the WHOLE chunk corpus, by kind, WITHOUT decoding a single blob.
+   *
+   * The same two counts the open-time warning reports (`stale` = wrong width, `space_stale` = same
+   * width but another recorded space — `embedding_model IS NOT` is null-safe, so a row with no
+   * recorded space counts as foreign exactly like the JS comparison in `reloadIndex`) plus `missing`
+   * (no vector at all), which is the third reason the semantic leg cannot use a chunk.
+   *
+   * This is what lets the shared repair flow read "what is stale" cheaply per slice instead of
+   * re-scanning and hashing the corpus (`corpusState` reads every text; a batched migration must
+   * not).
+   */
+  vectorSpaceCounts(space: string, expectedBytes: number): { stale: number; space_stale: number; missing: number } {
+    const row = this.db
+      .prepare<{ stale: number; space_stale: number; missing: number }>(
+        `SELECT
+           COALESCE(SUM(CASE WHEN semantic_vector IS NULL THEN 1 ELSE 0 END), 0) AS missing,
+           COALESCE(SUM(CASE WHEN semantic_vector IS NOT NULL AND length(semantic_vector) != :bytes THEN 1 ELSE 0 END), 0) AS stale,
+           COALESCE(SUM(CASE WHEN semantic_vector IS NOT NULL AND length(semantic_vector) = :bytes AND embedding_model IS NOT :space THEN 1 ELSE 0 END), 0) AS space_stale
+         FROM doc_chunks`,
+      )
+      .get({ bytes: expectedBytes, space })
+    return { stale: Number(row?.stale ?? 0), space_stale: Number(row?.space_stale ?? 0), missing: Number(row?.missing ?? 0) }
+  }
+
+  /** Chunks with no persisted vector — the repair flow's `missing` term in `remaining`. */
+  countMissingVectors(): number {
+    return Number(
+      this.db.prepare<{ n: number }>('SELECT COUNT(*) AS n FROM doc_chunks WHERE semantic_vector IS NULL').get()?.n ?? 0,
+    )
+  }
+
+  /**
+   * Chunks the semantic leg cannot use (no vector / wrong width / another space), bounded and
+   * ordered by id — the repair flow's encode source.
+   *
+   * The content-hash check `vectorReusable` adds is deliberately NOT here: a chunk whose vector is
+   * in the current space is usable even if its text was edited behind the store's back, and that
+   * (rarer) case belongs to `kb_reindex`, which re-derives every leg. Repairing the SPACE must not
+   * pay a jieba/hash pass over the corpus to find rows the space change did not touch.
+   */
+  staleVectorRows(space: string, expectedBytes: number, limit: number): { chunk_id: number; text: string }[] {
+    // SQLite reads a negative LIMIT as "no limit" (`LIMIT -1`) and rejects a non-integer bind with a
+    // datatype mismatch, so the explicit-repair `Infinity` has to be translated here rather than
+    // reaching the driver.
+    const bound = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : -1
+    return this.db
+      .prepare<{ chunk_id: number; text: string }>(
+        `SELECT chunk_id AS chunk_id, text AS text FROM doc_chunks
+          WHERE semantic_vector IS NULL OR length(semantic_vector) != :bytes OR embedding_model IS NOT :space
+          ORDER BY chunk_id ASC LIMIT :limit`,
+      )
+      .all({ bytes: expectedBytes, space, limit: bound })
+  }
+
   count(): number {
     return this.db.prepare<{ n: number }>('SELECT COUNT(*) AS n FROM doc_chunks').get()!.n
   }
 
   /**
-   * Replace the entity rows of the given chunks in one transaction (`replace` clears the
-   * old rows first — used by reindex, where the extractor may have changed).
+   * Replace the entity rows of the given chunks in one transaction.
+   *
+   * `replace` is REQUIRED, not defaulted: `true` clears the old rows first (the entity sweep, where
+   * the extractor may have changed), `false` is the ingest path, where the chunk ids are freshly
+   * inserted and an absent old row set. A default would let one caller silently inherit the other's
+   * semantics — an extra `DELETE` per chunk on ingest, or an append-on-top-of-stale sweep.
    */
-  replaceEntities(rows: readonly ChunkEntityRow[], replace = false): void {
+  replaceEntities(rows: readonly ChunkEntityRow[], replace: boolean): void {
     const del = this.db.prepare('DELETE FROM chunk_entities WHERE chunk_id = ?')
     const ins = this.db.prepare('INSERT OR IGNORE INTO chunk_entities (chunk_id, name) VALUES (?, ?)')
     this.db.transaction(() => {
@@ -195,19 +249,14 @@ export class ChunksDao {
 
   /** Batched entity bags: `Map<chunkId, names>` (ids with none are absent). */
   entityBags(ids: readonly number[]): Map<number, string[]> {
-    const out = new Map<number, string[]>()
-    for (const batch of batches(ids)) {
-      const { placeholders, values } = inList(batch)
-      const rows = this.db
-        .prepare<{ chunk_id: number; name: string }>(`SELECT chunk_id, name FROM chunk_entities WHERE chunk_id IN (${placeholders})`)
-        .all(...values)
-      for (const r of rows) {
-        const list = out.get(r.chunk_id)
-        if (list) list.push(r.name)
-        else out.set(r.chunk_id, [r.name])
-      }
-    }
-    return out
+    // No seed: knowledge's callers use `?? []`, and only rows that really carry entities appear (see
+    // `shared.ts#entityBags`).
+    return entityBags(this.db, ids, {
+      table: 'chunk_entities',
+      keyColumn: 'chunk_id',
+      nameColumn: 'name',
+      seedEmpty: false,
+    })
   }
 
   /** Chunk body + owning-document identity for the fused candidate ids. */
@@ -271,6 +320,45 @@ export class ChunksDao {
       .all(domain ?? null, domain ?? null)
   }
 
+  /**
+   * Chunk rows whose `chunk_entities` were produced by OLDER extraction rules — the entity sweep's
+   * selection, bounded and ordered by id.
+   *
+   * `COALESCE(entities_version, 0) < :version`, not `entities_version != :version`: the column is
+   * NULLABLE on purpose (a row written before the derived-state columns existed must look stale
+   * exactly once and be adopted by the first rebuild — see `ChunkStateRow`), and a bare `<` would
+   * evaluate to NULL for those rows and let them hide from the sweep forever.
+   *
+   * The predicate is index-served in id order (`doc_chunks` is keyed by `chunk_id`), so the LIMIT
+   * bounds what is READ, not only what is rebuilt — the same property `FactsDao.staleEntityRows`
+   * documents for the memory side.
+   */
+  chunkEntityRows(version: number, limit: number, domain?: string): { chunk_id: number; text: string }[] {
+    return this.db
+      .prepare<{ chunk_id: number; text: string }>(
+        `SELECT dc.chunk_id AS chunk_id, dc.text AS text
+           FROM doc_chunks dc
+           JOIN documents d ON d.doc_id = dc.doc_id
+          WHERE COALESCE(dc.entities_version, 0) < :version AND (:domain IS NULL OR d.domain = :domain)
+          ORDER BY dc.chunk_id ASC LIMIT :limit`,
+      )
+      .all({ version, limit, domain: domain ?? null })
+  }
+
+  /** How many chunks still carry entity rows from older rules — the sweep's `deferred` source. */
+  countStaleEntityChunks(version: number, domain?: string): number {
+    return Number(
+      this.db
+        .prepare<{ n: number }>(
+          `SELECT COUNT(*) AS n
+             FROM doc_chunks dc
+             JOIN documents d ON d.doc_id = dc.doc_id
+            WHERE COALESCE(dc.entities_version, 0) < :version AND (:domain IS NULL OR d.domain = :domain)`,
+        )
+        .get({ version, domain: domain ?? null })?.n ?? 0,
+    )
+  }
+
   /** Rebuild the FTS index from the content table (write-path maintenance). */
   rebuildFts(): void {
     this.db.exec("INSERT INTO doc_chunks_fts(doc_chunks_fts) VALUES('rebuild')")
@@ -278,7 +366,8 @@ export class ChunksDao {
 
   /** Active chunks sharing at least one entity name with the query (jaccard candidate set). */
   /**
-   * Entity-overlap candidates, most-shared first and CAPPED (see the memory store's sibling).
+   * Entity-overlap candidates, highest-score first and CAPPED (see the memory store's sibling;
+   * the score/order tail itself lives in `./shared.js#entityCandidateTail`).
    *
    * `limit` is applied per name-batch and the batches are unioned, so the result is bounded by
    * `limit x ceil(names/batch)` — corpus-independent, which is what this query can promise. The
@@ -288,16 +377,16 @@ export class ChunksDao {
    * of the truth. (The memory store's sibling does not batch, so its single `LIMIT` is already exact.)
    */
   candidatesByEntityNames(names: readonly string[], domain: string | undefined, source: string | undefined, limit: number, queryWidth: number, widthCap: number): number[] {
-    if (limit <= 0) return []
-    const out = new Set<number>()
-    for (const batch of batches(names)) {
-      const { placeholders, values } = inList(batch)
-      const rows = this.db
-        .prepare<{ chunk_id: number }>(
-          // Ordered by the LEG'S SCORE — see the memory store's sibling. The score is anchored
-          // Jaccard with a saturating union: `shared / (|A| + min(total - shared, widthCap))`, so a
-          // narrower chunk sharing one entity can outrank a wide one sharing two.
-          `SELECT ce.chunk_id AS chunk_id, COUNT(*) AS shared,
+    // The score/order tail, bind order and per-batch union come from `./shared.js` — the memory
+    // store's `candidateFactsForAnyEntity` runs the same contract on its own table.
+    return entityCandidates(this.db, {
+      names,
+      filterParams: [domain ?? null, domain ?? null, source ?? null, source ?? null],
+      limit,
+      queryWidth,
+      widthCap,
+      batchNames: true,
+      sql: (placeholders) => `SELECT ce.chunk_id AS id, COUNT(*) AS shared,
                   (SELECT COUNT(*) FROM chunk_entities x WHERE x.chunk_id = ce.chunk_id) AS total
              FROM chunk_entities ce
              JOIN doc_chunks dc ON dc.chunk_id = ce.chunk_id
@@ -308,14 +397,8 @@ export class ChunksDao {
             -- removed document's chunks out of a result is the JOIN itself.
             WHERE ce.name IN (${placeholders})
               AND (? IS NULL OR d.domain = ?) AND (? IS NULL OR d.source = ?)
-            GROUP BY ce.chunk_id
-            ORDER BY (CAST(shared AS REAL) / (? + MIN(total - shared, ?))) DESC, total ASC, ce.chunk_id ASC
-            LIMIT ?`,
-        )
-        .all(...values, domain ?? null, domain ?? null, source ?? null, source ?? null, queryWidth, widthCap, limit)
-      for (const r of rows) out.add(r.chunk_id)
-    }
-    return [...out]
+            ${entityCandidateTail('ce.chunk_id')}`,
+    })
   }
 
   /**
@@ -326,16 +409,7 @@ export class ChunksDao {
    * all chunks, which is the population the leg ranks.
    */
   docFrequency(names: readonly string[]): Map<string, number> {
-    const out = new Map<string, number>()
-    if (!names.length) return out
-    const { placeholders, values } = inList(names)
-    const rows = this.db
-      .prepare<{ name: string; df: number }>(
-        `SELECT name, COUNT(*) AS df FROM chunk_entities WHERE name IN (${placeholders}) GROUP BY name`,
-      )
-      .all(...values)
-    for (const row of rows) out.set(row.name, Number(row.df))
-    return out
+    return queryDocFrequency(this.db, names, { from: ' FROM chunk_entities', nameExpr: 'name' })
   }
 
   /** FTS leg (`bm25` rank; negated by the caller so higher = better). */
@@ -361,17 +435,18 @@ export class ChunksDao {
    * the domain/source filter lives.
    */
   ftsSubstringSearch(terms: readonly string[], domain?: string, source?: string, limit?: number): { id: number; rank: number }[] {
-    const { any, count, params } = likeSubstring('dc.text', terms)
-    if (params.length === 0) return []
-    return this.db
-      .prepare<{ id: number; rank: number }>(
-        `SELECT dc.chunk_id AS id, ${count} AS rank
+    return likeSubstringLeg(
+      this.db,
+      'dc.text',
+      terms,
+      ({ any, count }) => `SELECT dc.chunk_id AS id, ${count} AS rank
            FROM doc_chunks dc
            JOIN documents d ON d.doc_id = dc.doc_id
           WHERE (? IS NULL OR d.domain = ?) AND (? IS NULL OR d.source = ?) AND (${any})
           ORDER BY rank DESC, dc.chunk_id ASC
           LIMIT ?`,
-      )
-      .all(...params, domain ?? null, domain ?? null, source ?? null, source ?? null, ...params, limit ?? -1)
+      [domain ?? null, domain ?? null, source ?? null, source ?? null],
+      limit,
+    )
   }
 }

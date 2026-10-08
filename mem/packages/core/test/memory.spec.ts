@@ -347,9 +347,9 @@ describe('semantic index persistence across restarts', () => {
       expect(after.with_semantic).toBe(1)
       expect(after.indexed).toBe(1) // rebuilt from the blob on construction
       // vectors_fix reports nothing left to repair
-      const fix = (await rt2.admin({ action: 'vectors_fix' })) as { reindexed: number; unindexed: number }
-      expect(fix.unindexed).toBe(0)
-      expect(fix.reindexed).toBe(0)
+      const fix = await rt2.admin({ action: 'vectors_fix' })
+      expect(fix.stores.memory?.unindexed).toBe(0)
+      expect(fix.stores.memory?.reindexed).toBe(0)
     } finally {
       rt2.shutdown()
     }
@@ -378,8 +378,8 @@ describe('semantic index persistence across restarts', () => {
   it('vectors_fix reloads persisted vectors that are missing from the live index', async () => {
     const a = await rt.remember({ action: 'add', content: '陈静加入平台组' })
     rt.db.prepare('UPDATE facts SET semantic_vector = ? WHERE fact_id = ?').run(fakeVector(1), a.fact_id)
-    const fix = (await rt.admin({ action: 'vectors_fix' })) as { reindexed: number; semantic_available: boolean }
-    expect(fix.reindexed).toBe(1)
+    const fix = await rt.admin({ action: 'vectors_fix' })
+    expect(fix.stores.memory?.reindexed).toBe(1)
     expect(rt.memory.vectorsDiagnose().indexed).toBe(1)
   })
 
@@ -401,9 +401,9 @@ describe('semantic index persistence across restarts', () => {
       expect(diag.store).toContain('local_numpy')
 
       // Must resolve, not reject: the store refuses to add a mismatched vector.
-      const fix = (await offline.admin({ action: 'vectors_fix' })) as { stale: number; dropped: number; semantic_available: boolean }
-      expect(fix.stale).toBe(1)
-      expect(fix.dropped).toBe(0) // the repair cannot run without a model → nothing is cleared
+      const fix = await offline.admin({ action: 'vectors_fix' })
+      expect(fix.stores.memory?.stale).toBe(1)
+      expect(fix.stores.memory?.dropped).toBe(0) // the repair cannot run without a model → nothing is cleared
       expect(fix.semantic_available).toBe(false)
       expect(offline.memory.vectorsDiagnose().stale).toBe(1)
     } finally {
@@ -430,15 +430,15 @@ describe('semantic index persistence across restarts', () => {
       expect(diag.unindexed).toBe(1) // usable, and absent from the live index (row written post-open)
       expect(diag.models).toEqual({ [foreign]: 1 })
 
-      const plan = (await offline.admin({ action: 'vectors_fix', dry_run: true })) as { space_stale: number; dropped: number }
-      expect(plan.space_stale).toBe(1)
-      expect(plan.dropped).toBe(0) // a dry run writes nothing
+      const plan = await offline.admin({ action: 'vectors_fix', dry_run: true })
+      expect(plan.stores.memory?.space_stale).toBe(1)
+      expect(plan.stores.memory?.dropped).toBe(0) // a dry run writes nothing
 
       // Without a model the vector is reported but must NOT be dropped, or the fact would
       // silently lose its (still best-available) vector.
-      const fix = (await offline.admin({ action: 'vectors_fix' })) as { space_stale: number; dropped: number }
-      expect(fix.space_stale).toBe(1)
-      expect(fix.dropped).toBe(0)
+      const fix = await offline.admin({ action: 'vectors_fix' })
+      expect(fix.stores.memory?.space_stale).toBe(1)
+      expect(fix.stores.memory?.dropped).toBe(0)
       expect(offline.memory.vectorsDiagnose().space_stale).toBe(1)
     } finally {
       offline.shutdown()
@@ -469,14 +469,16 @@ describe('semantic index persistence across restarts', () => {
         .run(fakeVector(3), 'local_bge/bge-m3/512', a.fact_id)
 
       const plan = (await offline.admin({ action: 'vectors_fix', dry_run: true })) as VectorsFixReport
-      expect(plan).toMatchObject({ space_stale: 1, dropped: 0, dry_run: true, semantic_available: false, would_warm: true })
+      expect(plan.dry_run).toBe(true)
+      expect(plan.stores.memory).toMatchObject({ space_stale: 1, dropped: 0, semantic_available: false, would_warm: true })
 
       const real = (await offline.admin({ action: 'vectors_fix' })) as VectorsFixReport
-      expect(real).toMatchObject({ dry_run: false, would_warm: true })
+      expect(real.dry_run).toBe(false)
+      expect(real.stores.memory).toMatchObject({ would_warm: true })
       // The warmup was attempted and failed (the backend cannot warm), so nothing is cleared: the
       // row keeps the only vector it has and `space_stale` keeps reporting it.
       expect(real.semantic_available).toBe(false)
-      expect(real.dropped).toBe(0)
+      expect(real.stores.memory?.dropped).toBe(0)
       expect(offline.memory.vectorsDiagnose().space_stale).toBe(1)
     } finally {
       offline.shutdown()
@@ -509,10 +511,12 @@ describe('semantic index persistence across restarts', () => {
       expect(live.memory.vectorsDiagnose().space_stale).toBe(1)
 
       const plan = (await live.admin({ action: 'vectors_fix', dry_run: true })) as VectorsFixReport
-      expect(plan).toMatchObject({ space_stale: 1, dropped: 0, dry_run: true, semantic_available: true, would_warm: false })
+      expect(plan.dry_run).toBe(true)
+      expect(plan.stores.memory).toMatchObject({ space_stale: 1, dropped: 0, semantic_available: true, would_warm: false })
 
       const real = (await live.admin({ action: 'vectors_fix' })) as VectorsFixReport
-      expect(real).toMatchObject({ space_stale: 1, dropped: 1, fixed: 1, dry_run: false, semantic_available: true })
+      expect(real.dry_run).toBe(false)
+      expect(real.stores.memory).toMatchObject({ space_stale: 1, dropped: 1, encoded: 1, semantic_available: true })
       const row = live.db.prepare('SELECT embedding_model FROM facts WHERE fact_id = ?').get(a.fact_id) as { embedding_model: string }
       expect(row.embedding_model).toContain('always_warm/')
       // Repaired means BOTH: the column carries the current space, and the live index serves it.
@@ -837,7 +841,7 @@ describe('a vector repair re-queues the facts it just made scorable', () => {
 
       warm()
       const fix = await store.vectorsFix()
-      expect(fix).toMatchObject({ fixed: 2, semantic_available: true })
+      expect(fix).toMatchObject({ encoded: 2, semantic_available: true })
 
       const sigs = store.checkContradictions()
       expect(sigs).toHaveLength(1)

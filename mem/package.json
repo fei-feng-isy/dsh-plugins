@@ -24,7 +24,8 @@
     "bench:reinforce": "node scripts/bench-reinforce.mjs",
     "clean": "node ../scripts/clean.mjs --group mem",
     "rebuild:dsh": "pnpm run build:dsh",
-    "cleanup:dsh": "bash scripts/cleanup.sh"
+    "cleanup:dsh": "bash scripts/cleanup.sh",
+    "audit:flows": "node scripts/audit-flow-duplication.mjs"
   },
   "license": "MIT"
 }

@@ -20,6 +20,11 @@ export * from './dispatch.js'
 export * from './runtime.js'
 export * from './store/memory.js'
 export * from './store/knowledge.js'
+// The shared vector-space repair flow both stores run, and the driver the plugin mounts. Exported for
+// the same reason as the retrieval orchestration below: it is the pluggability point for a THIRD
+// store (write an adapter, do not copy the loop), and the plugin has to drive both stores through the
+// one implementation.
+export * from './store/vector_repair.js'
 // The shared retrieval orchestration both stores run. Exported because `RetrievalInputError` crosses
 // the boundary (a caller-supplied `queryVector` of the wrong width is rethrown rather than degraded,
 // so a caller can tell its own mistake from a backend failure) — and because a third store built on

@@ -328,8 +328,15 @@ async function main(): Promise<void> {
       }
       case 'vectors': {
         const fix = rest.includes('--fix')
+        // `--store memory|knowledge` narrows the repair to one library; omitted = both (the report is
+        // per store either way).
+        const store = parseFlag(rest, '--store')
         const result = fix
-          ? await rt.admin(validated(AdminUnion, { action: 'vectors_fix', dry_run: rest.includes('--dry-run') }))
+          ? await rt.admin(validated(AdminUnion, {
+              action: 'vectors_fix',
+              dry_run: rest.includes('--dry-run'),
+              ...(store === undefined ? {} : { store }),
+            }))
           : rt.admin(validated(AdminUnion, { action: 'vectors_diagnose' }))
         console.log(JSON.stringify(result, null, 2))
         break
