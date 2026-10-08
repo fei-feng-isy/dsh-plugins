@@ -4,8 +4,10 @@
  * decides what a proposed step carries to the model.
  *
  * The hook makes wake-ups free by emptying the batch when there is nothing to act on (an empty batch
- * opens no step). It must never REFUSE the step: that ends the turn and would cut a tool-calling
- * step off from its own result.
+ * opens no step). It refuses the step in exactly one shape: the turn's first step whose whole claimed
+ * batch was our own workers' settlement notices, with nothing for the owner to act on — there an empty
+ * batch would be filled by a host listener that appends after this decision, buying a model call for
+ * nothing. Any other refusal would cut a tool-calling step off from its own result (see `pre-step ③a`).
  *
  * @module @avantf/dsh-mission
  */
@@ -452,7 +454,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   })
 
   // ── the pre-step gate ───────────────────────────────────────────────────
-  ctx.on('agent/pre-step', async ({ agent }, next) => {
+  ctx.on('agent/pre-step', async ({ agent, step }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
 
@@ -482,13 +484,46 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const content = kept.filter((message) => !isOwnWake(message))
     if (content.length > 0) return { ...decision, messages: content }
 
-    // ③ Only our own signal — or an empty batch — is left. Neither may be refused: `reject` ends the
-    //    turn, so a tool-calling step would never read its own result, and the driver stops without
-    //    re-reading the inbox, stranding input queued behind the signal. So: keep the signal only when
-    //    the engine still has mission, serve a queued message in this step, and otherwise empty the batch
-    //    so the step closes without a model call.
+    // ③ Only our own signal — or an empty batch — is left. A blanket `reject` here is what killed
+    //    tool-calling turns (`reject` ends the turn, so a tool-calling step would never read its own
+    //    result) and stranded queued input (the driver stops without re-reading the inbox). So: keep
+    //    the signal only when the engine still has mission, serve a queued message in this step, and
+    //    otherwise empty the batch so the step closes without a model call. The ONE shape that must
+    //    not be emptied is ③a below.
     const admitted = actionable ? kept : []
     const queued = takeQueuedInput(agent, host)
+
+    // ③a One shape must NOT be emptied: a turn whose ENTIRE claimed batch was our own worker
+    //    settlement notices, with nothing for the owner to act on and no queued input to serve. An
+    //    emptied batch is only "zero model calls" if nothing is appended on top of our decision — but
+    //    a host listener registered before this one (dsh-time-context) awaits `next()` and then
+    //    appends its note to whatever we return, so an empty batch buys exactly the model call this
+    //    gate exists to avoid. `reject` is checked before that append and discards the claimed notice
+    //    (the host's `accountsForClaim` semantics), so the turn ends here.
+    //
+    //    Both extra conditions are load-bearing, and both narrow the refusal to the shape the empty
+    //    batch cannot cover:
+    //
+    //    - `step === 1` is the turn's FIRST proposed step — the only one where refusing ends a turn
+    //      that has produced nothing yet. At a later step a notice can be claimed as steering while
+    //      the model still has its own tool result to read; refusing there ends the turn and cuts the
+    //      step off from that result (the "calling a tool ends the conversation" failure).
+    //    - `decision.messages.length > 0`: an EMPTY batch is the ordinary continuation step after a
+    //      tool call (a tool result lands in the SESSION, not in a claimed inbox message), and it must
+    //      be entered so that step runs at all. Only a batch that actually CLAIMED something, and
+    //      whose every message was a worker notice, is a notice-only turn.
+    //
+    //    (Reaching ③ at all already means `content.length === 0`: bucket ② returned for anything the
+    //    owner or another plugin put in the batch.)
+    if (
+      step === 1
+      && queued === undefined
+      && decision.messages.length > 0
+      && kept.length === 0
+      && !actionable
+    ) {
+      return { kind: 'reject' }
+    }
     return queued === undefined
       ? { ...decision, messages: admitted }
       : { ...decision, messages: [...admitted, queued] }

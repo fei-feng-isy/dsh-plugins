@@ -1250,8 +1250,22 @@ export class AvantfMissionHost extends TypertRemoteService {
 
   /**
    * Whether a proposed step should reach the model. The wake carries only a signal, so this decides on
-   * STATE: a tree this session owns must have something actionable. Otherwise the step is refused,
-   * which also discards the trigger message.
+   * STATE: a tree this session owns must hold something only its OWNER can act on.
+   *
+   * Exactly three states qualify, and a middle node settling is none of them:
+   *
+   *  - the **root** reached a terminal status (`done`/`failed`): the owner reads `mission_result` and
+   *    calls `finish_mission`;
+   *  - the tree is **troubled** (`isTroubled`: repeated stalls/hangs/failed attempts/failed starts):
+   *    the owner is the only one who can `adjust_mission` or `cancel_mission`;
+   *  - a node is **parked-ready** (decomposed, every child landed, session parked): `nextDispatchable`
+   *    deliberately excludes it, so no engine pass will start it, and the owner's step is the only
+   *    place the authorizing parent can adopt and wake that session (`wakeParkedWorkers`).
+   *
+   * Everything else — a CHILD going `done`/`failed`, a sibling becoming dispatchable `ready` — is
+   * aggregated and dispatched by the engine (see §4.3), so admitting a step for it only makes the
+   * owner read the guidance again. Before this predicate was tightened, ANY `ready` / `interrupted` /
+   * `done` / `failed` node admitted the step, so every executor settlement bought an owner model call.
    */
   admitStep(agent: Agent): AdmitDecision {
     const tree = this.tree
@@ -1261,14 +1275,19 @@ export class AvantfMissionHost extends TypertRemoteService {
       .filter((entry) => entry.ownerSessionId === agent.id && entry.closedAt === null)
     if (owned.length === 0) return { admit: false, reason: 'no open tree owned by this session' }
     for (const entry of owned) {
-      const actionable = tree
-        .nodesOf(entry.rootId)
-        .filter((node) => node.status === 'ready' || node.status === 'interrupted' || node.status === 'done' || node.status === 'failed')
-      if (actionable.length > 0) {
-        return { admit: true, reason: `${actionable.length} actionable node(s) in tree ${entry.rootId}` }
+      const nodes = tree.nodesOf(entry.rootId)
+      const root = nodes.find((node) => node.id === entry.rootId)
+      if (root !== undefined && TERMINAL.has(root.status)) {
+        return { admit: true, reason: `root ${root.id} reached ${root.status}` }
+      }
+      if (isTroubled(nodes)) {
+        return { admit: true, reason: `tree ${entry.rootId} is troubled` }
+      }
+      if (tree.parkedReadyNodes(entry.rootId).length > 0) {
+        return { admit: true, reason: `tree ${entry.rootId} has a parked executor to wake` }
       }
     }
-    return { admit: false, reason: 'trees owned but nothing actionable' }
+    return { admit: false, reason: 'trees owned but nothing only the owner can act on' }
   }
 
   /** Whether this plugin's wake/notice filtering applies: a session that owns a tree (closed included —

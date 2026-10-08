@@ -215,6 +215,12 @@ export interface Mounted {
     agent: StubAgent
     messages: Message[]
     next: () => Promise<{ kind: 'enter'; messages: Message[] }>
+    /** The turn to report (default 1). */
+    turn?: number
+    /** The 1-based step to report (default 1). A step after the turn's first is what the loop
+     *  proposes at a tool-call boundary, where a claimed batch may carry steering and an empty batch
+     *  means "the model still has a tool result to read". */
+    step?: number
   }) => Promise<{ kind: string; messages?: Message[] }>
   /**
    * The session currently executing each node, and the prompt it last received.
@@ -752,14 +758,16 @@ export async function mount(
     agent: StubAgent
     messages: Message[]
     next: () => Promise<{ kind: 'enter'; messages: Message[] }>
+    turn?: number
+    step?: number
   }): Promise<{ kind: string; messages?: Message[] }> =>
     dispatch(
       'agent/pre-step',
       {
         agent: payload.agent,
         messages: payload.messages,
-        turn: 1,
-        step: 1,
+        turn: payload.turn ?? 1,
+        step: payload.step ?? 1,
         signal: new AbortController().signal,
       },
       payload.next,

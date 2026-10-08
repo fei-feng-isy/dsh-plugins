@@ -400,7 +400,10 @@ master 被唤醒（inbox 有消息）
       ② 去掉我们自己的唤醒消息后，批次里还有别的东西吗？
           ├── 有（用户消息 / 其他插件的注入 / 引导层快照） → 原样放行，丢弃唤醒消息
           │      —— 唤醒本身无内容，已有别的消息在撑起这一轮
-          └── 没有 → 这是「只有本插件自己的信号」或「空批次」两种情况之一，都不拒绝：
+          └── 没有 → 无论那是「只有本插件自己的信号」还是「空批次」，都落在这四种处理之一：
+                ├── 本轮的**第一步**、批次确实认领到了东西、且整批**只有**本插件 worker 的
+                │      结算通知、队列里没有可服务的输入、`admitStep` 也没有 master 要动的事
+                │      → **reject**（唯一一处拒绝，见下）
                 ├── 引擎还有需要 master 处理的状态 → 保留唤醒消息（空批次不产生模型调用，
                 │      唤醒就是撑起这一轮的那条消息；内容由引导层提供）
                 ├── inbox 里还排着一条非信号消息（用户消息 / 别的插件的注入）
@@ -409,17 +412,41 @@ master 被唤醒（inbox 有消息）
                       → turn 以 completed 结束，零 LLM 调用；被丢掉的通知也不入库
 ```
 
-**它成立的两个依据**（已核实）：
+**master 只为三件事被叫醒**（`admitStep`，2026-10-08 收紧）：放行判据只看**只有 owner 能做的**状态，而不是"树上还有 `ready`/`done`/`failed`/`interrupted` 的节点"——
 
-1. 空批次在 `step()` 之前就判定 turn 结束，**从不进入 `step()`**，因此不发生模型调用
+| 状态 | 为什么只有 master 能做 |
+|---|---|
+| **根**进入终态（`done`/`failed`） | 读 `mission_result` → `finish_mission` |
+| **trouble**（`isTroubled`：反复 stall / hang / 失败 / 起不来） | `adjust_mission` / `cancel_mission` |
+| 有 **parked-ready** 节点（已拆解、子节点全终态、会话停着） | `nextDispatchable` 排除 parked 节点，引擎不会派它；只有 owner 的这一步能作为授权父会话在 ⓪ 里 `wakeParkedWorkers` 把它认领并唤醒（`MissionTree.parkedReadyNodes` 的注释正是这个口径） |
+
+**子节点的 `done`/`failed` 由引擎聚合、可派发的 `ready` 由引擎派发**，都不是 master 的事；收紧前它们全部算"可动作"，于是**每一次执行者结算都会买一次 owner 模型调用** —— 而那次调用的内容（只有一张引导层快照）什么也改不了。
+
+**它成立的两个依据**（已核实，但第 1 条有前提）：
+
+1. 空批次在 `step()` 之前就判定 turn 结束，**从不进入 `step()`**，因此不发生模型调用 —— 前提是**我们的决策之后没有别的监听器往批次里追加东西**；见下"唯一一处拒绝"
 2. pre-step 从 inbox 摘出的消息**只在 `enter` 分支才被写进会话**；批次清空时那些消息既离开 inbox 也从未入库 —— 净效果与"什么都没发生"一致，等价于原设计的 `WAKE_ONLY` 空唤醒
 
 > 实测依据：结算通知的 source 是 `{ kind: "subagent-settled", form: "notice", summary, senderSessionId }`，普通用户消息是 `{ kind: "user" }` —— **两类可判别**，过滤是确定的而非启发式。
 
-**为什么这里一次都不能 `reject`**（原先的实现用 reject，两个后果都在真实会话里发生过）：
+**为什么不能一概 `reject`**（原先的实现用 reject，两个后果都在真实会话里发生过）：
 
-- **pre-step waterfall 会在空批次上跑**：`step === 0 && messages.length === 0` 的判定在**钩子之后**，而第一步之后的每个步边界，loop 都会用「`next-step` 全量 + `next-turn` 第一条」发起一次 pre-step —— 模型刚调完工具时这次认领通常是空的。旧实现把它当"没有可处理的状态"reject 掉，于是 **turn 在第一次工具调用后立即结束**：模型看不到自己那次调用的结果，会话表现为"一调工具就断"。
+- **pre-step waterfall 会在空批次上跑**：`step === 0 && messages.length === 0` 的判定在**钩子之后**，而第一步之后的每个步边界，loop 都会用「`next-step` 全量 + `next-turn` 第一条」发起一次 pre-step —— 模型刚调完工具时这次认领通常是空的（**工具结果落在会话里，不在被认领的批次里**）。旧实现把它当"没有可处理的状态"reject 掉，于是 **turn 在第一次工具调用后立即结束**：模型看不到自己那次调用的结果，会话表现为"一调工具就断"。
 - **reject 会搁置队列**：`agent-loop` 的 `turn()` 在 reject 分支直接 `return false`，**跳过 `if (!inbox.hasPending) return false`**，driver 就此停下；而一次认领只取 `next-turn` 的一条，所以排在后面（例如用户刚发的消息）的那条要等到**下一次无关的唤醒**才会被认领（harness 自己的文档也写明 "A rejected step leaves steering parked in the inbox until the next wake"）。这正是"用户消息石沉大海、越打字越乱"的成因：每次新消息只消耗掉队首的一条通知。
+
+**唯一一处拒绝：结算通知独占的第一批**（2026-10-08，实施规格见 `docs/pre-step-wake-suppression.md`）
+
+宿主 `dsh-time-context` 以 `{ prepend: true }` 注册 pre-step 监听器：先 `await next()`（我们），再在**我们的决策之上**追加一条时间注记（只受 `refreshIntervalMs` 节流）。它自己的 model-switch 监听器有空批次守卫，它没有。于是"批次清空 → turn 以 completed 结束"这条零调用路径被它填成有内容 → 白跑一次模型（实测 turn 63 距上次注入 5m47s、被 10 分钟节流 → 无 step；turn 64 距 16m41s、放行 → 跑了一步）。上游缺口只报告、不本地修补（见 §13），我们侧改为在**最窄的形状**上返回 `reject`（宿主在 append 之前就检查 `kind === 'reject'`，并丢弃已认领的消息）：
+
+**当且仅当**下面五条同时成立：
+
+1. `step === 1` —— 本轮**第一个**被提议的步。这一步之后 turn 已经产出过东西，拒绝会把它和自己的工具结果切断；
+2. `decision.messages.length > 0` —— 批次确实**认领到了**东西（空批次不是"通知独占"，是工具调用后的续步）；
+3. `content.length === 0` 且 `kept.length === 0` —— 整批都是本插件 worker 的结算通知（② 的早返回已经保证批里没有任何非自家消息）；
+4. `takeQueuedInput` 返回 `undefined` —— 队列里没有可服务给这一步的输入；
+5. `admitStep(agent).admit === false` —— 没有"只有 master 能做的事"（见上表）。
+
+任一条不成立就维持现状（交回 `admitted`/`queued`）。第 1、2 两条正是上面两个历史事故的护栏：通知可以在 turn 中途作为 steering 被认领（那时批次**看起来**同样只有通知），而工具结果落在**会话**里、不在被认领的批次里 —— 这两种情形都不能拒绝，只能把批次清空。
 
 因此本步的代偿是：**把队首那条非信号消息取出来、放进本步**（`inbox.remove` + 放进 `decision.messages`，等价于 loop 自己的一次认领；不 remove 会二次投递）。空闲时还排着的那 20 条结算通知，则由 ⓪ 直接清掉，不再逐个变成一轮。
 
@@ -1559,3 +1586,17 @@ wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSche
 9. **并发上限生效**：一批 N 个 ready 节点不会一次派出超过上限的任务单元
 10. **容量闸门生效且只排队不拒绝**：装不下的节点留在 `ready`，`attempts`/`failures`/`spawnFailures`/`stalls` 全为 0；work-conserving 用轻任务填满空闲容量；老化超阈值后预留、排空后只派发一次；`weight > capacity` 的节点在无其它 running 时被派发；空闲内存低于下限只推迟不拒绝；`waitingFor` 在面板可见（`mission_result` 的 `waiting_for` 因为读结果只在终态放行而恒为 `null`，见 §9.2.1）
 11. **唤醒真的唤醒**：引擎唤醒产生的 turn 至少带一条消息（否则零模型调用，等于没唤醒）
+12. **结算通知不买模型调用**：只有本插件 worker 的结算通知、且树里没有"只有 master 能做"的状态时，本轮 pre-step 决策是 `reject`（`step === 1`），该轮不产生模型调用；混入用户消息 / 别的插件的通知 / 队列里还有输入时照常送达；根终态、trouble、parked-ready 一律不拒绝
+
+---
+
+## 十三、已知上游问题（只报告，不本地修补）
+
+### 13.1 `dsh-time-context` 的 pre-step 监听器没有空批次守卫（2026-10-08）
+
+- **位置**：宿主包 `@deepseek-ai/dsh-time-context` 的 `agent/pre-step` 监听器（`ctx.on(..., { prepend: true })`）。
+- **形态**：它 `await next()` 之后**无条件**把时间注记追加到 `decision.messages`（只受 `refreshIntervalMs` 节流），既不检查批次是否为空，也不检查上游是否已经决定这一步不跑。宿主自己的 model-switch 监听器有空批次守卫（`if (decision.messages.length === 0 && (step === 1 || messages.length > 0)) return decision;`），它没有。
+- **后果**：任何"把批次清空以免跑模型"的下游策略都会被它填成有内容。实测 owner 会话在只有一条结算通知的轮次里白跑一步：turn 64 日志 `agent/inbox/spliced {removedCount:1}`（通知已被丢掉）之后仍 `step/start` → `user/message(kind='time-context')` → 模型跑一步；turn 63 落在 10 分钟节流窗口内，没有注记也没有 step。
+- **我们侧的对策**：不再依赖"空批次"，而是对"结算通知独占的第一批"返回 `reject`（§4.2「唯一一处拒绝」）—— 它在 `dsh-time-context` append 之前就检查 `decision.kind === 'reject'` 并原样返回。
+- **建议的上游修法**（不由本仓实施，本地 patch 不随我们发布）：给它补上与 model-switch 同形的守卫 —— `step === 1` 且 `decision.messages.length === 0`（或 `decision.kind === 'reject'`）时不追加注记。注意**不能**对 `step > 1` 的空批次加同样的守卫：那一步是模型读自己工具结果的续步，空批次必须照常进行。
+

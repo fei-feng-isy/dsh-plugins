@@ -16,7 +16,7 @@ DSH（DeepSeek Harness）原生 Cordis 插件：**任务树引擎**。
 | 9 个模型工具，分两张面孔 | `create_mission` / `adjust_mission` / `note_mission` / `decompose_mission` / `submit_mission` / `mission_result` / `list_missions` / `finish_mission` / `cancel_mission`。**owner 面孔**（顶层会话）见 6 个：`create_mission`/`adjust_mission`/`mission_result`/`list_missions`/`finish_mission`/`cancel_mission`；**executor 面孔**（任务单元）见 3 个：`note_mission`/`decompose_mission`/`submit_mission`。`note_mission` 只给执行者：它写下本轮自己的分析，而 `decompose_mission` 会拒绝一个没写过分析的拆解。回收是引擎自己的事，不给模型一个手动回收的工具 —— 见下。**owner 看不到任务内部**：`list_missions` 只说一个任务还在跑、或者反复出过问题（`troubled`，是历史而非现值），不报它被拆成了什么、各部分什么状态 —— owner 只对整棵树有动作（`adjust_mission` / `cancel_mission`），内部结构是引擎的事 |
 | 一段静态系统提示词段 | 告诉模型**什么时候**该把活交出去（判据是"能不能连验收标准一起交出去"，不是复不复杂；需要拆与不需要拆的都算）、以及"谁在等、别轮询、别替它做"，并附一句**写法提示**（要交付长规格或长清单时，先写进仓库里的文件、描述里指向它 —— 超长工具参数是实测的失败源）。参数怎么填、任务能不能包含某类内容都**不在这段里**（前者属于工具的说明，后者由 owner 自己判断）。与 `create_mission` 的授权判据同一个判据，worker 视角返回空串。**正文可编辑**：家族共享目录 `<data home>/prompts/mission-tree-guide.md`（缺失或空白写回默认，启动时读一次；见根 README「自定义系统提示词」） |
 | 一段引导上下文 | 每轮把树的状态写进 owner 的 prompt |
-| 一个 `agent/pre-step` 钩子 | 过滤 worker 结算通知、决定某一步带什么进模型；引擎的唤醒信号在没有可处理状态时被**清空**（不是 reject，reject 会截断这一轮并把队列搁置）|
+| 一个 `agent/pre-step` 钩子 | 过滤 worker 结算通知、决定某一步带什么进模型；引擎的唤醒信号在没有可处理状态时被**清空**。唯一的例外是**结算通知独占的第一批**（`step === 1` 且整批只有自家结算通知、队列里没有可服务的输入、`admitStep` 也没有 owner 要动的事）—— 那一处返回 `reject`，因为宿主 `dsh-time-context` 会在我们的决策之后往空批次里追加时间注记，清空等于白跑一次模型；其余任何情形都不拒绝（reject 会截断这一轮并把队列/工具结果搁置，见 §4.2）|
 | `/archive` 命令 | 把本会话**已完成**的 mission 会话记录标记为归档（走 workspace registry 的官方接口，durable、可 unarchive）。只标记，**不释放磁盘** |
 | `/clean` 命令 | 两个作用域，删除必须同时给作用域与目标：`/clean`（无参数）=只读总览、`/clean archive [all\|mission-xxxxxxxx]` 清理本会话已完成的 worker 会话日志（三步一趟完成：标记归档 → 释放记录 → 取消归档）、`/clean orphans [all\|root-xxxxxxxx]` 清理 owner 会话已不存在或不可观测的孤立任务树 |
 | `/mission` 命令 | 无参数：列出本会话拥有的任务树；**带文本：用它建一个根任务**（等价于 agent 调 `create_mission`）|
@@ -226,7 +226,7 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 | 卸载 | `unmounting` |
 | 客户端挂载 | `client half mounting: …` / `Remote namespace mounted: …` / `registered the conversation.view seat: id=missions order=20` |
 
-**刻意不打点的**：`agent/pre-step` 的每次放行/剔除。它每步都跑（包括第一步之后的**空批次**），逐次打印会把上面这些真正的转折点淹掉；判断它为什么清空批次请用返回的原因（`admitStep` 是纯函数）。
+**刻意不打点的**：`agent/pre-step` 的每次放行/剔除/拒绝。它每步都跑（包括第一步之后的**空批次**），逐次打印会把上面这些真正的转折点淹掉；判断它为什么清空批次或拒绝请用返回的原因（`admitStep` 是纯函数，只回答"有没有只有 owner 能做的事"）。
 
 ## 设计要点
 

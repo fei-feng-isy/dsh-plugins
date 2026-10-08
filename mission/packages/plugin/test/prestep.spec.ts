@@ -5,8 +5,18 @@
  * an empty enter decision, so a hook that dropped every runtime-context snapshot
  * (and every wake with it) looked correct.
  */
-import { describe, expect, it } from 'vitest'
-import { callTool, agent, loopNext, message, mount, SNAPSHOT_SOURCE } from './mount.js'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  agent,
+  callTool,
+  executorFor,
+  loopNext,
+  message,
+  mount,
+  noteAndSplit,
+  SNAPSHOT_SOURCE,
+} from './mount.js'
+import { parkedRoot, settle, WORKER } from './fixtures.js'
 
 const wake = (): ReturnType<typeof message> =>
   message('w', { kind: 'plugin:avantf-mission' }, 'Work tree n1 reached done.')
@@ -152,6 +162,46 @@ describe('engine wake', () => {
   })
 })
 
+/**
+ * A tree whose ROOT is blocked on a still-live child while a SIBLING child is already `done` — the
+ * state a settlement notice arrives in when only a middle node settled. Root not terminal, nothing
+ * parked-ready (the parked root is still `blocked`, not `ready`), nothing troubled.
+ */
+async function withSettledSibling(
+  mounted: Awaited<ReturnType<typeof mount>>,
+): Promise<{ root: string; settled: string; running: string }> {
+  const created = await callTool(
+    mounted,
+    'create_mission',
+    { title: 'T', description: 'd', analysis: ['because'] },
+    mounted.owner,
+  )
+  const root = String(created.data?.root_id ?? '')
+  await mounted.flush()
+  await settle()
+  const rootWorker = agent(String(mounted.dispatched[0]?.childId ?? ''))
+  const split = await noteAndSplit(
+    mounted,
+    root,
+    [
+      { title: 'a', description: 'd', context: ['why'] },
+      { title: 'b', description: 'd', context: ['why'] },
+    ],
+    rootWorker,
+  )
+  const [settled, running] = (split.data?.['created'] as string[] | undefined) ?? []
+  if (settled === undefined || running === undefined) throw new Error('the split did not create two children')
+  await mounted.flush()
+  await callTool(
+    mounted,
+    'submit_mission',
+    { node_id: settled, result: 'child a conclusion' },
+    executorFor(mounted, settled),
+  )
+  await mounted.flush()
+  return { root, settled, running }
+}
+
 describe('worker settlement notices', () => {
   it('drops the notice of its own worker', async () => {
     const mounted = await mount()
@@ -198,8 +248,8 @@ describe('worker settlement notices', () => {
 
   it('serves a user message queued behind a notice instead of stranding it', async () => {
     const mounted = await mount()
-    await withTree(mounted)
-    const claim = String(mounted.dispatched[0]?.childId ?? '')
+    const { settled } = await withSettledSibling(mounted)
+    const claim = executorFor(mounted, settled).id
     const user = message('u1', { kind: 'user' }, '你能继续吗？')
     mounted.owner.inbox.append('next-turn', user)
 
@@ -213,28 +263,173 @@ describe('worker settlement notices', () => {
     expect(decision.messages?.map((entry) => entry.id)).toEqual(['u1'])
     expect(mounted.owner.inbox.nextTurn).toEqual([])
   })
+})
 
-  it('drops a notice-only batch without ending the turn it interrupted', async () => {
-    // A rejection here is what killed every tool-calling turn: the notice arrives
-    // while the model still has its own tool result to read.
+describe('the settlement-notice batch that must not reach the model', () => {
+  /**
+   * A notice-only batch, the tree holding nothing only the owner can act on. In a live profile the
+   * host's `dsh-time-context` listener appends its note AFTER this decision, so returning an empty
+   * batch bought a model call: the decision has to be `reject`, which that listener honors.
+   */
+  it('refuses the turn when only a middle node settled', async () => {
     const mounted = await mount()
-    await withTree(mounted)
-    const claim = String(mounted.dispatched[0]?.childId ?? '')
+    const { settled } = await withSettledSibling(mounted)
+    const claim = executorFor(mounted, settled).id
+    expect(claim).not.toBe('')
+    expect(mounted.host.admitStep(mounted.owner as never).admit).toBe(false)
+
     const decision = await mounted.preStep({
       agent: mounted.owner,
       messages: [notice(claim)],
       next: loopNext([notice(claim)]),
     })
+
+    expect(decision.kind).toBe('reject')
+    expect(decision.messages).toBeUndefined()
+  })
+
+  it('admits the same notice-only batch once the ROOT is terminal', async () => {
+    // The root's own end is exactly what the owner must act on: read `mission_result`, then finish.
+    const mounted = await mount()
+    const rootId = await withTree(mounted)
+    await callTool(mounted, 'cancel_mission', { root_id: rootId }, mounted.owner)
+    const claim = String(mounted.dispatched[0]?.childId ?? '')
+
+    const decision = await mounted.preStep({
+      agent: mounted.owner,
+      messages: [notice(claim)],
+      next: loopNext([notice(claim)]),
+    })
+
+    expect(decision.kind).toBe('enter')
+  })
+
+  it('admits a notice-only batch while a parked executor needs the owner to wake it', async () => {
+    // The third owner-only state: `nextDispatchable` excludes a parked node, so the owner's step is
+    // the only place its session can be adopted and woken (pre-step ⓪).
+    const mounted = await mount()
+    const { root } = await parkedRoot(mounted)
+    expect(mounted.host.admitStep(mounted.owner as never).admit).toBe(true)
+    const claim = String(mounted.executorOf.get(root)?.sessionId ?? '')
+
+    const decision = await mounted.preStep({
+      agent: mounted.owner,
+      messages: [notice(claim)],
+      next: loopNext([notice(claim)]),
+    })
+
+    expect(decision.kind).toBe('enter')
+  })
+
+  it('admits a notice-only batch while the tree is troubled', async () => {
+    // Trouble is the owner's call (`adjust_mission` / `cancel_mission`), so tightening the predicate
+    // must not start refusing it. Only `Date` is faked: the counters and floors are the engine's.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const mounted = await mount({ failStart: true })
+      mounted.makeLive('owner')
+      const created = await callTool(
+        mounted,
+        'create_mission',
+        { title: 'T', description: 'd', analysis: [] },
+        mounted.owner,
+      )
+      const rootId = String(created.data?.root_id ?? '')
+      let guard = 0
+      while ((mounted.nodeFor(rootId)?.spawnFailures ?? 0) < 4 && guard < 10) {
+        guard += 1
+        vi.setSystemTime(Date.now() + 11 * 60_000)
+        await mounted.flush()
+      }
+      expect(mounted.nodeFor(rootId)?.spawnFailures).toBeGreaterThanOrEqual(4)
+      expect(mounted.host.admitStep(mounted.owner as never).admit).toBe(true)
+
+      const decision = await mounted.preStep({
+        agent: mounted.owner,
+        messages: [notice(WORKER)],
+        next: loopNext([notice(WORKER)]),
+      })
+
+      expect(decision.kind).toBe('enter')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never refuses a batch that also carries a user message', async () => {
+    const mounted = await mount()
+    const { settled } = await withSettledSibling(mounted)
+    const claim = executorFor(mounted, settled).id
+    const user = message('u1', { kind: 'user' }, 'and another thing')
+
+    const decision = await mounted.preStep({
+      agent: mounted.owner,
+      messages: [notice(claim), user],
+      next: loopNext([notice(claim), user]),
+    })
+
+    expect(decision.kind).toBe('enter')
+    expect(decision.messages?.map((entry) => entry.id)).toEqual(['u1'])
+  })
+
+  it('never refuses a foreign subagent notice (UUID sender)', async () => {
+    // An ordinary subagent's session id is `spec.childId ?? randomUUID()`, which cannot match mission's    // `^mission-[0-9a-f]{8}$` claim shape — so it is not "ours" and must arrive verbatim.
+    const mounted = await mount()
+    await withSettledSibling(mounted)
+    const foreign = notice('3f2b0c1e-5d4a-4b3c-9e8f-1a2b3c4d5e6f')
+
+    const decision = await mounted.preStep({
+      agent: mounted.owner,
+      messages: [foreign],
+      next: loopNext([foreign]),
+    })
+
+    expect(decision.kind).toBe('enter')
+    expect(decision.messages?.map((entry) => entry.id)).toEqual(['n'])
+  })
+
+  it('never refuses a notice claimed at a LATER step of a running turn', async () => {
+    // A notice can arrive as steering while the model still has its own tool result to read. The tool
+    // result is a SESSION event, not a claimed message, so this batch looks notice-only — but
+    // refusing it would end the turn before the model reads that result. Emptying it is correct: the
+    // emptied batch still runs the step, and the notice itself never reaches the model.
+    const mounted = await mount()
+    const { settled } = await withSettledSibling(mounted)
+    const claim = executorFor(mounted, settled).id
+
+    const decision = await mounted.preStep({
+      agent: mounted.owner,
+      messages: [notice(claim)],
+      next: loopNext([notice(claim)]),
+      step: 2,
+    })
+
     expect(decision.kind).toBe('enter')
     expect(decision.messages).toEqual([])
   })
 })
 
 describe('the empty batch of a continuing turn', () => {
-  it('enters with nothing rather than refusing the step', async () => {
-    // The loop proposes an empty batch at every step boundary after the first.
-    // Refusing it ends the turn, so the model never reads its own tool result —
-    // the "calling a tool ends the conversation" failure.
+  it('enters with nothing at a LATER step rather than refusing the step', async () => {
+    // The loop proposes an empty batch at every step boundary after the first — a tool result lands
+    // in the session, not in a claimed inbox message. Refusing it ends the turn, so the model never
+    // reads its own tool result: the "calling a tool ends the conversation" failure.
+    const mounted = await mount()
+    await withTree(mounted)
+    const decision = await mounted.preStep({
+      agent: mounted.owner,
+      messages: [],
+      next: loopNext([]),
+      step: 2,
+    })
+    expect(decision.kind).toBe('enter')
+    expect(decision.messages).toEqual([])
+  })
+
+  it('enters with nothing at the turn\'s first step too (no claimed batch)', async () => {
+    // Nothing was CLAIMED, so this is not a notice-only turn: the refusal is reserved for a batch
+    // that actually carried our own settlement notices. An empty first batch opens no step either
+    // way, and `reject` would skip the loop's inbox re-read.
     const mounted = await mount()
     await withTree(mounted)
     const decision = await mounted.preStep({
