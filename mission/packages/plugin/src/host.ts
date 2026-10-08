@@ -1381,8 +1381,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     if (tree === undefined) return { text: '', error: '任务引擎尚未启动' }
     const node = tree.node(args.nodeId)
     if (node === undefined) return { text: '', error: `任务 ${args.nodeId} 不存在` }
-    const owner = tree.treeOf(node.rootId)
-    if (args.sessionId === undefined || owner === undefined || owner.ownerSessionId !== args.sessionId) {
+    if (this.ownedNodeFor(node, args.sessionId) === undefined) {
       return { text: '', error: '这个任务属于别的会话' }
     }
     // Never spilled: the node IS the whole result.
@@ -1418,8 +1417,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     if (tree === undefined) return { children: [], error: '任务引擎尚未启动' }
     const node = tree.node(nodeId)
     if (node === undefined) return { children: [], error: `任务 ${nodeId} 不存在` }
-    const owner = tree.treeOf(node.rootId)
-    if (sessionId === undefined || owner === undefined || owner.ownerSessionId !== sessionId) {
+    if (this.ownedNodeFor(node, sessionId) === undefined) {
       return { children: [], error: '这个任务属于别的会话' }
     }
     // By `children`, not `parentId`: a reused prerequisite was born under another parent.
@@ -1490,8 +1488,8 @@ export class AvantfMissionHost extends TypertRemoteService {
     if (tree === undefined) return { status: 'unsupported', error: '任务引擎尚未启动' }
     const node = tree.node(args.nodeId)
     if (node === undefined) return { status: 'not-found', error: `任务 ${args.nodeId} 不存在` }
-    const owner = tree.treeOf(node.rootId)
-    if (args.sessionId === undefined || owner === undefined || owner.ownerSessionId !== args.sessionId) {
+    const owner = this.ownedNodeFor(node, args.sessionId)
+    if (owner === undefined) {
       return { status: 'not-found', error: '这个任务属于别的会话' }
     }
     // ① The record already names its executor: answer from it and read NOTHING. The client opens
@@ -1540,6 +1538,29 @@ export class AvantfMissionHost extends TypertRemoteService {
   }
 
   /**
+   * The node-addressed ownership guard: the node's tree must exist and belong to `sessionId`.
+   * Returns that tree record — `resolveExecutorSession` needs the owner id — or `undefined` for
+   * "not your tree". The caller has already resolved the node and refuses a missing one with its
+   * own text, so only the ownership decision is shared here; every caller keeps its own payload and
+   * its own sentence. `readResult` (which tolerates a missing owner) is NOT this shape and stays its
+   * own check.
+   */
+  private ownedNodeFor(node: NodeRecord, sessionId: string | undefined): TreeRecord | undefined {
+    const owner = this.tree?.treeOf(node.rootId)
+    if (owner === undefined || !this.treeOwnedBy(owner, sessionId)) return undefined
+    return owner
+  }
+
+  /**
+   * The tree-addressed half of the same rule, for a caller already holding the tree record (`delete`
+   * is addressed by ROOT id, so there is no node to resolve first). The existence check stays with
+   * that caller: a missing tree is "不存在", which is a different answer from "not yours".
+   */
+  private treeOwnedBy(record: TreeRecord, sessionId: string | undefined): boolean {
+    return sessionId !== undefined && record.ownerSessionId === sessionId
+  }
+
+  /**
    * Record that a node's CURRENT executor session was RELEASED off disk, so the panel explains that
    * instead of opening a session that is not there. Called by the cleanup pipeline for every id in
    * `cleanWorkers`' `cleaned` bucket — and ONLY for that bucket: a `refused` archive left the session
@@ -1571,7 +1592,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     if (tree === undefined) return { deleted: [], error: '任务引擎尚未启动' }
     const record = tree.treeOf(args.rootId)
     if (record === undefined) return { deleted: [], error: `任务 ${args.rootId} 不存在` }
-    if (args.sessionId === undefined || record.ownerSessionId !== args.sessionId) {
+    if (!this.treeOwnedBy(record, args.sessionId)) {
       this.log.warn(`delete refused on ${args.rootId}: caller ${String(args.sessionId)} is not the tree owner`)
       return { deleted: [], error: '这个任务属于别的会话' }
     }
