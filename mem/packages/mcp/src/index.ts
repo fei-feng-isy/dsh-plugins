@@ -2,15 +2,13 @@ import { readFileSync } from 'node:fs'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { buildRuntime, dispatchToolKey, provisionToolchainAsync, type AvantfRuntime } from '@avantf/mem'
+import { buildRuntime, dispatchToolKey, installTrustHeartbeat, provisionToolchainAsync, runToolSpec, type AvantfRuntime } from '@avantf/mem'
 import {
   TOOL_SPECS,
   toolInputJsonSchema,
   modelFacingToolResult,
-  toolOk,
   toolErr,
   toWellFormedDeep,
-  validationError,
   type ToolSpec,
 } from '@avantf/mem-contract'
 
@@ -53,16 +51,11 @@ export async function buildMcpServer(rt: AvantfRuntime): Promise<Server> {
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const spec = TOOL_SPECS.find((s) => s.name === req.params.name)
     if (!spec) return textResult(toolErr(`unknown tool ${req.params.name}`), true)
-    // Validate against the contract BEFORE dispatch (same envelope as @avantf/dsh-mem):
-    // a bad call returns a structured error instead of a raw exception.
-    const parsed = spec.input.safeParse(req.params.arguments ?? {})
-    if (!parsed.success) return textResult(validationError(spec.name, parsed.error.issues), true)
-    try {
-      const result = await dispatchTool(rt, spec.key, parsed.data as Record<string, unknown>)
-      return textResult(toolOk(result))
-    } catch (error) {
-      return textResult(toolErr(error), true)
-    }
+    // Validation → dispatch → agent envelope is the ENGINE's ONE boundary (`runToolSpec`), shared
+    // with the DSH plugin so the two envelopes cannot drift field by field. What is MCP's is only the
+    // wrapper: `textResult`, and `isError` for a failed envelope.
+    const envelope = await runToolSpec(rt, spec, req.params.arguments ?? {})
+    return textResult(envelope, envelope.ok !== true)
   })
   return server
 }
@@ -99,20 +92,20 @@ export async function main(opts?: { dataHome?: string }): Promise<void> {
   void provisionToolchainAsync(rt)
 
   // Trust heartbeat (TRUST_MODEL.md §5): advance the active-day clock and sweep
-  // settle/forget/idle/purge while the server is alive. 0 disables it.
+  // settle/forget/idle/purge while the server is alive. The tick and the interval are the ENGINE's
+  // (`installTrustHeartbeat`), shared with the DSH plugin, so the trust clock cannot advance
+  // differently on the two surfaces. 0 disables it; the DSH plugin's interval line is its own, so
+  // nothing is printed here.
   const heartbeatMinutes = rt.config.common.trust.presence.heartbeat_minutes
   if (heartbeatMinutes > 0) {
-    const timer = setInterval(() => {
-      try {
-        rt.memory.trustTick()
-      } catch (error) {
-        // A failed sweep must never take the server down — but it must not be invisible either: the
-        // DSH plugin's identical heartbeat logs, and a trust clock that stopped advancing shows up
-        // much later as facts that never settle, forget or purge.
-        rt.logger.warn(`trust heartbeat: sweep failed (${error instanceof Error ? error.message : String(error)})`)
-      }
-    }, heartbeatMinutes * 60_000)
-    timer.unref()
+    // A failed sweep must never take the server down — but it must not be invisible either: a trust
+    // clock that stopped advancing shows up much later as facts that never settle, forget or purge.
+    installTrustHeartbeat({
+      memory: rt.memory,
+      logger: rt.logger,
+      heartbeatMinutes,
+      tickFailed: (message) => `trust heartbeat: sweep failed (${message})`,
+    })
   }
   const shutdown = (): void => {
     void server.close().finally(() => rt.shutdown()).finally(() => process.exit(0))

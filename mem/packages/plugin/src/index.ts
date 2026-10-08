@@ -29,8 +29,9 @@ import {
   awaitStartupGate,
   buildRuntime,
   dispatchToolKey,
+  installTrustHeartbeat,
   provisionToolchainAsync,
-  supportsToolKey,
+  runToolSpec as runToolSpecShared,
   warmSemanticAsync,
   warmTokenizerAsync,
   type AvantfRuntime,
@@ -49,8 +50,6 @@ import {
   adoptWellFormed,
   createConsoleLogger,
   describeError,
-  modelFacingToolResult,
-  toolOk,
   toolErr,
   validationError,
   remoteErrorText,
@@ -130,27 +129,16 @@ const RECONCILE_MIN_INTERVAL_MS = 2000
 
 // ─── dispatch: validate with the contract schema, never leak a raw exception ──────────────────
 //
-// The key → runtime table is the ENGINE's (`@avantf/mem`'s `dispatchToolKey`), shared with the MCP
-// server. It used to be duplicated here, and the copy that drifted was the MCP one: the four `kb_*`
-// tools were advertised to the model and answered `unknown tool key` on every call.
+// The validation → dispatch → agent-envelope path is the ENGINE's (`@avantf/mem`'s `runToolSpec`),
+// shared with the MCP server; only what surrounds the envelope (the `present` view, the Remote
+// gateway) is this file's. It used to be duplicated, and the copy that drifted was the MCP one: the
+// four `kb_*` tools were advertised to the model and answered `unknown tool key` on every call.
 
 async function runToolSpec(spec: ToolSpec, rt: AvantfRuntime, args: unknown): Promise<Record<string, JsonValue>> {
-  const parsed = spec.input.safeParse(args ?? {})
-  if (!parsed.success) {
-    return validationError(spec.name, parsed.error.issues) as unknown as Record<string, JsonValue>
-  }
-  if (!supportsToolKey(spec.key)) return toolErr(`unknown tool ${spec.key}`) as unknown as Record<string, JsonValue>
-  try {
-    const value = await dispatchToolKey(rt, spec.key, parsed.data as Record<string, unknown>)
-    // Uniform agent-facing envelope, identical to the MCP surface (`ToolEnvelope`):
-    // every success is `{ok:true,result}` regardless of the payload's shape.
-    // `mem_admin`'s fact views lose the retention diagnostics here; the Remote gateway that
-    // drives the 记忆/知识 tabs calls the same table and keeps them.
-    const shaped = modelFacingToolResult(spec.key, (parsed.data as { action?: unknown }).action, value)
-    return toolOk(shaped) as unknown as Record<string, JsonValue>
-  } catch (error) {
-    return toolErr(error) as unknown as Record<string, JsonValue>
-  }
+  // The envelope's element type is the contract's `ToolEnvelope`; the DSH tool face wants the same
+  // object seen as an indexable record. One cast, at the boundary, with the shared function as the
+  // oracle in between.
+  return await runToolSpecShared(rt, spec, args) as unknown as Record<string, JsonValue>
 }
 
 function present(spec: ToolSpec, args: Record<string, unknown>): GenericCallView {
@@ -681,25 +669,26 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     })
 
   // Trust heartbeat: the active-day clock advances on presence, and the tick performs
-  // the settle/forget/idle/purge sweeps (TRUST_MODEL.md §5). `0` = startup pass only.
+  // the settle/forget/idle/purge sweeps (TRUST_MODEL.md §5). `0` = startup pass only. The tick and
+  // the interval are the ENGINE's (`installTrustHeartbeat`), shared with the MCP server; this
+  // caller adds its own per-beat work and keeps its own disposer and interval line.
   const heartbeatMinutes = rt.config.common.trust.presence.heartbeat_minutes
   if (heartbeatMinutes > 0) {
     ctx.effect(() => {
-      const timer = setInterval(() => {
-        try {
-          rt.memory.trustTick()
-        } catch (error) {
-          logger.warn(`trust tick failed: ${error instanceof Error ? error.message : String(error)}`)
-        }
-        sweepEntities()
-        // Retry whatever the last migration pass could not finish (model still cold, a batch write
-        // failed). A current store is a quiet no-op, so this is cheap.
-        vectorMigration.start()
-      }, heartbeatMinutes * 60_000)
-      const unref = (timer as unknown as { unref?: () => void }).unref
-      if (typeof unref === 'function') unref.call(timer)
+      const stop = installTrustHeartbeat({
+        memory: rt.memory,
+        logger,
+        heartbeatMinutes,
+        onBeat: () => {
+          sweepEntities()
+          // Retry whatever the last migration pass could not finish (model still cold, a batch write
+          // failed). A current store is a quiet no-op, so this is cheap.
+          vectorMigration.start()
+        },
+        tickFailed: (message) => `trust tick failed: ${message}`,
+      })
       logger.info(`trust heartbeat: every ${heartbeatMinutes}min (active-day clock + lifecycle sweep)`)
-      return () => clearInterval(timer as unknown as ReturnType<typeof setInterval>)
+      return stop
     })
   }
 

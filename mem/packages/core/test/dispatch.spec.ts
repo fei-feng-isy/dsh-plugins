@@ -11,8 +11,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { TOOL_SPECS } from '@avantf/mem-contract'
-import { buildRuntime, dispatchToolKey, supportsToolKey, type AvantfRuntime } from '../src/index.js'
+import { TOOL_SPECS, REMEMBER_TOOL } from '@avantf/mem-contract'
+import { buildRuntime, dispatchToolKey, runToolSpec, supportsToolKey, type AvantfRuntime } from '../src/index.js'
 
 let dir: string
 let rt: AvantfRuntime
@@ -65,5 +65,24 @@ describe('dispatch table', () => {
   it('refuses a kb_add with no content, without touching the store', async () => {
     const res = await dispatchToolKey(rt, 'kb_add', { domain: 'notes', source: 'default' })
     expect(res).toEqual({ error: 'kb_add 需要 text、source_uri 或 paths 三者之一。' })
+  })
+})
+
+describe('the shared model-facing envelope', () => {
+  it('validates, dispatches and shapes in one place, and turns every failure into an envelope', async () => {
+    // The ONE boundary both the DSH tool runner and the MCP server now call. Its oracle lives here,
+    // with the sink; the cross-surface identity assertion is `mem/packages/mcp/test/mcp.spec.ts`.
+    const ok = await runToolSpec(rt, REMEMBER_TOOL, { action: 'add', content: '统一边界的事实' })
+    expect(ok).toMatchObject({ ok: true })
+    expect((ok as { result?: { fact_id?: number } }).result?.fact_id).toBeGreaterThan(0)
+
+    // Contract violation: named after the spec, with the offending path in `violations`.
+    const bad = await runToolSpec(rt, REMEMBER_TOOL, { action: 'nope' })
+    expect(bad).toMatchObject({ ok: false })
+    if (bad.ok === false) expect(bad.violations?.join()).toContain('action')
+
+    // Unknown key: `toolErr`, never a throw.
+    const unknown = await runToolSpec(rt, { ...REMEMBER_TOOL, key: 'nope' }, { action: 'add', content: 'x' })
+    expect(unknown).toMatchObject({ ok: false, error: 'unknown tool nope' })
   })
 })

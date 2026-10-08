@@ -20,7 +20,10 @@ import type {
   KbRequest,
   QueryRequest,
   KbAddRequest,
+  ToolEnvelope,
+  ToolSpec,
 } from '@avantf/mem-contract'
+import { modelFacingToolResult, toolErr, toolOk, validationError } from '@avantf/mem-contract'
 import type { AvantfRuntime } from './runtime.js'
 
 /**
@@ -116,4 +119,34 @@ export async function dispatchToolKey(
   const dispatch = DISPATCH[key]
   if (dispatch === undefined) throw new Error(`unknown tool key ${key}`)
   return dispatch(rt, args as never)
+}
+
+/**
+ * The ONE model-facing boundary: validate against the contract spec, dispatch the key, and shape the
+ * result into the agent envelope.
+ *
+ * Every model-facing surface shares this — the DSH tool runner (`@avantf/dsh-mem`) and the MCP
+ * server — because the envelope is `ToolEnvelope`, a wire shape: an MCP caller and a DSH caller
+ * asking the same question must get the same fields. It used to live only in the plugin, so the MCP
+ * surface re-implemented it and the two could drift field by field.
+ *
+ * What stays in the CALLERS is everything AROUND the envelope: MCP's `textResult`/`isError` wrapper
+ * and the plugin's `present` view plus its Remote gateway. The Remote gateway is deliberately NOT
+ * routed through here (`mem/DESIGN.md` §239: it keeps `mem_admin`'s retention diagnostics and uses
+ * the wire error type, not `toolErr`).
+ *
+ * A validation failure answers `validationError` (named for the spec), an unknown key answers
+ * `toolErr`, and a throwing runtime call answers `toolErr` too — a raw exception never escapes.
+ */
+export async function runToolSpec(rt: AvantfRuntime, spec: ToolSpec, args: unknown): Promise<ToolEnvelope<unknown>> {
+  const parsed = spec.input.safeParse(args ?? {})
+  if (!parsed.success) return validationError(spec.name, parsed.error.issues)
+  if (!supportsToolKey(spec.key)) return toolErr(`unknown tool ${spec.key}`)
+  try {
+    const value = await dispatchToolKey(rt, spec.key, parsed.data as Record<string, unknown>)
+    // `mem_admin`'s fact views drop the retention diagnostics here; the Remote gateway keeps them.
+    return toolOk(modelFacingToolResult(spec.key, (parsed.data as { action?: unknown }).action, value))
+  } catch (error) {
+    return toolErr(error)
+  }
 }

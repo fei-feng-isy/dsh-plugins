@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildRuntime, supportsToolKey, type AvantfRuntime } from '@avantf/mem'
+import { buildRuntime, runToolSpec, supportsToolKey, type AvantfRuntime } from '@avantf/mem'
 import { buildMcpServer, jsonSchema, textResult } from '../src/index.js'
-import { REMEMBER_TOOL, QUERY_TOOL, TOOL_SPECS } from '@avantf/mem-contract'
+import { ADMIN_TOOL, KB_LIST_TOOL, QUERY_TOOL, RECALL_TOOL, REMEMBER_TOOL, TOOL_SPECS, type ToolSpec } from '@avantf/mem-contract'
 
 /** Every string reachable from the value must be well-formed (JSON.parse accepts lone surrogates). */
 function expectWellFormedEverywhere(value: unknown, path = '$'): void {
@@ -201,5 +201,31 @@ describe('MCP server', () => {
   it('every live handler answer is well-formed', async () => {
     const answer = await callTool('mem_remember', { action: 'add', content: '边界完整性检查' })
     expectWellFormedEverywhere(answer.body)
+  })
+
+  it('is field-for-field the engine envelope on success and on every failure shape', async () => {
+    // The DSH plugin no longer owns any envelope code: its tool runner calls the SAME
+    // `runToolSpec`. Comparing the MCP wrapper against that function pins "both surfaces answer the
+    // same fields" — a wrapper that added, dropped or reshaped one would fail here.
+    const cases: { name: string; spec: ToolSpec; args: Record<string, unknown>; mutates?: boolean }[] = [
+      { name: 'mem_remember', spec: REMEMBER_TOOL, args: { action: 'add', content: '信封矩阵的事实' }, mutates: true },
+      { name: 'mem_admin', spec: ADMIN_TOOL, args: { action: 'list', limit: 2 } },
+      // Contract violation: the engine's own `validationError`, with the offending path.
+      { name: 'mem_recall', spec: RECALL_TOOL, args: { action: 'search' } },
+      // A rejected `kb_list` parameter must reach the same envelope, not a special case.
+      { name: 'kb_list', spec: KB_LIST_TOOL, args: { doc_id: 'not-a-number' } },
+    ]
+    for (const { name, spec, args, mutates } of cases) {
+      const engine = await runToolSpec(rt, spec, args)
+      const mcp = await callTool(name, args)
+      expect(Object.keys(mcp.body).sort(), `${name}: envelope fields`).toEqual(Object.keys(engine).sort())
+      expect(mcp.body.ok, `${name}: ok`).toBe(engine.ok)
+      expect(mcp.isError === true, `${name}: isError follows ok`).toBe(engine.ok === false)
+      // A mutating success carries a fresh id, so only a read-only or failed call is byte-comparable.
+      if (mutates !== true) expect(mcp.body, `${name}: envelope body`).toEqual(engine)
+    }
+    // An unknown key is the sink's own branch (no MCP tool name maps to it): `toolErr`, never a throw.
+    const unknown = await runToolSpec(rt, { ...REMEMBER_TOOL, key: 'nope' }, { action: 'add', content: 'x' })
+    expect(unknown).toMatchObject({ ok: false, error: 'unknown tool nope' })
   })
 })
