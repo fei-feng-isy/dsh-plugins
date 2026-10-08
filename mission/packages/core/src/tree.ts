@@ -742,6 +742,72 @@ export class MissionTree {
     return this.unitRefusal(node) ?? this.capacityRefusal(node, capacity)
   }
 
+  /**
+   * The failure budgets the two DISPATCH-like transitions spend (`dispatch` and
+   * `adoptContinuation`) — a continuation IS a dispatch, so it must fail here exactly as `dispatch`
+   * would rather than resurrect a spent node. `adoptParked` deliberately does NOT call this: the
+   * parked session already knows what the children were for, and the next `dispatch` still sees the
+   * budgets. Every call site runs {@link admissionRefusal} FIRST, so a resource "not yet" never
+   * spends a budget; the resource gate is a deferral, this one is a failure.
+   */
+  private async budgetRefusal(
+    state: TreeState,
+    node: NodeRecord,
+  ): Promise<MutationResult<DispatchView> | undefined> {
+    // Budget is `failures` (reclaims without a result), NOT `attempts`: a successful
+    // aggregate/convergence round dispatches again without failing.
+    if (node.failures >= CAPACITY.maxAttempts) {
+      return this.failExhausted(state, node, `已用完 ${CAPACITY.maxAttempts} 次执行（反复失败）`)
+    }
+    // Cannot even start a worker is an infrastructure failure, budgeted separately from the
+    // mission's execution failures.
+    if (node.spawnFailures >= CAPACITY.maxAttempts) {
+      return this.failExhausted(state, node, `连续 ${CAPACITY.maxAttempts} 次无法启动执行者`)
+    }
+    return undefined
+  }
+
+  /**
+   * The patch all three transitions INTO `running` share (`dispatch`, `adoptParked`,
+   * `adoptContinuation`), so the binding invariants cannot drift apart:
+   *
+   *  - the fresh binding and its generation marker — `claimedBy`/`claimedAt`/`attempts` (every
+   *    dispatch counts, including the aggregate pass; the ceilings ride `failures`/`spawnFailures`
+   *    elsewhere) and the two activity windows, which start together so a just-bound node is neither
+   *    silent nor unproductive;
+   *  - the consumed address arrives as the CALLER's one-key fragment — `parkedWorker` for a parked
+   *    adoption and a fresh dispatch, `lastWorkerId` for a continuation. Which address a transition
+   *    spends is that transition's rule, not this helper's;
+   *  - `executorSessionId` is the DISPLAY handle: last attempt wins and it survives the attempt,
+   *    unlike `claimedBy`;
+   *  - `executorReleasedAt: null` — a fresh binding is never the released one, whatever the last
+   *    attempt left behind. Without this reset a re-dispatched node would stay judged "released"
+   *    forever and the panel would refuse to open a session that is running right now;
+   *  - `dispatchedAt` moves only on the FIRST dispatch (`node.dispatchedAt ?? at`), so
+   *    "排队 = dispatchedAt − createdAt" keeps meaning the one wait before the first run. An adoption
+   *    only ever runs on a node that already ran; the `??` keeps the invariant true even for a
+   *    hand-built record.
+   */
+  private bindRunning(
+    node: NodeRecord,
+    claimId: string,
+    at: number,
+    consumed: { readonly parkedWorker: null } | { readonly lastWorkerId: null },
+  ): Partial<NodeRecord> {
+    return {
+      status: 'running',
+      claimedBy: claimId,
+      claimedAt: at,
+      attempts: node.attempts + 1,
+      progressAt: at,
+      activityAt: at,
+      ...consumed,
+      executorSessionId: claimId,
+      executorReleasedAt: null,
+      dispatchedAt: node.dispatchedAt ?? at,
+    }
+  }
+
   /** Nodes waiting for their parked session to be woken: `ready` with a recorded address, i.e. all
    * children terminal and a session to continue in. The owner's wake gate admits on this. */
   parkedReadyNodes(rootId?: string): readonly NodeRecord[] {
@@ -791,25 +857,12 @@ export class MissionTree {
       }
       const busy = this.admissionRefusal(node, capacity)
       if (busy !== undefined) return busy
+      const spent = await this.budgetRefusal(state, node)
+      if (spent !== undefined) return spent
       const at = this.deps.now()
-      const updated = this.replace(state, node, {
-        status: 'running',
-        claimedBy: workerId,
-        claimedAt: at,
-        attempts: node.attempts + 1,
-        progressAt: at,
-        activityAt: at,
+      const updated = this.replace(state, node, this.bindRunning(node, workerId, at, {
         parkedWorker: null,
-        // The display handle: kept after this dispatch ends, unlike `claimedBy`.
-        executorSessionId: workerId,
-        // A NEW executor is not the released one, whatever the last attempt left behind. Without this
-        // reset a re-dispatched node would stay judged "released" forever, and the panel would refuse
-        // to open a session that is running right now.
-        executorReleasedAt: null,
-        // FIRST dispatch wins: a parked adoption only ever runs on a node that already ran (it parked
-        // itself by decomposing), but the `??` keeps the invariant true even for a hand-built record.
-        dispatchedAt: node.dispatchedAt ?? at,
-      })
+      }))
       await this.flush(state.tree.rootId)
       return accept({
         node: updated,
@@ -872,29 +925,14 @@ export class MissionTree {
       if (busy !== undefined) return busy
       // Same budgets as `dispatch`, and the same refusal shape: a continuation that cannot be
       // attempted must not silently skip the ceiling.
-      if (node.failures >= CAPACITY.maxAttempts) {
-        return this.failExhausted(state, node, `已用完 ${CAPACITY.maxAttempts} 次执行（反复失败）`)
-      }
-      if (node.spawnFailures >= CAPACITY.maxAttempts) {
-        return this.failExhausted(state, node, `连续 ${CAPACITY.maxAttempts} 次无法启动执行者`)
-      }
+      const spent = await this.budgetRefusal(state, node)
+      if (spent !== undefined) return spent
       const at = this.deps.now()
-      const updated = this.replace(state, node, {
-        status: 'running',
-        claimedBy: workerId,
-        claimedAt: at,
-        attempts: node.attempts + 1,
-        // Fresh windows: the previous attempt's activity says nothing about this one.
-        progressAt: at,
-        activityAt: at,
+      const updated = this.replace(state, node, this.bindRunning(node, workerId, at, {
+        // The address is CONSUMED rather than kept: this dispatch continues that session or falls
+        // back to a fresh one, and neither outcome may try it again.
         lastWorkerId: null,
-        // Last attempt wins: the continuation replaces the previous executor as the one to open — and
-        // with it, whatever was known about that previous address being released.
-        executorSessionId: workerId,
-        executorReleasedAt: null,
-        // The continuation is a re-dispatch of a node that already ran, so this never moves the clock.
-        dispatchedAt: node.dispatchedAt ?? at,
-      })
+      }))
       await this.flush(state.tree.rootId)
       return accept({
         node: updated,
@@ -1160,36 +1198,13 @@ export class MissionTree {
       // — two passes can otherwise both see an empty machine and both bind.
       const busy = this.admissionRefusal(node, capacity)
       if (busy !== undefined) return busy
-      // Budget is `failures` (reclaims without a result), NOT `attempts`: a successful
-      // aggregate/convergence round dispatches again without failing.
-      if (node.failures >= CAPACITY.maxAttempts) {
-        return this.failExhausted(state, node, `已用完 ${CAPACITY.maxAttempts} 次执行（反复失败）`)
-      }
-      // Cannot even start a worker is an infrastructure failure, budgeted separately from the
-      // mission's execution failures.
-      if (node.spawnFailures >= CAPACITY.maxAttempts) {
-        return this.failExhausted(state, node, `连续 ${CAPACITY.maxAttempts} 次无法启动执行者`)
-      }
+      const spent = await this.budgetRefusal(state, node)
+      if (spent !== undefined) return spent
       const at = this.deps.now()
-      const updated = this.replace(state, node, {
-        status: 'running',
-        claimedBy: claimId,
-        claimedAt: at,
-        attempts: node.attempts + 1,
-        // Fresh windows: the previous attempt's activity says nothing about this one. Both clocks
-        // start together, so a just-dispatched node is neither silent nor unproductive.
-        progressAt: at,
-        activityAt: at,
+      const updated = this.replace(state, node, this.bindRunning(node, claimId, at, {
         // This dispatch did not adopt the parked session, so its address is spent.
         parkedWorker: null,
-        // The display handle: last attempt wins, and it survives this attempt's terminal state.
-        executorSessionId: claimId,
-        // ...and a fresh binding is never the released one (see `adoptParked`'s copy).
-        executorReleasedAt: null,
-        // The FIRST dispatch of this node stops its queue clock; later dispatches leave it alone, so
-        // "排队 = dispatchedAt − createdAt" keeps meaning the one wait before the first run.
-        dispatchedAt: node.dispatchedAt ?? at,
-      })
+      }))
       await this.flush(state.tree.rootId)
       return accept({
         node: updated,
