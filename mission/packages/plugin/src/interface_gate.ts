@@ -120,3 +120,20 @@ export function interfaceVerdict(module: unknown, bakedUrl?: URL | string): Inte
   }
   return verdict as InterfaceVerdict
 }
+
+/**
+ * Whether a Cordis context is still alive.
+ *
+ * Cordis clears `fiber.uid` on disposal, and every later context call then throws
+ * `INACTIVE_EFFECT`. `apply` awaits environment preparation, so a profile reload or unload can land
+ * inside that window and half-register a plugin (the Remote face cannot be rolled back). A fiberless
+ * stub counts as active: an unknown shape is "cannot tell", never "disposed".
+ *
+ * Generic Cordis liveness rather than interface-gate knowledge — but the two plugins' startup paths
+ * share it byte-for-byte, so it lives with their one shared shim, where the two readings of "is my
+ * context alive" cannot drift.
+ */
+export function stillActive(ctx: unknown): boolean {
+  const fiber = (ctx as { readonly fiber?: { readonly uid?: unknown } } | null | undefined)?.fiber
+  return fiber === undefined || fiber.uid !== null
+}

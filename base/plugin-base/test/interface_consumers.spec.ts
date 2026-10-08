@@ -63,6 +63,9 @@ describe('the interface gate consumers', () => {
       const source = readShim(tree)
       expect(source, `${tree}: interfaceVerdict missing`).toMatch(/export function interfaceVerdict\(/u)
       expect(source, `${tree}: baseIsUsable missing`).toMatch(/export function baseIsUsable\(/u)
+      // `stillActive` is the shim's one GENERIC Cordis helper (both startups imported a private copy):
+      // the byte pin above is what keeps its two readings from drifting.
+      expect(source, `${tree}: stillActive missing`).toMatch(/export function stillActive\(/u)
     }
   })
 })

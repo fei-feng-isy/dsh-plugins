@@ -20,6 +20,7 @@ import { join } from 'node:path'
 // in the bundle — the service itself is the host's.
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { buildPromptSections, PROMPT_NAMESPACE, promptFileSpecs, promptTextWarnings } from './prompt.js'
+import { stillActive } from './interface_gate.js'
 import { hintText, messageText } from './hints.js'
 import z from '@deepseek-ai/schemastery'
 import { defineTool, type GenericCallView, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
@@ -337,20 +338,6 @@ function hostLogger(ctx: Context): AvantfLogger {
     warn: (message) => { local.warn(message); host.warn(message) },
     error: (message) => { local.error(message); host.error(message) },
   }
-}
-
-/**
- * Whether this plugin's fiber is still alive after the environment await.
- *
- * The environment gate can take the whole startup budget (15 s on a first run) and the framework may
- * even fetch the gate's base during it. A profile reload or unload landing inside that window clears
- * the fiber's uid, after which every Cordis call throws `INACTIVE_EFFECT` — the plugin would then
- * half-register (the Remote face cannot be rolled back) instead of stopping cleanly. An unknown
- * shape is "cannot tell", so only an explicitly cleared uid counts as disposed.
- */
-function stillActive(ctx: Context): boolean {
-  const fiber = (ctx as unknown as { fiber?: { uid?: unknown } }).fiber
-  return fiber === undefined || fiber.uid !== null
 }
 
 /**

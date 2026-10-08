@@ -29,6 +29,7 @@ import type {} from '@deepseek-ai/cordis-plugin-timer'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
 import { AvantfMissionHost, type OrphanTreeReport, type OwnerProbe } from './host.js'
+import { stillActive } from './interface_gate.js'
 import { isOutputEvent } from './workerEvents.js'
 import { defineWorkTools } from './tools.js'
 import {
@@ -242,14 +243,6 @@ function takeQueuedInput(agent: Agent, host: AvantfMissionHost): UserMessage | u
     return inbox.remove(message.id) ? message : undefined
   }
   return undefined
-}
-
-
-// Cordis clears `fiber.uid` on disposal and later context calls throw `INACTIVE_EFFECT`; `apply`
-// awaits environment preparation, so a reload can land in that window. A fiberless stub counts as active.
-function stillActive(ctx: Context): boolean {
-  const fiber = (ctx as unknown as { fiber?: { uid: number | null } }).fiber
-  return fiber === undefined || fiber.uid !== null
 }
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
