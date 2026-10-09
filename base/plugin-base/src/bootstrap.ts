@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export const VERSION = '0.4.0'
+export const VERSION = '0.4.1'
 /**
  * The framework interval this bootstrap can launch.
  *

@@ -1,6 +1,6 @@
 {
   "name": "@avantf/dsh-plugin-base",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "The @avantf family base for DSH plugins: startup environment initialisation (declare → probe → fetch → verify → report) plus the host compatibility gate (provision / verdictOf / probes / report / post-registration verification). One package, loaded by the plugins through the inlined bootstrap.",
   "keywords": [
     "dsh",
