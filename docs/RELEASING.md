@@ -57,6 +57,12 @@ pnpm version:set mem   <x.y.z>
 pnpm version:set mission <x.y.z>
 pnpm version:check                  # 每组版本只记在一处；base manifest 与 baked VERSION 一致
 
+# 1b) 动了 base 组的版本时：重新 vendor 两棵插件的 src/envinit-bootstrap.{js,d.ts} 并**一起提交**。
+#     它内嵌 base 的 VERSION、会随产物内联（家族硬约束 1），任一门禁 / build:dsh 会自动刷新它，
+#     所以"版本提交"之后工作区会多出这两份派生物——漏提交就会让入库的树与 tarball 不一致
+#     （0.4.1 发版时踩过一次，见 93c2a5b）。
+pnpm build:dsh base && pnpm build:dsh mem && pnpm build:dsh mission
+
 # 2) 发版档（三个严格门禁 + 两棵树 mount smoke + 根发布面 + 发布前断言）
 pnpm check:release
 # 需要单独重跑某一包时，仍可用它自己的门禁（链接 → 编译 → 类型检查 → 测试 → pack，
