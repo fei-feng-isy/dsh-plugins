@@ -1,6 +1,6 @@
 {
   "name": "@avantf/dsh-mem",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "avantf-mem DSH native Cordis plugin: host service + tools + RPC + client tabs 记忆/知识",
   "type": "module",
   "main": "lib/index.js",

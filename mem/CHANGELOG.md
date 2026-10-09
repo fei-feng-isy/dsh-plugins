@@ -4,6 +4,11 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-09
+
+*本版无用户可观察的行为变化*：内部共享逻辑对齐（工具边界与信任心跳下沉到引擎、两树共用的 loader shim、
+兼容门禁委托 base 的 `provision`）。按本仓口径，仓库内部重构不进 CHANGELOG。
+
 ## [0.6.1] - 2026-10-08
 
 ### Fixed（知识库也进自动自愈；实体清扫不再因单行失败整趟失败）
