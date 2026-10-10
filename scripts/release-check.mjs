@@ -12,11 +12,13 @@
  *      The merged tree contains a dozen packages (engines, the kit, the CLI/MCP), and a missing
  *      `private` flag publishes an internal package by accident the first time someone runs a
  *      recursive publish.
- *   2. **The publish ORDER is base → plugins.** A plugin declares the base as a REQUIRED peer; a host
- *      that installs the plugin before the base exists fails to resolve it, and the plugin's degraded
- *      path is a runtime WARNING rather than the intended experience. So, unless `--allow-missing-base`
- *      is given for a pre-publication dry run, the registry must already carry a
- *      `@avantf/dsh-plugin-base` version inside the peer range each plugin declares.
+ *   2. **The publish ORDER is base → plugins.** A plugin declares the base as a plain (runtime)
+ *      DEPENDENCY; a host that installs the plugin before the base exists fails to resolve it, and the
+ *      plugin's degraded path is a runtime WARNING rather than the intended experience. So, unless
+ *      `--allow-missing-base` is given for a pre-publication dry run, the registry must already carry a
+ *      `@avantf/dsh-plugin-base` version inside the dependency range each plugin declares — and both
+ *      plugins must declare the SAME range, or the installer resolves two physical copies instead of
+ *      one (measured on pnpm isolated / pnpm hoisted / npm flat).
  *   3. **The one-zod rule.** `catalog.zod` is `4.6.5` (the version the installed dsh ships), the
  *      base's own `zod` peer stays the wide `>=4.4.3 <5`, and `@avantf/dsh-mem` — the plugin that uses
  *      zod at runtime — takes it as a REQUIRED peer. So ONE copy of zod serves the workspace's engine
@@ -248,7 +250,7 @@ if (problems.length === 0) {
   }
 }
 
-// ── 3. per-plugin wiring: REQUIRED peer with a real, wide-enough range ───────────────────────────
+// ── 3. per-plugin wiring: a plain, wide, IDENTICAL runtime dependency on the base ───────────────
 const baseManifest = seen.get(BASE_DIR)
 const baseVersion = baseManifest?.version
 
@@ -256,47 +258,30 @@ const pluginRanges = []
 for (const plugin of PLUGINS) {
   const manifest = seen.get(plugin.dir)
   if (manifest === undefined) continue
-  // BOTH sides of the base wiring: a required peer with a registry range, and the SAME range in
-  // devDependencies (pnpm-workspace.yaml's "asserts both sides" — the dev half had no assertion).
-  const wiring = baseDependencyProblems(plugin.name, manifest, BASE)
+  // The base is a PLAIN DEPENDENCY of each plugin: dsh writes `autoInstallPeers: false` into every
+  // profile it manages, so a peer would never be installed and "install the plugin, get the base"
+  // would be false. The one-copy invariant is not "a peer, never a runtime dep" — it is "both plugins
+  // name the SAME range" (measured: pnpm isolated / pnpm hoisted / npm flat each install exactly one
+  // physical copy when the ranges agree, and fork only when they differ). `previous` is what makes
+  // that drift fatal rather than a warning.
+  const wiring = baseDependencyProblems(plugin.name, manifest, BASE, pluginRanges.at(-1))
   for (const problem of wiring.problems) fail(problem)
-  if (wiring.peer !== undefined) {
-    pluginRanges.push({ plugin: plugin.name, dir: plugin.dir, range: wiring.peer, dev: manifest.devDependencies?.[BASE] })
-    if (baseVersion !== undefined && !satisfies(wiring.peer, baseVersion)) {
+  if (wiring.range !== undefined) {
+    // `dev` is reported, not asserted: the published range is what a host install resolves. Keeping
+    // the dev half at the same range is what lets `pnpm install` link the workspace base at all.
+    pluginRanges.push({ plugin: plugin.name, dir: plugin.dir, range: wiring.range, dev: manifest.devDependencies?.[BASE] })
+    if (baseVersion !== undefined && !satisfies(wiring.range, baseVersion)) {
       fail(
-        `${plugin.name}'s peer range ${wiring.peer} does not accept the workspace base ${baseVersion} — `
+        `${plugin.name}'s dependency range ${wiring.range} does not accept the workspace base ${baseVersion} — `
         + 'a local mount would refuse the base that is right there',
-      )
-    }
-    // Wide enough for a base-only fix: a caret range on 0.x accepts patch releases, which is what
-    // "fix shared code with one base release" needs. An exact pin or a `~` range would block it.
-    if (/^[~=]|^\d+\.\d+\.\d+$/u.test(wiring.peer)) {
-      fail(
-        `${plugin.name}'s peer range for ${BASE} is ${wiring.peer} — too narrow: a patch/minor base release `
-        + '(one base release must be enough to fix shared code) would fall outside it',
-      )
-    }
-  }
-  if (manifest.peerDependenciesMeta?.[BASE]?.optional === true) {
-    fail(`${plugin.name} marks ${BASE} an OPTIONAL peer — it must be required (a missing base degrades at runtime, not at install time)`)
-  }
-  for (const section of ['dependencies', 'optionalDependencies']) {
-    if (manifest[section]?.[BASE] !== undefined) {
-      fail(
-        `${plugin.name} lists ${BASE} in ${section} — it must be a PEER: a runtime dependency would let `
-        + 'the installer place it inside the plugin, and the plugin must load the host-provided copy',
       )
     }
   }
 }
 if (pluginRanges.length > 0) {
   note(
-    `plugin base wiring: ${pluginRanges.map((p) => `${p.plugin} peer ${p.range} = dev ${String(p.dev)}`).join(', ')}`,
+    `plugin base wiring: ${pluginRanges.map((p) => `${p.plugin} dependency ${p.range} (dev ${String(p.dev)})`).join(', ')}`,
   )
-}
-const distinctRanges = new Set(pluginRanges.map((p) => p.range))
-if (distinctRanges.size > 1) {
-  note(`WARNING: the two plugins declare different ${BASE} peer ranges (${[...distinctRanges].join(', ')}) — keep them in step`)
 }
 
 // ── 4. the base's own contract: no runtime deps, wide zod peer ──────────────────────────────────
@@ -407,7 +392,7 @@ if (probed && baseVersions === undefined) {
     note(`WARNING: ${BASE} is not published yet — publish it BEFORE the plugins (--allow-missing-base given, so this is not fatal)`)
   } else {
     fail(
-      `${BASE} has no published version, but the plugins declare it as a required peer.\n`
+      `${BASE} has no published version, but the plugins depend on it at runtime.\n`
       + `    Publish the base FIRST:\n      pnpm -C ${BASE_DIR} publish\n`
       + '    or, for a pre-publication dry run, re-run with:\n'
       + '      node scripts/release-check.mjs --allow-missing-base',
@@ -418,8 +403,8 @@ if (probed && baseVersions === undefined) {
     const accepted = baseVersions.filter((entry) => satisfies(range, entry.version))
     if (accepted.length === 0) {
       const detail =
-        `${BASE} is published (${baseVersions.map((entry) => entry.version).join(', ')}) but no version satisfies ${plugin}'s peer `
-        + `range ${range} — the plugin would install without a base it accepts.`
+        `${BASE} is published (${baseVersions.map((entry) => entry.version).join(', ')}) but no version satisfies ${plugin}'s dependency `
+        + `range ${range} — installing the plugin would fail to resolve a base it accepts.`
       if (allowMissingBase) note(`WARNING: ${detail}`)
       else fail(`${detail}\n    Fix: publish a ${BASE} version inside ${range} first.`)
       continue

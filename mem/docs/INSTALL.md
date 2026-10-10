@@ -67,7 +67,8 @@ pnpm build:dsh
 
 > **家族底座的接线也在这个脚本里**（`scripts/build-plugin.mjs`）：编译**前**跑
 > `scripts/link-envinit.mjs`——从 `packages/plugin/node_modules/@avantf/dsh-plugin-base`（`pnpm install` 从
-> registry 装上的底座，底座同时是 peer 与 devDependency；**一个包**里装着环境初始化框架、启动兼容门禁与
+> registry 装上的底座，底座是插件声明的普通运行期依赖（`devDependencies` 里另有同一条区间，供本仓
+> `pnpm install` 链到本地 `base/`）；**一个包**里装着环境初始化框架、启动兼容门禁与
 > 两个插件共享的 kit）取零依赖的
 > `dist/bootstrap.js`/`dist/bootstrap.d.ts`，vendor 成 `packages/plugin/src/envinit-bootstrap.{js,d.ts}`
 > （`--check` 只核对安装与 vendor 的内容，不改任何东西）；要就地改底座，用 `DSH_ENVINIT=<checkout>` 显式指定——
@@ -98,17 +99,18 @@ node scripts/mount-smoke.mjs
 
 ---
 
-## 3. 让 profile 能解析到插件与它的 peer 底座
+## 3. 让 profile 能解析到插件（底座随依赖自动装好）
 
-从 registry 安装（发布形态）——底座是插件的 **peer**，pnpm 关掉了 `autoInstallPeers`，所以要显式一起装：
+从 registry 安装（发布形态）——底座 `@avantf/dsh-plugin-base` 是插件的**普通运行期依赖**，装插件时
+自动带上，不用单独装：
 
 ```bash
 cd ~/.dsh/profiles/<PROFILE>
-pnpm add @avantf/dsh-plugin-base @avantf/dsh-mem
+pnpm add @avantf/dsh-mem
 ```
 
 从源码 checkout 开发时，只 link 插件就够：软链的插件从**它自己的依赖树**解析底座（`pnpm install` 已按插件
-的 `devDependencies` 把它装在那里），而引擎包（`@avantf/mem` / `@avantf/mem-contract` / `@avantf/mem-retrieval` …）
+的依赖声明把它链在那里），而引擎包（`@avantf/mem` / `@avantf/mem-contract` / `@avantf/mem-retrieval` …）
 在构建时已经内联进 `lib/index.js`，**不需要**再装：
 
 ```bash
@@ -510,7 +512,7 @@ domains:              # 允许的领域；库中已有的领域始终仍然可�
 | 摄入报 `知识域「X」不在允许清单里` | `X` 既不在 `knowledge.domains` 里，也不是库中已有的领域 | 用清单里的领域；或在「知识」页入库表单里点 domain 旁的「+ 新增领域」（立即生效），或手改 `~/.avantf/configs/knowledge.yaml` 的 `domains`（`domains: []` = 不限制，改完重启 `dsh`）（见 §7.3） |
 | 构建通过但运行时崩（例如某图标/变量未定义） | `tsdown` **不做类型检查** | 构建管线必须先 `tsc` 再 `tsdown`；单独 `tsdown` 会放过类型错误 |
 | 启动日志出现 `compat:` 警告 | 产物声明的宿主版本与运行的不一致，或宿主 API 已变。只看版本号不同（探针通过）时插件照常加载，只是提醒；若出现 `compat: INCOMPATIBLE` / `compat: REFUSING to load` / `plugin not loaded`，说明真身探针（`register` → 精确 key 复查 → `toJSONSchema`）证明 API 不兼容，插件**整体不加载**（可用 `/mem` 命令问原因），且后台资源项（pandoc / 模型）一步都不派发 | 用当前 dsh 重建：`pnpm build:dsh`（插件只对着已安装的全局 dsh 编译）；或换回匹配的 dsh 版本后重启 `dsh web`。详见 DESIGN §12.1 |
-| 启动日志出现 `envinit: WARNING — @avantf/dsh-plugin-base is unavailable (…)` / `… could not be made available; …` | 内联 bootstrap 没能让底座可用：peer 没安装（`node_modules` 不完整），或树上那份版本超出 bootstrap 烘焙的 `supportedRange`。**插件照常挂载**（门禁判定缺席，工具/service/prompt/remote 都注册），只是少了启动兼容性检查这道安全网，资源预装退回 legacy 路径 | 正常安装里不应出现：确认 `pnpm install` 装上了 `@avantf/dsh-plugin-base`（它是 peer；pnpm 关掉 `autoInstallPeers` 时要显式装），并跑过 `pnpm build:dsh`（它会跑 `scripts/link-envinit.mjs` 从安装副本 vendor bootstrap）。**没有下载可重试、也没有受管 compat 根可修**——底座不在就只是降级挂载。就地联调底座时才用 `DSH_ENVINIT=<checkout>` |
+| 启动日志出现 `envinit: WARNING — @avantf/dsh-plugin-base is unavailable (…)` / `… could not be made available; …` | 内联 bootstrap 没能让底座可用：底座没被装上（`node_modules` 不完整），或树上那份版本超出 bootstrap 烘焙的 `supportedRange`。**插件照常挂载**（门禁判定缺席，工具/service/prompt/remote 都注册），只是少了启动兼容性检查这道安全网，资源预装退回 legacy 路径 | 正常安装里不应出现：确认 `pnpm install` 装上了 `@avantf/dsh-plugin-base`（它是插件的普通运行期依赖），并跑过 `pnpm build:dsh`（它会跑 `scripts/link-envinit.mjs` 从安装副本 vendor bootstrap）。**没有下载可重试、也没有受管 compat 根可修**——底座不在就只是降级挂载。就地联调底座时才用 `DSH_ENVINIT=<checkout>` |
 | 族根里出现第二份 zod | 不应发生：底座与插件从同一棵依赖树解析 `zod`，必须是同一份（两份 zod 的 schema identity 不兼容，见 DESIGN §20.11） | 检查插件的 `zod` 是否可解析；旧的 compat 目录（`<home>/compat`、`<dataHome>/dsh-compat`）都不再被读写，可以直接删除 |
 | 启动即报 `toJSONSchema() threw … Undefined cannot be represented in JSON Schema` | wire face 里可选字段写成了 `z.union([z.undefined(), X])`；这个形状宿主投影不出来，真身探针会把它读成不兼容 | 改成 `X.optional()`（本仓已改，见 DESIGN §12.1 末段）；`test/provision.spec.ts` 会逐个 schema 断言可投影 |
 | 数据落在 `~/.avantf/.avantf/` | 旧版 `db.path` 默认值 bug（已修） | 升级到当前版本后重启；把 `~/.avantf/.avantf/{memory,knowledge}` 里的 DB 移到 `~/.avantf/{memory,knowledge}` |

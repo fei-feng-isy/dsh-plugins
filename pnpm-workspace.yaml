@@ -11,15 +11,16 @@ autoInstallPeers: false
 # Link the workspace's own `@avantf/dsh-plugin-base` into the plugins, instead of trying to fetch
 # that range from the registry.
 #
-# The plugins declare the base as a REQUIRED peer (`>=0.3.0 <1.0.0`) and, because `autoInstallPeers` is off,
-# they also declare it in `devDependencies` so a plain `pnpm install` gives the build something to
-# resolve. That dev range (`>=0.3.0 <1.0.0`) is NOT a `workspace:` specifier — it has to stay a normal registry
-# range so the published manifest is a real dependency and a host's package manager can install the
-# base from npm. Without this switch pnpm would read `>=0.3.0 <1.0.0` as "download it from the registry", so a
-# local build would silently run against a published copy (or fail outright before the base is on npm
-# at all) instead of the tree under `base/`. With it, the workspace version is linked, which is what
-# lets the "swap ONLY the base, never rebuild the plugins" proof gate
-# (`scripts/prove-base-swap.mjs`) mean anything.
+# The plugins declare the base as a plain runtime DEPENDENCY (`>=0.3.0 <1.0.0`) — dsh writes
+# `autoInstallPeers: false` into every profile it manages, so a peer would never be installed and
+# "install the plugin, get the base" would be false. The plugins ALSO keep the same range in
+# `devDependencies` so this switch has something to link. That range (`>=0.3.0 <1.0.0`) is NOT a
+# `workspace:` specifier — it has to stay a normal registry range so the published manifest names
+# something a host's package manager can install from npm. Without this switch pnpm would read
+# `>=0.3.0 <1.0.0` as "download it from the registry", so a local build would silently run against a
+# published copy (or fail outright before the base is on npm at all) instead of the tree under
+# `base/`. With it, the workspace version is linked, which is what lets the "swap ONLY the base, never
+# rebuild the plugins" proof gate (`scripts/prove-base-swap.mjs`) mean anything.
 linkWorkspacePackages: true
 
 # ONE version per entry, for the WHOLE merged workspace. This is the merge of the two catalogs that
@@ -33,11 +34,12 @@ linkWorkspacePackages: true
 # cast (mem DESIGN §20.11). `pnpm why zod` must keep resolving ONE copy for `@avantf/mem-contract`,
 # `@avantf/dsh-mem` and `@avantf/dsh-mission`. Bump this line, never a package.json.
 #
-# Not in this catalog on purpose: `@avantf/dsh-plugin-base`. The plugins depend on it as a REQUIRED
-# peer (`>=0.3.0 <1.0.0`) AND declare it in `devDependencies` (`>=0.3.0 <1.0.0`) so a plain `pnpm install` resolves it;
-# a catalog entry holds ONE range, and the peer range must stay a registry range (the published manifest
-# has to be installable by a host's package manager). So this one pair lives in the two manifests, and
-# `scripts/release-check.mjs` asserts both sides.
+# Not in this catalog on purpose: `@avantf/dsh-plugin-base`. The plugins declare it as a runtime
+# dependency (`>=0.3.0 <1.0.0`, identical in BOTH plugins — that sameness is what keeps the install at
+# one physical copy) AND in `devDependencies` with the same range so a plain `pnpm install` resolves
+# it. A catalog entry holds ONE range, and that range must stay a registry range (the published
+# manifest has to be installable by a host's package manager). So this one pair lives in the two
+# manifests, and `scripts/release-check.mjs` asserts it.
 catalog:
   zod: 4.6.5
 

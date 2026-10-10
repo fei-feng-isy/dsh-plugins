@@ -11,13 +11,22 @@
 其余工作区包（`@avantf/mem-*`、`@avantf/mission-core`、CLI/MCP）都是 `private: true`，会被内联进使用它的
 那个插件。每个子树的领域设计仍写在自己的 `DESIGN.md` / `docs/` 里。
 
+本文只放**三个包 / 三棵树都成立**的公共约束；**各树专有的约定**写在各树的开发 README——
+`base/README.md`、`mem/README.md`、`mission/README.md`（三份**随包发布的** README 是 npm 页面，面向用户，
+不写仓库内部内容）。
+
 ## 发布面
 
 - **可发布集合恰好是这三个包**；`scripts/release-check.mjs` 会在这件事不成立时失败。
-- **发布顺序 base → 插件**：插件的 required peer 必须已在 registry 上（可 `--allow-missing-base` 试跑）；
+- **发布顺序 base → 插件**：插件的**普通运行期依赖**必须已在 registry 上（可 `--allow-missing-base` 试跑）；
   `publishConfig.access` 是 `public`。
-- **对 base 的引用只放 required peer**（`>=0.3.0 <1.0.0`）+ 同区间 `devDependencies`，**绝不放 `dependencies`**
-  （那会装出多份副本，跨副本的 registry 与类型身份会分叉）。
+- **base 是插件的普通 `dependencies`**（同一个宽区间 `>=0.3.0 <1.0.0`，两棵树**逐字相同**，禁 `~`/精确版本），
+  所以**装插件就自动带上底座**、用户不需要知道有 base。dsh 给每个 profile 写 `autoInstallPeers: false`，
+  peer 不会被补装，所以这里**不能用 peer 表达"宿主提供"**。**一份副本由「两棵树同区间」保证**：实测
+  pnpm isolated / pnpm hoisted（dsh profile 自己的设置）/ npm flat 下，只要两棵树区间相同，base 物理副本
+  都恰好 1 份，两个消费者解析到同一路径；**区间一旦不同就会出现第二份**——所以 `release-check` 把
+  "两树区间逐字相同"当**硬断言**（不同即失败），不是 WARNING。`devDependencies` 里保留同一条区间只为让
+  本仓 `pnpm install` 链到 workspace 的 `base/`；宿主安装时解析的是发布出去的那条 `dependencies` range。
 - **只有一份 `zod`**：由**宿主**提供——三棵树都声明 **required peer** `>=4.4.3 <5`（下限已实测跑通）；本仓
   自己解析的那份来自根 catalog（改 catalog、不改发布区间），免得副本分叉 schema 类型身份；`release:check`
   断言两棵插件树这一点。
@@ -28,6 +37,11 @@
   会指出漏了哪条线。补声明前先按 `check:old-dsh` 与本机门禁实测能跑，再发 patch。
 - **发布直接从 dev 仓做**（RC 投影已废除）：RC 原本的三件事（排除发布工具、版本盖章、生成 README）改为
   **发布前断言**，在 dev 树里必须成立才允许 `publish`。
+- **用户安装面**：两个插件随包声明组合包（`dsh.bundle.patch` → 随包的 `cordis.patch.yml`），`dsh plugin add`
+  会把它选进 profile 的 `dsh.profile.bundles`、由 patch 插入挂载行（组合包与手写行**二选一**）；**安装请钉
+  版本号**——pnpm ≥ 10 的 `minimumReleaseAge` 会避开刚发布的版本，解析到的旧版本可能不认当前宿主、被安装
+  门禁拒绝并回滚那一单。安装 / 升级 / 卸载的用户说明在各包**发布 README**，装机面全貌见
+  `docs/desktop-compatibility.md`。
 
 ## 家族的三条硬约束
 
@@ -35,9 +49,10 @@
    `packages/plugin/src/envinit-bootstrap.js` 并**内联**进产物的零依赖 bootstrap；一句静态的
    `import ... from '@avantf/dsh-plugin-base'` 就会让 base 缺席时插件模块加载失败，而那正是插件绝不能
    有的失败。
-2. **base 由宿主提供、按 file URL 动态加载。** 启动时 bootstrap 用
-   `createRequire(import.meta.url).resolve('@avantf/dsh-plugin-base/package.json')` 解析它、动态 `import()`、
-   用内联的 `supportedRange` 校验版本；缺失或超出区间 → 一条 `envinit: WARNING`，插件照常挂载。
+2. **base 随插件自动装、按 file URL 动态加载。** 启动时 bootstrap 用
+   `createRequire(import.meta.url).resolve('@avantf/dsh-plugin-base/package.json')` 从**插件自己的依赖树**
+   解析它、动态 `import()`、用内联的 `supportedRange` 校验版本；缺失或超出区间 → 一条 `envinit: WARNING`，
+   插件照常挂载。
 3. **发布有序、路径干净。** 细则见「发布面」（先 base 后插件；已发布 manifest 里永不出现 `link:`/`file:`）。
 
 ## base 缺失、或运行时 base **更旧**时的降级
@@ -71,13 +86,13 @@ ERROR/WARN、工具面回答"未就绪 + 原因"、`/mem` · `/mission` 命令�
   `loadFramework()` 解析 → 校验版本 → 动态 import。**源码里绝不静态 import 本包**。
 - **取用**：`PromptFiles` / `familyHome` / `resolveDataHome` / 兼容门禁（`provision` / `verdictOf` /
   `gatherEvidence` / `compatReport` / `verifyRegisteredFaces`）/ `checkInterface` 等，都从**加载到的那个模块**
-  上取，不复制、不内联。`.` 是显式列举的稳定子集，零运行期消费者的成员在 `./internal`。
+  上取，不复制、不内联。`.` 是显式列举的稳定子集（成员归置与 `./internal` 的规矩见 `base/README.md`）。
 - **接口世代**：`checkInterface(required, module)` + `readInterfaceRequirement(url)` 比对"构建时所对"与
   "运行时加载到"的世代；构建期把自己的世代 bake 进 `lib/interface-version.json`。
 - **降级义务**：非对称判定与逐项降级见上文「降级」一节——任何情况下**绝不拒载**。
 - **要动四处**（构建入口是**发现式**的：新目录自带 `build:dsh` 即可 `pnpm build:dsh <目录名>`，`scripts/`
   一个字不用改）：① 根 `pnpm-workspace.yaml` 的 `packages:`；② `scripts/release-check.mjs` 的可发布集合；
-  ③ 插件 manifest（required peer + 同区间 dev、`build:dsh`、`scripts/mount-smoke.mjs`、`files` 带
+  ③ 插件 manifest（base 放 `dependencies` + 同区间 dev、`build:dsh`、`scripts/mount-smoke.mjs`、`files` 带
   `lib/interface-version.json`）；④ 依赖版本写进根 catalog（`pnpm guard` 自动适用，不用登记）。
 
 ## 共享逻辑：归谁 + 怎么抽
@@ -105,9 +120,8 @@ ERROR/WARN、工具面回答"未就绪 + 原因"、`/mem` · `/mission` 命令�
 
 **抽到 base 的次序**（不然旧插件会被判不兼容；细节与完整清单见 `base/plugin-base/docs/INTERFACE.md`）：
 
-1. **先升接口**：`INTERFACE_VERSION` +1、新增 `api/interface-vN.json`，新成员写进 `.` 的接口类型与两份名单
-   （`UPDATE_INTERFACE_SNAPSHOT=1 pnpm -C base/plugin-base test public-surface` 重落快照）。接口与包版本是
-   **两条轴**：换代只动接口编号，包版本按普通 semver 走。
+1. **先升接口**：`INTERFACE_VERSION` +1，并重落接口快照与两份名单（世代编号、快照文件与命令见
+   `base/README.md`）。接口与包版本是**两条轴**：换代只动接口编号，包版本按普通 semver 走。
 2. **再实现**（放 base）并补**跨树行为测试**：从**已链接的 base** 取真实实现比对，mock 里断言不算。
 3. **向前兼容是硬要求**：新成员必须**增量**——不改既有成员的形状与语义；顺序敏感的参数用具名对象
    （`resolveDataHome({ explicit, env, configured })`）；可观察文案归调用方（`compatReport` 的 `words`）。
@@ -134,8 +148,9 @@ patch。`workspace:*` 指到的私有包，版本只在 `pnpm pack` 那一刻临
 
 随包发布的 README 就是 npm 页面（`pack-plugin.mjs` 断言它随包、且首行是包名），只写**这个包本身**：
 
-- **base**：包是什么 → 主要功能 → 怎么用（可以有基础示例）→ 源码怎么编译。
-- **mem / mission**：插件是什么 → 主要功能 → **怎么接入 dsh** → 怎么用。
+- **base**：包是什么 → 主要功能 → 怎么用（含示例）→ 接口要点。
+- **mem / mission**：插件是什么 → 主要功能 → **怎么接入 dsh** → 怎么用；以功能、使用与示例为主，
+  **不写实现细节与仓库内部内容**。
 - **不要写**：谁在用它、发布顺序、这个包由哪些包合并而来、catalog / rc / 发布门禁这类仓库内部内容；
   也不要指向**不随包发布**的仓库文档（`docs/DESIGN.md`、`docs/INTERFACE.md`、`INSTALL.md` 等）。
 - 计数按实测写（工具个数、提示词段数）；发布文档里出现过期数字属于缺陷。
@@ -156,7 +171,7 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | --- | --- |
 | `pnpm version:check` | 每组版本只记在它的可发布 manifest 里；base 的 manifest 与 baked `VERSION` 一致 |
 | `pnpm guard` | 每棵树只够得到 base 与自己的包（不许 import 别棵树；相对路径不许出树——唯一例外是工作区共用的 `scripts/lib/`；产物里不许按值 import base；其余 `@avantf/*` 必须是本树自己的） |
-| `pnpm release:check` | 可发布集合恰好那三个、peer 是 required 且够宽、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base，**且那个已发布 base 内置的接口世代不低于两棵插件 bake 的世代**（版本区间 ≠ 接口世代） |
+| `pnpm release:check` | 可发布集合恰好那三个、base 是普通依赖且区间够宽、两棵插件树区间逐字相同、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base，**且那个已发布 base 内置的接口世代不低于两棵插件 bake 的世代**（版本区间 ≠ 接口世代） |
 | `pnpm proof:base-swap[:mount]` | 产物里没有静态 base import / 内联 kit；**被替换的** base 仍能提供提示词读写、根解析与接口门禁 |
 | `pnpm release:check:<base\|mem\|mission>` | 该包自己的门禁：链接 → 编译 → 类型检查 → 测试 → pack，`old-dsh` **最后**跑（要重新链接并重建）；mem 的 build 必须先于 typecheck（`typecheck` 通过产出的 `lib/*.d.ts` 读依赖） |
 | `pnpm check:old-dsh <base\|mem\|mission>` | 在该包声明的 dsh peer **下限**上重跑 LOCAL 步骤（含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
@@ -191,22 +206,19 @@ pnpm build:dsh base       # 只构建 base（tsc）
 `用户是` 抢走唯一词法命中）；③ 一条**反事实断言**（把那个碎片删掉 → 结果应回正）作为 fixture 自检。
 任何"只在合成小语料上绿"的检索改动都不算验证通过。
 
+**读 schema 库（zod）内部别猜**：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })` 这类
+公开形状读取，别读私有实现（三棵树都适用；mem 侧的形状断言在 `contract.spec.ts` / `tool_schema.spec.ts`）。
+
 ## 体量与枢纽文件（hub）
 
-**口径**：`base/mem/mission` 下 `git ls-files` 的 `.ts/.tsx`，排除 `test/` 与 spec。超过 800 行的就是下面
-这批——问题不是"大文件多"，而是少数**枢纽**被反复改动：
+**口径**：`base/mem/mission` 下 `git ls-files` 的 `.ts/.tsx`，排除 `test/` 与 spec。超过 800 行的就是各树的
+枢纽——问题不是"大文件多"，而是少数**枢纽**被反复改动。**各树的枢纽清单与其取舍写在各树 README**：
+`base/README.md`、`mem/README.md`、`mission/README.md`。
 
-- **mission**：`plugin/src/host.ts` · `core/src/tree.ts` · `plugin/src/client/MissionTreeView.tsx` ·
-  `plugin/src/index.ts`
-- **mem**：`core/src/store/memory.ts`（SQL/索引形状含实测性能结论，慎动）· `plugin/src/client/index.ts` ·
-  `core/src/store/knowledge.ts`（SQL 形状慎动）· `core/src/db/dao/facts.ts` · `contract/src/types.ts` ·
-  `plugin/src/index.ts`
-- **base**（最后动）：`provisioner.ts` · `compat.ts` · `conformance.ts` · `interface.ts`
-
-**规矩**：① **触及枢纽时，若正在加的关注点能干净分离，就顺手抽成独立模块**（`claims.ts` / `continuation.ts` /
-`prompt.ts` / `hybrid.ts` / `dispatch.ts` / `coldResume.ts` / `reconcile.ts` / `dao/facts.ts` 都是这么来的），
-**不专门开重构线**；② **不为"变小"做整体重构**——行为被测试、**被冻结的评测集数字**、提示词正文与 wire 格式
-钉死，一次性重构的静默漂移风险大于收益；③ **`base/**` 的枢纽最后动**。名单只作观察、**不做门禁**：本仓没有
+**规矩（跨树通用）**：① **触及枢纽时，若正在加的关注点能干净分离，就顺手抽成独立模块**（`claims.ts` /
+`continuation.ts` / `prompt.ts` / `hybrid.ts` / `dispatch.ts` / `coldResume.ts` / `reconcile.ts` /
+`dao/facts.ts` 都是这么来的），**不专门开重构线**；② **不为"变小"做整体重构**——行为被测试、**被冻结的评测集
+数字**、提示词正文与 wire 格式钉死，一次性重构的静默漂移风险大于收益；③ 名单只作观察、**不做门禁**：本仓没有
 行数限制，也不打算加。
 
 ## 边界与路径
@@ -221,52 +233,20 @@ pnpm build:dsh base       # 只构建 base（tsc）
   `prompt_files.spec.ts` 钉住。
 - 数据文件永不搬出 `~/.avantf/{memory,knowledge}`；用户**编辑**的一切都住在 `~/.avantf/configs/*.yaml`
   与 `~/.avantf/prompts/*.md`，绝不放在数据库旁边。
+- **家族共享提示词目录**：`<数据根>/prompts/` 由家族各插件共用、按**文件名前缀**归属（mem `mem-*`、
+  mission `mission-*`），每个插件只碰自己清单里的文件，目录里其它 `.md` 不读、不写、不删；**文件全文就是
+  提示词**（无 frontmatter），启动时读一次，缺失或为空时写入内置默认，base 缺席时用插件内置的默认正文。
+  各插件的文件清单与软检查见 `mem/README.md` / `mission/README.md`。
 
-## 子树约定
+## 各树约定
 
-- **mem**：`@avantf/mem-contract` 是工具 / 配置 schema 与 UI payload 的**唯一真源**（工具 schema、
-  MCP inputSchema、CLI 参数、client 类型都由它派生）。两个存储（memory / knowledge）各自独立、共用一套
-  检索编排：工具键 → 运行时的派发表只在 `core/src/dispatch.ts`，检索流程只在 `core/src/store/hybrid.ts`，
-  **不许再分叉**。**融合必须让证据按可靠性定序**：确定性/高精度信号（意图表改写、精确词法命中、结构化字段）
-  排在前，稠密相似度只能作补充；**绝不允许"某条腿的偶然头部"压过"另一条腿的压倒性证据"**——各腿按自身
-  最大值归一后**不可直接比较**（`store/floors.ts` 已注明融合分只能同查询内比较），"某腿拿了 1.0"不构成
-  "最相关"的证明。改融合或门槛时，必须同时给出"**并集不收窄**、**非自指查询逐字节不变**"的证据，并**先
-  回答"这条候选是靠哪条腿、几分证据进来的"**。**改嵌入空间（模型 / 维度 / 池化 / 归一化）就是一次数据迁移**：
-  库里持久化的 `semantic_vector` 属于**旧空间**，语义腿会**静默跳过**它们（实测换默认模型后 80 条 active 里
-  78 条被跳过、`indexed` 只剩 2，且无任何告警）——换空间必须**检测 + 响亮告警 + 有界后台自愈**（分批、
-  可续跑、不阻塞查询、可关闭；手动入口 `vectors --fix`）；测试必须**复刻真实形状**（库里放**旧维向量**再上
-  新模型，断言自愈后语义腿重新命中）。**"表示指纹"必须覆盖所有影响表示的旋钮**：空间 id =
-  `v2/<backend>/<model>/<dim>@p=<pooling>;n=<0|1>;w=<配置截断窗口>;r=<模型旁车 sha>`——pooling / normalize /
-  截断窗口 / 模型权重任一变化都必须让 id 不等。两条硬要求：① 指纹必须在**进程内稳定**——`w` 取**配置值**
-  而不是解析后的窗口（解析窗口依赖已加载的分词器，预热前后会变 ⇒ 会让 store 把自己刚写的行判 stale）；
-  后端未声明表示时记 `rep=undeclared` 而**不是崩溃**；② **指纹格式换代 = 一次性全量重编码**，必须在告警与
-  文档里写明代价（实测 80 条约 11s），并保证**幂等**（迁移后再跑必须 `migrated: 0`）。
-  中文评测集（`core/test/eval_zh.spec.ts`，**41 条** = 原 35 + 自指问句哨兵 6〔4 条表内 + 2 条表外 KNOWN GAP〕，
-  见 `mem/docs/SELF_QUERY_RELEVANCE.md`）的汇总数字是**精确断言** —— 任何移动它的改动都要重新冻结并解释。
-  `pnpm -C mem typecheck` 也检查 `test/`，且要在 `pnpm -C mem build` **之后**跑（包通过产出的 `lib/*.d.ts`
-  读依赖）；`pnpm -C mem typecheck:dsh` 覆盖插件 src + specs。读 zod 内部别猜：用 `def.shape` / `def.values` /
-  `z.toJSONSchema(..., { io: 'input' })`，形状断言在 `contract.spec.ts` / `tool_schema.spec.ts`。**工具面就是
-  `TOOL_SPECS` 里的 8 个**（`mem_*` 3 + `kb_*` 5）；`kb_manage` 属 `KB_TOOL`（UI remote 与 CLI 用的内部引擎
-  API），**不在模型面**——按 `name:` 数会数成 9，挂载冒烟断言的就是 8。**`mem/CHANGELOG.md` 的 `[Unreleased]`
-  必须为空**，首个版本段 == `packages/plugin/package.json` 的版本（严格门禁的 preflight）：新条目写进**正在
-  准备的版本段**——版本还没切就先 `pnpm version:set mem <x.y.z>` 再写对应段，或把条目攥在手里、等切版本
-  那天一起写（**不要**塞进 `[Unreleased]` 或已发布的历史段）。
-- **mission**：任务树状态机在 `mission/packages/core`（**刻意不带 Node 类型**），`mission/packages/plugin` 是
-  薄壳；它的领域模型与 mem 不共享任何东西。**调度语义（v1）**：**容量是派发闸门，不是受理闸门** ——
-  `create_mission`/`decompose_mission` 永不因容量失败，节点进 `ready` 即排队；候选不满足
-  `Σ running.weight + candidate.weight ≤ capacity` 就**跳过**（不扣 `attempts`/`failures`、无冷却、不记 `stalls`，
-  与 unit 租约同纪律）。`capacity` 的推导链 = 配置 → `os.availableParallelism()` → `os.cpus().length` → 4，
-  在**宿主边界**算完注入 core；**显式配置 as-is 使用**（仅 clamp，不预留），只有探测链派生值才
-  `max(1, 派生 − 1)`（预留 1 核）；`weight`（默认 **1**）= "这台机器上大约占几核"，
-  子任务**不继承**父估值。排队 = **work-conserving + 老化预留**（等太久就停止接纳新节点、让在跑的排空；
-  `weight > capacity` 者独占整机），顺序按**入队时间**而非 weight；等容量的节点在投影里显示 `waitingFor`。
-  平台探针（`ResourceProbe`）：**`null` = 本平台无此信号，绝不等于"空闲"**，只能让调度更保守；压力信号与
-  子进程归属的适配器留给 v2。
-- **mission 的 worker 清理（由实际故障确立）**：① 清理是**四步生命周期**——标记归档 → 释放会话记录 →
-  **取消归档** → **清投影缓存残留**（宿主会替已 dispose 的会话保留投影缓存且无驱逐 API，不清会在"子代理"
-  列表里留下幽灵条目，实测曾显示 70 个）；② 计数保留策略：每个属主会话保留**最新 `keepWorkers`（默认 10）
-  个已完成**的 worker，**正在执行的不占名额、永不被清理**，`keepWorkers = 0` 关闭自动保留，
-  `/clean archive all` 仍是显式"手动全清"。
+各树**专有**的开发约定只在各树的开发 README 里（本文不重复，避免两处真相）：
+
+- `base/README.md` —— 接口世代与 `api/interface-vN.json` 快照流程、kit 成员归置、`base/**` 枢纽"最后动"、
+  base 自身的门禁与契约。
+- `mem/README.md` —— 契约唯一真源、检索编排不许分叉、融合定序与证据要求、嵌入空间迁移与表示指纹、
+  `eval_zh` 冻结数字、类型检查顺序、工具面 8 个、`mem/CHANGELOG.md` 段落规则、mem 枢纽清单。
+- `mission/README.md` —— 调度语义 v1、worker 清理四步与 `keepWorkers` 保留、mission 枢纽清单。
 
 ## 架构裁决记录（第五轮架构审查，2026-10-03）
 

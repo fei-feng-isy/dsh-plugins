@@ -47,7 +47,7 @@ pnpm build:dsh   # links harness packages + publishes the manifest stub, then ts
 > The interface generation is its own axis, judged at runtime by the base: the build bakes
 > `{ baseVersion, interfaceVersion }` into `lib/interface-version.json`, and at startup the plugin
 > reads it back through the base's `readInterfaceRequirement` and asks the base's `checkInterface`.
-> `incompatible` (a base inside the peer range that reports another generation — either direction)
+> `incompatible` (a base inside the dependency range that reports another generation — either direction)
 > is one `WARNING` plus the SAME degradation as "base absent": the base's shared capabilities are not
 > used (own prompt defaults, gate skipped, legacy provisioning) and the plugin still mounts;
 > `cannot-tell` (a base without the gate, a missing/malformed bake) is only a `WARNING` and the base
@@ -101,17 +101,17 @@ pnpm build:dsh   # links harness packages + publishes the manifest stub, then ts
 
 ## 2. Make the packages resolvable to DSH
 
-DSH plugins are loaded from a profile's `node_modules`. With released packages, install the plugin AND
-its base peer — pnpm has `autoInstallPeers: false`, so the peer is not pulled in automatically
-(npm-style installers do pull it in). From the DSH profile workspace:
+DSH plugins are loaded from a profile's `node_modules`. With released packages, installing the plugin is
+enough: `@avantf/dsh-plugin-base` is a plain runtime dependency, so the installer brings it along (dsh
+writes `autoInstallPeers: false`, so a peer would never be pulled in). From the DSH profile workspace:
 
 ```bash
 cd ~/.dsh/profiles/web
-pnpm add @avantf/dsh-plugin-base @avantf/dsh-mem
+pnpm add @avantf/dsh-mem
 ```
 
 During development, linking the source checkout is enough: the linked plugin resolves base from its own
-dependency tree (`pnpm install` put it there through the plugin's `devDependencies`).
+dependency tree (`pnpm install` links it from the workspace through the plugin's dependency range).
 
 ```bash
 cd ~/.dsh/profiles/web

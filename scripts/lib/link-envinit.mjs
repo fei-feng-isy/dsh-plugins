@@ -3,10 +3,11 @@
  * Vendor `@avantf/dsh-plugin-base`'s bootstrap into a plugin tree, from the base the plugin actually
  * loads — ONE implementation for both trees.
  *
- * The base is each plugin's **peer** and a **published package**. In this workspace pnpm links
- * `base/plugin-base` into `<tree>/packages/plugin/node_modules/@avantf/dsh-plugin-base` (the plugin
- * also declares it in `devDependencies` — a peer alone is never auto-installed), and that linked,
- * built copy is what a build is checked against. One piece is INLINED:
+ * The base is each plugin's plain runtime **dependency** (`dependencies`, the same wide range in both
+ * trees) and a **published package**. In this workspace pnpm links `base/plugin-base` into
+ * `<tree>/packages/plugin/node_modules/@avantf/dsh-plugin-base` (the plugin also declares the same
+ * range in `devDependencies`, which is what makes that link resolve), and that linked, built copy is
+ * what a build is checked against. One piece is INLINED:
  *
  *   1. `packages/plugin/node_modules/@avantf/dsh-plugin-base` is the source of truth, so
  *      `await import('@avantf/dsh-plugin-base')` resolves (the normal path);
@@ -20,19 +21,20 @@
  * `dist/bootstrap.js`.
  *
  * `--check` reports a missing link, an opt-in that drifted, a vendored copy that drifted, a vendored
- * copy outside the declared peer range, and a stale baked interface record as separate problems with
- * separate fixes (`pnpm install` for the first, this script for the rest). The drift check compares
- * the vendored files BYTE-FOR-BYTE with the base's (minus the source-map comment), not just the
- * `VERSION` constant: a stale build or a hand edit must not pass a version check.
+ * copy outside the declared dependency range, and a stale baked interface record as separate problems
+ * with separate fixes (`pnpm install` for the first, this script for the rest). The drift check
+ * compares the vendored files BYTE-FOR-BYTE with the base's (minus the source-map comment), not just
+ * the `VERSION` constant: a stale build or a hand edit must not pass a version check.
  *
  *   node scripts/link-envinit.mjs            # vendor from the workspace link (or the DSH_ENVINIT opt-in)
  *   node scripts/link-envinit.mjs --check    # verify only, change nothing
  *
  * The two trees used to carry a copy each, and the copies had drifted: one required the base to live
  * inside the workspace, the other accepted a registry install whose boundary was only the parent
- * directory; one checked the vendored bootstrap against the declared peer range, the other did not.
+ * directory; one checked the vendored bootstrap against the declared dependency range, the other did
+ * not.
  * This module is the union: the workspace boundary is FOUND (walking up to `pnpm-workspace.yaml`, so
- * a nested tree still resolves the real workspace root), and the peer-range check runs for both.
+ * a nested tree still resolves the real workspace root), and the dependency-range check runs for both.
  *
  * @module scripts/lib/link-envinit
  */
@@ -211,25 +213,26 @@ export async function runLinkEnvinit({ repo, argv = process.argv.slice(2), env =
     } else if (!readFileSync(vendoredDts).equals(vendoredBytes(join(source, 'dist', 'bootstrap.d.ts')))) {
       problems.push({ text: `${vendoredDts} differs byte-for-byte from the ${mode}'s dist/bootstrap.d.ts`, fix: 'node scripts/link-envinit.mjs' })
     }
-    // Matching the installed copy is not the same as BEING INSTALLABLE. The plugin declares a peer
-    // range, and `linkWorkspacePackages` links past it: when the base cuts a minor the workspace keeps
-    // linking it, this script keeps vendoring it byte-for-byte, and the only thing that notices is a
-    // run-time `envinit: WARNING`. The check uses the base's OWN semver implementation rather than a
-    // second copy of the range grammar (`./semver` is not an exported subpath, so it is loaded by path).
+    // Matching the installed copy is not the same as BEING INSTALLABLE. The plugin declares the base
+    // as a plain runtime DEPENDENCY range, and `linkWorkspacePackages` links past it: when the base
+    // cuts a minor the workspace keeps linking it, this script keeps vendoring it byte-for-byte, and
+    // the only thing that notices is a run-time `envinit: WARNING`. The check uses the base's OWN
+    // semver implementation rather than a second copy of the range grammar (`./semver` is not an
+    // exported subpath, so it is loaded by path).
     if (vendored !== undefined) {
-      const declared = readManifest(pluginDir)?.peerDependencies?.[PACKAGE]
+      const declared = readManifest(pluginDir)?.dependencies?.[PACKAGE]
       try {
         const { satisfiesRange } = await import(pathToFileURL(join(source, 'dist', 'semver.js')).href)
         if (typeof declared !== 'string' || declared === '' || !satisfiesRange(vendored, declared)) {
           problems.push({
-            text: `vendored bootstrap ${vendored} is outside the declared peer range ${String(declared)}; `
-              + 'this plugin would mount with only a WARNING (a base minor moved past its peer)',
-            fix: `widen peerDependencies["${PACKAGE}"] to admit ${vendored} (and re-check the adapter surface)`,
+            text: `vendored bootstrap ${vendored} is outside the declared dependency range ${String(declared)}; `
+              + 'this plugin would mount with only a WARNING (a base minor moved past the range)',
+            fix: `widen dependencies["${PACKAGE}"] to admit ${vendored} (and re-check the adapter surface)`,
           })
         }
       } catch (error) {
         problems.push({
-          text: `cannot check the vendored bootstrap against the declared peer range (${error instanceof Error ? error.message : String(error)})`,
+          text: `cannot check the vendored bootstrap against the declared dependency range (${error instanceof Error ? error.message : String(error)})`,
           fix: 'pnpm --filter @avantf/dsh-plugin-base run build',
         })
       }
@@ -265,7 +268,7 @@ export async function runLinkEnvinit({ repo, argv = process.argv.slice(2), env =
 
   console.log(`base: ${source} (${version}) — ${mode}`)
 
-  // 1. the peer link — only for the explicit co-development opt-in. Without one, the workspace link
+  // 1. the workspace link — only for the explicit co-development opt-in. Without one, the workspace link
   //    stays exactly as pnpm left it and is the base.
   if (checkout !== undefined) {
     mkdirSync(dirname(linkPath), { recursive: true })

@@ -56,7 +56,7 @@ export async function readBaseInterfaceVersion(baseDir) {
  *
  * The base's own `interface-vN.json` asserts "file name N == exported constant". This is the mirror on
  * the plugin side: the interface number is what the runtime gate speaks in, and the package version is
- * what the peer range speaks in, so both travel with the artifact.
+ * what the dependency range speaks in, so both travel with the artifact.
  * @param baseDir - a built `@avantf/dsh-plugin-base` directory.
  * @returns the version string from the base's manifest.
  */

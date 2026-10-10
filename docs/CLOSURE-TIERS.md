@@ -30,7 +30,7 @@ pnpm check:release --parallel             # 可选：三个严格门禁并发（
 | `pack` + 产物字节断言 | **不跑** | 跑（三个包） |
 | `old-dsh` 下限门（`0.1.5-rc.2`） | **不跑** | 跑（base / mem / mission） |
 | mount smoke（真 Cordis） | **不跑** | 跑（mem + mission；在各自严格门禁里） |
-| 根 `release:check`（可发布集合/peer/一份 zod/registry 上已有兼容 base） | **不跑** | 跑 |
+| 根 `release:check`（可发布集合/base 依赖区间/一份 zod/registry 上已有兼容 base） | **不跑** | 跑 |
 
 一句话：**快档证明"这棵树的源码编译、类型自洽、测试通过"；发版档才证明"产物能挂、在下限 dsh
 上能跑、发布面自洽"。** 快档不放水的地方是：它跑的是该树**完整**的测试套件（不是抽样），而且

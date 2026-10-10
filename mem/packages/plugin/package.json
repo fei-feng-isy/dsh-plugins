@@ -1,6 +1,6 @@
 {
   "name": "@avantf/dsh-mem",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "avantf-mem DSH native Cordis plugin: host service + tools + RPC + client tabs 记忆/知识",
   "type": "module",
   "main": "lib/index.js",
@@ -50,7 +50,6 @@
     "prepublishOnly": "node ../../../scripts/prepublish-assert.mjs --package @avantf/dsh-mem && node ../../scripts/pack-plugin.mjs"
   },
   "peerDependencies": {
-    "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",
     "@deepseek-ai/cordis": "^4.0.0",
     "@deepseek-ai/dsh-system-prompt": "^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2",
@@ -76,6 +75,7 @@
     }
   },
   "dependencies": {
+    "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",
     "exceljs": "catalog:",
     "unpdf": "catalog:",
     "yaml": "catalog:"

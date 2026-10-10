@@ -14,7 +14,9 @@
  *     a bootstrap that installs a different base version than the one this build was checked with);
  *   - the base package is SELF-CONTAINED: no `dependencies`, and at most the shared `zod` PEER (the
  *     compat half needs it, the host provides it, and it is the same copy the plugin uses);
- *   - the plugin declares the base as a PEER with a real range (never `dependencies`, never `*`).
+ *   - the plugin declares the base as a plain runtime DEPENDENCY with a real range (never `*`): dsh
+ *     writes `autoInstallPeers: false` into every profile, so a peer would never be installed and
+ *     installing the plugin would not bring the base.
  *
  * The artifact-side half of the gate (bootstrap really inlined into `lib/index.js`, `@avantf/dsh-plugin-base`
  * still external, `lib/client.js` untouched) lives in `scripts/assert-envinit-artifacts.mjs`, which
@@ -69,25 +71,25 @@ if (vendored === undefined) {
 }
 
 const pluginManifest = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8'))
-const peer = pluginManifest.peerDependencies?.[FRAMEWORK]
-if (typeof peer !== 'string' || peer.trim() === '') {
-  fail(`${FRAMEWORK} must be declared in packages/plugin/package.json peerDependencies`)
-} else if (peer === '*' || /^(link|file|workspace):/.test(peer)) {
-  fail(`peerDependencies["${FRAMEWORK}"] = ${peer} — a publishable range is required`)
+const range = pluginManifest.dependencies?.[FRAMEWORK]
+if (typeof range !== 'string' || range.trim() === '') {
+  fail(`${FRAMEWORK} must be declared in packages/plugin/package.json dependencies (installing the plugin installs the base)`)
+} else if (range === '*' || /^(link|file|workspace):/.test(range)) {
+  fail(`dependencies["${FRAMEWORK}"] = ${range} — a publishable registry range is required`)
 } else if (vendored !== undefined && frameworkVersion !== undefined) {
   // The range and the inlined bootstrap must AGREE, checked with the framework's OWN predicate
   // (`satisfiesRange`, the same subset the bootstrap applies at startup). This is the check that
-  // catches "the framework moved, the plugin's peer range did not": the bootstrap then refuses the
+  // catches "the framework moved, the plugin's range did not": the bootstrap then refuses the
   // copy that is right there, falls back to the registry, and the plugin mounts on the legacy path
   // with only a runtime warning. Observed once for real (framework 0.1.0 vs peer `^0.0.0`).
   const semverUrl = pathToFileURL(join(dirname(linkedManifest), 'dist', 'semver.js')).href
   try {
     const semver = await import(semverUrl)
-    if (!semver.satisfiesRange(vendored, peer)) {
-      fail(`peerDependencies["${FRAMEWORK}"] = ${peer} does not accept the framework ${vendored} — bump the range with the framework`)
+    if (!semver.satisfiesRange(vendored, range)) {
+      fail(`dependencies["${FRAMEWORK}"] = ${range} does not accept the framework ${vendored} — bump the range with the framework`)
     }
   } catch (error) {
-    fail(`cannot check ${peer} against ${vendored} (${error instanceof Error ? error.message : String(error)})`)
+    fail(`cannot check ${range} against ${vendored} (${error instanceof Error ? error.message : String(error)})`)
   }
 }
 

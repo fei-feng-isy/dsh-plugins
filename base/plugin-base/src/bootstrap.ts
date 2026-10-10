@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export const VERSION = '0.4.1'
+export const VERSION = '0.4.2'
 /**
  * The framework interval this bootstrap can launch.
  *
@@ -300,7 +300,10 @@ export async function loadFramework<T = unknown>(options: EnsureFrameworkOptions
 
 /**
  * Read the range a plugin declares in the nearest `package.json`: walk up from `from`,
- * preferring `peerDependencies` over `devDependencies`; `undefined` when none is found.
+ * preferring `dependencies` over `peerDependencies` over `devDependencies`; `undefined` when none is
+ * found. `dependencies` is the live declaration — the base ships as a normal dependency of the
+ * plugins — while `peerDependencies` stays as the fallback for plugins built when the base was
+ * declared a peer, and `devDependencies` covers a local checkout.
  */
 export async function readDependencyRange(from: string = process.cwd()): Promise<string | undefined> {
   let current = from
@@ -335,7 +338,9 @@ export async function readDependencyRange(from: string = process.cwd()): Promise
       const parsed: unknown = JSON.parse(text)
       if (typeof parsed !== 'object' || parsed === null) return undefined
       const manifest = parsed as Record<string, unknown>
-      return rangeOf(manifest['peerDependencies']) ?? rangeOf(manifest['devDependencies'])
+      return rangeOf(manifest['dependencies'])
+        ?? rangeOf(manifest['peerDependencies'])
+        ?? rangeOf(manifest['devDependencies'])
     } catch {
       // The nearest manifest is unparseable: stop.
       return undefined

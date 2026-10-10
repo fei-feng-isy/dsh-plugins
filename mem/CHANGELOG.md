@@ -4,6 +4,13 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-10
+
+### Fixed（安装面）
+- **装插件不再需要单独安装底座**：底座 `@avantf/dsh-plugin-base` 现在是本插件的**普通依赖**，会随插件一起
+  装好；用户只需要装 `@avantf/dsh-mem` 再重启 dsh 即可（DSH Desktop 走「插件」页）。装的仍是**同一份**
+  底座，不会出现第二个副本。
+
 ## [0.6.2] - 2026-10-09
 
 *本版无用户可观察的行为变化*：内部共享逻辑对齐（工具边界与信任心跳下沉到引擎、两树共用的 loader shim、

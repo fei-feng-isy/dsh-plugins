@@ -75,10 +75,10 @@ pnpm check:old-dsh --floor 0.1.5-rc.2           # 显式指定下限（也可用
 
 ### 1.1 一次发布的完整顺序（2026-09-21 发 0.1.1 实跑，可直接复刻）
 
-**前置**：① 底座 `@avantf/dsh-plugin-base` 已发布，且插件的 peer 区间接受
+**前置**：① 底座 `@avantf/dsh-plugin-base` 已发布，且插件的依赖区间接受
 registry 上那一版（`scripts/copy-envinit-bootstrap.mjs` 会在构建期用底座自己的 `satisfiesRange` 比对，
 区间没跟上就构建立刻红）；② 工作区没有 `link:`/`file:`。**发布顺序是底座 FIRST、插件在后**：`release-check`
-在发布插件前会确认 registry 上已有落在插件 peer 区间内的底座版本。
+在发布插件前会确认 registry 上已有落在插件依赖区间内的底座版本。
 
 ```bash
 # 0) 起点干净、与远端一致
@@ -139,11 +139,10 @@ available.`，而 `npm stage list` 会说没有 staged 版本。②只能等（2
   **共用同一个版本号**：插件是引擎的薄壳（且把引擎内联进自己的 `lib/index.js`），版本各走各的只会制造
   "这是哪一版的引擎"的问题。`release:check` 的 preflight 会拦下不一致（清单从目录派生）。
 - **发布直接从开发仓做**（不再投影到 `../dsh-plugins-rc`，该目录已废弃）：真正发布出去的仍然只有一个
-  自包含插件包 `@avantf/dsh-mem`（外加底座 peer），引擎与开发入口都是 `private: true`。
+  自包含插件包 `@avantf/dsh-mem`（底座作为普通运行期依赖随那一单自动装上），引擎与开发入口都是 `private: true`。
 - **只发布 `@avantf/dsh-mem` 一个包**。另外 7 个在 manifest 里是 `private: true`（workspace-only），
   `pnpm -r publish` 碰不到它们；preflight 会断言"可发布的只有 plugin"，所以既不会误发引擎，
-  也不会出现"插件悄悄变成 private 而没人发现"。DSH 用户装的是这一个插件包**加上**它的 peer 底座
-  `@avantf/dsh-plugin-base`（npm 这类会自动装 peer；pnpm 关掉 `autoInstallPeers` 时要显式装），不需要装
+  也不会出现"插件悄悄变成 private 而没人发现"。DSH 用户装的是这一个插件包，底座 `@avantf/dsh-plugin-base` 作为它的**普通运行期依赖**随那一单自动装上，不需要单独装；也不需要装
   引擎包 `@avantf/mem*`。家族里可发布的还有底座与任务插件两个包，它们各在自己的目录/仓库发布（见 §1.1 前置）。
 - semver：破坏性变更进 major，向后兼容的新增进 minor，修 bug 进 patch。候选版用 `X.Y.Z-rc.N`。
 - **CHANGELOG 就是 release notes**：`## [Unreleased]` 里积累，打 tag 时把它改名为 `## [X.Y.Z] - YYYY-MM-DD`

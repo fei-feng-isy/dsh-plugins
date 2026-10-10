@@ -3,7 +3,7 @@
 > 面向：给 `@avantf/dsh-mission` 打版本 tag、发布 npm 包的人。
 >
 > **这是差异手册，不是第二份发布手册。** 共享知识只在写一遍，本文只链不复述：家族发布顺序
-> （base → 插件）、required peer 约定、版本载体规则、发布前断言（`pnpm prepublish:assert`，替代
+> （base → 插件）、base 作为普通依赖的约定、版本载体规则、发布前断言（`pnpm prepublish:assert`，替代
 > 已退役的 RC 投影）、上传后 202 与 "staged 待批准"的区别 —— 见根 [`AGENTS.md`](../../AGENTS.md)
 > 与根 [`docs/RELEASING.md`](../../docs/RELEASING.md)；mem 手册
 > [`mem/docs/RELEASING.md`](../../mem/docs/RELEASING.md) §1.1 是一次完整发布的实跑记录，
@@ -15,7 +15,7 @@
 
 | | mem | mission |
 |---|---|---|
-| CHANGELOG | 有 `mem/CHANGELOG.md`；preflight 检查"第一个版本节 == 包版本"且 `[Unreleased]` 已清空 | **没有 CHANGELOG**，`pnpm -C mission release:check` 也不检查它（只有根 `pnpm release:check` 管仓库级元数据：可发布集合、peer、registry 上的 base） |
+| CHANGELOG | 有 `mem/CHANGELOG.md`；preflight 检查"第一个版本节 == 包版本"且 `[Unreleased]` 已清空 | **没有 CHANGELOG**，`pnpm -C mission release:check` 也不检查它（只有根 `pnpm release:check` 管仓库级元数据：可发布集合、base 依赖区间、registry 上的 base） |
 | pack 产物 | `mem/dist/avantf-dsh-mem-<ver>.tgz` | `mission/release/avantf-dsh-mission-<ver>.tgz` |
 | 门禁入口 | `pnpm -C mem release:check`（带 CHANGELOG preflight） | `pnpm -C mission release:check`（typecheck → build → test → pack，见 §1） |
 
@@ -88,7 +88,7 @@ manifest、`finally` 还原），所以**只有它产出的 tarball** 已把 `wo
   `pnpm prepublish:assert`（根 `scripts/prepublish-assert.mjs`）与 `pnpm release:check`；rc 原本提供的
   三件事（排除发布工具、版本盖章、生成 README）现在是发布前在开发树里必须成立的断言。
 - tag 只在开发仓打、带组前缀：`mission-vX.Y.Z`（三个包共用一个仓库，裸 `vX.Y.Z` 会互相撞）。
-- 家族发布顺序、required peer、发布前断言见根 `AGENTS.md` 与根
+- 家族发布顺序、base 作为普通依赖的约定、发布前断言见根 `AGENTS.md` 与根
   [`docs/RELEASING.md`](../../docs/RELEASING.md)。
 
 ## 5. 上传之后

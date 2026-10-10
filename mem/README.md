@@ -43,8 +43,8 @@
 > [`@avantf/dsh-plugin-base`](../base/plugin-base)（`base/plugin-base`，合并后的唯一底座；
 > 从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，两个旧包不再发新版本、已死）
 > 负责——它把资源预装到受管族根（默认 `~/.avantf/env`），并在启动时跑兼容门禁。本仓把底座声明为插件的
-> **peerDependency**（peer 区间 `>=0.3.0 <1.0.0`；另在 `devDependencies` 里声明同一条 `>=0.3.0 <1.0.0`，
-> `pnpm install` 即装上一份）：**不内联、也不按 specifier import**——插件唯一的静态引用是内联的零依赖
+> **普通运行期依赖**（`dependencies` 里的宽区间 `>=0.3.0 <1.0.0`，两棵插件树逐字相同，装插件即自动
+> 带上；另在 `devDependencies` 里声明同一条以便 `pnpm install` 链到本地 `base/`）：**不内联、也不按 specifier import**——插件唯一的静态引用是内联的零依赖
 > `bootstrap`（`packages/plugin/src/envinit-bootstrap.js`），它按
 > `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从插件自己的依赖树解析底座、
 > 动态 `import()` 并校验版本，拿不到就一条 `envinit: WARNING` 后**照常降级挂载**。插件在**运行时**从底座取用
@@ -125,11 +125,18 @@ semantic:
 - 模型未就绪时检索**自动降级**到 FTS + 实体 Jaccard（`isAvailable()` = false）；下载完成后自动升级到 `0.55 / 0.30 / 0.15` 三路融合。**降级不是终态**：启动预热失败后，后续检索/索引会自动重试（同一时刻只跑一次，最短间隔 30s），无需重启进程；`vectors_fix` 则会当场等待一次完整尝试。`auto_download: false` 时不重试（本地缺失是确定性的）。CLI 启动时同步预热；插件与 MCP 异步预热（MCP 先应答 `initialize`，再后台加载模型）。
 - `@huggingface/transformers` 已声明为 `@avantf/mem-retrieval` 的 **optionalDependency**，`pnpm install` 会自动装上（无需额外 `pnpm add`），由适配器动态加载；首次运行时从镜像下载 BGE 权重（默认 `Xenova/bge-base-zh-v1.5` 约 **389 MB**，之后离线可用）。即使装不上也只是语义路径降级，不会报错。
 - 语义后端只负责嵌入；**结果重排在 0.5.0 已被整体移除**（`Reranker` 接口、`rerank.*` 配置、公开面的 `registerReranker`、`rerank_*` 健康计数与结果字段、以及 wire 版本一起变更）——旧配置里的 `rerank:` 段现在会被当作未知键告警并忽略。
-- **换嵌入表示 = 一次数据迁移**（重要）：库里持久化的向量带着**表示指纹**（`v2/backend/model/dim@池化;归一化;截断窗口;模型 revision`）。换默认模型、换维度、改 `semantic.max_input_tokens`、换池化/归一化，甚至同一模型仓库换了权重，旧向量都属于**旧坐标**，语义腿对它们不可用，检索会**静默退化成词法+实体**——看起来仍有结果，只是答错。实测：默认模型 `bge-small-zh-v1.5`（512 维）→ `bge-base-zh-v1.5`（768 维）后，本机 80 条 ACTIVE 里 **78 条**被跳过、`indexed` 只剩 **2**，修前多条查询塌成同一条无关短事实。行为：
+- **换嵌入表示 = 一次数据迁移**（重要）：库里持久化的向量带着**表示指纹**（空间 id =
+  `v2/<backend>/<model>/<dim>@p=<pooling>;n=<0|1>;w=<配置截断窗口>;r=<模型旁车 sha>`；pooling / normalize /
+  截断窗口 / 模型权重任一变化都必须让 id 不等）。换默认模型、换维度、改 `semantic.max_input_tokens`、换池化/归一化，甚至同一模型仓库换了权重，旧向量都属于**旧坐标**，语义腿对它们不可用，检索会**静默退化成词法+实体**——看起来仍有结果，只是答错。实测：默认模型 `bge-small-zh-v1.5`（512 维）→ `bge-base-zh-v1.5`（768 维）后，本机 80 条 ACTIVE 里 **78 条**被跳过、`indexed` 只剩 **2**，修前多条查询塌成同一条无关短事实。行为：
   - **检测 + 响亮告警**：启动时若存在旧空间向量，日志打一条 WARNING（条数 + 原因 + 手动入口）；`/mem` 状态面、`avantf-mem stats`、`avantf-mem vectors`（`vectors.{stale,space_stale}`）如实暴露计数。
   - **自动自愈**：插件在启动预热之后**分批**重算（每批有界、逐批让出事件循环、不阻塞查询、可续跑、失败下轮重试）。手动入口 `avantf-mem vectors --fix`（先 `--dry-run` 预览计数；MCP/插件为 `mem_admin vectors_fix`）。
-  - **指纹格式换代 = 一次性全量重编码**：本次升级把空间 id 换成带版本前缀的表示指纹（`v2/…`），所以**每个**老库升级后第一次启动时全部向量都记为 `space_stale`（告警会写明 "written before the representation fingerprint — a ONE-TIME full re-encode"），随后由同一套有界后台迁移整库重算一遍（本机 80 条 ACTIVE 实测数秒级）。这是预期代价，不是故障。
+  - **指纹格式换代 = 一次性全量重编码**：本次升级把空间 id 换成带版本前缀的表示指纹（`v2/…`），所以**每个**老库升级后第一次启动时全部向量都记为 `space_stale`（告警会写明 "written before the representation fingerprint — a ONE-TIME full re-encode"），随后由同一套有界后台迁移整库重算一遍（本机 80 条 ACTIVE 实测数秒级）。这是预期代价，不是故障；迁移必须
+    **幂等**——再跑一次必须 `migrated: 0`。
   - **模型 revision 读不到时只降级**：没有家族旁车（`<模型缓存根>/.envinit/models--<owner>--<name>/record.json`）时指纹不含 revision；**权重已在本地**而旁车缺失时，启动日志会有一条 `semantic: no model revision …` 的 WARNING 说明"同名仓库换权重"这一盲区（首次安装进行中则不报，那时还没有可指纹化的东西）；绝不影响打开库或其余旋钮的检测。
+  - **指纹必须在进程内稳定**：`w` 取**配置值**而不是解析后的窗口（解析窗口依赖已加载的分词器，预热前后会变
+    ⇒ 会让 store 把自己刚写的行判 stale）；后端未声明表示时记 `rep=undeclared` 而**不是崩溃**。自愈必须用
+    **真实形状**验证：库里放**旧维向量**再上新模型，断言自愈后语义腿重新命中（只复刻"1 条正确答案 + 1 条干扰
+    项"不算）。
   - **关闭自动迁移**：`semantic.auto_migrate: false`（默认 `true`）；关掉后只剩告警 + 手动入口。知识库侧目前只有检测 + 手动 `kb_reindex` 提示。
 - agent 工具统一返回 `{ok:true,result}` / `{ok:false,error,violations}`（DSH 工具与 MCP server 一致）；`db.path` 里的 `~/` 展开为**用户 home**，留空则落在数据目录下。
 
@@ -188,6 +195,36 @@ trust:
 
 完整规格与决策记录见 [docs/TRUST_MODEL.md](docs/TRUST_MODEL.md)，概要与运维见 [DESIGN.md](DESIGN.md) §18。
 
+## 树内约定（开发）
+
+- **契约唯一真源**：`@avantf/mem-contract` 是工具 / 配置 schema 与 UI payload 的**唯一真源**——工具 schema、
+  MCP `inputSchema`、CLI 参数、client 类型都由它派生。
+- **检索编排不许分叉**：两个存储（memory / knowledge）各自独立，但共用一套编排——工具键 → 运行时的派发表
+  只在 `packages/core/src/dispatch.ts`，检索流程只在 `packages/core/src/store/hybrid.ts`，**不许再分叉**。
+- **融合必须让证据按可靠性定序**：确定性 / 高精度信号（意图表改写、精确词法命中、结构化字段）排在前，
+  稠密相似度只能作补充；**绝不允许"某条腿的偶然头部"压过"另一条腿的压倒性证据"**——各腿按自身最大值归一
+  后**不可直接比较**（`packages/core/src/store/floors.ts` 已注明融合分只能同查询内比较），"某腿拿了 1.0"不
+  构成"最相关"的证明。改融合或门槛时，必须同时给出"**并集不收窄**、**非自指查询逐字节不变**"的证据，并
+  **先回答"这条候选是靠哪条腿、几分证据进来的"**。
+- **读 zod 内部别猜**：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })`（正本在根
+  `AGENTS.md`「构建与门禁」）；形状断言在 `packages/contract/test/contract.spec.ts` 与
+  `tool_schema.spec.ts`。
+- **工具面就是 8 个**：`TOOL_SPECS` 里的 `mem_*` 3 + `kb_*` 5；`kb_manage` 属 `KB_TOOL`（UI remote 与 CLI
+  用的内部引擎 API），**不在模型面**——按 `name:` 数会数成 9，挂载冒烟断言的就是 8。
+- **类型检查顺序**：`pnpm -C mem typecheck` 也检查 `test/`，且必须在 `pnpm -C mem build` **之后**跑（包通过
+  产出的 `lib/*.d.ts` 读依赖）；`pnpm -C mem typecheck:dsh` 覆盖插件 src + specs。
+- **中文评测集是精确断言**：`packages/core/test/eval_zh.spec.ts` 共 **41 条**（原 35 + 自指问句哨兵 6〔4 条表内
+  + 2 条表外 KNOWN GAP〕，见 [docs/SELF_QUERY_RELEVANCE.md](docs/SELF_QUERY_RELEVANCE.md)）的汇总数字是**精确
+  断言**——任何移动它的改动都要重新冻结并解释。
+- **CHANGELOG 段落规则**：`mem/CHANGELOG.md` 的 `[Unreleased]` 必须为空，首个版本段 ==
+  `packages/plugin/package.json` 的版本（严格门禁的 preflight）。新条目写进**正在准备的版本段**——版本还没切
+  就先 `pnpm version:set mem <x.y.z>` 再写对应段，或把条目攥在手里、等切版本那天一起写（**不要**塞进
+  `[Unreleased]` 或已发布的历史段）。
+- **枢纽文件（hub）**：超过 800 行的枢纽是 `packages/core/src/store/memory.ts`（SQL/索引形状含实测性能结论，
+  **慎动**）、`packages/plugin/src/client/index.ts`、`packages/core/src/store/knowledge.ts`（SQL 形状**慎动**）、
+  `packages/core/src/db/dao/facts.ts`、`packages/contract/src/types.ts`、`packages/plugin/src/index.ts`；跨树
+  通用的"触及即抽 / 不为变小做整体重构 / 名单只作观察"见根 `AGENTS.md`。
+
 ## 发布
 
 每个包都声明了 `publishConfig.access=public`；可发布包（base 与两个插件）的 `prepublishOnly` 会在真
@@ -199,31 +236,29 @@ trust:
 pnpm release:check
 ```
 
-家族底座 `@avantf/dsh-plugin-base` 是插件的 **peerDependency**（peer 区间 `>=0.3.0 <1.0.0`）；
-插件同时把它声明进 `devDependencies`（同一条 `>=0.3.0 <1.0.0`），`pnpm install` 即装上：
+家族底座 `@avantf/dsh-plugin-base` 是插件的**普通运行期依赖**（`dependencies`，区间
+`>=0.3.0 <1.0.0`；两棵插件树必须写**逐字相同**的区间，否则安装器会装出两份副本）；插件同时把它
+声明进 `devDependencies`（同一条 `>=0.3.0 <1.0.0`），`pnpm install` 即链到本地 `base/`：
 `pnpm build:dsh` 会先跑 `scripts/link-envinit.mjs`，从**安装副本** vendor 它零依赖的 bootstrap；底座
-**绝不内联、也绝不按 specifier import**，所以本地开发**不需要任何 checkout**（只有要就地改底座时才用
-`DSH_ENVINIT=<checkout>` 显式指定）。**作为可安装包部署时**，底座由 npm 这类会自动安装 peer 的包管理器
-跟着装上（多个插件共用顶层那一份）；pnpm 关掉 `autoInstallPeers` 或 yarn 不会自动装，那时在宿主/profile
-里显式写一条即可：
+**绝不内联、也绝不按 specifier import**。**装插件就自动带上底座**，用户不需要单独装它（dsh 给每个
+profile 写 `autoInstallPeers: false`，所以这里也不能用 peer 表达"宿主提供"）：
 
 ```jsonc
-// ~/.dsh/profiles/<profile>/package.json
+// ~/.dsh/profiles/<profile>/package.json —— 只点名插件即可
 "dependencies": {
-  "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0",
   "@avantf/dsh-mem": "^0.1.1"
 }
 ```
 
-它保持 **required peer**，缺了只是降级挂载（一条 `envinit: WARNING` + 退回 legacy 机制，绝不拒载）。
+缺了底座只是降级挂载（一条 `envinit: WARNING` + 退回 legacy 机制，绝不拒载）。
 宿主自己提供的 peer 才是 `optional`，免得包管理器去 registry 拉一份宿主内部实现。环境初始化框架与启动兼容
 门禁现在都在底座**这一个包**里（不再有独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat`，也不再有
 `mem:compat` item 或受管 `runtime` 根上的门禁副本）。**接口世代由底座在运行期裁决**：插件构建期把
 `INTERFACE_VERSION` bake 进 `lib/interface-version.json`，启动时用底座自己的
 `readInterfaceRequirement` 读回、再调 `checkInterface`；`incompatible`（区间内但另一世代）⇒ 一条
 `WARNING` 且**不用底座的共享能力**（自带 prompt 默认正文、门禁跳过、legacy provisioning）但**照常挂载**，
-`cannot-tell` ⇒ 只告警、照常使用 —— 接口变不再要求插件同批改 peer。发布顺序是**底座先于插件**——
-`release-check` 在发布插件前会确认 registry 上已有落在插件 peer 区间内的底座版本；发布前确认
+`cannot-tell` ⇒ 只告警、照常使用 —— 接口变不再要求插件同批改依赖区间。发布顺序是**底座先于插件**——
+`release-check` 在发布插件前会确认 registry 上已有落在插件依赖区间内的底座版本；发布前确认
 工作区里没有 `link:`/`file:` 覆盖——`pack-plugin.mjs` 会拒绝仍带这类 specifier 的 tarball。
 
 后三步（链接 / `typecheck:dsh` / `build:dsh` + mount smoke）**只对着已安装的全局 `dsh`**
@@ -262,8 +297,8 @@ pnpm release:check                                  # 本包严格门禁（含 p
 
 本包的 npm 页面就是 `packages/plugin/README.md` 本身（真实文件，`files` 里有它）。插件的 manifest
 在开发树里就是要发布的那一份（引擎与 `react` 放 `devDependencies` 以便内联，`dependencies` /
-`optionalDependencies` 就是引擎的运行时依赖面；底座 `@avantf/dsh-plugin-base` 是 **peer**，本仓另在
-`devDependencies` 里声明一条以便 `pnpm install` 装上）。
+`optionalDependencies` 就是引擎的运行时依赖面；底座 `@avantf/dsh-plugin-base` 是**普通运行期依赖**，
+装插件即自动带上，本仓另在 `devDependencies` 里声明同一条区间以便 `pnpm install` 链到本地 `base/`）。
 
 > 这份 manifest 形态是**构建正确性的一部分**：tsdown 的规则是"production 段保持
 > import，其余全部内联"，所以引擎一旦回到 `dependencies`，`lib/index.js` 就会悄悄**不内联**——这种产物
@@ -274,8 +309,8 @@ pnpm release:check                                  # 本包严格门禁（含 p
 
 **版本、升级与回滚、release notes 必须带上的已知限制、以及人工确认清单**都在
 [docs/RELEASING.md](docs/RELEASING.md)。要点：6 个包**共用同一个版本号**，但本仓**只发布
-`@avantf/dsh-mem`**（引擎内联进 `lib/index.js`；家族侧没有生产依赖——底座 `@avantf/dsh-plugin-base` 是
-peer，另在 `devDependencies` 里声明一条以便安装，**底座必须先于插件**发布）；迁移**单向**（升级前备份
+`@avantf/dsh-mem`**（引擎内联进 `lib/index.js`；家族侧只有底座这一条普通运行期依赖，
+`@avantf/dsh-plugin-base` 装插件时自动带上，**底座必须先于插件**发布）；迁移**单向**（升级前备份
 `~/.avantf`，降级会被 `SchemaDowngradeError` 拒绝）；插件的 DSH peer 范围就是"支持的宿主窗口"。
 
 另外 5 个包（引擎 / `mem-cli` / `mem-mcp`）在 manifest 里都是 `private: true`：它们只作为本仓库的

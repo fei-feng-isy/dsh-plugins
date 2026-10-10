@@ -3,7 +3,7 @@
  * Vendor `@avantf/dsh-plugin-base`'s bootstrap into this plugin, from the workspace's base build.
  *
  * The implementation (source resolution, the workspace boundary, the byte-for-byte drift check, the
- * peer-range check and the interface bake) lives in `scripts/lib/link-envinit.mjs`, shared with
+ * dependency-range check and the interface bake) lives in `scripts/lib/link-envinit.mjs`, shared with
  * `mission/`; this file binds it to `mem/`.
  *
  *   node scripts/link-envinit.mjs            # vendor from the workspace link (or the DSH_ENVINIT opt-in)

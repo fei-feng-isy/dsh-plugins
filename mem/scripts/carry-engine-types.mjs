@@ -9,8 +9,8 @@
  * `lib/types/*.d.ts` verbatim, and `exports["."].types` points straight at `lib/types/index.d.ts`. A
  * `from '@avantf/mem'` left in there is an unresolvable specifier for a consumer — `@avantf/mem` is
  * not on npm, so their type-check stops at TS2307 (this shipped for real in 0.3.1). The published
- * declaration surface must therefore name only packages a user's install resolves: the required
- * `@avantf/dsh-plugin-base` peer, `@deepseek-ai/*` peers, `zod`, and relative paths INSIDE this
+ * declaration surface must therefore name only packages a user's install resolves: the runtime
+ * `@avantf/dsh-plugin-base` dependency, `@deepseek-ai/*` peers, `zod`, and relative paths INSIDE this
  * package.
  *
  * The fix is the one `mission/scripts/build.mjs` (`inlineCoreTypes`) already uses and that its tarball

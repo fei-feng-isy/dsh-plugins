@@ -13,56 +13,96 @@
 
 /**
  * `link:` / `file:` / `workspace:` / `catalog:` (and a bare `*`) are LOCAL specifiers: fine in-source,
- * because pnpm rewrites them at pack time, but never what a plugin's REQUIRED peer on the base may be —
- * a host's package manager has to install the base from the registry.
+ * because pnpm rewrites them at pack time, but never what a plugin's runtime DEPENDENCY on the base may
+ * be — a host's package manager has to install the base from the registry.
  */
 export function isLocalSpecifier(range) {
   return /^(?:link|file|workspace|catalog):/u.test(range) || range === '*'
 }
 
 /**
- * The base wiring a publishable plugin manifest must declare, on BOTH sides:
+ * The base wiring a publishable plugin manifest must declare, on every side that matters.
  *
- *   - `peerDependencies[@avantf/dsh-plugin-base]` — present, REQUIRED (the caller checks
- *     `peerDependenciesMeta`), and a publishable registry range; and
- *   - `devDependencies[@avantf/dsh-plugin-base]` — present, and the SAME range, so a plain
- *     `pnpm install` has something for `linkWorkspacePackages` to link without a second number that
- *     can drift from the one the published manifest asks a host for.
+ * `@avantf/dsh-plugin-base` is a PLAIN RUNTIME DEPENDENCY of each plugin, because dsh writes
+ * `autoInstallPeers: false` into every profile it manages (`dsh-app-boot/lib/index.js:566-567`), so the
+ * "the host supplies the base" story a peer would tell is not true here: installing the plugin has to
+ * pull the base in by itself. The old rule said the opposite (peer only, never `dependencies`) on the
+ * theory that a runtime dependency forks the install; measured on the real packed artifacts, pnpm
+ * (isolated), pnpm with `nodeLinker: hoisted` (what a dsh profile uses) and npm (flat) each install
+ * exactly ONE physical copy — as long as the two plugins ask for the SAME range. A range that drifts
+ * is the only way to grow a second copy, so that is the assertion, not a warning.
  *
- * `pnpm-workspace.yaml` says `scripts/release-check.mjs` "asserts both sides"; the peer half existed,
- * the dev half was never checked (review §2.2-2). Pure, so the pair can be exercised on constructed
- * manifests.
+ * The four assertions:
+ *   1. the base is in `dependencies` — `peerDependencies` alone does not install it (see above);
+ *   2. the range is a publishable registry range (never `workspace:`/`link:`/`file:`/`catalog:`/`*`);
+ *   3. it is not optional — neither `optionalDependencies` nor `peerDependenciesMeta.optional`, so a
+ *      host install cannot silently skip the one copy the plugin's bootstrap resolves;
+ *   4. the range is WIDE (not `~`, not exact): one base release must be enough to fix shared code.
  *
- * Returns `{ problems, peer }`, where `peer` is the usable registry range (or `undefined`) for the
- * caller's further checks: does it accept the workspace base, and is it wide enough for a base-only
- * patch release?
+ * The caller passes `previous` — the earlier plugin tree's `{ plugin, range }`, if any — and a
+ * `range` that differs from it EVEN BY ONE CHARACTER is a problem (invariant: two plugins, one copy;
+ * `scripts/release-check.mjs` walks the publish order, so mem is judged against mission and vice versa).
+ * Keep the `devDependencies` entry at the same range too: it is what makes a plain `pnpm install`
+ * resolve the workspace base (a published manifest must never carry a `workspace:` range). The dev
+ * half is not asserted because the PUBLISHED range is the one a host install follows.
+ *
+ * Pure, so `scripts/gates.test.mjs` can replay each way the rule can be broken.
+ *
+ * @returns {{ problems: string[], range: string | undefined }} `range` is the usable registry range,
+ *   or `undefined` when the wiring has no usable one.
  */
-export function baseDependencyProblems(pluginName, manifest, base) {
+export function baseDependencyProblems(pluginName, manifest, base, previous) {
   const problems = []
-  const peer = manifest.peerDependencies?.[base]
-  const peerUsable = typeof peer === 'string' && peer.trim() !== '' && !isLocalSpecifier(peer.trim())
-  if (typeof peer !== 'string' || peer.trim() === '') {
-    problems.push(`${pluginName} does not declare ${base} in peerDependencies — the host could not supply the base`)
-  } else if (!peerUsable) {
-    problems.push(`${pluginName}'s peer range for ${base} is ${peer} — it must be a publishable registry range`)
+
+  const raw = manifest.dependencies?.[base]
+  const declared = typeof raw === 'string' && raw.trim() !== ''
+  const usable = declared && !isLocalSpecifier(raw.trim())
+
+  if (!declared) {
+    const alsoAPeer = typeof manifest.peerDependencies?.[base] === 'string'
+    const peerNote = alsoAPeer
+      ? '; a peer alone does not — dsh writes "autoInstallPeers: false" into every profile, so nothing installs it'
+      : ''
+    problems.push(
+      `${pluginName} does not declare ${base} in dependencies — installing the plugin must bring the base with it${peerNote}`,
+    )
+  } else if (!usable) {
+    problems.push(
+      `${pluginName}'s dependency on ${base} is ${raw} — it must be a publishable registry range: the `
+      + 'packed manifest is what a host\'s package manager resolves, and it cannot resolve a local specifier',
+    )
   }
 
-  const dev = manifest.devDependencies?.[base]
-  if (typeof dev !== 'string' || dev.trim() === '') {
-    problems.push(`${pluginName} does not declare ${base} in devDependencies — a plain install would have nothing to link the base from`)
-  } else if (isLocalSpecifier(dev.trim())) {
+  if (manifest.optionalDependencies?.[base] !== undefined) {
     problems.push(
-      `${pluginName}'s devDependency on ${base} is ${dev} — it must stay a plain registry range, not a `
-      + 'local specifier, so the packed manifest names something a host could resolve',
-    )
-  } else if (peerUsable && dev.trim() !== peer.trim()) {
-    problems.push(
-      `${pluginName} declares ${base} as peer "${peer.trim()}" but as devDependency "${dev.trim()}" — `
-      + 'pnpm-workspace.yaml says both sides name the SAME range; a second, drifted number is how a local '
-      + 'build stops exercising the range the published manifest asks a host for',
+      `${pluginName} lists ${base} in optionalDependencies — it is the plugin's one runtime dependency and `
+      + 'must never be skippable: a missing base degrades the plugin at runtime, it does not uninstall it silently',
     )
   }
-  return { problems, peer: peerUsable ? peer.trim() : undefined }
+  if (manifest.peerDependenciesMeta?.[base]?.optional === true) {
+    problems.push(
+      `${pluginName} marks ${base} an OPTIONAL peer — nothing then requires the single copy the plugin's `
+      + 'bootstrap resolves',
+    )
+  }
+
+  if (usable && /^[~=]|^\d+\.\d+\.\d+$/u.test(raw.trim())) {
+    problems.push(
+      `${pluginName}'s range for ${base} is ${raw.trim()} — too narrow: a patch/minor base release (one base `
+      + 'release must be enough to fix shared code) would fall outside it',
+    )
+  }
+
+  // Invariant: two plugins, one base copy. Copies fork only when the ranges differ, so drift is fatal.
+  if (previous !== undefined && typeof previous.range === 'string' && previous.range !== raw) {
+    problems.push(
+      `${pluginName} declares ${base} as ${String(raw)} but ${previous.plugin} declares ${previous.range} — `
+      + 'the two plugins must name the SAME range, or the installer resolves them to two physical copies of '
+      + 'the base and their registries/type identities fork',
+    )
+  }
+
+  return { problems, range: usable ? raw.trim() : undefined }
 }
 
 /**

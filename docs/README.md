@@ -16,9 +16,14 @@ place for anything that is about the WORKSPACE as a whole.
   subtree, because later rounds span subtrees.
 - `../AGENTS.md` — the workspace contract: publish surface, the three family hard constraints, the
   "can ONE base release fix this?" rule, degradation when the base is missing, and the gates to run.
-- `../base/plugin-base/README.md`, `../base/plugin-base/docs/DESIGN.md` and
-  `../base/plugin-base/docs/INTERFACE.md` — the family base (environment initialisation +
-  compatibility gate + kit), and the public-interface freeze / version policy that decides when a
+  It holds **only** constraints that hold for all three trees, and is the single entry document:
+  the former root `README.md` was removed on 2026-10-10 (its user-facing halves live in the three
+  package READMEs, the workspace facts in `../AGENTS.md`).
+- `../base/README.md` — the base tree's development README (interface generations and the
+  `api/interface-vN.json` snapshot flow, kit member placement, the hub list). The package page is
+  `../base/plugin-base/README.md`, and `../base/plugin-base/docs/DESIGN.md` /
+  `../base/plugin-base/docs/INTERFACE.md` carry the family base design (environment initialisation +
+  compatibility gate + kit) and the public-interface freeze / version policy that decides when a
   base release is a major (interface), a minor (behaviour) or a patch.
 - `../mem/README.md`, `../mem/DESIGN.md`, `../mem/docs/*` — the memory/knowledge plugin. `INSTALL.md`,
   `PROVISIONING.md` and `RELEASING.md` describe the merged base+plugin install/publish flow.

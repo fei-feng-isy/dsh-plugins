@@ -14,7 +14,7 @@ DSH（DeepSeek Harness）原生 Cordis 插件：**任务树引擎**。
 |---|---|
 | 宿主服务 `avantfMission` | 拥有任务树、存储域与派活循环；Remote 面给"任务"标签读树（`snapshot`）、读单个任务详情（`detail`）、**按需读回落盘的完整结果**（`result`）、删任务（`delete`）、**批量删除本会话已关闭任务树**（`cleanFinished`，面板「清理已完成」与 `/clean missions all` 共用）、**点击时查找历史任务的执行者会话**（`resolveExecutorSession`），并把每次变更推给已打开的标签（`watch`，stream 调用）|
 | 9 个模型工具，分两张面孔 | `create_mission` / `adjust_mission` / `note_mission` / `decompose_mission` / `submit_mission` / `mission_result` / `list_missions` / `finish_mission` / `cancel_mission`。**owner 面孔**（顶层会话）见 6 个：`create_mission`/`adjust_mission`/`mission_result`/`list_missions`/`finish_mission`/`cancel_mission`；**executor 面孔**（任务单元）见 3 个：`note_mission`/`decompose_mission`/`submit_mission`。`note_mission` 只给执行者：它写下本轮自己的分析，而 `decompose_mission` 会拒绝一个没写过分析的拆解。回收是引擎自己的事，不给模型一个手动回收的工具 —— 见下。**owner 看不到任务内部**：`list_missions` 只说一个任务还在跑、或者反复出过问题（`troubled`，是历史而非现值），不报它被拆成了什么、各部分什么状态 —— owner 只对整棵树有动作（`adjust_mission` / `cancel_mission`），内部结构是引擎的事 |
-| 一段静态系统提示词段 | 告诉模型**什么时候**该把活交出去（判据是"能不能连验收标准一起交出去"，不是复不复杂；需要拆与不需要拆的都算）、以及"谁在等、别轮询、别替它做"，并附一句**写法提示**（要交付长规格或长清单时，先写进仓库里的文件、描述里指向它 —— 超长工具参数是实测的失败源）。参数怎么填、任务能不能包含某类内容都**不在这段里**（前者属于工具的说明，后者由 owner 自己判断）。与 `create_mission` 的授权判据同一个判据，worker 视角返回空串。**正文可编辑**：家族共享目录 `<data home>/prompts/mission-tree-guide.md`（缺失或空白写回默认，启动时读一次；见根 README「自定义系统提示词」） |
+| 一段静态系统提示词段 | 告诉模型**什么时候**该把活交出去（判据是"能不能连验收标准一起交出去"，不是复不复杂；需要拆与不需要拆的都算）、以及"谁在等、别轮询、别替它做"，并附一句**写法提示**（要交付长规格或长清单时，先写进仓库里的文件、描述里指向它 —— 超长工具参数是实测的失败源）。参数怎么填、任务能不能包含某类内容都**不在这段里**（前者属于工具的说明，后者由 owner 自己判断）。与 `create_mission` 的授权判据同一个判据，worker 视角返回空串。**正文可编辑**：家族共享目录 `<data home>/prompts/mission-tree-guide.md`（缺失或空白写回默认，启动时读一次；见 [`../README.md`](../README.md) 的「自定义系统提示词」） |
 | 一段引导上下文 | 每轮把树的状态写进 owner 的 prompt |
 | 一个 `agent/pre-step` 钩子 | 过滤 worker 结算通知、决定某一步带什么进模型；引擎的唤醒信号在没有可处理状态时被**清空**。唯一的例外是**结算通知独占的第一批**（`step === 1` 且整批只有自家结算通知、队列里没有可服务的输入、`admitStep` 也没有 owner 要动的事）—— 那一处返回 `reject`，因为宿主 `dsh-time-context` 会在我们的决策之后往空批次里追加时间注记，清空等于白跑一次模型；其余任何情形都不拒绝（reject 会截断这一轮并把队列/工具结果搁置，见 §4.2）|
 | `/archive` 命令 | 把本会话**已完成**的 mission 会话记录标记为归档（走 workspace registry 的官方接口，durable、可 unarchive）。只标记，**不释放磁盘** |
@@ -31,9 +31,8 @@ pnpm link:profile            # 切 runtime peer 软链 → 装/刷新 link: 依�
 # 等价的手工第一步：
 dsh plugin --profile web add link:/home/qunqi/opensource/avantf-mission/packages/plugin
 
-# 发布：从 registry 装。底座 `@avantf/dsh-plugin-base` 是插件的 peer，
-#       pnpm 关掉了 autoInstallPeers 不会自动装，所以要显式一起装（npm 会自动带上它）
-dsh plugin --profile web add @avantf/dsh-plugin-base
+# 发布：从 registry 装。底座 `@avantf/dsh-plugin-base` 是插件的普通运行期依赖，
+#       装插件时自动带上，不用单独装一条
 dsh plugin --profile web add @avantf/dsh-mission
 
 # 两种都要在 profile 的 cordis.patch.yml 里挂载这一行
@@ -339,7 +338,7 @@ pnpm workers:usage -- --strict        # 出现"调了不存在的工具"就非�
 
 ## 环境初始化（`@avantf/dsh-plugin-base`）
 
-插件挂载的第一步不是注册工具，而是**把环境准备好**——交给家族底座 `@avantf/dsh-plugin-base`（peer 区间 `>=0.3.0 <1.0.0`；本仓另在 `devDependencies` 里声明同一个范围，并由根 `pnpm-workspace.yaml` 的 `linkWorkspacePackages: true` 链到本地 `base/`）。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本）。时序固定为：
+插件挂载的第一步不是注册工具，而是**把环境准备好**——交给家族底座 `@avantf/dsh-plugin-base`（普通运行期依赖，区间 `>=0.3.0 <1.0.0`，**装插件即自动带上**；本仓另在 `devDependencies` 里声明逐字相同的范围，并由根 `pnpm-workspace.yaml` 的 `linkWorkspacePackages: true` 链到本地 `base/`）。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本）。时序固定为：
 
 ```
 内联 bootstrap（解析底座 → 动态 import() → 校验 supportedRange）→ 接口门禁（底座判 verdict）→ 跑挂载前检查（兼容门禁）
@@ -347,7 +346,7 @@ pnpm workers:usage -- --strict        # 出现"调了不存在的工具"就非�
 
 - **它要准备什么**：不再有 item 清单，也**没有 `mission:compat`**——门禁就是底座本身。本插件像记忆插件一样注册手写的 Typert wire face，有同一个运行时错配风险：契约挪了以后**挂载成功**，然后在某个 remote 调用里炸，报错里没有版本信息，所以启动时用底座自带的规则 / 探针 / 复查跑一次门禁。
 - **底座怎么被找到**：内联 bootstrap 用 `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从**插件自己的依赖树**解析（正常就是 `node_modules/@avantf/dsh-plugin-base`），再动态 `import()`；版本不在内联 `supportedRange` 内 → 一条 `envinit: WARNING`，插件**照常挂载、降级**。绝不静态 `import` 底座、绝不 bundle 底座：静态 import 会在底座缺席时让整个插件模块加载失败。
-- **唯一内联件是 bootstrap**：本插件是 `tsc` 直出（没有打包器），所以底座构建产物里的零依赖单文件 `bootstrap.js` 被**拷进产物**、按相对路径 import。`scripts/build.mjs` 负责拷贝并断言它与**安装的**底座同版本。底座本包**只能是 peer**（外加一条 `devDependencies` 让 pnpm 装上），且**不得被静态 value import**——坏树时静态 import 会先于 bootstrap 抛错，插件连"解析底座并留下 WARNING"这一步都做不到（`pack-plugin.mjs` 断言这两条）。
+- **唯一内联件是 bootstrap**：本插件是 `tsc` 直出（没有打包器），所以底座构建产物里的零依赖单文件 `bootstrap.js` 被**拷进产物**、按相对路径 import。`scripts/build.mjs` 负责拷贝并断言它与**安装的**底座同版本。底座本包是插件的**普通运行期依赖**（`dependencies` 里两棵树逐字相同的宽区间；另有同区间 `devDependencies` 让本仓 pnpm 链到本地 `base/`），且**不得被静态 value import**——坏树时静态 import 会先于 bootstrap 抛错，插件连"解析底座并留下 WARNING"这一步都做不到（`pack-plugin.mjs` 断言这两条）。
 - **拿不到就降级，不拒载**：底座不可解析 → 一条 `envinit: WARNING`，插件照常挂载（工具、服务、prompt 段、Remote face 全注册），门禁跳过并退回 legacy provisioning；门禁包装不上或门禁本身跑不起来，同样 WARNING 后继续。**接口世代不匹配也一样**：插件 bake 的 `INTERFACE_VERSION` 与加载到的底座报出的不同（区间内但另一世代）⇒ 一条 `WARNING` 且**不使用底座的共享能力**（prompt 层退回本插件内置正文、门禁跳过），走的正是"底座拿不到"那条降级路径，仍**照常挂载**；`cannot-tell`（老底座没有 `checkInterface`/`readInterfaceRequirement`、bake 缺失/畸形）⇒ 只告警、照常使用。判定语义不变：只有**被证明的破坏**（`probe-failed`）才拒载，"无法判定"只是 note，版本差异只是 warning，绝不抛错。
 - **共享逻辑从底座运行时取**：兼容门禁规则/探针/复查、envinit provisioner、prompt 文件层 `PromptFiles`、以及本插件的数据根解析 `resolveDataHome`，都在运行时从动态 import 的那份底座上取用——所以修这些共享逻辑**只需发一次底座**，不必重建插件产物。仍留在插件里、改它们**需要发插件**的是：`typert` `strict` wire codec 与端点/字段/结果符号字面量（照抄宿主约定的两三行，描述符在模块加载期组装），以及本插件自己的 logger 与底座缺席时的 fallback 默认参数。底座 kit 另外导出 `familyHome`、`familyToolsDir`、`familyModelsDir`、`expandHome` 等，插件可在运行时取用；`createPluginLogger` 已随接口 v3 移出 `.`、进了不承诺兼容的 `./internal`，两棵树因此各自持有自己的 logger。改 `base/**` 里的共享代码后，两个插件的完整门禁都要重跑（mission：`pnpm release:check` + mount-smoke；mem：`pnpm build:dsh` + `node scripts/mount-smoke.mjs`）。
 - **异步那一档**：`startup: 'background'` 的项由框架派发、不占挂载预算，完成时回调 `onSettled` 再做后续；本插件的门禁是 blocking，加项不改代码。

@@ -139,8 +139,8 @@ try {
   // Link the peers from the INSTALLED dsh and leave them there: that is the copy the running host
   // loads, so `tsc` type-checks against exactly what the plugin will share object identity with.
   run('link the plugin to the installed dsh', process.execPath, ['scripts/link-dsh.mjs'])
-  // The family base (`@avantf/dsh-plugin-base`) is the workspace-linked peer. `pnpm build:dsh` built
-  // it first; this vendors `bootstrap.js` — the one piece the plugin inlines — from that built copy.
+  // The family base (`@avantf/dsh-plugin-base`) is the workspace-linked dependency. `pnpm build:dsh`
+  // built it first; this vendors `bootstrap.js` — the one piece the plugin inlines — from that build.
   run('vendor @avantf/dsh-plugin-base bootstrap (from the workspace base build)', process.execPath, ['scripts/link-envinit.mjs'])
   run('build the plugin (tsc + tsdown → lib/index.js + lib/client.js)', pnpm, ['-C', 'packages/plugin', 'run', 'build'])
   // The artifact half of the base inlining gate: bootstrap really inlined, the base still external,

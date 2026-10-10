@@ -47,6 +47,28 @@ DSH（DeepSeek Harness）的**任务树引擎**插件：`@avantf/dsh-mission`。
 | 启动失败预算 `spawnFailures` | 5（派发即失败才 +1，按 `30s × 2^(n-1)` 退避后重试，成功启动即清零） |
 | 结果内联阈值 | 2000 字（超出走 `ctx.spillStore` 落盘，并保留后端给的取回指引）|
 
+## 调度语义（v1）
+
+- **容量是派发闸门，不是受理闸门**：`create_mission` / `decompose_mission` **永不因容量失败**，节点进 `ready`
+  即排队；候选不满足 `Σ running.weight + candidate.weight ≤ capacity` 就**跳过**（不扣
+  `attempts`/`failures`、无冷却、不记 `stalls`，与 unit 租约同纪律）。
+- **`capacity` 的推导链** = 配置 → `os.availableParallelism()` → `os.cpus().length` → 4，在**宿主边界**算完注入
+  core；**显式配置 as-is 使用**（仅 clamp，不预留），只有探测链派生值才 `max(1, 派生 − 1)`（预留 1 核）。
+- **`weight`**（默认 **1**）= "这台机器上大约占几核"，子任务**不继承**父估值。
+- **排队 = work-conserving + 老化预留**：等太久就停止接纳新节点、让在跑的排空；`weight > capacity` 者独占整
+  机；顺序按**入队时间**而非 weight；等容量的节点在投影里显示 `waitingFor`。
+- **平台探针（`ResourceProbe`）**：**`null` = 本平台无此信号，绝不等于"空闲"**，只能让调度更保守；压力信号与
+  子进程归属的适配器留给 v2。
+
+完整推导、阈值理由与逐条守卫见 [`docs/design/2026-10-02-capacity.md`](docs/design/2026-10-02-capacity.md) 与
+[`docs/design/mission-engine-plugin.md`](docs/design/mission-engine-plugin.md) §9.2.1。
+
+## 枢纽文件（hub）
+
+超过 800 行的枢纽是 `packages/plugin/src/host.ts` · `packages/core/src/tree.ts` ·
+`packages/plugin/src/client/MissionTreeView.tsx` · `packages/plugin/src/index.ts`；跨树通用的"触及即抽 / 不为变小做
+整体重构 / 名单只作观察"见根 `AGENTS.md`。
+
 ## worker 会话的自动保留
 
 每个任务单元都是一次**真实会话**，日志会持续堆在 `$DSH_HOME/sessions` 下。插件按**数量**保留：每个
@@ -54,6 +76,9 @@ DSH（DeepSeek Harness）的**任务树引擎**插件：`@avantf/dsh-mission`。
 降序，越新越保留），超出的、更旧的已完成记录在**挂载时**与**每轮后台 sweep** 时，按与 `/clean archive all`
 相同的链路（**标记归档 → 释放记录 → 取消归档 → 清投影缓存残留**）自动释放。
 
+- **清理是四步生命周期**：标记归档 → 释放会话记录 → **取消归档** → **清投影缓存残留**。第三步去掉 durable
+  的幽灵归档 id，第四步清宿主替已 dispose 会话保留、**且无驱逐 API** 的投影缓存——少任一步都会在"子代理"列表
+  里留下幽灵条目（实测曾显示 70 个）。
 - **正在执行的 worker 不占名额、永不被清理**：13 个已完成 + 4 个在执行 → 只释放最旧的 3 个已完成；
   3 个已完成 + 8 个在执行 → 一个都不释放（已完成 3 ≤ 10）。
 - **`keepWorkers: 0` 关闭自动保留**（保留全部），**不是**"一个都不留"；负数与 0 同义（配置 schema 只接受
@@ -112,7 +137,7 @@ pnpm release:check  # 上面这些 + 类型检查 + 单测 + 两个冒烟 + 打�
 
 `scripts/link-dsh.mjs` 默认把 peer 链接指向已安装的 dsh（`--runtime [dshDir]` 可指定安装位置）；`zod` 在 `pnpm-workspace.yaml` 的 catalog 里跟随该 dsh 的版本，否则 `@deepseek-ai/dsh-storage-domain` 的记录 schema 会变成另一套不兼容类型。编译不再读 harness 源码 checkout。
 
-插件挂载时的环境初始化交给家族底座 `@avantf/dsh-plugin-base`（peer 区间 `>=0.3.0 <1.0.0`；本仓另在 `devDependencies` 里声明同一个范围，由 `linkWorkspacePackages: true` 链到本地 `base/`）：插件内联一份零依赖 `bootstrap`，它按 `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从**插件自己的依赖树**解析底座，再动态 `import()` 并校验版本落在内联的 `supportedRange` 内。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本），因此这里**没有 `mission:compat` item、没有下载、也没有受管 `~/.avantf/env/compat/**`**：门禁就是底座本身。`scripts/link-envinit.mjs` 从**安装副本** vendor 出要内联的 bootstrap（`pnpm build:dsh` / `pnpm typecheck` / `pnpm link:profile` 会自动跑）；`--check` 为"缺安装"给 `pnpm install`、为"副本漂移"给重跑脚本，两种建议各自可执行。要就地联调底座，用 `DSH_ENVINIT=<checkout>` 显式 opt-in（此时脚本把该 checkout 链进插件并据此 vendor）；兄弟 checkout **永不隐式发现**。**作为可安装包部署时**，底座由 npm 这类会自动安装 peer 的包管理器跟着装上（多个插件共用顶层那一份）；pnpm 关掉 `autoInstallPeers` 或 yarn 不会自动装，那时把 `"@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0"` 与 `"@avantf/dsh-mission": "<version>"` 一起写进宿主/profile 的 `dependencies` 即可。它保持 **required peer**，缺了只是降级挂载（一条 `envinit: WARNING` + 退回 legacy 机制，绝不拒载）；宿主的 `@deepseek-ai/*` 运行时 peer 是 `optional`，免得包管理器去 registry 拉一份宿主内部实现；**唯一例外是 `zod`** —— 它与 mem 一样声明为 **required peer**（`>=4.4.3 <5`，见 `packages/plugin/package.json`），让宿主那份成为唯一一份：存储域的记录 schema 由它校验，第二份副本的对象身份不同、会拒绝本插件写入的记录。共享业务逻辑在**运行时**从底座那份取用（兼容门禁规则/探针/复查、envinit provisioner、prompt 文件层 `PromptFiles`，以及本插件的 `resolveDataHome`），所以修这些共享代码只需一次底座发布、不必重建插件——仍留在插件里的是 `typert` `strict` wire codec 与端点/字段/结果符号字面量（照抄宿主约定的两三行，描述符在模块加载期就要组装）以及本插件自己的 logger 与底座缺席时的 fallback 默认参数，改它们**需要发插件**；底座 kit 另外导出 `familyHome`、`familyToolsDir`、`familyModelsDir`、`expandHome` 等，插件可在运行时取用；`createPluginLogger` 已随接口 v3 移出 `.`、进了不承诺兼容的 `./internal`，两棵树因此各自持有自己的 logger。**改 `base/**` 里的共享代码后，两个插件的完整门禁都要重跑**：mission 侧 `pnpm release:check` + mount-smoke，mem 侧 `pnpm build:dsh` + `node scripts/mount-smoke.mjs`。判据："这条知识能不能靠**一次底座发布**修好"——能就从底座运行时取，不能（两三行字面量）可留在插件但须注明改它要发插件。详见 `packages/plugin/README.md` 的「环境初始化」一节。
+插件挂载时的环境初始化交给家族底座 `@avantf/dsh-plugin-base`（普通运行期依赖，区间 `>=0.3.0 <1.0.0`，**装插件即自动带上**；本仓另在 `devDependencies` 里声明逐字相同的范围，由 `linkWorkspacePackages: true` 链到本地 `base/`）：插件内联一份零依赖 `bootstrap`，它按 `createRequire(...).resolve('@avantf/dsh-plugin-base/package.json')` 从**插件自己的依赖树**解析底座，再动态 `import()` 并校验版本落在内联的 `supportedRange` 内。底座**一个包**里装着启动期环境初始化框架与宿主兼容门禁（从前独立的 `@avantf/dsh-envinit` / `@avantf/dsh-compat` 已并入它，且不再发新版本），因此这里**没有 `mission:compat` item、没有下载、也没有受管 `~/.avantf/env/compat/**`**：门禁就是底座本身。`scripts/link-envinit.mjs` 从**安装副本** vendor 出要内联的 bootstrap（`pnpm build:dsh` / `pnpm typecheck` / `pnpm link:profile` 会自动跑）；`--check` 为"缺安装"给 `pnpm install`、为"副本漂移"给重跑脚本，两种建议各自可执行。要就地联调底座，用 `DSH_ENVINIT=<checkout>` 显式 opt-in（此时脚本把该 checkout 链进插件并据此 vendor）；兄弟 checkout **永不隐式发现**。**作为可安装包部署时**，底座随插件自动装上（多个插件共用同一份，前提是两棵树的区间逐字相同）。它是一条普通依赖，缺了只是降级挂载（一条 `envinit: WARNING` + 退回 legacy 机制，绝不拒载）；宿主的 `@deepseek-ai/*` 运行时 peer 是 `optional`，免得包管理器去 registry 拉一份宿主内部实现；**唯一例外是 `zod`** —— 它与 mem 一样声明为 **required peer**（`>=4.4.3 <5`，见 `packages/plugin/package.json`），让宿主那份成为唯一一份：存储域的记录 schema 由它校验，第二份副本的对象身份不同、会拒绝本插件写入的记录。共享业务逻辑在**运行时**从底座那份取用（兼容门禁规则/探针/复查、envinit provisioner、prompt 文件层 `PromptFiles`，以及本插件的 `resolveDataHome`），所以修这些共享代码只需一次底座发布、不必重建插件——仍留在插件里的是 `typert` `strict` wire codec 与端点/字段/结果符号字面量（照抄宿主约定的两三行，描述符在模块加载期就要组装）以及本插件自己的 logger 与底座缺席时的 fallback 默认参数，改它们**需要发插件**；底座 kit 另外导出 `familyHome`、`familyToolsDir`、`familyModelsDir`、`expandHome` 等，插件可在运行时取用；`createPluginLogger` 已随接口 v3 移出 `.`、进了不承诺兼容的 `./internal`，两棵树因此各自持有自己的 logger。**改 `base/**` 里的共享代码后，两个插件的完整门禁都要重跑**：mission 侧 `pnpm release:check` + mount-smoke，mem 侧 `pnpm build:dsh` + `node scripts/mount-smoke.mjs`。判据："这条知识能不能靠**一次底座发布**修好"——能就从底座运行时取，不能（两三行字面量）可留在插件但须注明改它要发插件。详见 `packages/plugin/README.md` 的「环境初始化」一节。
 
 浏览器半边由 `scripts/build-client.mjs`（esbuild）打成 `lib/client.js`，由 `scripts/client-smoke.mjs` 在无浏览器环境验证。**不使用 harness 的 tsdown 客户端预设** —— 它要求目标包在 harness 工作区内可被 glob 到，第三方仓用它会需要往 DSH 源码树里放 stub。客户端半边对 Context 用结构化接口（已安装的 dsh 不带 `dsh-client-ui-slots` 包），因此 `tsc` 只依赖已安装的 dsh。
 

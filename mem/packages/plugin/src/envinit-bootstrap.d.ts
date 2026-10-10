@@ -3,7 +3,7 @@
  * @module bootstrap
  */
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export declare const VERSION = "0.4.1";
+export declare const VERSION = "0.4.2";
 /**
  * The framework interval this bootstrap can launch.
  *
@@ -49,6 +49,9 @@ export declare function ensureFramework(options: EnsureFrameworkOptions): Promis
 export declare function loadFramework<T = unknown>(options: EnsureFrameworkOptions): Promise<T | undefined>;
 /**
  * Read the range a plugin declares in the nearest `package.json`: walk up from `from`,
- * preferring `peerDependencies` over `devDependencies`; `undefined` when none is found.
+ * preferring `dependencies` over `peerDependencies` over `devDependencies`; `undefined` when none is
+ * found. `dependencies` is the live declaration — the base ships as a normal dependency of the
+ * plugins — while `peerDependencies` stays as the fallback for plugins built when the base was
+ * declared a peer, and `devDependencies` covers a local checkout.
  */
 export declare function readDependencyRange(from?: string): Promise<string | undefined>;

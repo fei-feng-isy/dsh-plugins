@@ -6,7 +6,8 @@
  * kind that must be proven on constructed input: "does the version materializer touch a second
  * group's manifests?" and "does one tree missing a dsh line fail the gate?". So the decisions live in
  * `scripts/lib/` (versions.mjs, gates.mjs, published-base.mjs, pack-plugin.mjs) and this file replays
- * them — M7 (group-scoped version materialization), §2.2-2 (the base peer↔dev pair), M8 (per-tree
+ * them — M7 (group-scoped version materialization), the base-as-dependency wiring (one copy is
+ * guaranteed by the two trees declaring the IDENTICAL range, so drift is fatal), M8 (per-tree
  * dsh-line coverage), M10 (the plugin prepublishOnly wiring), N15 (the plugin half of the one-zod rule,
  * for BOTH trees), R1 (the published base's interface generation vs the plugin's bake) and S2 (the
  * documented-count observation a pack prints — silent on agreement or a missing input).
@@ -146,55 +147,95 @@ test('M7: calling with no { group } refuses to cross groups instead of guessing'
   })
 })
 
-// ── §2.2-2 · the base peer↔devDependencies pair, asserted on both sides ───────────────────────────
+// ── the base-as-dependency wiring: installed automatically, exactly once ─────────────────────────
+//
+// dsh writes `autoInstallPeers: false` into every profile it manages, so the base has to be a plain
+// `dependencies` entry for "install the plugin, get the base" to be true. The one-copy invariant is
+// then the two trees naming the IDENTICAL range — measured on the real packed artifacts under pnpm
+// isolated / pnpm hoisted / npm flat, each of which installs one physical copy when the ranges agree
+// and forks only when they differ. Each way the rule can be broken is replayed below.
 
-test('release-check: the dev half of the base wiring is asserted, not just the peer half', () => {
-  const peer = '>=0.3.0 <1.0.0'
-  assert.deepEqual(baseDependencyProblems('@avantf/dsh-mem', {
-    peerDependencies: { [BASE]: peer }, devDependencies: { [BASE]: peer },
-  }, BASE).problems, [])
+test('release-check: the base is a plain runtime dependency of the plugin, never merely a peer', () => {
+  const range = '>=0.3.0 <1.0.0'
+  assert.deepEqual(
+    baseDependencyProblems('@avantf/dsh-mem', { dependencies: { [BASE]: range } }, BASE),
+    { problems: [], range },
+  )
 
-  const noDev = baseDependencyProblems('@avantf/dsh-mem', { peerDependencies: { [BASE]: peer } }, BASE)
-  assert.match(noDev.problems.join('\n'), /does not declare .* in devDependencies/u)
+  // MUTATION 1 — `peerDependencies` only: nothing installs it for the user, which is the whole point.
+  const onlyPeer = baseDependencyProblems('@avantf/dsh-mem', { peerDependencies: { [BASE]: range } }, BASE)
+  assert.match(onlyPeer.problems.join('\n'), /does not declare .* in dependencies/u)
+  assert.match(onlyPeer.problems.join('\n'), /autoInstallPeers/u)
+  assert.equal(onlyPeer.range, undefined)
 
-  const drifted = baseDependencyProblems('@avantf/dsh-mem', {
-    peerDependencies: { [BASE]: peer }, devDependencies: { [BASE]: '^0.3.0' },
+  // MUTATION 2 — a `dependencies` entry that is not where it belongs.
+  const missing = baseDependencyProblems('@avantf/dsh-mem', { dependencies: { exceljs: 'catalog:' } }, BASE)
+  assert.match(missing.problems.join('\n'), /does not declare .* in dependencies/u)
+
+  // MUTATION 3 — optional: the host install can silently skip the plugin's one runtime dependency.
+  const optional = baseDependencyProblems('@avantf/dsh-mem', {
+    dependencies: { [BASE]: range }, optionalDependencies: { [BASE]: range },
   }, BASE)
+  assert.match(optional.problems.join('\n'), /optionalDependencies/u)
+
+  const optionalPeer = baseDependencyProblems('@avantf/dsh-mem', {
+    dependencies: { [BASE]: range }, peerDependenciesMeta: { [BASE]: { optional: true } },
+  }, BASE)
+  assert.match(optionalPeer.problems.join('\n'), /OPTIONAL peer/u)
+
+  // MUTATION 4 — a range too narrow for "one base release fixes shared code".
+  for (const narrow of ['~0.3.0', '0.3.0', '=0.3.0']) {
+    assert.match(
+      baseDependencyProblems('@avantf/dsh-mem', { dependencies: { [BASE]: narrow } }, BASE).problems.join('\n'),
+      /too narrow/u,
+      narrow,
+    )
+  }
+
+  // A local specifier is not something a host's installer can resolve.
+  const local = baseDependencyProblems('@avantf/dsh-mem', { dependencies: { [BASE]: 'workspace:*' } }, BASE)
+  assert.match(local.problems.join('\n'), /publishable registry range/u)
+
+  // MUTATION 5 — the two trees drifting apart: EXACTLY the case that makes the installer fork a copy.
+  const drifted = baseDependencyProblems(
+    '@avantf/dsh-mission',
+    { dependencies: { [BASE]: '>=0.3.0 <1.0.0' } },
+    BASE,
+    { plugin: '@avantf/dsh-mem', range: '^0.3.0' },
+  )
   assert.match(drifted.problems.join('\n'), /SAME range/u)
+  assert.match(drifted.problems.join('\n'), /two physical copies/u)
 
-  const localDev = baseDependencyProblems('@avantf/dsh-mem', {
-    peerDependencies: { [BASE]: peer }, devDependencies: { [BASE]: 'workspace:*' },
-  }, BASE)
-  assert.match(localDev.problems.join('\n'), /plain registry range/u)
-
-  const noPeer = baseDependencyProblems('@avantf/dsh-mem', { devDependencies: { [BASE]: peer } }, BASE)
-  assert.match(noPeer.problems.join('\n'), /does not declare .* in peerDependencies/u)
-  assert.equal(noPeer.peer, undefined)
-
-  const localPeer = baseDependencyProblems('@avantf/dsh-mem', {
-    peerDependencies: { [BASE]: 'file:../base' }, devDependencies: { [BASE]: 'file:../base' },
-  }, BASE)
-  assert.match(localPeer.problems.join('\n'), /publishable registry range/u)
-  assert.equal(localPeer.peer, undefined)
+  // Same range in both trees: green even with a `previous` in play.
+  assert.deepEqual(
+    baseDependencyProblems(
+      '@avantf/dsh-mission',
+      { dependencies: { [BASE]: range } },
+      BASE,
+      { plugin: '@avantf/dsh-mem', range },
+    ).problems,
+    [],
+  )
 })
 
-test('release-check: the two REAL plugin manifests declare a matching base pair', () => {
+test('release-check: the two REAL plugin manifests declare a matching, wide base dependency', () => {
+  const seen = []
   for (const dir of ['mem/packages/plugin', 'mission/packages/plugin']) {
     const manifest = JSON.parse(readFileSync(join(workspace, dir, 'package.json'), 'utf8'))
-    assert.deepEqual(
-      baseDependencyProblems(manifest.name, manifest, BASE).problems,
-      [],
-      `${dir} must declare ${BASE} with the same range in peerDependencies and devDependencies`,
-    )
+    const wiring = baseDependencyProblems(manifest.name, manifest, BASE, seen.at(-1))
+    assert.deepEqual(wiring.problems, [], `${dir} must declare ${BASE} as a runtime dependency`)
+    assert.equal(wiring.range, '>=0.3.0 <1.0.0', `${dir} must keep the shared, wide base range`)
+    seen.push({ plugin: manifest.name, range: wiring.range })
   }
 })
 
 // ── N15 · the one-zod rule reaches the plugin PUBLISH manifest, not just catalog and base ──────────
 
-test('N15: a host-provided dependency must stay a REQUIRED peer, in peerDependencies only', () => {
+test('N15: a HOST-provided dependency must stay a REQUIRED peer, in peerDependencies only', () => {
   // BOTH trees: a host install is judged by whichever manifest it reads, so each must declare the
   // same disposition — zod required, in peerDependencies, never nested. (`^4.4.3` and `>=4.4.3 <5`
-  // both pass: the rule is about WHERE zod comes from, not the spelling of the range.)
+  // both pass: the rule is about WHERE zod comes from, not the spelling of the range. The base is NOT
+  // in this class: it is the plugin's own runtime dependency and is asserted by the base-wiring test.)
   for (const name of ['@avantf/dsh-mem', '@avantf/dsh-mission']) {
     assert.deepEqual(requiredPeerProblems(name, {
       peerDependencies: { zod: '>=4.4.3 <5' },

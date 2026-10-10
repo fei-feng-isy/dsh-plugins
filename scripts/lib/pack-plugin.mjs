@@ -40,7 +40,7 @@ import { dirname, join, posix, resolve } from 'node:path'
 
 import { readBootstrapVersion } from './bootstrap-version.mjs'
 
-/** The family base: the one `@avantf/*` package a runtime section may name, and only as a peer. */
+/** The family base: the one `@avantf/*` package a runtime section may name, as a PLAIN dependency. */
 export const FRAMEWORK_PEER = '@avantf/dsh-plugin-base'
 
 /**
@@ -391,10 +391,17 @@ export function assertSelfContained(fail, label, code, declared, { client, allow
   }
 }
 
-/** Every declared production dependency must actually be reached, or the user installs dead weight. */
+/**
+ * Every declared production dependency must actually be reached, or the user installs dead weight.
+ *
+ * The base is the deliberate exception: it IS a production dependency (installing the plugin must
+ * install the base), but no shipped file names it as a specifier — the inlined bootstrap resolves it
+ * at RUNTIME with `createRequire(...).resolve(...)`, which is exactly the "no static import" rule.
+ */
 export function assertNoDeadDependencies(fail, label, code, declared) {
   const reached = new Set(specifiersIn(code).map(packageName))
   for (const name of declared) {
+    if (name === FRAMEWORK_PEER) continue
     if (!reached.has(name)) fail(`${label}: "${name}" is declared but never imported — drop it from the production sections`)
   }
 }
@@ -435,18 +442,40 @@ export function assertCheckout(config) {
   const { manifest, production, declaredNames } = contextOf(config)
 
   // ── the manifest ─────────────────────────────────────────────────────────────────────────────
-  if (manifest.dependencies?.[FRAMEWORK_PEER] !== undefined || manifest.optionalDependencies?.[FRAMEWORK_PEER] !== undefined) {
-    fail(`manifest: "${FRAMEWORK_PEER}" is a runtime dependency — it must be a PEER (a second copy under the plugin would be a different framework)`)
+  // The base is the plugin's one RUNTIME dependency: dsh writes `autoInstallPeers: false` into every
+  // profile, so a peer would not be installed and "install the plugin → get the base" would be false.
+  // The one-copy invariant is not "a peer, never a runtime dep" — measured on the real artifacts, pnpm
+  // isolated / pnpm hoisted / npm flat all install exactly one copy as long as both plugins name the
+  // SAME range, so that sameness is what this asserts (see the sibling check below).
+  const baseRange = manifest.dependencies?.[FRAMEWORK_PEER]
+  if (typeof baseRange !== 'string' || baseRange.trim() === '') {
+    fail(`manifest: "${FRAMEWORK_PEER}" is not a runtime dependency — installing the plugin must bring the base with it (a peer does not: dsh sets autoInstallPeers: false)`)
+  } else if (/^(?:link|file|workspace|catalog):/u.test(baseRange.trim()) || baseRange.trim() === '*') {
+    fail(`manifest: "${FRAMEWORK_PEER}" is declared as "${baseRange}" — the packed manifest must carry a registry range a host's installer can resolve`)
   }
-  if (typeof manifest.peerDependencies?.[FRAMEWORK_PEER] !== 'string') {
-    fail(`manifest: "${FRAMEWORK_PEER}" is not declared in peerDependencies`)
+  if (manifest.optionalDependencies?.[FRAMEWORK_PEER] !== undefined) {
+    fail(`manifest: "${FRAMEWORK_PEER}" is in optionalDependencies — it is the plugin's one runtime dependency and must never be skippable`)
   }
   if (manifest.peerDependenciesMeta?.[FRAMEWORK_PEER]?.optional === true) {
-    fail(`manifest: "${FRAMEWORK_PEER}" is marked an optional peer — it must be required, or installing this package does not install the framework`)
+    fail(`manifest: "${FRAMEWORK_PEER}" is marked an optional peer — the base is installed as a dependency, not negotiated with the host`)
   }
-  const declaredBase = manifest.devDependencies?.[FRAMEWORK_PEER]
-  if (typeof declaredBase !== 'string' || declaredBase === '') {
-    fail(`manifest: "${FRAMEWORK_PEER}" is not declared in devDependencies — pnpm install would have no copy to build and vendor the bootstrap from`)
+  // `devDependencies` is what makes `pnpm install` link the workspace base; it must name the SAME
+  // range as `dependencies` so a local build never runs against a number the published manifest does
+  // not ask for. (The published `dependencies` range is the one a host install follows.)
+  if (typeof manifest.devDependencies?.[FRAMEWORK_PEER] === 'string'
+    && typeof baseRange === 'string' && manifest.devDependencies[FRAMEWORK_PEER] !== baseRange) {
+    fail(`manifest: "${FRAMEWORK_PEER}" is "${baseRange}" in dependencies but "${manifest.devDependencies[FRAMEWORK_PEER]}" in devDependencies — both must name the SAME range`)
+  }
+  // Two plugins, one base copy: the two trees must ask for the IDENTICAL range. Read from the sibling
+  // tree rather than a constant here, so the number still lives in exactly one place (the manifests).
+  const siblingName = manifest.name === '@avantf/dsh-mem' ? '@avantf/dsh-mission' : '@avantf/dsh-mem'
+  const siblingDir = manifest.name === '@avantf/dsh-mem' ? 'mission/packages/plugin' : 'mem/packages/plugin'
+  const siblingManifest = join(dirname(dirname(dirname(pluginDir))), siblingDir, 'package.json')
+  if (existsSync(siblingManifest)) {
+    const siblingRange = JSON.parse(readFileSync(siblingManifest, 'utf8')).dependencies?.[FRAMEWORK_PEER]
+    if (typeof baseRange === 'string' && siblingRange !== baseRange) {
+      fail(`manifest: this tree declares "${FRAMEWORK_PEER}": "${baseRange}" but ${siblingName} declares "${String(siblingRange)}" — the two plugins must name the SAME range, or the installer resolves them to two physical copies of the base`)
+    }
   }
   for (const section of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
     for (const name of Object.keys(manifest[section] ?? {})) {
@@ -524,7 +553,7 @@ export function assertCheckout(config) {
   // The inlined/vendored bootstrap must be the SAME framework version this checkout installed.
   const installedManifest = join(pluginDir, 'node_modules', FRAMEWORK_PEER, 'package.json')
   if (!existsSync(installedManifest)) {
-    fail(`the installed ${FRAMEWORK_PEER} is missing — run \`pnpm install\` (the framework is a registry peer plus devDependency)`)
+    fail(`the installed ${FRAMEWORK_PEER} is missing — run \`pnpm install\` (the base is a plain dependency, linked from the workspace)`)
   } else {
     const installedVersion = JSON.parse(readFileSync(installedManifest, 'utf8')).version
     const installedBootstrap = join(pluginDir, 'node_modules', FRAMEWORK_PEER, 'dist', 'bootstrap.js')
@@ -897,8 +926,8 @@ export function assertTarball(config, tarball) {
   }
   if (packed.exports?.['./client'] === undefined) fail('tarball manifest: exports["./client"] is missing (the browser half)')
   if (packed.dsh?.client?.platform !== 'web') fail('tarball manifest: dsh.client.platform must be "web"')
-  if (packed.peerDependencies?.[FRAMEWORK_PEER] === undefined) {
-    fail(`tarball manifest: "${FRAMEWORK_PEER}" must be a peerDependency (the host provides the framework)`)
+  if (typeof packed.dependencies?.[FRAMEWORK_PEER] !== 'string') {
+    fail(`tarball manifest: "${FRAMEWORK_PEER}" must be a runtime dependency (installing the plugin installs the base)`)
   }
 
   // ── the npm page and the license ──────────────────────────────────────────────────────────────

@@ -84,7 +84,8 @@ describe('the editable guidance file', () => {
   })
 
   it('gives the same answer as the linked BASE for the same named slots', () => {
-    // The base is a REQUIRED peer here, so `base.resolveDataHome` is the linked workspace copy — the
+    // The base is a plain runtime dependency here (the same wide range both trees declare), so
+    // `base.resolveDataHome` is the linked workspace copy — the
     // real implementation, not a mock. The local `resolveDataHome` is the base-less degradation path;
     // a divergence between the two would put this plugin's prompt files in a different directory from
     // the one every other family member reads.

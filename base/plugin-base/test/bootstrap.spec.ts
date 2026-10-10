@@ -193,9 +193,18 @@ describe('bootstrap（零依赖自包含）', () => {
       await expect(readDependencyRange(dir)).resolves.toBe('~1.2.0')
     })
 
-    it('只声明 dependencies 不算数（那会装出多份框架副本）', async () => {
+    it('dependencies 优先（base 是插件的普通依赖）', async () => {
       const dir = await repo('deps-only', { name: 'demo', dependencies: { [PACKAGE]: '^1.2.0' } })
-      await expect(readDependencyRange(dir)).resolves.toBeUndefined()
+      await expect(readDependencyRange(dir)).resolves.toBe('^1.2.0')
+    })
+
+    it('dependencies 与 peer 都在时取 dependencies', async () => {
+      const dir = await repo('both', {
+        name: 'demo',
+        dependencies: { [PACKAGE]: '^2.0.0' },
+        peerDependencies: { [PACKAGE]: '^1.2.0' },
+      })
+      await expect(readDependencyRange(dir)).resolves.toBe('^2.0.0')
     })
 
     it('最近的那份 package.json 不可解析 ⇒ 不去读更远的那份', async () => {

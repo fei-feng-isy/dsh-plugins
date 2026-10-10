@@ -351,6 +351,9 @@ importers:
 
   mem/packages/plugin:
     dependencies:
+      '@avantf/dsh-plugin-base':
+        specifier: '>=0.3.0 <1.0.0'
+        version: link:../../../base/plugin-base
       exceljs:
         specifier: 'catalog:'
         version: 4.4.0
@@ -361,9 +364,6 @@ importers:
         specifier: 'catalog:'
         version: 2.9.1
     devDependencies:
-      '@avantf/dsh-plugin-base':
-        specifier: '>=0.3.0 <1.0.0'
-        version: link:../../../base/plugin-base
       '@avantf/mem':
         specifier: workspace:*
         version: link:../core
@@ -456,10 +456,11 @@ importers:
         version: 2.1.9(@types/node@22.20.4)(lightningcss@1.33.0)
 
   mission/packages/plugin:
-    devDependencies:
+    dependencies:
       '@avantf/dsh-plugin-base':
         specifier: '>=0.3.0 <1.0.0'
         version: link:../../../base/plugin-base
+    devDependencies:
       '@avantf/mission-core':
         specifier: workspace:*
         version: link:../core
