@@ -14,9 +14,9 @@ export const OWNER_TOOL_DENY: readonly string[] = [
 /**
  * Everything an executor must not hold, grouped by WHY it is dangerous here:
  *
- * - `subagent` / `subagent_fork` start mission the TREE cannot see (no node, no result, no convergence),
- *   and `send_message` delivers into sessions outside this mission — the owner's included, which is how an
- *   executor would report around the tree instead of through `submit_mission`.
+ * - `send_message` delivers into sessions outside this mission — the owner's included, which is how an
+ *   executor would report around the tree instead of through `submit_mission`. That is the bypass
+ *   `submit_mission` alone cannot prevent, and the reason this name stays.
  * - `create_goal` / `get_goal` / `update_goal` are the OWNER's: an executor that can read or rewrite
  *   the goal it is judged against is answering to a different objective than the one the tree
  *   dispatched, and `dsh-tool-goal`'s static section rides the owner's preset into the executor
@@ -24,15 +24,16 @@ export const OWNER_TOOL_DENY: readonly string[] = [
  * - the last six are the owner's mission-tree face; an executor touches the tree only through
  *   `note_mission` / `decompose_mission` / `submit_mission`.
  *
- * Only `subagent` / `subagent_fork` actually SPAWN a session — the rest are refusals of access, not
- * of spawning, and the comment here used to claim otherwise for all six.
+ * `subagent` / `subagent_fork` are deliberately ABSENT: spawning a child is how one node works in
+ * parallel INTERNALLY, and the tree only ever reads nodes and results — a child the engine cannot see
+ * cannot break convergence. What an executor gives up by spawning is attribution/observability, not the
+ * tree's integrity, and `submit_mission` stays the one exit either way. Because `send_message` IS denied,
+ * the worker prompt tells it to take parallel results synchronously (`run_in_background: false`).
  *
  * `note_mission` is deliberately absent — `decompose_mission` needs it.
  */
 export const WORKER_TOOL_DENY: readonly string[] = [
   'send_message',
-  'subagent',
-  'subagent_fork',
   'create_goal',
   'get_goal',
   'update_goal',

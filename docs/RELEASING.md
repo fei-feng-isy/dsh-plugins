@@ -1,6 +1,6 @@
 # 发布（根工作区）
 
-三个**可发布包**，按顺序 **base → 插件** 发布（插件把 base 声明为**同区间的普通运行期依赖**——
+四个**可发布包**，按顺序 **base → 插件** 发布（插件把 base 声明为**同区间的普通运行期依赖**——
 装插件即自动带底座；base 不在 registry 上时，插件那一单直接解析失败）：
 
 | 顺序 | 包 | 目录 |
@@ -8,6 +8,7 @@
 | 1 | `@avantf/dsh-plugin-base` | `base/plugin-base` |
 | 2 | `@avantf/dsh-mem` | `mem/packages/plugin` |
 | 3 | `@avantf/dsh-mission` | `mission/packages/plugin` |
+| 4 | `@avantf/dsh-identity` | `identity/packages/plugin` |
 
 **自 2026-10-03 起直接从本仓发布**：不再投影到 `../dsh-plugins-rc`，也不再有"发布树"这一步
 （第五轮复审 §1.5/§7.11，用户拍板：RC 只贡献 drift 风险，dev 直接 publish）。
@@ -36,17 +37,17 @@ RC（`../dsh-plugins-rc`）当初存在的唯一理由是产生三处差异：
 
 | 档 | 命令 | 什么时候 |
 | --- | --- | --- |
-| **快档** | `pnpm check:fast <base\|mem\|mission\|root>`（不给树名则从 git 自动判） | 日常每个派发任务结束后（默认档） |
+| **快档** | `pnpm check:fast <base\|mem\|mission\|identity\|root>`（不给树名则从 git 自动判） | 日常每个派发任务结束后（默认档） |
 | **发版档** | `pnpm check:release` | 发版前；改 `base/**`、发布面/接口、门禁脚本或版本号 |
 
 - **快档**：只覆盖被改到的那棵树 —— build + typecheck + 该树**一次**全套测试，再加
   `guard` + 四个自测 + `prepublish:assert`。**不跑** `old-dsh` / pack / mount smoke /
   根 `release:check`。它证明"这棵树的源码编译、类型自洽、测试通过"，**不证明**"产物能挂、在
   dsh 下限上能跑、发布面自洽"。
-- **发版档**：三个包的严格门禁（含 pack 与 `old-dsh` 下限门）+ 两棵树的 mount smoke
+- **发版档**：每个包的严格门禁（含 pack 与 `old-dsh` 下限门）+ 各插件树的 mount smoke
   （在各自严格门禁里）+ 根 `release:check` + `prepublish:assert`。
 - 两档都去重：一条流程里测试只跑一次，base 在快档里只构建一次。发版档仍会看到各树严格门禁
-  内部重建 base——那是三棵树各自的黑盒门禁，根脚本不修改三棵树，去不掉（见 `CLOSURE-TIERS.md`）。
+  内部重建 base——那是各树自己的黑盒门禁，根脚本不修改各树，去不掉（见 `CLOSURE-TIERS.md`）。
 
 ## 怎么发
 
@@ -55,21 +56,23 @@ RC（`../dsh-plugins-rc`）当初存在的唯一理由是产生三处差异：
 pnpm version:set base  <x.y.z>
 pnpm version:set mem   <x.y.z>
 pnpm version:set mission <x.y.z>
+pnpm version:set identity <x.y.z>
 pnpm version:check                  # 每组版本只记在一处；base manifest 与 baked VERSION 一致
 
-# 1b) 动了 base 组的版本时：重新 vendor 两棵插件的 src/envinit-bootstrap.{js,d.ts} 并**一起提交**。
+# 1b) 动了 base 组的版本时：重新 vendor 各插件树的 src/envinit-bootstrap.{js,d.ts} 并**一起提交**。
 #     它内嵌 base 的 VERSION、会随产物内联（家族硬约束 1），任一门禁 / build:dsh 会自动刷新它，
 #     所以"版本提交"之后工作区会多出这两份派生物——漏提交就会让入库的树与 tarball 不一致
 #     （0.4.1 发版时踩过一次，见 93c2a5b）。
-pnpm build:dsh base && pnpm build:dsh mem && pnpm build:dsh mission
+pnpm build:dsh base && pnpm build:dsh mem && pnpm build:dsh mission && pnpm build:dsh identity
 
-# 2) 发版档（三个严格门禁 + 两棵树 mount smoke + 根发布面 + 发布前断言）
+# 2) 发版档（每个严格门禁 + 各插件树 mount smoke + 根发布面 + 发布前断言）
 pnpm check:release
 # 需要单独重跑某一包时，仍可用它自己的门禁（链接 → 编译 → 类型检查 → 测试 → pack，
 # mem/mission 还含真 Cordis mount smoke）：
 pnpm release:check:base
 pnpm release:check:mem
 pnpm release:check:mission
+pnpm release:check:identity
 
 # 3) 需要时单独跑发布前断言（发版档已包含；各包的 prepublishOnly 也会自动跑）
 node scripts/prepublish-assert.mjs
@@ -80,6 +83,7 @@ node scripts/prepublish-assert.mjs --tarball dist/avantf-dsh-mem-<x.y.z>.tgz
 pnpm -C base/plugin-base publish --access public
 pnpm -C mem/packages/plugin publish --access public
 pnpm -C mission/packages/plugin publish --access public
+pnpm -C identity/packages/plugin publish --access public
 ```
 
 mem 发版前还要把 `mem/CHANGELOG.md` 的版本段切好（mem 自己的严格门禁会检查，
@@ -91,7 +95,7 @@ mem 发版前还要把 `mem/CHANGELOG.md` 的版本段切好（mem 自己的严�
 
 | 断言 | 替代的 RC 差异 | 拦住什么 |
 | --- | --- | --- |
-| 可发布集合恰好是三个（base + 两个插件），其余 workspace 包必须 `private: true`，根 manifest 必须 private | 排除 RC 工具链 | 内部引擎包误发、根工作区/发布工具链被发出去 |
+| 可发布集合恰好是四个（base + 三个插件），其余 workspace 包必须 `private: true`，根 manifest 必须 private | 排除 RC 工具链 | 内部引擎包误发、根工作区/发布工具链被发出去 |
 | 每组版本只记在**一份** manifest 里、是合法 semver、私有 manifest 不重复记它、base 的 baked `VERSION` 与 manifest 一致 | 版本盖章 | 版本没盖、盖错、base 两处版本分叉 |
 | 每个可发布包都有自己的 `README.md`，首行是 `# <包名>` | 生成 README | README 没随包、复制/改名串了包页 |
 | 没有任何可发布包通过 `files` 装进（或指向）本仓的发布工具链；`files` 不许逃出包目录 | 排除 RC 工具链 | 产物里出现发布专用工具 |
@@ -100,7 +104,7 @@ mem 发版前还要把 `mem/CHANGELOG.md` 的版本段切好（mem 自己的严�
 
 ```bash
 node scripts/prepublish-assert.mjs                              # 整张发布面
-node scripts/prepublish-assert.mjs --package @avantf/dsh-mem    # 顺带确认这是三个之一
+node scripts/prepublish-assert.mjs --package @avantf/dsh-mem    # 顺带确认这是四个之一
 node scripts/prepublish-assert.mjs --tarball <path.tgz>         # 追加"真实产物字节"断言
 ```
 

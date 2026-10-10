@@ -2111,17 +2111,38 @@ export class AvantfMissionHost extends TypertRemoteService {
    * The subset of one face's names this deployment offers. `toolFilter` (and `restrict()`) THROWS on a
    * name no tool provides, so a hardcoded list would fail every dispatch in a composition without (say)
    * the goal tools. Names a child cannot inherit are caught by the retry in `startChild`.
+   *
+   * A dropped name is a REAL divergence between the face this build intends and the one it sends, so it
+   * is reported rather than swallowed: silence here is how the intended face and the delivered one drifted
+   * apart unobserved (measured: 11 of 12 names went out). This does NOT double up with `startChild`: that
+   * retry handles a name the PARENT has but the child cannot inherit, while a name dropped here has no
+   * tool at all and could never be carried by any filter.
    */
-  private deniableFor(parent: Agent, names: readonly string[] = WORKER_TOOL_DENY): string[] {
+  private deniableFor(
+    parent: Agent,
+    names: readonly string[] = WORKER_TOOL_DENY,
+    face: 'worker' | 'owner' = 'worker',
+  ): string[] {
     const tools = this.ctx.get('tools')
     if (tools === undefined) return []
-    return names.filter((name) => tools.get(name, parent) !== undefined)
+    const kept: string[] = []
+    const dropped: string[] = []
+    for (const name of names) {
+      if (tools.get(name, parent) === undefined) dropped.push(name)
+      else kept.push(name)
+    }
+    if (dropped.length > 0) {
+      this.log.warn(
+        `${face} tool face: dropped ${String(dropped.length)} name${dropped.length > 1 ? 's' : ''} this deployment does not provide — ${dropped.join(', ')}`,
+      )
+    }
+    return kept
   }
 
   /** The owner-side face: executor-only tools, filtered to the names this deployment offers
    *  (`restrict()` throws, and one throw would cost the owner its whole turn). */
   ownerFaceFor(agent: Agent): readonly string[] {
-    return this.deniableFor(agent, OWNER_TOOL_DENY)
+    return this.deniableFor(agent, OWNER_TOOL_DENY, 'owner')
   }
 
   private async interruptWorker(sessionId: string, ownerSessionId?: string): Promise<void> {

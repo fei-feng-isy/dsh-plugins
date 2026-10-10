@@ -673,9 +673,7 @@ submit_result(node, result):
 ```yaml
 toolFilter:
   deny:
-    - send_message          # 摘掉消息回传
-    - subagent              # 摘掉委派 —— 任务推进只能由任务引擎进行
-    - subagent_fork
+    - send_message          # 摘掉消息回传 —— 真正防"绕过树汇报"的是它
     - create_goal           # 摘掉目标工具 —— goal 属于 master 的意图层
     - get_goal
     - update_goal
@@ -685,14 +683,19 @@ toolFilter:
 
 | 摘掉的 | 不摘的后果 |
 |---|---|
-| `send_message` | 结果会同时存在于树和消息里，且 prompt 里那段"完成后把结果发给父 agent"的引导被追加，与"结果只走树"冲突 |
-| `subagent` / `subagent_fork` | worker 可以自己 spawn 一个**不在树上**的执行者：引擎不知道它、结果不回填节点、失败无人回收，且递归绕过所有配额（§9.2 的节点上限按树节点计数）|
+| `send_message` | 结果会同时存在于树和消息里，且 prompt 里那段"完成后把结果发给父 agent"的引导被追加，与"结果只走树"冲突；它还能把消息投进**本任务之外**的会话（包括 owner 自己的），那才是"绕过树汇报" |
 | `create_goal` / `get_goal` / `update_goal` | goal 是 master 的意图层，worker 没有业务；而且 goal 的写操作本就要求 `requireDirectHuman`，worker 调用只会浪费一个回合。**注意**：摘工具摘不掉那段指引文本，见 §5.4.2 |
 | 六个 owner 工具（`create_mission` / `adjust_mission` / `mission_result` / `list_missions` / `finish_mission` / `cancel_mission`） | 执行者用不上它们（调用只会被 `no-authority` / `not-owner` 拒），而读到全树会让它看见兄弟节点进度 —— 与 §5.1 刻意不给 worker 兄弟进度的意图冲突（见 §5.5）|
 
+**`subagent` / `subagent_fork` 属于允许的内部扇出（2026-10-10 修订，已从 deny 列表移除）。** 起子 agent 是节点
+**内部**的实现手段，而树只认节点与结果 —— 一个引擎看不见的子 agent 不会破坏收敛。失去的是归因与可观测性（子
+agent 不在树上、不占并发配额、失败不由引擎回收），不是树的完整性；`submit_mission` 仍是唯一出口。真正防"绕过
+树汇报"的是 `send_message`，所以那条留着。worker 提示词相应补了一句：要并行就派生 `subagent` 并用
+`run_in_background: false` 同步取结果（`send_message` 不可用，不能靠它取回结果）。
+
 **`note_mission` 不在摘除之列**：记录本轮自己的分析正是执行者的本职，而且 `decompose_mission` 会拒绝一个没写过分析的拆解（§5.3.2）。它属于 executor 面孔。
 
-**已知缺口：`workflow` / `ralph` 没有被摘。** 上面第二行的理由（"worker 不能自己 spawn 一个不在树上的执行者"）对这两个工具同样成立 —— `workflow` 的 `agent()` 与 `ralph` 的每一轮都会起子 agent，它们不在树上、结果不回填节点、失败无人回收，递归也绕开节点配额。当前 deny 列表只有 `send_message` / `subagent` / `subagent_fork` / 三个 goal 工具，所以**隔离只覆盖了主要几条路，不是密不透风**。要不要一并摘掉是个取舍：摘了隔离严密，代价是节点内部无法再自行扇出（见下）。
+**`workflow` / `ralph` 也在同一口径之内（2026-09-20 决定，见下）。** 它们与 `subagent` / `subagent_fork` 同类：都会起引擎看不见的子 agent。当前 deny 列表是 `send_message` / 三个 goal 工具 / 六个 owner 工具 —— 「引擎是唯一派活者」这条不变量**只在树这一层成立**，不延伸到 worker 内部的自发扇出；这条决定的代价与记账入口见下面的记录。
 
 > **决定（2026-09-20）：不摘，保持现状。** 口径是「worker 怎么做子任务是 worker 的事，引擎只关心任务结果」。
 > 引擎对 worker 的契约只有一条 —— 最终凭 `submit_mission` 把结果交回它持有的那个节点；节点内部用什么手段
@@ -702,6 +705,7 @@ toolFilter:
 > 上限（`CAPACITY.maxNodesPerTree = 200`）现在是硬约束，`decompose` 超限即拒。它不能把 `workflow` / `ralph`
 > 起的子 agent 拉回树上（引擎根本看不见它们），但保证**树这一层**的节点数有天花板，而不是只靠"深度 8"这个
 > 要到第八层才生效的限制。若将来要把内部扇出也计入，先让执行者把扇出规模报给节点（改动在工具面，不在 deny）。
+> **并入（2026-10-10）**：同一口径扩展到 `subagent` / `subagent_fork` —— 两者已从 deny 列表移除（见 §5.4.1 开头）。
 
 **它挡住的是什么（若摘掉 workflow/ralph 会失去的能力）**：
 
@@ -723,7 +727,7 @@ toolFilter:
 | 面孔 | 判据（与 `create_mission` 的授权判据同源） | 看得见 | 看不见 |
 |---|---|---|---|
 | **owner** | 非子代理会话 | `create_mission`、`adjust_mission`、`mission_result`、`list_missions`、`finish_mission`、`cancel_mission` | `note_mission`、`decompose_mission`、`submit_mission` |
-| **executor** | 子代理会话 | `note_mission`、`decompose_mission`、`submit_mission` | 上面那六个 + `send_message`/`subagent`/`subagent_fork`/三个 goal 工具 |
+| **executor** | 子代理会话 | `note_mission`、`decompose_mission`、`submit_mission`；部署提供时还有 `subagent` / `subagent_fork`（节点内部扇出） | 上面那六个 + `send_message` + 三个 goal 工具 |
 
 **为什么要有这张表**：不做的话每个 agent 的 schema 里都带着另一半用不了的工具 —— 更糟的是"可见但必然被拒"：`create_mission` 对执行者是 `no-authority`，`note_mission` / `decompose_mission` / `submit_mission` 对 owner 是 `not-owner`。另外，worker 能读到别的节点（`list_missions` / `mission_result`）与 §5.1 "worker 的 prompt 不含兄弟节点进度"的意图相矛盾 —— 一个能看到兄弟进度的执行者，可能会去等它们。
 
@@ -1079,7 +1083,7 @@ agent 层（挂在 master 的 preset 行）：
 
 **owner 工具对 worker 不可见**（§5.5 的两张面孔把它变成了机制，不再只是意图），靠的是两个机制叠加（见 §10.1 的实施口径）：
 宿主平面注册一次 + **`create_mission` 拒绝非顶层会话**。后者是必须的：worker 若能建根，就等于造了一个引擎看不见的执行者
-（没人给它派活、没人回收、结果不回填任何节点，还绕开配额）—— 与摘掉 `subagent` / `subagent_fork` 要防的是同一件事。
+（没人给它派活、没人回收、结果不回填任何节点，还绕开配额）—— 那是造出一个**引擎看不见的根**，与节点内部自发的子 agent 不是一回事（后者是执行者自己的实现手段、不对树负责，见 §5.4.1）。
 
 ### 8.2 取消、进度展示与可见性
 
@@ -1544,7 +1548,7 @@ wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSche
 | 需要 | 用哪个 |
 |---|---|
 | 生成任务单元 | 既有子 agent 生成能力（`spawn` 语义：空对话、continuable） |
-| 限制 worker 工具面 | 子 agent 请求的 `toolFilter`（`deny`：`send_message` / `subagent` / `subagent_fork` / 三个 goal 工具）—— 同时使 `send_message` 那段回传引导**不被追加** |
+| 限制 worker 工具面 | 子 agent 请求的 `toolFilter`（`deny`：`send_message` / 三个 goal 工具 / 六个 owner 工具；`subagent` / `subagent_fork` 允许，见 §5.4.1）—— 同时使 `send_message` 那段回传引导**不被追加** |
 | 限制 worker 的工具面（含 goal） | 子 agent 请求的 `toolFilter`（见 §5.4）；goal 的**指引文本**无法干净移除，作为已知限制记录在 §5.4.2 |
 | 预留 child id（关闭 spawn/bind 窗口） | `ContinuableStartSpec.childId`（调用方预留，物化前即可记录 provisioning） |
 | 树的持久化 | 宿主 KV（引擎独占打开该域） |
@@ -1565,7 +1569,7 @@ wire 侧同样要声明：`wire.ts` 的 `snapshotResultSchema`/`detailResultSche
 | Step | 内容 | 验收 |
 |---|---|---|
 | 1 | 宿主插件骨架 + KV 域 + 节点模型（状态机、可派活计算、树记录的 `owner_session_id`）| 建树 / 拆解 / 可派活计算正确；重启后树仍在 |
-| 2 | 派活与绑定（KV 固化 `claimed_by`、批次去重、分派时解析活性）+ 节点 prompt 构造器（含状态尾段）+ `toolFilter` 工具面 | 同一节点不会同时有两个在跑；杀掉绑定者后节点在下次分派时被回收为 `interrupted`；迟到写入被拒；**热重载后不重派**（agent 仍在）；worker 的 prompt 里没有 `send_message` / 委派 / goal 工具 |
+| 2 | 派活与绑定（KV 固化 `claimed_by`、批次去重、分派时解析活性）+ 节点 prompt 构造器（含状态尾段）+ `toolFilter` 工具面 | 同一节点不会同时有两个在跑；杀掉绑定者后节点在下次分派时被回收为 `interrupted`；迟到写入被拒；**热重载后不重派**（agent 仍在）；worker 的 prompt 里没有 `send_message` / goal 工具（子代理可自行派生，见 §5.4.1） |
 | 3 | 工具面（拆解 / 提交 / 读结果 / 收尾）+ 互斥与配额校验 + 拆解去重 + 超长结果落盘 | 三层任务跑到根完成；每个叶任务对应一个新会话；子会话看不到 master 对话；`submit_result` 与 `decompose` 互相拒绝；深度 8 / 子任务 6 / `attempts` 5 各自生效 |
 | 4 | 指导层（锚定分段 + 去重）+ 根完成汇报 + pre-step 过滤与放行 + 取消子树 | 状态不变时**不产生新事件**；状态变化时恰好一条；根终态时 master 收到一次唤醒；用户消息既不丢也不被搁置（一次工具调用之后 turn 必须继续到模型自己收尾）|
 | 4.5 | **纠偏下传**：根上写的纠偏必须出现在其后代 worker 的 prompt 里（任务链携带）；取消子任务后，**所有**受影响父节点仍可派发；汇总轮读到被取消的子任务时能看到状态与理由 | 单测与挂载级测试各一条（复用树上取消 → 另一父节点变 `ready`；纠偏后后代 prompt 断言；取消后汇总 prompt 断言） |

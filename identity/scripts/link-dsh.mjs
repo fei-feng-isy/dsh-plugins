@@ -1,0 +1,46 @@
+#!/usr/bin/env node
+/**
+ * Link the DSH peer packages into this plugin's `packages/plugin/node_modules` — from the INSTALLED
+ * dsh, and nowhere else: the plugin is installed into a profile as a `link:` dependency, so these
+ * links are both the compilation target and the runtime identity the live host shares, and no harness
+ * source checkout is read.
+ *
+ * The shared implementation (source resolution, the fail-closed missing-peer policy, the version
+ * bake) lives in `scripts/lib/link-dsh.mjs`; this entry supplies identity's peer list. Toolchain
+ * packages (`typescript` / `vitest`) and `zod` come from the workspace install; `zod` is pinned in
+ * `pnpm-workspace.yaml` to the release the installed dsh ships.
+ *
+ *   node scripts/link-dsh.mjs                  # the globally installed dsh
+ *   node scripts/link-dsh.mjs --runtime <dir>  # an explicit installation
+ *   node scripts/link-dsh.mjs --no-bake        # link only; do not write the "compiled against" record
+ */
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { runLinkDsh } from '../../scripts/lib/link-dsh.mjs'
+
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+/**
+ * Every `@deepseek-ai/*` package this plugin compiles against.
+ *
+ * The `dsh-*` half of this list IS the gate's version list: `build-versions.mjs` bakes every linked
+ * `dsh-*` package, and `scripts/lib/pack-plugin.mjs` asserts the bake and `VERSION_PACKAGES`
+ * (`src/versions.ts`) name the SAME set both ways. So adding a link means adding the name there too.
+ *
+ * `dsh-scope` is here for the mechanism spec (`createScope`), and `dsh-tools` because the release
+ * gate requires a baked version for it — the plugin itself imports neither at runtime.
+ */
+const LINKS = [
+  'cordis',
+  'schemastery',
+  'dsh-scope',
+  'dsh-system-prompt',
+  'dsh-tools',
+  'dsh-typert-protocol',
+]
+
+runLinkDsh({
+  repo,
+  links: LINKS,
+  bakeNote: '(the compatibility gate\'s "compiled against" side)',
+})

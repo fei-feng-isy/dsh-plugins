@@ -1,0 +1,21 @@
+{
+  "name": "avantf-identity",
+  "private": true,
+  "description": "@avantf/identity — a DSH-native identity plugin: three editable files (IDENTITY / SOUL / RULES) replace the harness identity section of the system prompt, per profile and multi-lingual presets included",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "test": "pnpm -r --filter \"./packages/*\" run test",
+    "build:base": "pnpm -C ../base/plugin-base build",
+    "build:dsh": "pnpm build:base && node scripts/build-plugin.mjs",
+    "pack:plugin": "node scripts/pack-plugin.mjs",
+    "release:check": "pnpm build:base && node scripts/release-check.mjs",
+    "check:old-dsh": "node ../scripts/check-old-dsh.mjs identity",
+    "clean": "node ../scripts/clean.mjs --group identity"
+  },
+  "license": "MIT"
+}

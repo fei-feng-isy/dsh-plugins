@@ -5,10 +5,10 @@ on:
     branches: [master]
   pull_request:
 
-# The merged workspace: base/ (one published package), mem/ and mission/ (one published plugin each).
+# The merged workspace: base/ (one published package), mem/ / mission/ / identity/ (one published plugin each).
 #
 # What runs here: `pnpm install` → build → typecheck → test → guard → version:check, plus the
-# publish-surface check, and — in its own job, `mount-smoke` — `pnpm build:dsh` for BOTH plugin trees,
+# publish-surface check, and — in its own job, `mount-smoke` — `pnpm build:dsh` for EVERY plugin tree,
 # which builds the base and then mounts the plugin in a real Cordis context. That moves the family's
 # core promise ("it really mounts") out of the by-hand layer and into the enforced one.
 #
@@ -77,7 +77,7 @@ jobs:
       # that keep the two copies together.
       - name: Version tool self-tests (manifest ↔ baked bootstrap constant)
         run: node scripts/version.test.mjs
-      - name: Boundary guard (mem/ and mission/ never import each other)
+      - name: Boundary guard (no plugin tree imports another)
         run: pnpm guard
       # Each group records its version in exactly ONE carrier manifest; this catches a second copy
       # or a bump that missed the carrier.
@@ -93,9 +93,9 @@ jobs:
         run: pnpm proof:base-swap
 
   # A separate job on purpose: `build-test` proves the source COMPILES and passes its tests, this one
-  # proves the built artifact actually MOUNTS. `pnpm build:dsh mem` / `pnpm build:dsh mission` each
-  # build the base first, then run that tree's mount smoke against the installed dsh's real Cordis
-  # context — the host service, the model tools and the Typert Remote must all register. Nothing else
+  # proves the built artifact actually MOUNTS. `pnpm build:dsh <tree>` builds the base first, then runs
+  # that tree's mount smoke against the installed dsh's real Cordis context — the host service, the
+  # model tools / prompt section and the Typert Remote must all register. Nothing else
   # is repeated here (no `pnpm -r build`, no typecheck, no test): the two builds ARE the point, and
   # the pnpm store is shared with `build-test` through `cache: pnpm`.
   #
@@ -105,8 +105,8 @@ jobs:
   # load` or `the installed dsh peers were not found` is a version/install failure, not a mount bug.
   mount-smoke:
     runs-on: ubuntu-latest
-    # Two full plugin builds (each rebuilds the base) plus two real Cordis mounts: ~4x the observed
-    # end-to-end runtime, so this bounds a hung mount rather than normal work.
+    # Three full plugin builds (each rebuilds the base) plus three real Cordis mounts: several times
+    # the observed end-to-end runtime, so this bounds a hung mount rather than normal work.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -143,3 +143,8 @@ jobs:
           set -o pipefail
           pnpm build:dsh mission 2>&1 | tee mount-mission.log
           grep -q 'MOUNT SMOKE OK' mount-mission.log
+      - name: Mount smoke — identity (@avantf/dsh-identity)
+        run: |
+          set -o pipefail
+          pnpm build:dsh identity 2>&1 | tee mount-identity.log
+          grep -q 'MOUNT SMOKE OK' mount-identity.log

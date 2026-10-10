@@ -77,6 +77,18 @@ describe('execution prompt', () => {
     expect(prompt).toContain('不要等')
   })
 
+  it('tells the executor how to parallelize, since send_message is refused to it', () => {
+    // The worker's face denies `send_message`, so parallel work inside one node goes through `subagent`;
+    // without this line the model re-derives the blocked report-to-parent path and wastes a turn.
+    const prompt = buildWorkerPrompt(view())
+    expect(prompt).toContain('subagent')
+    expect(prompt).toContain('run_in_background: false')
+    expect(prompt).toContain('send_message')
+    // One sentence added, not a rewritten tail: the two endings above stay the only exits.
+    expect(prompt).toContain('submit_mission')
+    expect(prompt).toContain('decompose_mission')
+  })
+
   it('warns an executor at the depth ceiling, and only there', () => {
     // The engine refuses a decomposition at depth `maxDepth`, and before this line the refusal was the
     // only place that fact existed: the executor spent `note_mission` + `decompose_mission` on a call that

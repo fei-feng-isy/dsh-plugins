@@ -664,7 +664,7 @@ function workspaceRoot(repo) {
   }
 }
 
-/** Every source text under `<workspace>/{base,mem,mission}` — the corpus the dead-export observation searches. */
+/** Every source text under `<workspace>/{base,mem,mission,identity}` — the corpus the dead-export observation searches. */
 function repoSourceTexts(repo) {
   const texts = []
   const walk = (dir) => {
@@ -680,7 +680,7 @@ function repoSourceTexts(repo) {
       try { texts.push(readFileSync(path, 'utf8')) } catch { /* an unreadable source excludes nothing */ }
     }
   }
-  for (const tree of ['base', 'mem', 'mission']) walk(join(repo, tree))
+  for (const tree of ['base', 'mem', 'mission', 'identity']) walk(join(repo, tree))
   return texts
 }
 
@@ -1064,12 +1064,16 @@ export function assertTarball(config, tarball) {
       if (!candidates.some((candidate) => shippedEntries.has(candidate))) dangling.push(`${entry} → ${specifier}`)
     }
   }
-  const carried = contents.filter((entry) => entry.startsWith(`package/${config.carriedTypesDir}/`))
-  if (carried.length === 0) {
-    fail(`tarball: no ${config.carriedTypesDir}/**/*.d.ts shipped — the engine's declarations were not carried (or \`files\` dropped them), so the declared types still point at unpublished packages`)
-  }
-  if (relativeSpecifiers === 0 && carried.length > 0) {
-    fail(`tarball: the shipped declaration tree carries ${config.carriedTypesDir}/ but no relative specifier was found — the closure scan is broken, not the package`)
+  // A tree with NO unpublished engine (identity) has nothing to carry, and says so by omitting
+  // `carriedTypesDir`. Asserting it would fail a package whose declarations are already complete.
+  if (config.carriedTypesDir !== undefined) {
+    const carried = contents.filter((entry) => entry.startsWith(`package/${config.carriedTypesDir}/`))
+    if (carried.length === 0) {
+      fail(`tarball: no ${config.carriedTypesDir}/**/*.d.ts shipped — the engine's declarations were not carried (or \`files\` dropped them), so the declared types still point at unpublished packages`)
+    }
+    if (relativeSpecifiers === 0 && carried.length > 0) {
+      fail(`tarball: the shipped declaration tree carries ${config.carriedTypesDir}/ but no relative specifier was found — the closure scan is broken, not the package`)
+    }
   }
   if (dangling.length > 0) {
     fail(`tarball: ${String(dangling.length)} dangling relative import(s) in the shipped declarations — a repoint or a \`files\` pattern would ship a specifier that resolves to nothing: ${dangling.slice(0, 5).join(', ')}`)

@@ -1,0 +1,16 @@
+# Build output
+node_modules/
+packages/*/lib/
+release/*.tgz
+dist/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Test scratch
+*.log

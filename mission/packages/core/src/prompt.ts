@@ -166,6 +166,8 @@ const EXECUTE_TAIL = [
   '3. 如果上面有纠偏消息、或发现原方向作废：按新方向重新规划。要拆解时先重新 `note_mission`（新方向不需要拆解时直接',
   '   `submit_mission`）。已经有子任务时说明它们都已终态，直接重新拆解即可。然后停。',
   '',
+  '要并行就派生 `subagent`，并用 `run_in_background: false` 同步取结果（或等它 settle 后读通知）；`send_message` 对你不可用。',
+  '',
   '每次执行只有一个结局：',
   '- `submit_mission(node_id, result)`：任务完成。',
   '- `decompose_mission(node_id, children)`：需要前置条件；本任务等它们终态后会被重新派发。',

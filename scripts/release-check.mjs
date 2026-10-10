@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 /**
  * The WORKSPACE-level release gate: what must be true of the merged repository before any of its
- * three packages is published.
+ * publishable packages is published.
  *
- * The per-package gates (`pnpm release:check:mem`, `pnpm release:check:mission`, and the base's own
- * `release:check`) prove each tree builds, tests and packs. This script proves the four things that
- * only make sense once `base/`, `mem/` and `mission/` are one workspace:
+ * The per-package gates (`pnpm release:check:mem`, `pnpm release:check:mission`,
+ * `pnpm release:check:identity`, and the base's own `release:check`) prove each tree builds, tests and
+ * packs. This script proves the four things that only make sense once `base/` and the plugin trees are
+ * one workspace:
  *
- *   1. **The publishable set is exactly three packages.** `@avantf/dsh-plugin-base`,
- *      `@avantf/dsh-mem`, `@avantf/dsh-mission` — and every other workspace package is `private: true`.
+ *   1. **The publishable set is exactly those four packages.** `@avantf/dsh-plugin-base`,
+ *      `@avantf/dsh-mem`, `@avantf/dsh-mission`, `@avantf/dsh-identity` — and every other workspace
+ *      package is `private: true`.
  *      The merged tree contains a dozen packages (engines, the kit, the CLI/MCP), and a missing
  *      `private` flag publishes an internal package by accident the first time someone runs a
  *      recursive publish.
@@ -89,21 +91,23 @@ const notes = []
 const fail = (message) => problems.push(message)
 const note = (message) => notes.push(message)
 
-// ── the three packages that may be published, and where they live ────────────────────────────────
+// ── the packages that may be published, and where they live ──────────────────────────────────────
 /** dir (relative to the repo) → package name. Order is the PUBLISH order (base first). */
 const PUBLISHABLE = new Map([
   ['base/plugin-base', '@avantf/dsh-plugin-base'],
   ['mem/packages/plugin', '@avantf/dsh-mem'],
   ['mission/packages/plugin', '@avantf/dsh-mission'],
+  ['identity/packages/plugin', '@avantf/dsh-identity'],
 ])
-/** The workspace globs the three live under; a package anywhere else is build output, never shipped. */
-const WORKSPACE_PATTERNS = ['base/*', 'mem/packages/*', 'mission/packages/*']
+/** The workspace globs the publishable packages live under; anywhere else is build output, never shipped. */
+const WORKSPACE_PATTERNS = ['base/*', 'mem/packages/*', 'mission/packages/*', 'identity/packages/*']
 
 const BASE_DIR = 'base/plugin-base'
 const BASE = '@avantf/dsh-plugin-base'
 const PLUGINS = [
   { dir: 'mem/packages/plugin', name: '@avantf/dsh-mem' },
   { dir: 'mission/packages/plugin', name: '@avantf/dsh-mission' },
+  { dir: 'identity/packages/plugin', name: '@avantf/dsh-identity' },
 ]
 
 function readJson(relative) {
@@ -430,7 +434,7 @@ if (problems.length > 0) {
   console.error(`\nrelease-check: FAILED (${problems.length} problem${problems.length === 1 ? '' : 's'})`)
   process.exit(1)
 }
-console.log('\nrelease-check ok — three publishable packages, base before plugins, one zod')
+console.log('\nrelease-check ok — four publishable packages, base before plugins, one zod')
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
 /**

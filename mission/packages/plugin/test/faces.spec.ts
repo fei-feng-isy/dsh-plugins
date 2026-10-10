@@ -38,6 +38,29 @@ describe('the face table', () => {
     expect(hiddenFromWorker.filter((name) => hiddenFromOwner.includes(name))).toEqual([])
   })
 
+  it('pins the worker face: internal delegation open, messaging and the owner half closed', () => {
+    // The exact list is a boundary, not a convenience — a name added or dropped here changes what every
+    // dispatched worker may do — so it is pinned rather than sampled.
+    expect([...WORKER_TOOL_DENY]).toEqual([
+      'send_message',
+      'create_goal',
+      'get_goal',
+      'update_goal',
+      'create_mission',
+      'adjust_mission',
+      'mission_result',
+      'list_missions',
+      'finish_mission',
+      'cancel_mission',
+    ])
+    // `subagent` / `subagent_fork` are deliberately ABSENT: a child spawned inside one node cannot break
+    // convergence (the tree reads nodes and results), whereas `send_message` could report AROUND the tree
+    // into the owner's own session, and the goal tools would let an executor answer to another objective.
+    // `submit_mission` stays the one exit either way.
+    expect(WORKER_TOOL_DENY).not.toContain('subagent')
+    expect(WORKER_TOOL_DENY).not.toContain('subagent_fork')
+  })
+
   it('keeps the owner tools with the owner and the executor tools with the executor', async () => {
     const names = await registeredNames()
     const ownerSees = names.filter((name) => !OWNER_TOOL_DENY.includes(name))

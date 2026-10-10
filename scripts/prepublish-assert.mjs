@@ -43,21 +43,22 @@ import { bakedVersionProblems } from './lib/bootstrap-version.mjs'
 import { repoRoot as repo } from './lib/plugins.mjs'
 import { versionState } from './lib/versions.mjs'
 
-/** The three packages that may be published, and where they live. Order is the PUBLISH order. */
+/** The packages that may be published, and where they live. Order is the PUBLISH order. */
 const PUBLISHABLE = new Map([
   ['base/plugin-base', '@avantf/dsh-plugin-base'],
   ['mem/packages/plugin', '@avantf/dsh-mem'],
   ['mission/packages/plugin', '@avantf/dsh-mission'],
+  ['identity/packages/plugin', '@avantf/dsh-identity'],
 ])
 
 /**
- * The workspace globs the three live under. Compared for EQUALITY with what `pnpm-workspace.yaml`
+ * The workspace globs the publishable packages live under. Compared for EQUALITY with what `pnpm-workspace.yaml`
  * declares: a new glob adds a subtree this gate would otherwise never look at, and a publishable
  * package inside it would escape "the rest stay private" without a trace. Kept in step with
  * `scripts/release-check.mjs` (which asserts the same equality as part of the full release gate);
  * this file's copy exists so a publish can assert the surface without running the whole gate.
  */
-const WORKSPACE_PATTERNS = ['base/*', 'mem/packages/*', 'mission/packages/*']
+const WORKSPACE_PATTERNS = ['base/*', 'mem/packages/*', 'mission/packages/*', 'identity/packages/*']
 
 /**
  * The files that made up the retired projection. They are named here so a future copy that rides a
@@ -156,7 +157,7 @@ function checkVersionStamping() {
   const found = state.problems.map((problem) => `version stamping: ${problem}`)
   found.push(...bakedVersionProblems(repo, state.versions).map((problem) => `version stamping: ${problem}`))
   const note = found.length === 0
-    ? `version stamped in one manifest per group (base ${state.versions.base}, mem ${state.versions.mem}, mission ${state.versions.mission})`
+    ? `version stamped in one manifest per group (base ${state.versions.base}, mem ${state.versions.mem}, mission ${state.versions.mission}, identity ${state.versions.identity})`
     : undefined
   return { problems: found, note }
 }
@@ -294,7 +295,7 @@ for (let index = 0; index < argv.length; index += 1) {
 }
 
 if (selected !== undefined && !PUBLISHABLE.has(selected) && ![...PUBLISHABLE.values()].includes(selected)) {
-  problems.push(`--package ${selected}: not one of the three publishable packages (${[...PUBLISHABLE.values()].join(', ')})`)
+  problems.push(`--package ${selected}: not one of the publishable packages (${[...PUBLISHABLE.values()].join(', ')})`)
 } else if (selected !== undefined) {
   notes.push(`--package ${selected}: is a publishable package`)
 }

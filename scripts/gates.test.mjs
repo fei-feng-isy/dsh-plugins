@@ -48,9 +48,14 @@ const BASE = '@avantf/dsh-plugin-base'
 // ── M7 · the version materializer writes ONLY the declared group's manifests ─────────────────────
 
 /**
- * A minimal two-group workspace with one private workspace-protocol target per group, as a real git
- * repository: `groupManifests` reads the TRACKED manifests, so the fixture has to be committed to the
- * index or nothing would be found.
+ * A minimal workspace carrying EVERY version group, with one private workspace-protocol target per
+ * group that has one, as a real git repository: `groupManifests` reads the TRACKED manifests, so the
+ * fixture has to be committed to the index or nothing would be found.
+ *
+ * Each group in `VERSION_GROUPS` needs its publishable manifest here — the all-group scan reports
+ * "group <g> has no publishable package" for a group the fixture does not carry, which is a fact about
+ * the fixture, not about the code under test. `identity` deliberately has NO workspace-protocol target,
+ * so the cross-group message below still spans the two groups that do.
  */
 function makeWorkspace() {
   const root = mkdtempSync(join(tmpdir(), 'dsh-versions-'))
@@ -76,6 +81,13 @@ function makeWorkspace() {
     devDependencies: { [BASE]: '>=3.0.0 <4.0.0', '@avantf/mission-core': 'workspace:*' },
   })
   write('mission/packages/core/package.json', { name: '@avantf/mission-core', private: true })
+  write('identity/package.json', { name: 'identity-workspace', private: true })
+  write('identity/packages/plugin/package.json', {
+    name: '@avantf/dsh-identity',
+    version: '0.1.0',
+    peerDependencies: { [BASE]: '>=3.0.0 <4.0.0' },
+    devDependencies: { [BASE]: '>=3.0.0 <4.0.0' },
+  })
   execFileSync('git', ['init', '-q'], { cwd: root })
   execFileSync('git', ['add', '-A'], { cwd: root })
   return root

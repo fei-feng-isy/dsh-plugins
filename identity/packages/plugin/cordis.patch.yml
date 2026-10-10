@@ -1,0 +1,13 @@
+# The BUNDLE layer of @avantf/dsh-identity: one row, inserted over whatever the profile root holds.
+#
+# A bundle is how a DSH host installs a plugin without hand-editing the profile: selecting this
+# package in `dsh.profile.bundles` (the plugin manager does that when it installs it) applies THIS
+# file as its own patch layer. Installing the package as a plain dependency and adding the same row
+# to the profile's own `cordis.patch.yml` by hand is the other, equally supported route — the two are
+# alternatives; do exactly one. Doing both is never a double mount, but it is not harmless either: on
+# the 0.1.5 line (still inside this package's peer range) the duplicate row id makes the profile tree
+# fail to load, and on the 0.1.7/0.2.0 lines the loader keys entries by id and merely leaves a
+# redundant row.
+- insert:
+    - id: avantf-identity
+      name: '@avantf/dsh-identity'

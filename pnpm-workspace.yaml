@@ -6,6 +6,8 @@ packages:
   - "mem/packages/*"
   # The mission-tree engine workspace (kept in its original shape).
   - "mission/packages/*"
+  # The identity plugin workspace (single package: the host half and the browser half).
+  - "identity/packages/*"
 autoInstallPeers: false
 
 # Link the workspace's own `@avantf/dsh-plugin-base` into the plugins, instead of trying to fetch

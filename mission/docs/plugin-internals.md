@@ -322,7 +322,7 @@ plugin 的测试用真实事件链驱动 `agent/pre-step`，且默认 decision �
 
 ## 已知限制
 
-- **worker 的隔离只覆盖主要几条路：`workflow` / `ralph` 没有被摘。** deny 列表是 `send_message` / `subagent` / `subagent_fork` / 三个 goal 工具（`create_mission` 可见但执行时被 `no-authority` 拒），而 `workflow` 的 `agent()` 与 `ralph` 的每一轮都会起子 agent —— 它们不在树上、结果不回填节点、失败无人回收，递归也绕开节点配额。要么把它们一并加进 deny（隔离严密，代价是节点内部不能再自行扇出：N 个同构条目只能串行或分轮拆解、结构化中间结果只能自己拼字符串塞进结果、独立视角与"迭代到判据满足"都没有工具），要么承认隔离是"防住主要几条路"。取舍列在设计文档 §5.4.1。
+- **worker 的内部扇出是允许的，只有 `send_message` / goal / 六个 owner 工具被摘。** deny 列表是 `send_message` / 三个 goal 工具 / 六个 owner 工具；`subagent` / `subagent_fork` / `workflow` / `ralph` 都不摘 —— 起子 agent 是节点内部的手段，树只认节点与结果，所以「引擎是唯一派活者」只在树这一层成立。代价如实记录：worker 自发的子 agent 不在树上、结果不回填节点、失败无人回收、递归也绕开节点配额（`CAPACITY.maxNodesPerTree = 200` 只保证树这一层有天花板）；失去的是归因与可观测性。口径与 2026-09-20 / 2026-10-10 两次决定见设计文档 §5.4.1。
 - **工具面按运行时裁决收窄，而不是按预检。** `toolFilter` 由运行时的 `tools.restrict()` 校验，而它能接受的名字集合与"父 agent 可见的名字集合"并不相等：子 agent 继承的是**父 agent 所在 preset 的组合**（`agentPresets.composeFrom` 把子作用域挂到 preset 的 mount scope），**不是父 agent 自己的作用域**。因此按 agent 平面注册的工具（例如 `tool-subagent` 在启用 standing `modelSelectionSettings` 时按 Agent 安装的 `subagent`）对父可见、对子不可继承，`restrict()` 会拒绝**整个** filter。本插件的对策：首次 `startContinuable` 失败且错误来自 `tools.restrict()` 时，**从名单里去掉被点名的工具并重试一次**（只失去那一个工具的隔离，而不是让整棵树因为派活失败烧完 attempts）。要完全避免，需要上游把这类工具注册到 preset 作用域。
 - **worker 会读到 `dsh-tool-goal` 的目标指引，但没有对应工具**（仅当该部署挂载了 goal 工具时）。 该插件的 `tool:goal` 段落是静态文本、不做作用域判断，而 worker 会加入 owner 的 preset 组合。无法从第三方插件干净遮蔽：同名段落会连 owner 一起替换，而它不导出自己的指引文本。工具面本身按部署收窄（deny 只列部署真实注册过的名字，未知名字会让 `tools.restrict()` 直接抛错）。后果有界（worker 调 goal 工具会以 `UNKNOWN_TOOL` 失败，且 `requireDirectHuman` 本就拒绝它），浪费一个回合而已；正确修法在上游——把那段改成 `(context) =>` provider，在工具不可见的作用域返回空串（`dsh-plan-mode` 的 `plan:policy` 就是这个写法）。
 
@@ -334,7 +334,7 @@ pnpm workers:usage -- --tree <root>   # 只看某棵树的节点
 pnpm workers:usage -- --strict        # 出现"调了不存在的工具"就非零退出（用于 CI/巡检）
 ```
 
-每个任务单元都是一次真实会话，所以**策略问题可以直接从落盘的会话里读出来**：worker 有没有伸手去够不该有的工具（`workflow` / `ralph` / `subagent` / `send_message`）、有多少次派活白烧在一个错误上、某个节点当年花了几个 worker。§"已知限制"里 `workflow` / `ralph` 要不要摘，就用它决定 —— 只读，不改任何东西。
+每个任务单元都是一次真实会话，所以**策略问题可以直接从落盘的会话里读出来**：worker 有没有伸手去够不该有的工具（`send_message` / goal 工具）、有没有把该走树的结果改走消息、有多少次派活白烧在一个错误上、某个节点当年花了几个 worker。§"已知限制"里内部扇出的口径，就用它决定 —— 只读，不改任何东西。
 
 ## 环境初始化（`@avantf/dsh-plugin-base`）
 

@@ -2,17 +2,17 @@
 /**
  * The two closure tiers — the ONE place that decides what "收口" means.
  *
- * WHY TIERS. The pre-2026-10-03 closure ran the same full sequence for every change: three trees'
+ * WHY TIERS. The pre-2026-10-03 closure ran the same full sequence for every change: each tree's
  * `release:check` (link → build → typecheck → the whole test suite → pack → the old-dsh floor gate)
  * plus a separate `pnpm test`, `build:dsh mem`, `build:dsh mission`, two mount smokes, `guard`, the
- * four self-tests, `prepublish:assert` and the root `release:check`. Everything appeared three times
+ * four self-tests, `prepublish:assert` and the root `release:check`. Everything appeared as many times
  * over, so a one-line copy change cost the same as a release candidate. The tiers split that:
  *
  *   fast     — one tree, once: build + typecheck + that tree's full suite, plus the root-wide cheap
  *              gates (guard, four self-tests, prepublish assertions). NOT old-dsh / pack / mount
  *              smoke / root release:check.
  *   release  — before publishing (or after changing `base/**`, the publish surface, the gate scripts
- *              or a version): the three strict per-package gates (pack + old-dsh floor + the two
+ *              or a version): every strict per-package gate (pack + old-dsh floor + the plugins'
  *              plugin mount smokes) and the root release surface.
  *
  * DEDUP IS THE POINT. A step appears exactly once in a run: the fast tier does not run a tree's
@@ -22,15 +22,15 @@
  * USAGE
  *   pnpm check:fast <base|mem|mission|root>   # one named tree
  *   pnpm check:fast                           # auto-detect the changed tree(s) from git
- *   pnpm check:release                        # the release tier (three strict gates + root surface)
- *   pnpm check:release --parallel             # run the three strict gates at once (opt-in)
+ *   pnpm check:release                        # the release tier (every strict gate + root surface)
+ *   pnpm check:release --parallel             # run the strict gates at once (opt-in)
  *
  * PARALLELISM (see `docs/CLOSURE-TIERS.md` for the full analysis). `scripts/check-old-dsh.mjs` is
  * group-isolated BY CONSTRUCTION — it links inside the target tree's own `node_modules`, and its
  * closure cache / fake global root are keyed by `(group, floor)` — so the old-dsh legs do not
  * interfere across trees. What is NOT isolated is `base/plugin-base/dist`: every tree's gate rebuilds
  * the base (`mem` and `mission` build it before their plugin, the base's own gate builds it), and
- * `mem`'s strict gate additionally runs a workspace-wide `pnpm install`. Running the three gates
+ * `mem`'s strict gate additionally runs a workspace-wide `pnpm install`. Running the gates
  * concurrently therefore puts several `tsc` writers and one `node_modules` writer on shared state, so
  * the release tier runs them SEQUENTIALLY by default; `--parallel` exists for a machine/CI measured
  * clean (each gate still writes its own log). The fast tier is single-tree by design.
@@ -78,7 +78,7 @@ const rootGates = [
  * FAST steps per tree. Each list mirrors what that tree's `release:check` proves about build /
  * typecheck / tests, with the release-only legs removed (pack, old-dsh, mount smoke) and the base
  * hoisted out. `root` is the tree-less target (only the root-wide gates, for a change that touched
- * none of the three trees).
+ * none of the plugin trees).
  */
 const FAST = {
   base: [
@@ -114,17 +114,30 @@ const FAST = {
     { label: 'client smoke (built browser half)', command: NODE, args: ['mission/scripts/client-smoke.mjs'] },
     { label: 'test mission (core + plugin suites, once)', command: 'pnpm', args: ['-C', 'mission', 'test'] },
   ],
+  identity: [
+    baseBuild,
+    { label: 'typecheck identity (src + tests)', command: 'pnpm', args: ['-C', 'identity', 'typecheck'] },
+    { label: 'link identity DSH peers (LOCAL: the installed dsh)', command: NODE, args: ['identity/scripts/link-dsh.mjs', '--runtime'] },
+    { label: 'vendor the base bootstrap', command: NODE, args: ['identity/scripts/link-envinit.mjs'] },
+    { label: 'build identity (plugin, no mount smoke)', command: 'pnpm', args: ['-C', 'identity', 'build'] },
+    { label: 'bundle identity client half', command: NODE, args: ['identity/scripts/build-client.mjs'] },
+    // The built browser half must self-register / export the client plugin shape; `release:check` runs
+    // this between the tests and pack, but it judges the just-built artifact, so it belongs here too.
+    { label: 'client smoke (built browser half)', command: NODE, args: ['identity/scripts/client-smoke.mjs'] },
+    { label: 'test identity (plugin suite, once)', command: 'pnpm', args: ['-C', 'identity', 'test'] },
+  ],
   root: [],
 }
 
 /**
  * The RELEASE steps. Each is that package's own strict gate (`release:check`), which already contains
- * pack and the old-dsh floor gate; mem's and mission's also contain their real-Cordis mount smoke.
+ * pack and the old-dsh floor gate; the plugins' also contain their real-Cordis mount smoke.
  */
 const RELEASE = [
   { label: 'strict gate: base (@avantf/dsh-plugin-base)', command: 'pnpm', args: ['-C', 'base/plugin-base', 'release:check'], tree: 'base' },
   { label: 'strict gate: mem (@avantf/dsh-mem, incl. mount smoke)', command: 'pnpm', args: ['-C', 'mem', 'release:check'], tree: 'mem' },
   { label: 'strict gate: mission (@avantf/dsh-mission, incl. mount smoke)', command: 'pnpm', args: ['-C', 'mission', 'release:check'], tree: 'mission' },
+  { label: 'strict gate: identity (@avantf/dsh-identity, incl. mount smoke)', command: 'pnpm', args: ['-C', 'identity', 'release:check'], tree: 'identity' },
 ]
 
 /** The root surface runs last and serially: it judges the manifests the gates just packed. */
@@ -136,11 +149,11 @@ const RELEASE_ASSERT = { label: 'prepublish assertions (publish surface)', comma
 // ── plumbing ──────────────────────────────────────────────────────────────────────────────────────
 
 const USAGE = `usage:
-  pnpm check:fast <base|mem|mission|root>   # fast tier for one tree (or 'root' for the repo-wide gates)
+  pnpm check:fast <base|mem|mission|identity|root>   # fast tier for one tree (or 'root' for the repo-wide gates)
   pnpm check:fast                           # auto-detect the changed tree(s) from git
-  pnpm check:release                        # release tier: three strict gates + the root surface
-  pnpm check:release --parallel             # run the three strict gates at once (opt-in: shared base/ + install)
-  pnpm check:release --serial               # run the three strict gates one at a time (the default)`
+  pnpm check:release                        # release tier: every strict gate + the root surface
+  pnpm check:release --parallel             # run the strict gates at once (opt-in: shared base/ + install)
+  pnpm check:release --serial               # run the strict gates one at a time (the default)`
 
 function fail(message) {
   console.error(`check-tier: ${message}`)
@@ -211,7 +224,7 @@ function tail(logPath, count = 30) {
 /**
  * The trees a git-visible change touches, derived from `git status --porcelain`.
  *
- * Only the leading path segment is read; a change that touches none of the three trees selects
+ * Only the leading path segment is read; a change that touches no tree selects
  * `root`. Deliberately a convenience, not a gate: a working tree with unrelated uncommitted edits
  * over-selects, so a caller who knows the change names the tree explicitly.
  */
@@ -230,7 +243,7 @@ function detectTargets() {
     for (const raw of line.slice(3).split(' -> ')) {
       const path = raw.replace(/^"|"$/gu, '')
       const segment = path.split('/')[0]
-      if (segment === 'base' || segment === 'mem' || segment === 'mission') trees.add(segment)
+      if (segment === 'base' || segment === 'mem' || segment === 'mission' || segment === 'identity') trees.add(segment)
       else rootTouched = true
     }
   }
@@ -250,11 +263,11 @@ function fast(argv) {
   let targets = argv.filter((arg) => !arg.startsWith('-'))
   if (targets.length === 0) {
     targets = detectTargets()
-    if (targets.length === 0) fail('no changed tree detected — name one: base | mem | mission | root')
+    if (targets.length === 0) fail('no changed tree detected — name one: base | mem | mission | identity | root')
     console.log(`check:fast — no tree named; git says: ${targets.join(', ')}`)
   }
   for (const target of targets) {
-    if (!Object.hasOwn(FAST, target)) fail(`unknown tree '${target}' (expected base | mem | mission | root)`)
+    if (!Object.hasOwn(FAST, target)) fail(`unknown tree '${target}' (expected base | mem | mission | identity | root)`)
   }
   const steps = []
   // The base is built once: the `base` target has its own build step, and any other target's hoisted

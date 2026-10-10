@@ -1,23 +1,24 @@
 # AGENTS.md
 
-整个工作区的约定。一个仓库、**三个可发布包**：
+整个工作区的约定。一个仓库、**四个可发布包**：
 
 | 目录 | 包 | 是什么 |
 | --- | --- | --- |
 | `base/plugin-base` | `@avantf/dsh-plugin-base` | DSH 插件的底座：启动期资源预装（声明式 provisioner）+ 宿主兼容门禁 + 共享 kit，运行期零依赖 |
 | `mem/packages/plugin` | `@avantf/dsh-mem` | DSH 的记忆/知识插件：可长期检索的记忆 + 文档知识库（8 个模型工具、两个主窗口标签页） |
 | `mission/packages/plugin` | `@avantf/dsh-mission` | DSH 的任务树插件：把一件能连验收标准一起交出去的事交给引擎，由它后台逐级派给一次性执行者 |
+| `identity/packages/plugin` | `@avantf/dsh-identity` | DSH 的身份插件：`IDENTITY.md`/`SOUL.md`/`RULES.md` 三个文件替换 system prompt 里的身份部分，其余 section 一字不改；设置页一个页面 + 多语言内置预设 |
 
 其余工作区包（`@avantf/mem-*`、`@avantf/mission-core`、CLI/MCP）都是 `private: true`，会被内联进使用它的
 那个插件。每个子树的领域设计仍写在自己的 `DESIGN.md` / `docs/` 里。
 
-本文只放**三个包 / 三棵树都成立**的公共约束；**各树专有的约定**写在各树的开发 README——
-`base/README.md`、`mem/README.md`、`mission/README.md`（三份**随包发布的** README 是 npm 页面，面向用户，
+本文只放**每个包 / 每棵树都成立**的公共约束；**各树专有的约定**写在各树的开发 README——
+`base/README.md`、`mem/README.md`、`mission/README.md`、`identity/README.md`（四份**随包发布的** README 是 npm 页面，面向用户，
 不写仓库内部内容）。
 
 ## 发布面
 
-- **可发布集合恰好是这三个包**；`scripts/release-check.mjs` 会在这件事不成立时失败。
+- **可发布集合恰好是这四个包**；`scripts/release-check.mjs` 会在这件事不成立时失败。
 - **发布顺序 base → 插件**：插件的**普通运行期依赖**必须已在 registry 上（可 `--allow-missing-base` 试跑）；
   `publishConfig.access` 是 `public`。
 - **base 是插件的普通 `dependencies`**（同一个宽区间 `>=0.3.0 <1.0.0`，两棵树**逐字相同**，禁 `~`/精确版本），
@@ -27,9 +28,9 @@
   都恰好 1 份，两个消费者解析到同一路径；**区间一旦不同就会出现第二份**——所以 `release-check` 把
   "两树区间逐字相同"当**硬断言**（不同即失败），不是 WARNING。`devDependencies` 里保留同一条区间只为让
   本仓 `pnpm install` 链到 workspace 的 `base/`；宿主安装时解析的是发布出去的那条 `dependencies` range。
-- **只有一份 `zod`**：由**宿主**提供——三棵树都声明 **required peer** `>=4.4.3 <5`（下限已实测跑通）；本仓
+- **只有一份 `zod`**：由**宿主**提供——各插件树都声明 **required peer** `>=4.4.3 <5`（下限已实测跑通）；本仓
   自己解析的那份来自根 catalog（改 catalog、不改发布区间），免得副本分叉 schema 类型身份；`release:check`
-  断言两棵插件树这一点。
+  断言各插件树这一点。
 - **dsh 侧 peer 是「每条 minor 线一个 `||` 子句」的链**：现状
   `^0.1.5-rc.2 || ^0.1.7-rc.2 || ^0.2.0-rc.2`（**真实下限 `0.1.5-rc.2`**，`check:old-dsh` 就跑它）。启动门按
   `peerDependencies` 判兼容、不兼容就**禁用那一行**（不是告警），判定用 `includePrerelease: true`，故 caret
@@ -104,18 +105,20 @@ ERROR/WARN、工具面回答"未就绪 + 原因"、`/mem` · `/mission` 命令�
   工厂（archive / model / npm）、`PromptFiles`、家族与数据路径解析、接口门禁（`checkInterface` /
   `readInterfaceRequirement`）。
 - **不能 → 留在插件里**，但要在本文写明，并接受"改它需要一次**插件**发版"。已记录的本地知识：Typert
-  `strict` codec 与端点 / 字段 / 结果符号那几行（wire 面在模块加载时拼装，两棵树各留本地镜像）；插件自己的
+  `strict` codec 与端点 / 字段 / 结果符号那几行（wire 面在模块加载时拼装，各插件树各留本地镜像）；插件自己的
   logger（base 解析之前就要用）；各插件的 compat SPEC 与 envinit item 清单；各插件内置的默认提示词正文与
   client 半边。
-- **刻意的镜像**：两个路径约定各有三份、正本都是 `base/plugin-base/src/kit/family.ts`——
+- **刻意的镜像**：两个路径约定各有数份、正本都是 `base/plugin-base/src/kit/family.ts`——
   **家族根**（`familyHome`）：`@avantf/mem-contract`（`src/family.ts`，**无依赖**——CLI / MCP 没有 DSH
   宿主、从不加载 base）与 `mem/packages/provision`（`src/config.ts`，**依赖自由**——provision 跑在
   base 之前/之外）；跨树 pin 钉正本 ↔ contract，provision 那份的 `~/` 分支由 `family_paths.spec.ts`
   直接覆盖；改它 = 一次 base 发版 + 一次 mem 引擎改动。**数据根**（`resolveDataHome`）另挂两份：
   mem 引擎（`core/src/config/paths.ts`）与 mission 的 base-less 兜底（`plugin/src/prompt.ts`），
   分别由 `mem/packages/plugin/test/family_pin.spec.ts` 与 mission 的 `prompt_files.spec.ts` 对
-  linked base 钉住；改它 = base、mem、mission 三处都要跟。
-- **两个插件绝不互相 import**（连相对路径也不行），共享一律走 `base/`。刻意不复用：两个内核
+  linked base 钉住；identity 的 base-less 兜底（`identity/packages/plugin/src/paths.ts`）由
+  `identity/packages/plugin/test/paths.spec.ts` 逐例对 linked base 钉住。改它 = base 与所有挂了这份
+  兜底的树都要跟（今天：base、mem、mission、identity）。
+- **各插件绝不互相 import**（连相对路径也不行），共享一律走 `base/`。刻意不复用：两个内核
   （`@avantf/mem` / `@avantf/mission-core` 不共享领域模型）、两个 client 半边、各插件的 item 清单与 SPEC。
 
 **抽到 base 的次序**（不然旧插件会被判不兼容；细节与完整清单见 `base/plugin-base/docs/INTERFACE.md`）：
@@ -134,10 +137,11 @@ ERROR/WARN、工具面回答"未就绪 + 原因"、`/mem` · `/mission` 命令�
 | `base` | `base/plugin-base/package.json` | 无；另有一份 **baked 常量** `src/bootstrap.ts` 的 `VERSION`（零依赖 bootstrap 不能在运行期读 manifest） |
 | `mem` | `mem/packages/plugin/package.json` | `mem/package.json` + `packages/{core,contract,convert,provision,retrieval-core,cli,mcp}` |
 | `mission` | `mission/packages/plugin/package.json` | `mission/package.json` + `mission/packages/core` |
+| `identity` | `identity/packages/plugin/package.json` | `identity/package.json` |
 
 ```bash
 pnpm version:set <group> <x.y.z>   # 只改该组那一个 manifest；base 组会一并同步 baked VERSION
-pnpm version:check                 # 打印三组版本；私有 manifest 长出 version、或 base 两处不一致就报错
+pnpm version:check                 # 打印每组版本；私有 manifest 长出 version、或 base 两处不一致就报错
 pnpm version:prune                 # 删掉私有 manifest 上多余的 version
 ```
 
@@ -163,7 +167,7 @@ patch。`workspace:*` 指到的私有包，版本只在 `pnpm pack` 那一刻临
 
 ```bash
 pnpm build:dsh            # 全部插件（按目录名字典序）；每个都会先构建 base
-pnpm build:dsh mem|mission   # 只构建某个插件（含挂载冒烟）
+pnpm build:dsh mem|mission|identity   # 只构建某个插件（含挂载冒烟）
 pnpm build:dsh base       # 只构建 base（tsc）
 ```
 
@@ -171,16 +175,17 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | --- | --- |
 | `pnpm version:check` | 每组版本只记在它的可发布 manifest 里；base 的 manifest 与 baked `VERSION` 一致 |
 | `pnpm guard` | 每棵树只够得到 base 与自己的包（不许 import 别棵树；相对路径不许出树——唯一例外是工作区共用的 `scripts/lib/`；产物里不许按值 import base；其余 `@avantf/*` 必须是本树自己的） |
-| `pnpm release:check` | 可发布集合恰好那三个、base 是普通依赖且区间够宽、两棵插件树区间逐字相同、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base，**且那个已发布 base 内置的接口世代不低于两棵插件 bake 的世代**（版本区间 ≠ 接口世代） |
+| `pnpm release:check` | 可发布集合恰好那四个、base 是普通依赖且区间够宽、各插件树区间逐字相同、只有一份 zod、无 `link:`/`file:`、registry 上已有兼容的 base，**且那个已发布 base 内置的接口世代不低于各插件 bake 的世代**（版本区间 ≠ 接口世代） |
 | `pnpm proof:base-swap[:mount]` | 产物里没有静态 base import / 内联 kit；**被替换的** base 仍能提供提示词读写、根解析与接口门禁 |
-| `pnpm release:check:<base\|mem\|mission>` | 该包自己的门禁：链接 → 编译 → 类型检查 → 测试 → pack，`old-dsh` **最后**跑（要重新链接并重建）；mem 的 build 必须先于 typecheck（`typecheck` 通过产出的 `lib/*.d.ts` 读依赖） |
-| `pnpm check:old-dsh <base\|mem\|mission>` | 在该包声明的 dsh peer **下限**上重跑 LOCAL 步骤（含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
+| `pnpm release:check:<base\|mem\|mission\|identity>` | 该包自己的门禁：链接 → 编译 → 类型检查 → 测试 → pack，`old-dsh` **最后**跑（要重新链接并重建）；mem 的 build 必须先于 typecheck（`typecheck` 通过产出的 `lib/*.d.ts` 读依赖） |
+| `pnpm check:old-dsh <base\|mem\|mission\|identity>` | 在该包声明的 dsh peer **下限**上重跑 LOCAL 步骤（含 `test:dsh` 与 mount smoke），完事恢复现场；`release:check` 已内置这一步 |
 | `pnpm check:dsh-lines` | dsh **已发布**的版本里有没有我们的 peer 覆盖不到的（同一份 semver + `includePrerelease: true`）；有新 minor 线或 dist-tag 落到未覆盖线就退出 1，并给出该补的 `\|\|` 条款 |
 
-**改 `base/**` 后两棵树都要回归**（base 自己的测试不会走到挂载），**并检查根 `scripts/prove-base-swap.mjs`**——
+**改 `base/**` 后各插件树都要回归**（base 自己的测试不会走到挂载），**并检查根 `scripts/prove-base-swap.mjs`**——
 它双向断言接口判定语义（更新的世代 → base 保留、runtime 交回；更旧的世代 → 判 `incompatible`、扣留并出
-"shared capabilities are NOT used" WARNING）。**改 `checkInterface` 的判定语义时，三处一起看**：两棵树的
-`interface.spec.ts`/`envinit.spec.ts` 与 `prove-base-swap.mjs`。
+"shared capabilities are NOT used" WARNING）。**改 `checkInterface` 的判定语义时，几处一起看**：各插件树的
+`interface.spec.ts`/`envinit.spec.ts`（identity 是 `envinit.ts` + `prove-base-swap.mjs` 驱动的
+`loadCompat`）与 `prove-base-swap.mjs`。
 
 **验证分工**：**执行者只做针对性验证**——改动涉及的构建/类型检查 + **只跑新增或改动的那几个测试文件**，并
 报告"实际跑了什么 / 每个测试证明了哪条要求 / 有哪些没能验证"；**收口由派单方分档统一跑**，不重复验证。
@@ -191,7 +196,7 @@ pnpm build:dsh base       # 只构建 base（tsc）
 | 档 | 什么时候用 | 覆盖 |
 |---|---|---|
 | **快档** `pnpm check:fast [树名]` | **日常每个派发任务结束后**（默认档；不给树名从 git 自动判） | **只被改动的那棵树**：build + typecheck + 该树**一次**全套测试 + `guard` + 四个自测 + `prepublish:assert`。**不跑** old-dsh / pack / mount smoke / 根 `release:check` |
-| **发版档** `pnpm check:release` | 只在发版前，或**改了 `base/**`**（要求两棵树回归 + mount smoke + `proof:base-swap`）、改了发布面/接口/门禁脚本/版本号时 | 三个包的严格门禁（含 pack 与 **old-dsh 下限门**、两棵树 mount smoke）+ 根 `release:check` + `prepublish:assert` |
+| **发版档** `pnpm check:release` | 只在发版前，或**改了 `base/**`**（要求各插件树回归 + mount smoke + `proof:base-swap`）、改了发布面/接口/门禁脚本/版本号时 | 每个包的严格门禁（含 pack 与 **old-dsh 下限门**、各插件树 mount smoke）+ 根 `release:check` + `prepublish:assert` |
 
 **纪律**：不要"每次收口都跑发版档"。快档**不证明**"产物能挂载""在 dsh 下限上能跑""发布面自洽"——这些只在
 发版档覆盖。
@@ -207,13 +212,13 @@ pnpm build:dsh base       # 只构建 base（tsc）
 任何"只在合成小语料上绿"的检索改动都不算验证通过。
 
 **读 schema 库（zod）内部别猜**：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })` 这类
-公开形状读取，别读私有实现（三棵树都适用；mem 侧的形状断言在 `contract.spec.ts` / `tool_schema.spec.ts`）。
+公开形状读取，别读私有实现（各插件树都适用；mem 侧的形状断言在 `contract.spec.ts` / `tool_schema.spec.ts`）。
 
 ## 体量与枢纽文件（hub）
 
-**口径**：`base/mem/mission` 下 `git ls-files` 的 `.ts/.tsx`，排除 `test/` 与 spec。超过 800 行的就是各树的
+**口径**：`base` 与各插件树下 `git ls-files` 的 `.ts/.tsx`，排除 `test/` 与 spec。超过 800 行的就是各树的
 枢纽——问题不是"大文件多"，而是少数**枢纽**被反复改动。**各树的枢纽清单与其取舍写在各树 README**：
-`base/README.md`、`mem/README.md`、`mission/README.md`。
+`base/README.md`、`mem/README.md`、`mission/README.md`、`identity/README.md`。
 
 **规矩（跨树通用）**：① **触及枢纽时，若正在加的关注点能干净分离，就顺手抽成独立模块**（`claims.ts` /
 `continuation.ts` / `prompt.ts` / `hybrid.ts` / `dispatch.ts` / `coldResume.ts` / `reconcile.ts` /
@@ -247,6 +252,8 @@ pnpm build:dsh base       # 只构建 base（tsc）
 - `mem/README.md` —— 契约唯一真源、检索编排不许分叉、融合定序与证据要求、嵌入空间迁移与表示指纹、
   `eval_zh` 冻结数字、类型检查顺序、工具面 8 个、`mem/CHANGELOG.md` 段落规则、mem 枢纽清单。
 - `mission/README.md` —— 调度语义 v1、worker 清理四步与 `keepWorkers` 保留、mission 枢纽清单。
+- `identity/README.md` —— 三个身份文件与预设的磁盘布局、只补缺失/永不覆盖的释放语义、数据根兜底镜像的
+  钉法、设置页 slot 与两条 wire 坑、发布面登记点。
 
 ## 架构裁决记录（第五轮架构审查，2026-10-03）
 

@@ -38,8 +38,8 @@ import { judgeDshLines } from './lib/gates.mjs'
 import { execToolSync } from './lib/win-spawn.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-/** 声明 dsh peer 的两棵树；base 自己不声明（它由插件加载）。 */
-const MANIFESTS = ['mem/packages/plugin/package.json', 'mission/packages/plugin/package.json']
+/** 声明 dsh peer 的插件树；base 自己不声明（它由插件加载）。 */
+const MANIFESTS = ['mem/packages/plugin/package.json', 'mission/packages/plugin/package.json', 'identity/packages/plugin/package.json']
 const PACKAGE = '@deepseek-ai/dsh'
 
 /**

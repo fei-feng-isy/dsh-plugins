@@ -28,7 +28,7 @@
  * a valid stand-in for another's.
  *
  * Usage:
- *   node scripts/check-old-dsh.mjs <base|mem|mission> [--floor <version>] [--fresh] [--list]
+ *   node scripts/check-old-dsh.mjs <base|mem|mission|identity> [--floor <version>] [--fresh] [--list]
  *
  * The floor defaults to the dsh peer ranges the PLUGINS declare (base declares no dsh peers of its
  * own — it is loaded by them — so it shares the family floor they name). Exits non-zero if any step
@@ -89,6 +89,18 @@ const GROUPS = {
     restore: [
       ['restore: link-dsh (installed dsh)', process.execPath, ['scripts/link-dsh.mjs', '--runtime'], 'mission'],
       ['restore: rebuild (installed dsh)', process.execPath, ['scripts/build-plugin.mjs'], 'mission'],
+    ],
+  },
+  identity: {
+    package: 'identity/packages/plugin',
+    steps: [
+      ['link the DSH peers at the floor', process.execPath, ['scripts/link-dsh.mjs'], 'identity'],
+      ['typecheck (src + tests) at the floor', pnpm, ['run', 'typecheck'], 'identity'],
+      ['build + tests + mount smoke at the floor', pnpm, ['run', 'build:dsh'], 'identity'],
+    ],
+    restore: [
+      ['restore: link-dsh (installed dsh)', process.execPath, ['scripts/link-dsh.mjs', '--runtime'], 'identity'],
+      ['restore: rebuild (installed dsh)', process.execPath, ['scripts/build-plugin.mjs'], 'identity'],
     ],
   },
 }
@@ -200,7 +212,7 @@ function main(argv = process.argv.slice(2)) {
   const known = ['--floor', '--fresh', '--list', '--help', '-h']
   const positional = argv.filter((arg, index) => !arg.startsWith('--') && argv[index - 1] !== '--floor')
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('usage: node scripts/check-old-dsh.mjs <base|mem|mission> [--floor <version>] [--fresh] [--list]')
+    console.log('usage: node scripts/check-old-dsh.mjs <base|mem|mission|identity> [--floor <version>] [--fresh] [--list]')
     return 0
   }
   for (const arg of argv) {
@@ -218,9 +230,9 @@ function main(argv = process.argv.slice(2)) {
     fail('--floor needs a version')
   }
 
-  /** The family floor: every `@deepseek-ai/dsh*` peer range in the two plugins, which must agree. */
+  /** The family floor: every `@deepseek-ai/dsh*` peer range in the plugins, which must agree. */
   const dshPeers = []
-  for (const path of ['mem/packages/plugin', 'mission/packages/plugin']) {
+  for (const path of ['mem/packages/plugin', 'mission/packages/plugin', 'identity/packages/plugin']) {
     for (const [name, range] of Object.entries(readManifest(path).peerDependencies ?? {})) {
       if (name.startsWith('@deepseek-ai/dsh')) dshPeers.push([name, range])
     }

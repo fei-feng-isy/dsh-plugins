@@ -523,10 +523,12 @@ if (process.env['SMOKE_DEBUG'] !== undefined) {
 
 check('root dispatched', dispatches.length === 1, `got ${String(dispatches.length)}`)
 check(
-  'worker tool filter denies delegation and messaging',
+  'worker tool filter denies messaging but leaves internal delegation open',
   Array.isArray(dispatches[0]?.request?.toolFilter?.deny)
     && dispatches[0].request.toolFilter.deny.includes('send_message')
-    && dispatches[0].request.toolFilter.deny.includes('subagent'),
+    && !dispatches[0].request.toolFilter.deny.includes('subagent')
+    && !dispatches[0].request.toolFilter.deny.includes('subagent_fork'),
+  JSON.stringify(dispatches[0]?.request?.toolFilter?.deny ?? []),
 )
 // The deny list draws on the deployment's tools and this plugin's registrations: a name from neither
 // makes `tools.restrict()` throw and kills every dispatch.

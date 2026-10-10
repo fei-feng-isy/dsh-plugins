@@ -109,11 +109,11 @@ describe('worker tool face', () => {
     // A name no tool provides makes `tools.restrict()` throw, which would fail
     // every dispatch and burn the whole tree's attempts. So the request carries the
     // deployment's names PLUS this plugin's own (the owner face, always registered).
+    // `subagent` is offered here and deliberately NOT denied: a node may fan out internally.
     const mounted = await mount({ tools: ['send_message', 'subagent'] })
     await createTree(mounted)
     expect(mounted.dispatched[0]?.toolFilter?.deny).toEqual([
       'send_message',
-      'subagent',
       'create_mission',
       'adjust_mission',
       'mission_result',
@@ -138,19 +138,46 @@ describe('worker tool face', () => {
     ])
   })
 
+  it('warns, naming the face and the names, when it drops a name the deployment lacks', async () => {
+    // `deniableFor` used to DROP unresolvable names silently, so the face this build intends and the
+    // one it actually sends could diverge with no evidence anywhere (measured in a live session: 11 of
+    // 12 intended names went out, and only `subagent` was missing). A drop is now reported. This is a
+    // different condition from `startChild`'s retry: a name dropped here has no tool AT ALL, so no
+    // filter could have carried it.
+    const lines: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '))
+    })
+    try {
+      const mounted = await mount({ tools: [] })
+      await createTree(mounted)
+    } finally {
+      spy.mockRestore()
+    }
+    const warnings = lines.filter((line) => line.includes('tool face'))
+    expect(warnings).toHaveLength(1)
+    // Which face, and every name it could not place.
+    expect(warnings[0]).toContain('worker')
+    for (const name of ['send_message', 'create_goal', 'get_goal', 'update_goal']) {
+      expect(warnings[0], `the dropped name ${name} must be reported`).toContain(name)
+    }
+    // Only the divergence is reported: the names this deployment DOES provide stay quiet.
+    expect(warnings[0]).not.toContain('submit_mission')
+  })
+
   it('drops a name the runtime refuses to restrict, instead of failing the dispatch', async () => {
     // A tool registered at the agent plane is visible to the parent but NOT
     // inherited by the child, so `tools.restrict()` refuses the whole filter. The
     // tree must still run: that one tool stays visible, the rest stay denied.
+    // (`subagent` is offered here too, but it is no longer on the worker's deny list at all.)
     const mounted = await mount({
       tools: ['send_message', 'subagent', 'subagent_fork'],
-      unrestrictable: ['subagent'],
+      unrestrictable: ['subagent_fork'],
     })
     const rootId = await createTree(mounted)
     const second = mounted.dispatched.at(-1)
     expect(second?.toolFilter?.deny).toEqual([
       'send_message',
-      'subagent_fork',
       'create_mission',
       'adjust_mission',
       'mission_result',
