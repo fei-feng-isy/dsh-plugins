@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { RefusalCode } from '@avantf/mission-core'
 import { agent, callTool, executorFor, mount, noteAndSplit } from './mount.js'
 import type { TreeDocument } from '../src/domain.js'
-import { clientContribution, ROW_CORRECTIONS_MAX, SNAPSHOT_WIRE_VERSION } from '../src/wire.js'
+import { clientContribution, ROW_CORRECTIONS_MAX, SNAPSHOT_WIRE_VERSION, snapshotResultSchema } from '../src/wire.js'
 import { WORKER_TOOL_DENY } from '../src/faces.js'
 
 /** A mission unit: the child session the engine reserved for one node. */
@@ -750,6 +750,7 @@ describe('the browser half\'s wire face', () => {
     expect(contribution.face).toBe('host')
     expect(contribution.invocations.map((entry) => entry.method)).toEqual([
       'snapshot',
+      'status',
       'detail',
       'result',
       'delete',
@@ -760,6 +761,8 @@ describe('the browser half\'s wire face', () => {
     expect(contribution.schemas.map((entry) => entry.name)).toEqual([
       'snapshotargs',
       'snapshotResult',
+      'statusargs',
+      'statusResult',
       'deleteargs',
       'deleteResult',
       'cleanFinishedargs',
@@ -822,8 +825,37 @@ describe('the snapshot the 任务 view reads', () => {
     expect(node?.hasResult).toBe(false)
   })
 
-  it('caps the corrections a row carries but reports the full count', async () => {
-    // The row marks a steered mission from `correctionCount`; only the newest few texts ride along, so
+  /**
+   * N3's FIRST step: the frame size the panel is about to parse, reported so a real profile can be
+   * measured without a profiler. It rides the payload as instrumentation and is deliberately NOT a
+   * field of `snapshotResultSchema` (see `wire.ts`) — the revision tracks the method set, so shipping
+   * it must move neither the schema nor `SNAPSHOT_WIRE_VERSION`.
+   */
+  it('reports the UTF-8 size of the frame it is about to send, without promising it on the wire', async () => {
+    const mounted = await mount()
+    await createTree(mounted, 'Measured')
+    await mounted.flush()
+
+    const snapshot = await mounted.host.snapshot({ sessionId: mounted.owner.id })
+    expect(snapshot.trees).toHaveLength(1)
+    // Exactly the frame this call just built, serialised the way the transport will.
+    expect(snapshot.bytes).toBe(
+      Buffer.byteLength(JSON.stringify({ wire: snapshot.wire, trees: snapshot.trees }), 'utf8'),
+    )
+    expect(snapshot.bytes).toBeGreaterThan(0)
+    // It TRACKS the payload: a second tree of the same session grows the frame.
+    await createTree(mounted, 'Another')
+    await mounted.flush()
+    const bigger = await mounted.host.snapshot({ sessionId: mounted.owner.id })
+    expect(bigger.trees).toHaveLength(2)
+    expect(bigger.bytes).toBeGreaterThan(snapshot.bytes)
+    // The wire contract did not grow a field for it, and the revision did not move: `bytes` is a
+    // debug number, and only an added/removed `@Remote` method bumps the marker.
+    expect(snapshotResultSchema.shape).not.toHaveProperty('bytes')
+    expect(snapshot.wire).toBe(SNAPSHOT_WIRE_VERSION)
+  })
+
+  it('caps the corrections a row carries but reports the full count', async () => {    // The row marks a steered mission from `correctionCount`; only the newest few texts ride along, so
     // a root the owner corrected many times cannot make every frame carry all of them.
     const mounted = await mount()
     const root = await createTree(mounted, 'Steered')

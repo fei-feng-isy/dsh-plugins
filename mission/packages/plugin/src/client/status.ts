@@ -6,8 +6,15 @@
  * `MissionTreeView`'s effect, and `conversation.view` renders exactly ONE occupant at a time: leaving
  * the 任务 tab stops every read. A marker fed from the view would only be right while the reader is
  * already looking at the thing it exists to announce. So the read below is owned by the plugin BODY:
- * it polls the same `snapshot` the panel reads, for the session the host is showing, and the tab's
- * `label` thunk reads its verdict.
+ * it polls for the session the host is showing, and the tab's `label` thunk reads its verdict.
+ *
+ * WHAT THE POLL READS (and why it is still a poll). The cadence is the stream keepalive's, and it is
+ * NOT a performance poll: the engine's stream is the update channel, but a stream that is silently
+ * dead (open, delivering nothing) is not detectable from this side, so the marker must re-read to
+ * stop being stale forever. That ONE fact — is anything running — has its own Remote method
+ * (`wire.ts`'s `status`), which the host short-circuits on the first running node, because the
+ * backstop used to pull and walk the WHOLE snapshot every 30 s to answer a boolean. The panel's own
+ * read is a different path and still gets the full `snapshot` (`refresh`, and the view itself).
  *
  * FAILURE SAFETY. The marker's only value is that it can be trusted, so every uncertain state says
  * "not running": the Remote namespace not mounted, no current session, a read that threw, and the
@@ -23,10 +30,12 @@
  *
  * @module @avantf/dsh-mission/client/status
  */
+import { statusResultSchema } from '../wire.js'
 import {
   STREAM_KEEPALIVE_MS,
   fetchSnapshot,
   startPolling,
+  unwrap,
   type IntervalTimer,
   type MissionRemote,
 } from './api.js'
@@ -76,6 +85,42 @@ export function snapshotHasRunning(state: {
   // declared shape so the walk below stays typed.
   if (!Array.isArray(trees)) return false
   return (trees as readonly MissionTreeViewData[]).some((tree) => tree.nodes.some((node) => node.status === 'running'))
+}
+
+/**
+ * The light `status` call, as a member this half detects STRUCTURALLY.
+ *
+ * WHY IT IS NOT ON {@link MissionRemote}. The two halves publish separately and the member is NEW, so
+ * a host that predates it has no key on the namespace at all — and that is exactly the case the
+ * caller must recognise and fall back from (see `readLight`). Widening the shared `MissionRemote`
+ * interface is the snapshot-increment work's call, not this change's; this file tests the member
+ * here, so a host that never published it fails the `typeof` check instead of the call.
+ */
+type StatusReadableRemote = MissionRemote & {
+  status?: (args: { sessionId: string }) => Promise<unknown>
+}
+
+/**
+ * Ask the host for the ONE boolean, off the wire's `status` payload — and THROW when that cannot be
+ * established, so the caller (and only the caller) decides what an inconclusive light read means.
+ *
+ * A missing method, a carriage failure and a payload this client does not recognise are all throws,
+ * never a guessed `false`: "not running" would silently drop a marker that is genuinely up, and this
+ * read exists precisely to keep that marker honest. Nothing but a parsed `{ running }` is a verdict.
+ */
+async function fetchRunning(remote: StatusReadableRemote, sessionId: string): Promise<boolean> {
+  const status = remote.status
+  if (typeof status !== 'function') {
+    throw new Error('宿主可能没有注册这个接口（旧版本 / 未重启）：Remote 面没有 status 调用')
+  }
+  const { value, error } = unwrap(await status({ sessionId }))
+  if (error !== undefined) throw new Error(error)
+  const parsed = statusResultSchema.safeParse(value)
+  if (!parsed.success) {
+    const detail = parsed.error.issues.slice(0, 3).map((issue) => issue.message).join('; ')
+    throw new Error(`任务运行状态返回了无法识别的数据（${detail}）`)
+  }
+  return parsed.data.running
 }
 
 /**
@@ -259,34 +304,6 @@ export function createMissionStatusSignal(deps: MissionStatusDeps): MissionStatu
     }
   }
 
-  const read = async (): Promise<void> => {
-    if (disposed) return
-    try {
-      await deps.mounted
-      if (disposed) return
-      const remote = deps.getRemote()
-      const sessionId = deps.getSessionId()
-      if (remote === undefined || sessionId === undefined) {
-        setRunning(false)
-        return
-      }
-      const snapshot = await fetchSnapshot(remote, sessionId)
-      if (disposed) return
-      setRunning(snapshotHasRunning({ data: snapshot }))
-    } catch (cause) {
-      if (disposed) return
-      setRunning(false)
-      try {
-        deps.log(
-          'error',
-          `tab running indicator: reading the mission tree failed (no marker shown): ${cause instanceof Error ? cause.message : String(cause)}`,
-        )
-      } catch {
-        // Logging must never turn "the read failed" into an unhandled rejection.
-      }
-    }
-  }
-
   /**
    * The BOUNDED self-heal: re-announce the current verdict so the host re-projects it. At most once
    * per {@link TAB_STATUS_REARM_MS} because it is driven by {@link tick} on entire heal windows, and
@@ -310,19 +327,112 @@ export function createMissionStatusSignal(deps: MissionStatusDeps): MissionStatu
   }
 
   /**
-   * One poll tick: re-read, then — only if the read left the verdict `running` — count the tick
-   * towards the heal window. The count resets on every non-running tick (including the idle and
+   * Write the verdict of ONE read into the single writer, with the shared failure handling: every
+   * failure — an unmounted Remote, no current session, a rejected status read whose snapshot fallback
+   * also failed — degrades to "not running" plus one logged reason. It never rejects, and the read
+   * itself stays in its own function.
+   */
+  const settle = async (readVerdict: () => Promise<boolean>): Promise<void> => {
+    if (disposed) return
+    try {
+      await deps.mounted
+      if (disposed) return
+      const next = await readVerdict()
+      if (disposed) return
+      setRunning(next)
+    } catch (cause) {
+      if (disposed) return
+      setRunning(false)
+      try {
+        deps.log(
+          'error',
+          `tab running indicator: reading the mission tree failed (no marker shown): ${cause instanceof Error ? cause.message : String(cause)}`,
+        )
+      } catch {
+        // Logging must never turn "the read failed" into an unhandled rejection.
+      }
+    }
+  }
+
+  /**
+   * The verdict NOW, with the FULL snapshot read — what `refresh` exposes. It pays for the whole tree
+   * because a caller that asks right now (the session-switch subscription) wants the truth for the
+   * newly selected session, and `snapshotHasRunning` derives the verdict from it. The 30 s backstop is
+   * the path that must stay light, and that is {@link readLight}.
+   */
+  const readFull = async (): Promise<boolean> => {
+    const remote = deps.getRemote()
+    const sessionId = deps.getSessionId()
+    if (remote === undefined || sessionId === undefined) return false
+    const tree = await fetchSnapshot(remote, sessionId)
+    return snapshotHasRunning({ data: tree })
+  }
+
+  /**
+   * The LIGHT read of the same verdict, for the 30 s backstop: one boolean from the host instead of a
+   * whole snapshot walked on this side.
+   *
+   * FALLBACK, NOT A SECOND OPINION. `status` is a NEW member, so it is absent from every host that
+   * predates it, and the call also earns a gateway 404 against a host process that was never
+   * restarted. Reading a missing method OR a failed call as "not running" would silently drop a
+   * marker that is really up, so an inconclusive light read falls back to the full snapshot. Only a
+   * payload the client can parse is final; everything else is decided by the full read, so a broken
+   * light path can never produce a verdict of its own.
+   *
+   * The fallback is LOGGED ONCE per process, not per tick: a rebuilt client routinely talks to a host
+   * process loaded before the method existed, and repeating that every 30 s would be noise — but
+   * staying completely silent would make a genuinely broken light call invisible, and this is the one
+   * place that can tell the difference.
+   */
+  let lightUnavailableLogged = false
+  const readLight = async (): Promise<boolean> => {
+    const remote = deps.getRemote()
+    const sessionId = deps.getSessionId()
+    if (remote === undefined || sessionId === undefined) return false
+    try {
+      const verdict = await fetchRunning(remote, sessionId)
+      lightUnavailableLogged = false
+      return verdict
+    } catch (cause) {
+      if (!lightUnavailableLogged) {
+        lightUnavailableLogged = true
+        try {
+          deps.log(
+            'error',
+            'tab running indicator: the light `status` read failed, falling back to the full '
+            + `snapshot read (a host from before the method was published answers the gateway 404): ${
+              cause instanceof Error ? cause.message : String(cause)}`,
+          )
+        } catch {
+          // Logging must not escape either.
+        }
+      }
+      return await readFull()
+    }
+  }
+
+  /**
+   * One poll tick: re-read LIGHTLY, then — only if that read left the verdict `running` — count the
+   * tick towards the heal window. The count resets on every non-running tick (including the idle and
    * failed reads), so the heal can never fire on a tick that landed in idle, and an idle session
    * never re-registers. Counting TICKS rather than reading a clock keeps the heal on the poll's own
    * single interval: no second timer, and the cadence is whatever `TAB_STATUS_POLL_MS` means on this
    * host.
+   *
+   * This is the ONLY caller of the light read: the tick is the backstop, so it is the one place that
+   * must not pull the panel's full snapshot. `counting` is false for the OPENING read at creation:
+   * that read is what flips the verdict, and letting it also count a tick would make the first heal
+   * fire one tick early — the window is meant to be a full {@link TAB_STATUS_REARM_MS} of running.
    */
-  const tick = async (): Promise<void> => {
-    await read()
-    if (disposed || !running) {
+  const tick = async (counting = true): Promise<void> => {
+    await settle(readLight)
+    if (!running) {
+      // An idle (or failed, or disposed) read closes the heal window; the opening read is covered by
+      // `!counting` below, where the verdict is `running`.
       ticksWhileRunning = 0
       return
     }
+    if (!counting || disposed) return
     ticksWhileRunning += 1
     if (ticksWhileRunning < REARM_EVERY_TICKS) return
     ticksWhileRunning = 0
@@ -330,11 +440,15 @@ export function createMissionStatusSignal(deps: MissionStatusDeps): MissionStatu
   }
 
   const stopPolling = startPolling(() => { void tick() }, TAB_STATUS_POLL_MS, deps.getTimer())
-  void read()
+  // The FIRST read is the light one too: the marker's opening verdict is the same boolean, and the
+  // panel's own full read is a different path (it is the view's, not this signal's).
+  void tick(false)
 
   return {
     isRunning: (): boolean => running,
-    refresh: read,
+    // `refresh` is the FULL read on purpose: a caller that asks now wants the real snapshot's verdict,
+    // and only the 30 s backstop has to stay light.
+    refresh: async (): Promise<void> => await settle(readFull),
     dispose: (): void => {
       if (disposed) return
       disposed = true

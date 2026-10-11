@@ -36,6 +36,7 @@ import {
   type ChildSpec,
   type ContinuationDelta,
   type DispatchDeferral,
+  type EngineHooks,
   type HungReport,
   type MutationResult,
   type NodeRecord,
@@ -72,6 +73,57 @@ import { OWN_WAKE_SOURCE_KIND } from './source.js'
 import { createTreeStore, type TreesTable } from './store.js'
 
 const WORKER_PROVIDER = 'spawn'
+
+/**
+ * The reason {@link AvantfMissionHost.stop} aborts in-flight worker starts with, as ONE object.
+ *
+ * It is the identity the dispatch catch compares against, so the value must not be re-created per
+ * abort (a fresh `Error` with the same message would not match). An unload cancelling its own
+ * starting worker is an expected outcome, not a failed start.
+ */
+const UNLOAD_ABORT = new Error('avantf-mission: plugin unloading')
+
+/**
+ * The UTF-8 byte size of one `snapshot` frame, for the client's per-frame cost line (see
+ * {@link AvantfMissionHost.snapshot} and the client's `logSnapshotFrame`).
+ *
+ * Named rather than inlined because it must DEGRADE: a payload that cannot be serialised (a cycle
+ * would be an upstream bug, never a real tree) answers `0` instead of failing the read the panel needs.
+ * The cost is one `JSON.stringify` of the payload the transport serialises moments later.
+ */
+function frameBytes(payload: { wire: number; trees: readonly TreeView[] }): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(payload), 'utf8')
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Whether a rejection is {@link UNLOAD_ABORT}, directly or anywhere down its `cause` chain.
+ *
+ * The runtime does not re-throw the abort reason as-is: it wraps it (a `RemoteError` whose `cause` is
+ * the reason), so only the chain identifies it. The traversal mirrors the agent-team's
+ * `isCancellation` and is cycle-safe.
+ */
+function isUnloadAbort(error: unknown): boolean {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (!seen.has(current)) {
+    if (current === UNLOAD_ABORT) return true
+    if (!(current instanceof Error)) return false
+    seen.add(current)
+    current = current.cause
+  }
+  return false
+}
+
+/**
+ * The engine's overlap-advisory payload, taken FROM the hook itself so host and core cannot drift
+ * about the fields. The core's public export list deliberately does not grow for an advisory, so
+ * this is derived here instead of imported by name.
+ */
+type UnitOverlapReport = Parameters<NonNullable<EngineHooks['notifyUnitOverlap']>>[0]
 
 /** Delegated mission unit, not a top-level session: `origin` names the session kind and
  *  `delegationDepth` its distance from the root; either one is enough. */
@@ -514,6 +566,7 @@ export class AvantfMissionHost extends TypertRemoteService {
         notifyOwner: (rootId, reason) => this.notifyOwner(rootId, reason),
         notifyStalled: (info) => this.notifyStalled(info),
         notifyHung: (info) => this.reportHung(info),
+        notifyUnitOverlap: (info) => this.notifyUnitOverlap(info),
         notifyParkedReady: (nodes) => this.notifyParkedReady(nodes),
         notifyDeferred: (info) => this.reportDeferred(info),
         reportDispatchFailure: (nodeId, error) => {
@@ -581,7 +634,7 @@ export class AvantfMissionHost extends TypertRemoteService {
     this.sweepListeners.clear()
     // The controller owns only the start; an accepted worker is stopped through `subagents.interrupt`.
     for (const controller of this.workerAborts.values()) {
-      controller.abort(new Error('avantf-mission: plugin unloading'))
+      controller.abort(UNLOAD_ABORT)
     }
     this.workerAborts.clear()
     this.issuedClaims.clear()
@@ -1222,10 +1275,55 @@ export class AvantfMissionHost extends TypertRemoteService {
    * `wire` is the panel's version marker (see `wire.ts`): the client reads it to say "the two halves
    * are out of step" instead of blanking the panel. `trees` keeps its shape, so an older client that
    * has never heard of `wire` simply drops the extra key.
+   *
+   * `bytes` is INSTRUMENTATION, not contract: the UTF-8 size of this very frame, so the client's
+   * per-frame debug line can print "X KB / Y ms" without re-serialising the payload it just parsed.
+   * Deliberately absent from `snapshotResultSchema` (see there) — `wire.ts`'s revision marker tracks
+   * the method set, not this field, so shipping it must not move the revision. The cost is one
+   * `JSON.stringify` of a payload the transport serialises anyway moments later.
    */
   @Remote('snapshot')
-  snapshot(args: { sessionId?: string }): Promise<{ wire: number; trees: readonly TreeView[] }> {
-    return Promise.resolve({ wire: SNAPSHOT_WIRE_VERSION, trees: this.treesForSession(args.sessionId) })
+  snapshot(args: { sessionId?: string }): Promise<{ wire: number; trees: readonly TreeView[]; bytes: number }> {
+    const trees = this.treesForSession(args.sessionId)
+    return Promise.resolve({ wire: SNAPSHOT_WIRE_VERSION, trees, bytes: frameBytes({ wire: SNAPSHOT_WIRE_VERSION, trees }) })
+  }
+
+  /**
+   * The ONE fact the 「任务」 tab's `●` marker reads: is any node of this session's trees running?
+   *
+   * WHY IT IS NOT `snapshot`. The marker must stay right while the panel is off screen, so the client
+   * body re-reads it on the 30 s stream-keepalive backstop — the stream is the update channel, but a
+   * stream that is silently dead is not detectable from the client side, so the read cannot go away.
+   * That backstop used to call `snapshot` and walk every tree × every node; this method answers the
+   * same question by SHORT-CIRCUITING on the first running node and, deliberately, without building
+   * the row projection (`treesForSession` does that for the panel) or a snapshot payload at all.
+   *
+   * The cost is therefore O(position of the first running node) worst case and O(1) in the running
+   * case, and the client renders nothing from it but the marker. The panel's own read stays
+   * `snapshot`, because that path wants the real data.
+   */
+  @Remote('status')
+  status(args: { sessionId?: string }): Promise<{ running: boolean }> {
+    return Promise.resolve({ running: this.sessionHasRunning(args.sessionId) })
+  }
+
+  /**
+   * Whether any node of this session's trees is running — the SHORT-CIRCUIT walk behind `status`.
+   *
+   * It deliberately does NOT go through {@link treesForSession}: that one builds the view's row
+   * projection (a `TreeView` per tree, a row object per node) only for this read to throw every row
+   * away. The raw engine records answer the same question and `.some` stops at the first running
+   * node. Ownership is filtered the same way `projectTreesForSession` does it, so an absent or blank
+   * session id answers `false` for both — no session owns a tree, hence nothing is running for it.
+   */
+  private sessionHasRunning(sessionId: string | undefined): boolean {
+    if (sessionId === undefined || sessionId === '') return false
+    const tree = this.tree
+    if (tree === undefined) return false
+    return tree
+      .trees()
+      .filter((entry) => entry.ownerSessionId === sessionId)
+      .some((entry) => tree.nodesOf(entry.rootId).some((node) => node.status === 'running'))
   }
 
   /**
@@ -1829,18 +1927,30 @@ export class AvantfMissionHost extends TypertRemoteService {
       this.log.info(`dispatched ${node.id} as ${claimId}`)
       this.announceTree(node.rootId)
     } catch (error) {
-      this.log.warn(`dispatch of ${node.id} failed: ${String(error)}`)
-      // Charged to `spawnFailures`, not the mission's `failures` budget: the node never got a worker. The
-      // reclaim also starts the cooldown that holds it out of the next few pumps. `claimId` is the
-      // expectation — the start awaited, so a sweep that already reclaimed this binding must not have
-      // its outcome overwritten by this stale revert (which would charge `spawnFailures` twice for one
-      // attempt and move the cooldown off the reclaim that actually happened).
-      const reverted = await tree.reclaim(node.id, 'spawn-failed', claimId).catch(() => undefined)
+      // An unload cancels this start. That is expected — the worker never started, and the plugin is
+      // going away — so it must NOT be charged as a failed start, cooled down, or reported as trouble.
+      const unloading = isUnloadAbort(error)
+      if (unloading) {
+        this.log.info(`dispatch of ${node.id} cancelled: the plugin is unloading`)
+      } else {
+        this.log.warn(`dispatch of ${node.id} failed: ${String(error)}`)
+      }
+      // `spawn-failed` is charged to `spawnFailures`, not the mission's `failures` budget: the node never
+      // got a worker. The reclaim also starts the cooldown that holds it out of the next few pumps.
+      // `unloading` is neither: it returns the node to the pool uncharged, because the cancellation was
+      // the host's own doing. `claimId` is the expectation — the start awaited, so a sweep that already
+      // reclaimed this binding must not have its outcome overwritten by this stale revert (which would
+      // charge the budget twice for one attempt and move the cooldown off the reclaim that happened).
+      const reverted = await tree
+        .reclaim(node.id, unloading ? 'unloading' : 'spawn-failed', claimId)
+        .catch(() => undefined)
       // A node that cannot even get a worker started is trouble the owner can act on, at the SAME floor
       // `isTroubledNode` reports at (one short of the ceiling that fails it). Without this it was the one
       // trouble `list_missions` flagged that never reached the owner as a message — the stall heads-up
       // cannot see it, because a spawn-failed node is never `running` and its sweep only visits those.
-      if (reverted !== undefined && reverted.ok
+      // Gated on `!unloading`: the budget a spawn failure spends is what raises this signal, and an
+      // unload spends none, so the unload path must never reach this branch.
+      if (!unloading && reverted !== undefined && reverted.ok
         && reverted.value.spawnFailures >= CAPACITY.maxAttempts - 1
         // The same durable "told once" marker the stall heads-up uses: one node, one message about it,
         // whichever way it is failing.
@@ -2020,6 +2130,26 @@ export class AvantfMissionHost extends TypertRemoteService {
       `任务 ${info.nodeId}（"${info.title}"）已有 ${String(minutes)} 分钟没有进展，执行者已被中断、`
       + `任务已重新入队（第 ${String(info.attempts + 1)} 次派发）—— ${budget}。`,
       `stall on ${info.nodeId} reported to the owner`,
+    )
+  }
+
+  /** Tell the owner two executors are `running` on overlapping scopes — a container and the scope
+   *  inside it (`a` vs `a/b`). The lease is an EXACT-key match and deliberately lets this through
+   *  (the tool text says a parent directory and a file under it are two scopes), so the consequence
+   *  is a heads-up, not a decision: one WARN line for the log and one Chinese sentence naming both
+   *  nodes and both units. Nothing is deferred, interrupted or marked — no state changes here. */
+  private notifyUnitOverlap(info: UnitOverlapReport): void {
+    const [first, second] = info.nodeIds
+    this.log.warn(
+      `unit overlap: ${first} holds ${info.unit}, ${second} holds ${info.other}`
+      + ` (root ${info.rootId}); the lease is exact-match only, so both are running`,
+    )
+    this.deliverToOwner(
+      info.rootId,
+      `任务 ${first}（unit ${info.unit}）与任务 ${second}（unit ${info.other}）的范围互相包含，`
+      + '两者正在同时执行——unit 租约只挡完全相同的范围，父目录与它下面的文件不算互斥。'
+      + `建议把其中一个的 unit 写成 ${info.unit}，或改窄到各自实际会改的路径。`,
+      `unit overlap between ${first} and ${second} reported to the owner`,
     )
   }
 

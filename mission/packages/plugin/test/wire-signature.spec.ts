@@ -13,9 +13,9 @@
  *
  * This is the static half: it reads `descriptors` from `src/wire.ts` and recovers each host
  * method's own parameter names from `Function.prototype.toString()`, then asserts they line up
- * with the descriptor's wire fields one for one — for EVERY invocation (snapshot / detail / result /
- * delete / cleanFinished / resolveExecutorSession / watch), which the existing wire assertions do not
- * do (they only count the invocations and check that `watch` carries `mode: 'stream'`).
+ * with the descriptor's wire fields one for one — for EVERY invocation (snapshot / status / detail /
+ * result / delete / cleanFinished / resolveExecutorSession / watch), which the existing wire assertions
+ * do not do (they only count the invocations and check that `watch` carries `mode: 'stream'`).
  *
  * The dynamic half — mounting a real `@deepseek-ai/dsh-typert-registry` and calling the six
  * methods through a gateway client — is deliberately NOT mocked here. The gateway is not
@@ -30,7 +30,7 @@
 import type { InvocationDescriptor } from '@deepseek-ai/dsh-typert-protocol'
 import { describe, expect, it } from 'vitest'
 import { AvantfMissionHost } from '../src/host.js'
-import { descriptors } from '../src/wire.js'
+import { SNAPSHOT_WIRE_VERSION, descriptors, snapshotResultSchema } from '../src/wire.js'
 
 /** Split on top-level commas, so a default value or generic can never be mistaken for a boundary. */
 function splitParameters(inner: string): string[] {
@@ -104,6 +104,7 @@ describe('the wire face: host method parameters match the descriptor, in order',
   it('covers every invocation the host publishes', () => {
     expect(descriptors.map((descriptor) => descriptor.method)).toEqual([
       'snapshot',
+      'status',
       'detail',
       'result',
       'delete',
@@ -112,11 +113,35 @@ describe('the wire face: host method parameters match the descriptor, in order',
       'watch',
     ])
     // The pairing below is only meaningful if every invocation is actually present.
-    expect(descriptors).toHaveLength(7)
+    expect(descriptors).toHaveLength(8)
   })
 
-  it('gives each host method exactly the positional parameters its descriptor declares', () => {
-    for (const descriptor of descriptors) {
+  /**
+   * The version marker tracks the METHOD SET, not one payload's shape (see `wire.ts`): a client that
+   * asks a host process for a method it never published gets a gateway 404. `status` is a new method,
+   * so the revision must move with it — the exact assertion whose absence let revision 2 ship
+   * unbumped.
+   */
+  it('carries the revision that matches the published method set', () => {
+    expect(SNAPSHOT_WIRE_VERSION).toBe(4)
+    // 4 is the revision that first carried `status`; every method in the list above is therefore
+    // covered by it.
+    expect(descriptors.map((descriptor) => descriptor.method)).toContain('status')
+  })
+
+  /**
+   * N3's first step carries a debug-only `bytes` on the snapshot payload (see `host.ts`). It must NOT
+   * become a wire field: the marker above tracks the METHOD SET, and a schema change here would also
+   * make an absent debug number a parse failure for a client that learned the field.
+   */
+  it('keeps the snapshot frame-size instrumentation OFF the wire contract', () => {
+    expect(Object.keys(snapshotResultSchema.shape)).toEqual(['wire', 'trees'])
+    // Same revision as before the instrumentation: no method was added or removed, and this is not the
+    // "new optional field" case either — the field is not declared at all.
+    expect(SNAPSHOT_WIRE_VERSION).toBe(4)
+  })
+
+  it('gives each host method exactly the positional parameters its descriptor declares', () => {    for (const descriptor of descriptors) {
       const method = hostMethod(descriptor)
       expect(formalParameters(method), `${descriptor.method}: host method parameters`).toEqual(
         expectedParameters(descriptor),

@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { apply } from '../src/client/index.js'
-import { STREAM_KEEPALIVE_MS, type MissionRemote } from '../src/client/api.js'
+import { STREAM_KEEPALIVE_MS, unwrap, type MissionRemote } from '../src/client/api.js'
 import type { MissionNodeView, MissionSnapshot } from '../src/client/contract.js'
 import {
   RUNNING_MARKER,
@@ -24,6 +24,15 @@ import {
   subscribeSessionSwitch,
   type MissionStatusDeps,
 } from '../src/client/status.js'
+
+/**
+ * The light member as the signal detects it (`client/status.ts`): deliberately NOT part of the shared
+ * `MissionRemote` interface (the snapshot-increment work owns that), so the fake carries it as an
+ * extension. A host that never published `status` is modelled by simply omitting the key.
+ */
+type StatusRemote = MissionRemote & {
+  status?: (args: { sessionId: string }) => Promise<unknown>
+}
 
 /** One node in the wire shape; only `status` matters to the verdict. */
 function node(status: string, id = 'r1'): MissionNodeView {
@@ -47,13 +56,38 @@ function snapshot(...statuses: readonly string[]): MissionSnapshot {
 }
 
 /**
- * A Remote whose ONE honest method is `snapshot`. The other members exist because the real
+ * A Remote whose honest methods are `snapshot` and `status`. The other members exist because the real
  * {@link MissionRemote} declares them (a fake that omits them would let a shape change hide), and
  * they throw so a suite that starts calling them is told rather than silently served `undefined`.
+ *
+ * `status` DERIVES its verdict from the same snapshot the suite configured (`snapshotHasRunning`)
+ * unless the test gives a status answer of its own: the marker now reads the light call, and a
+ * fixture that only configured the full read would otherwise stop driving the verdict. It is a real
+ * derivation, not an echo, so `statusCalls` still tells the two data paths apart.
  */
-function remoteWith(snapshot: MissionRemote['snapshot']): MissionRemote {
-  const unused = (): never => { throw new Error('this suite only reads the snapshot') }
-  return { snapshot, detail: unused, delete: unused }
+function remoteWith(
+  snapshot: MissionRemote['snapshot'],
+  options: { status?: StatusRemote['status']; calls?: { method: 'snapshot' | 'status'; sessionId: string }[] } = {},
+): StatusRemote {
+  const unused = (): never => { throw new Error('this suite reads only snapshot/status') }
+  const calls = options.calls
+  const status = options.status ?? (async (args: { sessionId: string }): Promise<unknown> => {
+    const answer = unwrap(await snapshot(args))
+    if (answer.error !== undefined) throw new Error(answer.error)
+    return { ok: true, value: { running: snapshotHasRunning({ data: answer.value as MissionSnapshot }) } }
+  })
+  return {
+    snapshot: (args) => {
+      calls?.push({ method: 'snapshot', sessionId: args.sessionId })
+      return snapshot(args)
+    },
+    status: (args) => {
+      calls?.push({ method: 'status', sessionId: args.sessionId })
+      return status(args)
+    },
+    detail: unused,
+    delete: unused,
+  }
 }
 
 /** A platform timer that records its interval and its disposer instead of scheduling anything. */
@@ -214,9 +248,10 @@ describe('reading the CURRENTLY SELECTED session out of uiSession', () => {
 
 describe('the body-level status signal', () => {
   /**
-   * Deps whose single read answers from `remote` (defaulting to a running tree); `calls` records the
-   * session asked for, `errors` the reasons logged. `omitRemote` is the "Remote namespace never
-   * mounted" case.
+   * Deps whose single read answers from `remote` (defaulting to a running verdict); `calls` records
+   * the session asked for, `errors` the reasons logged. `omitRemote` is the "Remote namespace never
+   * mounted" case. The default remote answers the LIGHT `status` call the poll makes, because that is
+   * the call the signal now makes.
    */
   function deps(options: {
     remote?: MissionRemote
@@ -230,10 +265,13 @@ describe('the body-level status signal', () => {
     const errors: string[] = []
     const remote = options.omitRemote === true
       ? undefined
-      : options.remote ?? remoteWith(async (args: { sessionId: string }): Promise<unknown> => {
-          calls.push(args.sessionId)
-          return { ok: true, value: snapshot('running') }
-        })
+      : options.remote ?? remoteWith(
+          async (): Promise<unknown> => ({ ok: true, value: snapshot('running') }),
+          { status: async (args: { sessionId: string }): Promise<unknown> => {
+            calls.push(args.sessionId)
+            return { ok: true, value: { running: true } }
+          } },
+        )
     return {
       calls,
       errors,
@@ -278,6 +316,52 @@ describe('the body-level status signal', () => {
     await signal.refresh()
     expect(signal.isRunning()).toBe(false)
     expect(calls).toEqual([])
+    signal.dispose()
+  })
+
+  /**
+   * The whole point of the change: the 30 s backstop asks the LIGHT method for its boolean, and the
+   * verdict follows it in both directions. The call NAME is the assertion — a fixture that answered
+   * through `snapshot` would prove nothing about which method the tick uses.
+   */
+  it('① reads the verdict through `status` on every tick, never through a full snapshot', async () => {
+    const timer = fakeTimer()
+    let running = true
+    const reads: { method: 'snapshot' | 'status'; sessionId: string }[] = []
+    const remote = remoteWith(
+      async (): Promise<unknown> => ({ ok: true, value: snapshot(running ? 'running' : 'done') }),
+      { calls: reads, status: async () => ({ ok: true, value: { running } }) },
+    )
+    const signal = createMissionStatusSignal(deps({ remote, timer }).deps)
+    // The opening read is light too, so the very first recorded read is already `status`.
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(reads).toEqual([{ method: 'status', sessionId: 'owner-1' }])
+    expect(signal.isRunning()).toBe(true)
+    running = false
+    timer.intervals[0]?.callback()
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(signal.isRunning()).toBe(false)
+    // Two ticks, two light calls, and the full read was not pulled once.
+    expect(reads).toEqual([
+      { method: 'status', sessionId: 'owner-1' },
+      { method: 'status', sessionId: 'owner-1' },
+    ])
+    expect(reads.every((read) => read.method === 'status')).toBe(true)
+    signal.dispose()
+  })
+
+  /**
+   * The fallback that keeps the light method from becoming a REGRESSION against an older host: a host
+   * that never published `status` must still get the correct verdict, from the full read.
+   */
+  it('② falls back to the full snapshot read when the host publishes no `status` at all', async () => {
+    const timer = fakeTimer()
+    // A host from before the method existed: no `status` key on the namespace at all.
+    const base = remoteWith(async (): Promise<unknown> => ({ ok: true, value: snapshot('running') }))
+    const legacy: MissionRemote = { snapshot: base.snapshot, detail: base.detail, delete: base.delete }
+    const signal = createMissionStatusSignal(deps({ remote: legacy, timer }).deps)
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(signal.isRunning()).toBe(true)
     signal.dispose()
   })
 
@@ -406,6 +490,7 @@ describe('the conversation.view label thunk', () => {
   /** The slice of `apply` that matters here, with every host service answered structurally. */
   function boot(options: {
     snapshot?: MissionRemote['snapshot']
+    status?: StatusRemote['status']
     remote?: MissionRemote
     omitRemote?: boolean
     sessions?: unknown
@@ -416,6 +501,8 @@ describe('the conversation.view label thunk', () => {
     label: () => string | undefined
     projected: () => string | undefined
     calls: string[]
+    /** The data path each read took, in order — `status` on the tick, `snapshot` only where asked. */
+    reads: { method: 'snapshot' | 'status'; sessionId: string }[]
     listenerCalls: () => number
     errors: string[]
     seatDispose: () => void
@@ -475,9 +562,15 @@ describe('the conversation.view label thunk', () => {
       projected = registered?.label?.()
     })
     const timer = options.timer ?? fakeTimer()
+    // The mount-time read is the LIGHT one now, so the fixture derives `status` from whatever full
+    // snapshot the suite configured unless it gives a status answer of its own (see `remoteWith`).
+    const reads: { method: 'snapshot' | 'status'; sessionId: string }[] = []
     const remote = options.omitRemote === true
       ? undefined
-      : options.remote ?? remoteWith(options.snapshot ?? (async (): Promise<unknown> => ({ ok: true, value: snapshot('done') })))
+      : options.remote ?? remoteWith(
+          options.snapshot ?? (async (): Promise<unknown> => ({ ok: true, value: snapshot('done') })),
+          { calls: reads, ...options.status === undefined ? {} : { status: options.status } },
+        )
     const ctx = {
       effect: (callback: () => (() => void) | void): void => {
         const dispose = callback()
@@ -508,6 +601,7 @@ describe('the conversation.view label thunk', () => {
       label: () => registered?.label?.(),
       projected: () => projected,
       calls,
+      reads,
       listenerCalls: () => listenerCalls,
       errors,
       seatDispose: () => { seatDispose?.() },
@@ -547,6 +641,66 @@ describe('the conversation.view label thunk', () => {
     expect(booted.label()).toBe('任务')
     expect(asked).toBe(0)
     booted.unload()
+  })
+
+  /**
+   * The wiring half of the light read: the LABEL's verdict is driven by `status` ticks, and the
+   * 30 s backstop must not pull a full snapshot. (The panel's own read is a different path — this
+   * signal never full-reads on a tick.)
+   *
+   * Both verdicts are driven here so the assertion covers the glyph RULE on this path, not only the
+   * positive case: `●` appears while the light call says running and disappears when it stops.
+   */
+  it('drives the label from the LIGHT `status` tick, without pulling the full snapshot', async () => {
+    const timer = fakeTimer()
+    let running = true
+    const booted = boot({
+      sessions: MAIN,
+      timer,
+      // The full read keeps answering idle on purpose: a label that followed it could never show
+      // `任务 ●`, so the marker below can only have come from the status tick.
+      snapshot: async (): Promise<unknown> => ({ ok: true, value: snapshot('done') }),
+      status: async (): Promise<unknown> => ({ ok: true, value: { running } }),
+    })
+    await settle()
+    expect(booted.label()).toBe(`任务 ${RUNNING_MARKER}`)
+    running = false
+    timer.intervals[0]?.callback()
+    await settle()
+    expect(booted.label()).toBe('任务')
+    expect(booted.label()).not.toContain(RUNNING_MARKER)
+    // Both ticks used the light call; the full read was never on that path.
+    expect(booted.reads).toEqual([
+      { method: 'status', sessionId: 'owner-1' },
+      { method: 'status', sessionId: 'owner-1' },
+    ])
+    booted.unload()
+  })
+
+  /**
+   * The failure mode that matters: a light read that fails (the gateway 404 against a host that never
+   * published the method, a thrown transport) must degrade to "no marker", never to an exception —
+   * and never silently leave a stale `●` up. The full-read fallback succeeds here, so the verdict is
+   * the honest one the snapshot carries, and the fallback is SAID once instead of staying invisible
+   * or repeating per tick.
+   */
+  it('degrades to no marker when the light read fails, and says so once, without throwing', async () => {
+    const timer = fakeTimer()
+    const booted = boot({
+      sessions: MAIN,
+      timer,
+      snapshot: async (): Promise<unknown> => ({ ok: true, value: snapshot('done') }),
+      status: async (): Promise<unknown> => { throw new Error('gateway 404: no such method status') },
+    })
+    await settle()
+    expect(booted.label()).toBe('任务')
+    expect(booted.errors.filter((message) => message.includes('404'))).toHaveLength(1)
+    timer.intervals[0]?.callback()
+    await settle()
+    expect(booted.label()).toBe('任务')
+    // Bounded: the second failed light call does not add a second line.
+    expect(booted.errors.filter((message) => message.includes('404'))).toHaveLength(1)
+    expect(() => booted.unload()).not.toThrow()
   })
 
   /**

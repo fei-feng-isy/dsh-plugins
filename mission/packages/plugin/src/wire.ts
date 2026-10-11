@@ -189,16 +189,18 @@ const treeSchema = z.object({
 })
 
 /**
- * The wire surface: `snapshot` the summary, `detail` one node's full record, `result` the FULL text
- * behind a spilled one (on demand — a reader asks for it, the panel never prefetches it), `delete`
- * one finished tree, `cleanFinished` every CLOSED tree this session owns (the panel's batch entry),
- * `watch` a revision on every change (the engine pushing, not polling), and `resolveExecutorSession`
- * the CLICK-TIME lookup of a historical node's executor session (W18 — it reads session logs, so it
- * is deliberately NOT part of any render path).
+ * The wire surface: `snapshot` the summary, `status` the ONE boolean the tab's running marker needs,
+ * `detail` one node's full record, `result` the FULL text behind a spilled one (on demand — a reader
+ * asks for it, the panel never prefetches it), `delete` one finished tree, `cleanFinished` every
+ * CLOSED tree this session owns (the panel's batch entry), `watch` a revision on every change (the
+ * engine pushing, not polling), and `resolveExecutorSession` the CLICK-TIME lookup of a historical
+ * node's executor session (W18 — it reads session logs, so it is deliberately NOT part of any render
+ * path).
  * Every method carries a session id because a Remote invocation has no caller identity.
  */
 export const descriptors: readonly InvocationDescriptor[] = [
   direct('snapshot', z.object({ sessionId: z.string().optional() })),
+  direct('status', z.object({ sessionId: z.string().optional() })),
   direct('detail', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('result', z.object({ sessionId: z.string().optional(), nodeId: z.string() })),
   direct('delete', z.object({ sessionId: z.string().optional(), rootId: z.string() })),
@@ -236,8 +238,13 @@ export const descriptors: readonly InvocationDescriptor[] = [
  *   revision repairs.
  * - 3: `cleanFinished` added — the panel's batch entry for a session's CLOSED task trees (the same
  *   semantics as `/clean missions all`).
+ * - 4: `status` added — the LIGHT read behind the 「任务」 tab's running marker. The marker's 30 s tick
+ *   is the stream keepalive's backstop (a silently dead stream is not detectable from the client
+ *   side, so it must re-read); before this method that backstop pulled and walked the WHOLE snapshot.
+ *   This is a NEW METHOD, so it takes the bump for the same 404 reason as revision 2/3 — NOT because
+ *   the snapshot payload changed shape (it did not).
  */
-export const SNAPSHOT_WIRE_VERSION = 3
+export const SNAPSHOT_WIRE_VERSION = 4
 
 /**
  * The wire revision that FIRST carried `resolveExecutorSession`. A host reporting less than this — or
@@ -256,9 +263,34 @@ export const EXECUTOR_LOOKUP_WIRE_VERSION = 2
  */
 export const CLEAN_FINISHED_WIRE_VERSION = 3
 
+/**
+ * The `snapshot` result: `wire` and `trees`, and NOTHING else is promised.
+ *
+ * The host ALSO sends a `bytes` (the frame's UTF-8 size, see `host.ts`'s `snapshot`), which is
+ * deliberately NOT declared here. It is instrumentation for the N3 decision — the client's per-frame
+ * debug line prints "X KB / Y ms" from it — and this schema strips it, so no client may depend on it
+ * and an older client is unaffected. Keeping it out of the schema is the whole point of the split
+ * `wire.ts` draws: a debug field must never become a promise whose absence fails a parse, and the
+ * revision marker above tracks the METHOD SET, not this payload's shape.
+ */
 export const snapshotResultSchema = z.object({
   wire: z.number().optional(),
   trees: z.array(treeSchema),
+})
+
+/**
+ * The `status` result: ONE boolean, and nothing else.
+ *
+ * WHY A METHOD OF ITS OWN. The tab's `●` marker must be right while the panel is NOT on screen, so
+ * the plugin body re-reads it on the 30 s stream-keepalive backstop — not as a performance poll, but
+ * because a stream that is silently dead cannot be detected from this side (`client/api.ts`'s
+ * `STREAM_KEEPALIVE_MS`). That backstop used to call `snapshot` and walk every tree × every node for
+ * a fact the host can answer by short-circuiting on the first running node. This result is
+ * deliberately EXACTLY `{ running }`: a row projection here would re-create the cost the method
+ * exists to remove, and the panel's own full read is a different path (`snapshot`).
+ */
+export const statusResultSchema = z.object({
+  running: z.boolean(),
 })
 
 /**
@@ -363,6 +395,8 @@ const watchFrameSchema = z.object({ revision: z.number() })
 declaredSchemas.push(
   declare('snapshotargs', z.object({ sessionId: z.string().optional() })),
   declare('snapshotResult', snapshotResultSchema),
+  declare('statusargs', z.object({ sessionId: z.string().optional() })),
+  declare('statusResult', statusResultSchema),
   declare('deleteargs', z.object({ sessionId: z.string().optional(), rootId: z.string() })),
   declare('deleteResult', deleteResultSchema),
   declare('cleanFinishedargs', z.object({ sessionId: z.string().optional() })),

@@ -576,6 +576,13 @@ export async function mount(
       label: string
       childId: string
       request: { prompt: { text: string }[]; parent: StubAgent; toolFilter?: { deny?: readonly string[] } }
+      /**
+       * Caller cancellation. The real service rejects once this aborts before the child accepted its
+       * prompt (`subagent/src/control.ts` wraps the abort reason as the rejection's `cause`), which is
+       * the shape the host's unload classification has to walk — a double that ignored the signal
+       * would never exercise that path.
+       */
+      signal?: AbortSignal
     }) => {
       // An outage: nothing can be materialized. Rejected before the dispatch is recorded, because
       // no worker ever started — which is exactly what `spawnFailures` counts.
@@ -609,8 +616,21 @@ export async function mount(
       if (options.deferStart !== true) return Promise.resolve(started)
       // Held open until the test releases it: the child has been bound but has not
       // accepted its prompt, which is the window the host must read as "starting".
-      return new Promise<typeof started>((resolve) => {
-        pendingStarts.push(() => { resolve(started) })
+      return new Promise<typeof started>((resolve, reject) => {
+        const onAbort = (): void => {
+          // The runtime's own cancellation shape: the abort reason rides the `cause` chain, so a
+          // consumer that only compared the top-level error would miss it.
+          reject(new Error('stubbed: subagent prompt was cancelled', { cause: spec.signal?.reason }))
+        }
+        if (spec.signal?.aborted === true) {
+          onAbort()
+          return
+        }
+        spec.signal?.addEventListener('abort', onAbort, { once: true })
+        pendingStarts.push(() => {
+          spec.signal?.removeEventListener('abort', onAbort)
+          resolve(started)
+        })
       })
     },
     interrupt: (sessionId: string) => {
