@@ -28,6 +28,7 @@ import {
 import { setPandocProvisioning } from '@avantf/mem-convert'
 import { parseToolsConfig, resolveToolsDir } from '@avantf/mem-provision'
 import { loadConfig, type LoadedConfig } from './config/loader.js'
+import { DEFAULT_LIST_LIMIT } from './defaults.js'
 import { knowledgeConfigPath } from './config/paths.js'
 import { MEMORY_SCHEMA, openMemoryStore, type Db } from './db/conn.js'
 import { describeSqlite } from './db/sqlite.js'
@@ -436,7 +437,7 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
             validity: this.memory.validityCoverage(),
           } satisfies AdminStatsResult
         case 'list':
-          return this.memory.list(req.category, req.status ?? 'active', req.limit ?? 50, req.offset ?? 0, req.source)
+          return this.memory.list(req.category, req.status ?? 'active', req.limit ?? DEFAULT_LIST_LIMIT, req.offset ?? 0, req.source)
         case 'detail':
           return this.memory.get(req.fact_id) ?? ({ error: `fact_id=${req.fact_id} not found` } satisfies DispatchError)
         case 'archive':

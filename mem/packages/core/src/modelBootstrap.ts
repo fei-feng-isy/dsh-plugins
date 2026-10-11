@@ -118,7 +118,7 @@ export async function warmModels(
  * @param reportFinal - log the one-line verdict (default `true`).
  * @returns whether the semantic path is available.
  */
-export async function warmSemantic(rt: AvantfRuntime, reportFinal = true): Promise<boolean> {
+async function warmSemantic(rt: AvantfRuntime, reportFinal = true): Promise<boolean> {
   const started = Date.now()
   const { semantic } = rt.config.common
   rt.logger.info(
@@ -170,7 +170,7 @@ export async function awaitStartupGate(options: WarmOptions = {}): Promise<numbe
  * @param rt - the runtime whose logger reports the outcome.
  * @param options - the host-readiness signal and the idle gate (see {@link WarmOptions}).
  */
-export async function warmTokenizer(rt: AvantfRuntime, options: WarmOptions = {}): Promise<void> {
+async function warmTokenizer(rt: AvantfRuntime, options: WarmOptions = {}): Promise<void> {
   if (options.waitFor !== undefined) {
     rt.logger.info('model bootstrap: tokenizer warm waits for the host readiness signal')
   }
@@ -310,7 +310,7 @@ export async function provisionToolchainAsync(
 // ─── the model warm-up as a provisioning artifact ───────────────────────────────────────────────
 
 /** The artifact id, used in the startup log and in the model artifact's errors. */
-export const MODEL_ARTIFACT_ID = 'model'
+const MODEL_ARTIFACT_ID = 'model'
 
 /** The environment a model-artifact call runs under: the runtime that owns the model cache. */
 export interface ModelArtifactEnv {
@@ -348,7 +348,7 @@ function runtimeOf(artifactEnv: unknown): AvantfRuntime {
  * family framework is unavailable — with the framework up, `mem:model` owns the model root instead
  * and this artifact is not registered.
  */
-export const modelArtifact = {
+const modelArtifact = {
   id: MODEL_ARTIFACT_ID,
   title: '嵌入模型 + 分词器（启动预热）',
     // Not an install: every process rebuilds this from the local cache (see `isPresent`).
@@ -391,6 +391,6 @@ export const modelArtifact = {
 }
 
 /** Register the model artifact once per process (idempotent for a test that mounts twice). */
-export function registerModelArtifact(): void {
+function registerModelArtifact(): void {
   if (!hasArtifact(MODEL_ARTIFACT_ID)) registerArtifact(modelArtifact)
 }

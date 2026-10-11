@@ -74,6 +74,26 @@ class CapturingLogger implements AvantfLogger {
   error(message: string): void { this.lines.push(`ERROR ${message}`) }
 }
 
+/** The startup line that announces the migration — the surface the cross assertions read. */
+function olderSpaceWarning(logger: CapturingLogger): string {
+  const line = logger.lines.find((l) => l.startsWith('WARN') && l.includes('OLDER embedding space'))
+  expect(line, 'the startup stale-vector warning must fire').toBeDefined()
+  return line as string
+}
+
+/**
+ * The count the warning itself announced (`N persisted vector(s)`).
+ *
+ * The warning is produced by the shared JS reload scan; `vectorSpaceHealth()` is produced by the
+ * knowledge store's SQL projection (`ChunksDao.vectorSpaceCounts`). This reads the operator-visible
+ * number out of the message so the JS rule and its SQL mirror are pinned to the same answer.
+ */
+function warnedTotal(logger: CapturingLogger): number {
+  const match = /(\d+) persisted vector\(s\)/.exec(olderSpaceWarning(logger))
+  expect(match, 'the warning must carry its count').not.toBeNull()
+  return Number(match?.[1])
+}
+
 interface Fixture {
   dir: string
   /** Chunks in the seeded corpus (one per document — each document is shorter than `chunk_size`). */
@@ -186,13 +206,51 @@ describe('knowledge vector-space migration (the store used to be left behind)', 
     const kb = openKnowledgeDb(join(fx.dir, 'knowledge', 'knowledge.db'))
     try {
       kb.prepare('UPDATE doc_chunks SET semantic_vector = ?, embedding_model = ?')
-        .run(float32ToBytes(new Float32Array(DIM)), 'other_backend/other-model/768')
+        .run(float32ToBytes(new Float32Array(DIM)), 'v2/other_backend/other-model/768')
     } finally {
       kb.close()
     }
-    const rt = reopen(fx)
+    const logger = new CapturingLogger()
+    const rt = reopen(fx, logger)
     try {
-      expect(rt.knowledge.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: DOC_COUNT })
+      const health = rt.knowledge.vectorSpaceHealth()
+      expect(health).toEqual({ stale: 0, space_stale: DOC_COUNT })
+      // The JS reload scan (the warning) and the SQL mirror (`vectorSpaceCounts`) count the same
+      // rows; the migration's `remaining` starts from the same number.
+      expect(warnedTotal(logger)).toBe(health.stale + health.space_stale)
+      expect(olderSpaceWarning(logger)).toContain('another model or representation')
+      const slice = await rt.knowledge.migrateVectorsBatch(4)
+      expect(slice.remaining).toBe(DOC_COUNT - 4)
+      const outcome = await rt.knowledge.migrateVectors({ batchSize: 4 })
+      expect(outcome.remaining).toBe(0)
+      expect(rt.knowledge.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })
+      expect(await topChunk(rt, QUERY)).toBe(fx.answerChunk)
+    } finally {
+      rt.shutdown()
+      rmSync(fx.dir, { recursive: true, force: true })
+    }
+  })
+
+  it('counts a PRE-FINGERPRINT id as space_stale on both surfaces and heals it', async () => {
+    const fx = await seed()
+    // Same width, an id from before the representation fingerprint: the shape every existing library
+    // has after the `v2/` upgrade. The SQL mirror must count it as `space_stale` (its predicate is
+    // `embedding_model IS NOT :space`), and the JS warning must name the one-time re-encode.
+    const LEGACY = 'axis_sem/Xenova/bge-small-zh-v1.5/768'
+    const kb = openKnowledgeDb(join(fx.dir, 'knowledge', 'knowledge.db'))
+    try {
+      kb.prepare('UPDATE doc_chunks SET semantic_vector = ?, embedding_model = ?')
+        .run(float32ToBytes(new Float32Array(DIM)), LEGACY)
+    } finally {
+      kb.close()
+    }
+    const logger = new CapturingLogger()
+    const rt = reopen(fx, logger)
+    try {
+      const health = rt.knowledge.vectorSpaceHealth()
+      expect(health).toEqual({ stale: 0, space_stale: DOC_COUNT })
+      expect(warnedTotal(logger)).toBe(health.stale + health.space_stale)
+      expect(olderSpaceWarning(logger)).toContain('ONE-TIME full re-encode')
       const outcome = await rt.knowledge.migrateVectors({ batchSize: 4 })
       expect(outcome.remaining).toBe(0)
       expect(rt.knowledge.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })

@@ -102,25 +102,39 @@ const RECALL_TEXT_CMDS: Record<string, { field: 'query' | 'entity'; category: bo
 
 /**
  * Which commands touch the semantic path (query encode or vector indexing) and
- * therefore must await model warmup. Pure DB/graph commands skip it, so
- * `list`/`show`/`stats` never pay a model download.
+ * therefore must await model warmup, as DATA.
+ *
+ * It used to be a `switch` beside `RECALL_TEXT_CMDS`, the main dispatch switch and the command
+ * implementations — four independently maintained answers to "what does this command do", where a
+ * command missing here means "the model was never warmed" (`ask` on a cold cache answers from the
+ * degraded legs) and a local command listed here means a download for nothing. The rule per command
+ * is now one table entry, and `mem/packages/core/test/cli_warmup.spec.ts` cross-checks the table
+ * against the command list the usage banner advertises, so adding a command to the CLI fails the
+ * suite until it is classified here.
+ *
+ *   - `always`      — the command encodes a query or writes vectors unconditionally;
+ *   - `vectors-fix` — only the explicit repair loads the model (a plain `vectors` is a read);
+ *   - `kb-write`    — only the three writing subcommands (`ingest` / `import` / `reindex`);
+ *   - absent        — pure DB/graph commands, so `list`/`show`/`stats`/`related` pay no download.
  */
+const COMMAND_MODEL_WARMUP: Readonly<Record<string, 'always' | 'vectors-fix' | 'kb-write'>> = {
+  add: 'always',
+  edit: 'always',
+  search: 'always',
+  ask: 'always',
+  probe: 'always',
+  query: 'always',
+  vectors: 'vectors-fix',
+  kb: 'kb-write',
+}
+
+/** {@link COMMAND_MODEL_WARMUP} applied: does THIS invocation need the embedding model? */
 function needsModels(cmd: string | undefined, sub: string | undefined, rest: string[]): boolean {
-  switch (cmd) {
-    case 'add':
-    case 'edit':
-    case 'search':
-    case 'ask':
-    case 'probe':
-    case 'query':
-      return true
-    case 'vectors':
-      return rest.includes('--fix')
-    case 'kb':
-      return sub === 'ingest' || sub === 'import' || sub === 'reindex'
-    default:
-      return false
-  }
+  const rule = cmd === undefined ? undefined : COMMAND_MODEL_WARMUP[cmd]
+  if (rule === 'always') return true
+  if (rule === 'vectors-fix') return rest.includes('--fix')
+  if (rule === 'kb-write') return sub === 'ingest' || sub === 'import' || sub === 'reindex'
+  return false
 }
 
 /**

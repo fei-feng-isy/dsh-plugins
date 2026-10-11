@@ -180,6 +180,12 @@ export class ChunksDao {
    * This is what lets the shared repair flow read "what is stale" cheaply per slice instead of
    * re-scanning and hashing the corpus (`corpusState` reads every text; a batched migration must
    * not).
+   *
+   * The JS rule itself is `store/vector_space.ts` (`classifyVectorSpace` / `countVectorSpace`), and
+   * this projection is bound to it by the cross assertions in
+   * `test/knowledge_vector_migration.spec.ts` (the startup warning's count, the health count and the
+   * migration's `remaining` all have to be the same number). NOTHING here changes when the JS rule
+   * changes: the mirror is checked, not shared.
    */
   vectorSpaceCounts(space: string, expectedBytes: number): { stale: number; space_stale: number; missing: number } {
     const row = this.db

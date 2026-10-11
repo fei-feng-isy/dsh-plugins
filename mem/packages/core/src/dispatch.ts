@@ -24,15 +24,18 @@ import type {
   ToolSpec,
 } from '@avantf/mem-contract'
 import { modelFacingToolResult, toolErr, toolOk, validationError } from '@avantf/mem-contract'
+import { DEFAULT_LIST_LIMIT } from './defaults.js'
 import type { AvantfRuntime } from './runtime.js'
 
 /**
- * The default page for a model-facing `kb_list`.
+ * The default page for a model-facing `kb_list` — the SAME page the operator's `admin list` uses.
  *
  * Without one, `kb_list` on a large library read and parsed EVERY managed file (resolving a path
- * needs the file's frontmatter to detect collisions) to answer a question nobody asked in full.
+ * needs the file's frontmatter to detect collisions) to answer a question nobody asked in full. The
+ * two surfaces were separate literals; the contract documents both as 50, so they are one constant
+ * (`src/defaults.ts`).
  */
-export const KB_LIST_DEFAULT_LIMIT = 50
+export const KB_LIST_DEFAULT_LIMIT = DEFAULT_LIST_LIMIT
 
 /** A document view with the managed file's path — what makes "edit it yourself" actionable. */
 function withFilePath(

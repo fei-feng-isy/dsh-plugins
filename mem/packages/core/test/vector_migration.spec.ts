@@ -82,6 +82,31 @@ class CapturingLogger implements AvantfLogger {
   error(message: string): void { this.lines.push(`ERROR ${message}`) }
 }
 
+/** The startup line that announces the migration — the surface the cross assertions read. */
+function olderSpaceWarning(logger: CapturingLogger): string {
+  const line = logger.lines.find((l) => l.startsWith('WARN') && l.includes('OLDER embedding space'))
+  expect(line, 'the startup stale-vector warning must fire').toBeDefined()
+  return line as string
+}
+
+/**
+ * The count the warning itself announced (`N persisted vector(s)`).
+ *
+ * Read out of the MESSAGE rather than recomputed: the point of the cross assertion is that the
+ * operator-visible number and the counters the status surfaces report are the same number.
+ */
+function warnedTotal(logger: CapturingLogger): number {
+  const match = /(\d+) persisted vector\(s\)/.exec(olderSpaceWarning(logger))
+  expect(match, 'the warning must carry its count').not.toBeNull()
+  return Number(match?.[1])
+}
+
+/** The `legacy` reason split the warning announced (0 when the one-time sentence is absent). */
+function legacyCount(logger: CapturingLogger): number {
+  const match = /(\d+) written before the representation fingerprint/.exec(olderSpaceWarning(logger))
+  return match === null ? 0 : Number(match[1])
+}
+
 /** No model at all — the "upgraded on a machine that cannot load it (yet)" shape. */
 class NeverWarmSemantic implements SemanticBackend {
   readonly name = 'never_warm'
@@ -239,13 +264,28 @@ describe('vector-space migration (changing the embedding space is a data migrati
 
   it('also detects a same-width MODEL swap (space_stale) and heals it', async () => {
     const fx = await seed()
-    const rt = reopen(fx)
+    // Age the RECORDED space only (same width, another model) BEFORE the open: that is the state the
+    // startup warning has to describe, and the cross assertion below compares the warning's own count
+    // with the surfaces that report it later.
+    const first = buildRuntime({ dataHome: fx.dir, semantic: new AxisSemantic() })
+    first.db.prepare('UPDATE facts SET semantic_vector = ?, embedding_model = ?')
+      .run(float32ToBytes(new Float32Array(DIM)), 'v2/other_backend/other-model/768')
+    first.shutdown()
+    const logger = new CapturingLogger()
+    const rt = reopen(fx, logger)
     try {
       // Same width, another model: this one is invisible to a dim check and used to be ranked.
-      const bytes = float32ToBytes(new Float32Array(DIM))
-      rt.db.prepare('UPDATE facts SET semantic_vector = ?, embedding_model = ?').run(bytes, 'other_backend/other-model/768')
       const health = rt.memory.vectorSpaceHealth()
       expect(health).toEqual({ stale: 0, space_stale: FACT_COUNT })
+      expect(rt.memory.vectorsDiagnose().space_stale).toBe(FACT_COUNT)
+      // ① the warning's count IS the health count (the JS blob scan and the projected-length scan
+      // are the same rule): a drift between them is what this pins.
+      expect(warnedTotal(logger)).toBe(health.stale + health.space_stale)
+      const warning = olderSpaceWarning(logger)
+      expect(warning).toContain(String(FACT_COUNT))
+      expect(warning).toContain('another model or representation')
+      // A genuine model swap, NOT the one-time format upgrade.
+      expect(legacyCount(logger)).toBe(0)
       const outcome = await rt.memory.migrateVectors({ batchSize: 8 })
       expect(outcome.remaining).toBe(0)
       expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })
@@ -427,13 +467,63 @@ describe('representation fingerprint migration (pooling / normalize / window / r
     const logger = new CapturingLogger()
     const rt = buildRuntime({ dataHome: dir, semantic: new RepSemantic(BASE_REP), logger })
     try {
-      expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: FACT_COUNT })
-      const warning = logger.lines.find((l) => l.startsWith('WARN') && l.includes('OLDER embedding space'))
+      const health = rt.memory.vectorSpaceHealth()
+      expect(health).toEqual({ stale: 0, space_stale: FACT_COUNT })
+      expect(rt.memory.vectorsDiagnose().space_stale).toBe(FACT_COUNT)
+      // ① the LEGACY branch, pinned across the three surfaces: the warning's total is the health
+      // total, its one-time reason names every `space_stale` row (no genuine model swap is blamed),
+      // and the migration's `remaining` starts at the same number.
+      const warning = olderSpaceWarning(logger)
       expect(warning).toContain('representation fingerprint')
       expect(warning).toContain('ONE-TIME full re-encode')
+      expect(warnedTotal(logger)).toBe(health.stale + health.space_stale)
+      expect(legacyCount(logger)).toBe(health.space_stale)
+      const slice = await rt.memory.migrateVectorsBatch(3)
+      expect(slice.remaining).toBe(FACT_COUNT - 3)
       const outcome = await rt.memory.migrateVectors({ batchSize: 8 })
       expect(outcome.remaining).toBe(0)
       expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })
+      expect(await topRef(rt, QUERY)).toBe(1)
+    } finally {
+      rt.shutdown()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('splits space_stale into legacy and genuine swaps, and counts the same rows on every surface', async () => {
+    const dir = await seedUnder(BASE_REP)
+    // All THREE branches in one store, at the exact split: 3 wrong-width, 40 pre-fingerprint ids and
+    // 37 ids from another model. A single-branch fixture cannot see the `legacy` CLAMP (`legacy` is a
+    // reason split of `space_stale`, never a fourth bucket).
+    const WRONG_WIDTH = 3
+    const LEGACY_ROWS = 40
+    const first = buildRuntime({ dataHome: dir, semantic: new RepSemantic(BASE_REP) })
+    first.db.prepare(
+      'UPDATE facts SET semantic_vector = ?, embedding_model = ? WHERE fact_id <= ?',
+    ).run(float32ToBytes(new Float32Array(512)), LEGACY_SAME_WIDTH, WRONG_WIDTH)
+    first.db.prepare(
+      'UPDATE facts SET embedding_model = ? WHERE fact_id > ? AND fact_id <= ?',
+    ).run(LEGACY_SAME_WIDTH, WRONG_WIDTH, WRONG_WIDTH + LEGACY_ROWS)
+    first.db.prepare(
+      'UPDATE facts SET embedding_model = ? WHERE fact_id > ?',
+    ).run('v2/other_backend/other-model/768', WRONG_WIDTH + LEGACY_ROWS)
+    first.shutdown()
+
+    const logger = new CapturingLogger()
+    const rt = buildRuntime({ dataHome: dir, semantic: new RepSemantic(BASE_REP), logger })
+    try {
+      const health = rt.memory.vectorSpaceHealth()
+      expect(health).toEqual({ stale: WRONG_WIDTH, space_stale: FACT_COUNT - WRONG_WIDTH })
+      const diagnose = rt.memory.vectorsDiagnose()
+      expect({ stale: diagnose.stale, space_stale: diagnose.space_stale })
+        .toEqual({ stale: WRONG_WIDTH, space_stale: FACT_COUNT - WRONG_WIDTH })
+      // The warning announces the SAME total and the SAME split, in words.
+      expect(warnedTotal(logger)).toBe(health.stale + health.space_stale)
+      expect(legacyCount(logger)).toBe(LEGACY_ROWS)
+      const outcome = await rt.memory.migrateVectors({ batchSize: 8 })
+      expect(outcome.remaining).toBe(0)
+      expect(rt.memory.vectorSpaceHealth()).toEqual({ stale: 0, space_stale: 0 })
+      expect(rt.memory.vectorsDiagnose().stale).toBe(0)
       expect(await topRef(rt, QUERY)).toBe(1)
     } finally {
       rt.shutdown()

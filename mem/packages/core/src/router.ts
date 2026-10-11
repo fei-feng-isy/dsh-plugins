@@ -1,5 +1,6 @@
 import { DEGRADED_WEIGHTS, type RecallHit, type RecallResult, type RetrievalFloorDrops } from '@avantf/mem-contract'
 import { fitToTokenBudget, recordTruncation } from '@avantf/mem-retrieval'
+import { DEFAULT_SEARCH_LIMIT } from './defaults.js'
 import { mergeFloorDrops } from './store/floors.js'
 
 interface CrossQueryOptions {
@@ -62,7 +63,7 @@ export function normalizeMergedScores<T extends { score: number }>(pool: T[]): T
  * degraded even when embeddings were live.
  */
 export function crossQuery(memory: CrossQueryMemory, kb: RecallHit[], opts?: CrossQueryOptions): RecallResult {
-  const limit = opts?.limit ?? 10
+  const limit = opts?.limit ?? DEFAULT_SEARCH_LIMIT
   const weights = memory.weights ?? DEGRADED_WEIGHTS
   // Both stores read the SAME `retriever` floors, so the effective values are the memory leg's
   // (post degraded-relaxation); the DROPS are per store and are merged below.

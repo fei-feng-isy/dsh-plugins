@@ -49,10 +49,11 @@ import {
 } from './vector_repair.js'
 import { detectSecretShape, secretRefusalMessage } from './secret_guard.js'
 import type { Db } from '../db/conn.js'
-import { bytesToFloat32, isPreFingerprintSpace, vectorCachePath } from '../db/vectors.js'
+import { bytesToFloat32, vectorCachePath } from '../db/vectors.js'
 import { detectFtsTokenizer, reportFtsTokenizerDrift, resolveFtsTokenizer, type FtsTokenizer } from '../db/tokenizer.js'
 import { probeStoreTerms, type LexicalProbe } from './lexical.js'
 import { type FloorLeg } from './floors.js'
+import { classifyVectorSpace, countVectorSpace } from './vector_space.js'
 import { anchoredOverlap, ENTITY_UNION_CAP, selectAnchors } from './entity_leg.js'
 import { parseTimeWindow, windowDayBounds } from './time_window.js'
 import {
@@ -442,22 +443,18 @@ export class MemoryStore {
    * and every existing assertion on it — is unchanged; only the warning's wording uses it.
    */
   private vectorSpaceCounts(): StaleVectorCounts {
-    const space = this.vectorSpace()
-    const expectedBytes = this.vstore.dim * 4
-    let stale = 0
-    let spaceStale = 0
-    let legacy = 0
-    for (const row of this.facts.activeVectorSpaces()) {
-      if (row.bytes !== expectedBytes) {
-        stale++
-        continue
-      }
-      if (row.embedding_model !== space) {
-        spaceStale++
-        if (isPreFingerprintSpace(row.embedding_model)) legacy++
-      }
-    }
-    return { stale, space_stale: spaceStale, legacy }
+    // The cheap half of the ONE rule (`store/vector_space.ts`): `length(semantic_vector)` is already
+    // the byte width, so no blob is read. The `embedding_model` comparison and the `legacy` split
+    // come from the same function the open-time reload and the decode pass use, so "what counts as
+    // stale" cannot land on one of the three surfaces only.
+    return countVectorSpace(
+      this.facts.activeVectorSpaces().map((row) => ({
+        source: 'byteLength' as const,
+        byteLength: row.bytes,
+        embeddingModel: row.embedding_model,
+      })),
+      { space: this.vectorSpace(), dim: this.vstore.dim },
+    )
   }
 
   async add(content: string, category?: string, ttlDays?: number, opts?: FactWriteOptions): Promise<RememberResult> {
@@ -1012,7 +1009,7 @@ export class MemoryStore {
     const counts = this.facts.vectorCounts()
     const models = this.facts.embeddingModels()
     const rows = this.facts.activeVectorRows()
-    const space = this.vectorSpace()
+    const identity = { space: this.vectorSpace(), dim: this.vstore.dim }
 
     const staleIds: number[] = []
     // Rows whose bytes are usable but whose SPACE is not provably the current one: a different
@@ -1026,12 +1023,19 @@ export class MemoryStore {
     const usable: { id: number; vec: Float32Array }[] = []
     for (const r of rows) {
       const vec = bytesToFloat32(r.semantic_vector)
-      if (!vec || vec.length !== this.vstore.dim) {
+      // The decode pass is the one caller that HAS the vector, so it probes the decoded width —
+      // the same rule as the blob-length and projected-length callers (`store/vector_space.ts`).
+      const classified = classifyVectorSpace(
+        { source: 'decoded', vec, embeddingModel: r.embedding_model },
+        identity,
+      )
+      if (classified.verdict === 'stale') {
         staleIds.push(r.fact_id)
         continue
       }
-      if (r.embedding_model !== space) spaceStaleIds.push(r.fact_id)
-      usable.push({ id: r.fact_id, vec })
+      if (classified.verdict === 'space_stale') spaceStaleIds.push(r.fact_id)
+      // `verdict !== 'stale'` means the decoded width matched, so `vec` is non-null here.
+      usable.push({ id: r.fact_id, vec: vec as Float32Array })
     }
     const present = usable.length ? this.vstore.fetch(usable.map((u) => u.id)) : new Map<number, Float32Array>()
     return {

@@ -23,7 +23,7 @@
  *
  * @module store/hybrid
  */
-import { DEGRADED_WEIGHTS, type Config, type FloorProfile, type RecallResult, type RetrievalFloorDrops, type RetrievalFloors } from '@avantf/mem-contract'
+import { DEGRADED_WEIGHTS, defaultConfig, type Config, type FloorProfile, type RecallResult, type RetrievalFloorDrops, type RetrievalFloors } from '@avantf/mem-contract'
 import {
   fitToTokenBudget,
   fuse,
@@ -35,12 +35,10 @@ import {
   type Hit,
   type SemanticBackend,
 } from '@avantf/mem-retrieval'
+import { DEFAULT_SEARCH_LIMIT } from '../defaults.js'
 import { droppedLegs, emptyFloorDrops, resolveFloors, totalFloorDrops, type FloorLeg } from './floors.js'
 import { gradedTerms } from './lexical.js'
 import { selfQueryRewrite } from './self_query.js'
-
-/** The `limit` a caller gets when it passes nothing usable. */
-export const DEFAULT_SEARCH_LIMIT = 10
 
 /**
  * A retrieval input the CALLER got wrong, as opposed to a backend that failed at runtime.
@@ -52,9 +50,6 @@ export const DEFAULT_SEARCH_LIMIT = 10
  * exists to surface.
  */
 export class RetrievalInputError extends Error {}
-
-/** …and the over-fetch factor when the config does not set one (matches the contract default). */
-export const DEFAULT_OVER_FETCH_FACTOR = 5
 
 /** The three weights a `RecallResult` reports. */
 export type RetrievalWeights = RecallResult['weights']
@@ -283,7 +278,15 @@ export async function hybridSearch<H extends BudgetInput>(deps: HybridDeps<H>, p
         jaccard: retriever.weight_jaccard,
       }
     : DEGRADED_WEIGHTS
-  const overFetch = Math.max(limit, plan.overFetch ?? limit * (retriever.over_fetch_factor || DEFAULT_OVER_FETCH_FACTOR))
+  // The `||` fallback is UNREACHABLE on a schema-parsed config (`retriever.over_fetch_factor` is
+  // `.int().positive()`), and it is kept only for a hand-built `Config` in a test or an embedder that
+  // skips the schema — where a `0`/`undefined` would otherwise make `overFetch` NaN. Its value comes
+  // from the CONTRACT's own default (`defaultConfig`), so the number has one home and the engine
+  // carries no second copy of `5`.
+  const overFetch = Math.max(
+    limit,
+    plan.overFetch ?? limit * (retriever.over_fetch_factor || defaultConfig.retriever.over_fetch_factor),
+  )
   const legCap = legCapFor(deps.config, overFetch)
   // Computed once for both passes: the FTS bar is clamped to the terms this QUERY can produce (a
   // 3-char CJK query has one trigram, and a 2-char one falls back to ONE substring term, so a

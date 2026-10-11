@@ -33,8 +33,9 @@ import type {
 import { describeError } from '@avantf/mem-contract'
 import type { VectorStore } from '@avantf/mem-retrieval'
 import { retrievalLogger } from '@avantf/mem-retrieval'
-import { float32ToBytes, isPreFingerprintSpace, reloadVectorIndex } from '../db/vectors.js'
+import { float32ToBytes, reloadVectorIndex } from '../db/vectors.js'
 import { reportStaleVectors, yieldToEventLoop, type StaleVectorCounts } from './common.js'
+import { countVectorSpace } from './vector_space.js'
 
 /** The two stores this flow can drive. */
 export type VectorRepairStore = 'memory' | 'knowledge'
@@ -139,24 +140,15 @@ export function loadVectorIndex(opts: {
 }): StaleVectorCounts {
   reloadVectorIndex(opts.vstore, opts.rows, opts.store)
   // Both halves of "the embedding space changed": a width that no longer fits and a recorded space
-  // from another model (same width = still ranked, but in another model's coordinates). Reading the
-  // blob LENGTH is enough for the first and never decodes.
-  const expectedBytes = opts.vstore.dim * 4
-  let stale = 0
-  let spaceStale = 0
-  let legacy = 0
-  for (const row of opts.rows) {
-    if (row.vec === null || row.vec.byteLength !== expectedBytes) {
-      stale++
-      continue
-    }
-    if (row.embedding_model !== opts.space) {
-      spaceStale++
-      if (isPreFingerprintSpace(row.embedding_model)) legacy++
-    }
-  }
-  reportStaleVectors(opts.store, opts.space, { stale, space_stale: spaceStale, legacy }, opts.manualEntry)
-  return { stale, space_stale: spaceStale, legacy }
+  // from another model (same width = still ranked, but in another model's coordinates). The rule (and
+  // the `legacy` split) is `store/vector_space.ts`; reading the blob LENGTH is enough for the first
+  // and never decodes.
+  const counts = countVectorSpace(
+    opts.rows.map((row) => ({ source: 'blob' as const, vec: row.vec, embeddingModel: row.embedding_model })),
+    { space: opts.space, dim: opts.vstore.dim },
+  )
+  reportStaleVectors(opts.store, opts.space, counts, opts.manualEntry)
+  return counts
 }
 
 /** One row the shared encode flow should turn into a vector. */

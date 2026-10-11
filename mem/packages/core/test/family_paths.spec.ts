@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { homedir } from 'node:os'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defaultConfig, familyHome, familyModelsDir, familyToolsDir } from '@avantf/mem-contract'
 import { defaultToolsDir, parseToolsConfig, resolveToolsDir } from '@avantf/mem-provision'
+import { loadConfig } from '../src/config/loader.js'
 
 /**
  * The managed-directory convention, pinned in one place.
@@ -47,5 +49,45 @@ describe('the family managed-directory convention', () => {
     // path here is what would make a compatibility symlink load-bearing again.
     expect(defaultConfig.tools.dir).toBe('')
     expect(defaultConfig.semantic.cache_dir).toBe('')
+  })
+
+  it('pins the WHOLE `tools` default, not only `dir` (mirror / auto_install drift silently)', () => {
+    // `parseToolsConfig(undefined)` is the provision package's mirror of the contract's `tools`
+    // section, and its own comment says "the config schema defaults to exactly this shape". The old
+    // pin covered `dir` only, so a changed mirror list or auto_install would have been invisible —
+    // users would simply stop being able to install anything, with no test failing.
+    const provisionDefaults = parseToolsConfig(undefined)
+    expect(provisionDefaults.mirror).toEqual(defaultConfig.tools.mirror)
+    expect(provisionDefaults.auto_install).toBe(defaultConfig.tools.auto_install)
+    // Field-by-field above AND the whole object: a NEW field added on either side has to be mirrored.
+    expect(provisionDefaults).toEqual(defaultConfig.tools)
+  })
+
+  it('pins the `cache_dir` chain: blank → the family models root → the envinit `mem:model` gate', () => {
+    // Leg ①: the schema default is blank ("resolve me"), never a literal directory.
+    expect(defaultConfig.semantic.cache_dir).toBe('')
+    // Leg ②: the loader turns blank into `familyModelsDir()` (layer ① of loadConfig). It is run for
+    // real; only the two env escape hatches are neutralised, because the test environment sets one of
+    // them (vitest.config.ts points AVANTF_MEM_MODEL_CACHE at a throwaway directory).
+    const savedHome = process.env['AVANTF_HOME']
+    const savedCache = process.env['AVANTF_MEM_MODEL_CACHE']
+    delete process.env['AVANTF_HOME']
+    delete process.env['AVANTF_MEM_MODEL_CACHE']
+    const dir = mkdtempSync(join(tmpdir(), 'avantf-cache-dir-'))
+    try {
+      const loaded = loadConfig({ dataHome: dir })
+      expect(loaded.common.semantic.cache_dir).toBe(familyModelsDir({}))
+    } finally {
+      if (savedHome !== undefined) process.env['AVANTF_HOME'] = savedHome
+      if (savedCache !== undefined) process.env['AVANTF_MEM_MODEL_CACHE'] = savedCache
+      rmSync(dir, { recursive: true, force: true })
+    }
+    // Leg ③: the plugin declares `mem:model` exactly when the runtime's cache dir IS the framework's
+    // models root (`sameDir`). That entry cannot be imported from this package (it is another
+    // package of the tree, which the `rootDir` of this tsconfig forbids, and it loads the base), so
+    // the linkage is pinned as SOURCE: the gate must compare exactly the two values leg ② resolved.
+    // See the delivery report — the executable half lives in the plugin's `test/envinit.spec.ts`.
+    const envinit = readFileSync(new URL('../../plugin/src/envinit.ts', import.meta.url), 'utf8')
+    expect(envinit).toContain('if (!sameDir(semantic.cache_dir, modelsRoot)) return undefined')
   })
 })

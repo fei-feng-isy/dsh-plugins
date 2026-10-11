@@ -13,8 +13,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetRetrievalHealth, retrievalHealth, setRetrievalLogger } from '@avantf/mem-retrieval'
 import type { SemanticBackend } from '@avantf/mem-retrieval'
-import type { Config } from '@avantf/mem-contract'
+import { QueryUnion, defaultConfig, type Config } from '@avantf/mem-contract'
 import { loadConfig } from '../src/config/loader.js'
+import { DEFAULT_SEARCH_LIMIT } from '../src/defaults.js'
 import {
   hybridPlanOf,
   hybridSearch,
@@ -134,8 +135,11 @@ describe('hybridSearch', () => {
       deps((ctx) => { seen.push(ctx); return [leg({ 1: 0.9 })] }),
       { query: '查询', limit: Number.NaN },
     )
-    expect(seen[0].limit).toBe(10)
+    expect(seen[0].limit).toBe(DEFAULT_SEARCH_LIMIT)
     expect(result.hits).toHaveLength(1)
+    // …and the engine's default IS the contract's: `query`'s input schema carries `.default(10)`, and
+    // the recall actions document the same page. One number, two layers, pinned by parsing the schema.
+    expect(QueryUnion.parse({ query: '查询' }).limit).toBe(DEFAULT_SEARCH_LIMIT)
   })
 
   it('derives the pool from the configured over-fetch factor, for both stores alike', async () => {
@@ -147,7 +151,19 @@ describe('hybridSearch', () => {
     // An explicit request still wins, and is never smaller than the limit.
     const explicit: HybridContext[] = []
     await hybridSearch(deps((ctx) => { explicit.push(ctx); return [] }), { query: '查询', limit: 4, overFetch: 2 })
+    expect(explicit[0]).toBeDefined()
     expect(explicit[0].overFetch).toBe(4)
+  })
+
+  it('falls back to the CONTRACT\'s over-fetch factor when a hand-built config has none', async () => {
+    // The `||` branch is unreachable on a schema-parsed config (`over_fetch_factor` is
+    // `.int().positive()`), and the source of its value used to be a second literal `5` in this file.
+    // It is now the contract's own default; a hand-built `Config` (test seam, third-party embedder)
+    // is the only way to reach it, and reaching it must not produce NaN.
+    const handBuilt: Config = { ...config, retriever: { ...config.retriever, over_fetch_factor: 0 } }
+    const seen: HybridContext[] = []
+    await hybridSearch({ ...deps((ctx) => { seen.push(ctx); return [] }), config: handBuilt }, { query: '查询', limit: 4 })
+    expect(seen[0].overFetch).toBe(4 * defaultConfig.retriever.over_fetch_factor)
   })
 
   it('hands the legs the degraded weights when the semantic backend is down', async () => {
