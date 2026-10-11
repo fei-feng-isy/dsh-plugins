@@ -18,7 +18,7 @@
      ——它**从不自己发明一个世代**，换代是一次显式动作（新快照 + 版本决定）。
 - **kit 成员归置**：`.` 是**显式列举的稳定子集**，只有真实的运行期消费者才放上去；**零运行期消费者的成员
   放在 `./internal`**，`./internal` 不承诺兼容。成员的移出与清退是完整动作：`. ` 上没有、`./internal` 上必须
-  有（`createPluginLogger` 随接口 v3 移出 `.`、进了 `./internal`，两棵插件树因此各自持有自己的 logger）。
+  有（`createPluginLogger` 随接口 v3 移出 `.`、进了 `./internal`，每棵插件树因此各自持有自己的 logger）。
 - **向前兼容是硬要求**：新成员必须**增量**——不改既有成员的形状与语义；顺序敏感的参数用具名对象
   （`resolveDataHome({ explicit, env, configured })`）；可观察文案归调用方（`compatReport` 的 `words`）。
   一次增面绝不能让谁降级、更不能让谁拒载。

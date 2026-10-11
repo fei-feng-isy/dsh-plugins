@@ -11,15 +11,16 @@ export const VERSION = '0.4.2';
 /**
  * The framework interval this bootstrap can launch.
  *
- * Kept equal to the plugins' declared `dependencies` range for the base (the install-time face; the
- * base is a plain dependency, not a peer): the plugin passes no override, so THIS is the
- * runtime gate. It is a plain comparator interval, NOT a caret: the package version is ordinary
- * semver again and no longer tracks the interface, so the interval stays as wide as the family's
- * compatibility promise — `>=0.3.0 <1.0.0` admits every 0.x base this generation of plugins can
- * consume, and stops at the major that invented a new interface generation. The interface itself is
- * the separate, runtime axis: a base inside this interval whose `INTERFACE_VERSION` differs is judged
- * by the base's own gate (INTERFACE.md §1, §3) — an OLDER base degrades, a NEWER one is `ok` + a
- * warning (generations are additive), and neither ever refuses the mount.
+ * This is the PACKAGE-version window, and nothing else: the interval is byte-for-byte the range the
+ * plugins declare in their `dependencies` for the base (the install-time gate; the base is a plain
+ * dependency, not a peer) and the plugin passes no override, so THIS is the runtime gate too. It is
+ * a plain comparator interval, NOT a caret: the package version is ordinary semver and does not
+ * track the interface, so the interval stays as wide as the family's compatibility promise —
+ * `>=0.3.0 <1.0.0` admits every 0.x base this generation of plugins can consume. Its upper bound
+ * marks no generation boundary. Generation is the separate, runtime axis, judged on its own: the
+ * base's `INTERFACE_VERSION` is compared by the base's gate (INTERFACE.md §1, §3) — an OLDER base
+ * degrades to `incompatible`, a NEWER one is `ok` + a WARNING (generations are additive), and
+ * neither ever refuses the mount.
  */
 export const supportedRange = '>=0.3.0 <1.0.0';
 const PACKAGE = '@avantf/dsh-plugin-base';
