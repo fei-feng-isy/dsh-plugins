@@ -552,8 +552,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (registry === undefined) throw new Error('workspace registry is not mounted')
       await registry.archiveSession(SessionId(id))
     },
-    // Step 3 of the cleanup lifecycle: lift the marker once the record is gone. Best-effort by
-    // construction — `cleanWorkers` reports a rejection instead of undoing the deletion.
+    // Step 4 of the cleanup lifecycle: lift the marker once the record and its cache residue are gone.
+    // Best-effort by construction — `cleanWorkers` reports a rejection instead of undoing the deletion.
     unarchive: async (id: string) => {
       const registry = registryOf()
       if (registry === undefined) throw new Error('workspace registry is not mounted')
@@ -841,7 +841,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ? []
         : [`不属于本会话跳过 ${String(listing.foreign.length)} 个：`, ...listing.foreign.map((id) => `  ${id}`)]),
       ...(listing.archivable ? [] : [NO_REGISTRY]),
-      '清理是三步：标记归档 → 释放记录 → 取消归档。执行 /clean archive all 一趟完成；'
+      '清理是四步：标记归档 → 释放会话记录 → 清投影缓存残留 → 取消归档。执行 /clean archive all 一趟完成；'
       + '/clean archive <mission-xxxxxxxx> 只清理一个。',
     ]
   }
@@ -1063,7 +1063,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // a target.
     description: '清理 worker 会话记录、已完成任务或孤儿记录：archive 清的是会话记录，missions 清的是任务记录，'
       + '两层互相独立：archive 作用域清理本会话已完成的 worker 会话记录'
-      + '（先归档、再释放、最后取消归档，三步一趟完成；运行中的永不触碰）；'
+      + '（标记归档 → 释放会话记录 → 清投影缓存残留 → 取消归档，四步一趟完成；运行中的永不触碰）；'
       + 'missions 作用域删除本会话已关闭（finish_mission 收尾）的已完成任务记录，只删任务记录、不动 worker 会话记录，用 all 一次清掉；'
       + 'orphans 作用域针对 owner 会话已不存在或不可观测的孤儿记录。'
       + '无参只列不删；删除必须同时给作用域与目标（archive/orphans 接受 all 或具体 id，missions 只接受 all）。',
@@ -1235,7 +1235,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const done = named.cleaned[0]
       if (done !== undefined) {
         log.info(`/clean archive ${done.id} from ${agent.id}: ${bytes(done.freed)}`)
-        // Step 3 is best-effort: a failed unarchive is only ever reported, never a reason to undo the
+        // Step 4 is best-effort: a failed unarchive is only ever reported, never a reason to undo the
         // deletion — the files are gone, and keeping the marker is the worse outcome (a ghost id).
         const unarchiveFailure = named.unarchiveFailures[0]
         if (unarchiveFailure !== undefined) {

@@ -6,13 +6,19 @@
  * costs the most and is hardest to see in a browser.
  */
 import { describe, expect, it, vi } from 'vitest'
+// Type-only and erased: the browser half never imports the engine, and neither does this test at run
+// time — it only pins the SHAPES against each other (see the WaitingFor single-source block below).
+import type * as z from 'zod'
+import type { WaitingFor } from '@avantf/mission-core'
 import {
   CLEAN_FINISHED_WIRE_VERSION,
   EXECUTOR_LOOKUP_WIRE_VERSION,
   SNAPSHOT_WIRE_VERSION,
   detailResultSchema,
   snapshotResultSchema,
+  waitingForSchema,
 } from '../src/wire.js'
+import type { WaitingForView } from '../src/client/contract.js'
 import {
   POLL_INTERVAL_MS,
   REFRESH_COALESCE_MS,
@@ -683,5 +689,112 @@ describe('coalesce', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+// ── the `WaitingFor` single source: engine type ↔ wire schema ↔ client view ───────────────────────
+//
+// `WaitingFor` is spelled THREE times: the engine's type (`@avantf/mission-core`), this plugin's wire
+// schema, and the browser half's own view (`client/contract.ts`, which must not import the engine).
+// Nothing pinned them together, and the cost of drift is not cosmetic: the wire codec is `strict`, so
+// ONE unknown `reason` makes `snapshotResultSchema.safeParse` fail — and `snapshot` is the panel's
+// only entry point (`client/api.ts` throws its skew hint), i.e. the whole panel becomes one error
+// line. Adding a reason to the engine and forgetting the wire (or vice versa) is what this makes loud.
+
+/**
+ * The engine's reason list, AT RUNTIME, derived from the type itself: `satisfies Record<…>` makes
+ * tsc reject a missing or an extra member, and `Object.keys` then yields the list the wire enum must
+ * equal, member for member.
+ */
+const CORE_WAITING_FOR_REASONS = Object.keys({
+  capacity: true,
+  unit: true,
+  slot: true,
+  aging: true,
+} satisfies Record<WaitingFor['reason'], true>)
+
+/** The engine's FIELD set, derived the same way (a missing or extra key fails the `satisfies`). */
+const CORE_WAITING_FOR_FIELDS = Object.keys({
+  reason: true,
+  resource: true,
+  needed: true,
+  available: true,
+  unit: true,
+} satisfies { [K in keyof WaitingFor]-?: true })
+
+/** The browser half's field set, from its own copy of the type. */
+const VIEW_WAITING_FOR_FIELDS = Object.keys({
+  reason: true,
+  resource: true,
+  needed: true,
+  available: true,
+  unit: true,
+} satisfies { [K in keyof WaitingForView]-?: true })
+
+/** True when neither type is wider or narrower than the other (both assignment directions hold). */
+type SameShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never
+
+// Type-level bindings. They are checked by `tsc` (the plugin's `typecheck` compiles `tsconfig.test.json`
+// too, unlike vitest's transpile-only run), and read back in the test below so `noUnusedLocals` keeps
+// them honest.
+const _wireIsTheEngineShape: SameShape<z.infer<typeof waitingForSchema>, WaitingFor> = true
+const _viewIsTheEngineShape: SameShape<WaitingForView, WaitingFor> = true
+/** The binding the wire boundary itself would write: the schema is a `ZodType` OF the engine type. */
+const _wireSchemaAsEngineZodType: z.ZodType<WaitingFor> = waitingForSchema
+
+/** One snapshot node carrying `waitingFor`, with every OTHER required field filled in. */
+function nodeWithWaitingFor(waitingFor: unknown): unknown {
+  return {
+    id: 'n1',
+    parentId: null,
+    children: [],
+    depth: 0,
+    title: 't',
+    context: [],
+    corrections: [],
+    status: 'ready',
+    attempts: 0,
+    createdAt: 1,
+    hasResult: false,
+    resultRef: null,
+    waitingFor,
+  }
+}
+
+describe('the WaitingFor single source (engine type ↔ wire schema ↔ client view)', () => {
+  it('the type-level pins hold, and the schema really is a ZodType of the engine type', () => {
+    expect(_wireIsTheEngineShape).toBe(true)
+    expect(_viewIsTheEngineShape).toBe(true)
+    expect(typeof _wireSchemaAsEngineZodType.safeParse).toBe('function')
+  })
+
+  it('the wire enum equals the engine type’s reason list, member for member', () => {
+    const wireReasons = waitingForSchema.shape.reason.options
+    expect([...wireReasons].sort()).toEqual([...CORE_WAITING_FOR_REASONS].sort())
+    // Equal as SETS is not enough: the length pins out a duplicate in either list.
+    expect(wireReasons).toHaveLength(CORE_WAITING_FOR_REASONS.length)
+  })
+
+  it('the wire schema and the client view carry exactly the engine type’s fields', () => {
+    expect(Object.keys(waitingForSchema.shape).sort()).toEqual([...CORE_WAITING_FOR_FIELDS].sort())
+    expect([...VIEW_WAITING_FOR_FIELDS].sort()).toEqual([...CORE_WAITING_FOR_FIELDS].sort())
+    // The bare schema is the ENGINE shape; `null`/absent is expressed by the two usage sites
+    // (`nodeSchema`/`detailNodeSchema` apply `.nullable().default(null)`), not by this object.
+    expect(waitingForSchema.safeParse(null).success).toBe(false)
+  })
+
+  it('every engine reason survives the snapshot boundary; an unknown one is rejected loudly', () => {
+    for (const reason of CORE_WAITING_FOR_REASONS) {
+      const parsed = snapshotResultSchema.safeParse({
+        wire: SNAPSHOT_WIRE_VERSION,
+        trees: [{ rootId: 'r1', closedAt: null, nodes: [nodeWithWaitingFor({ reason })] }],
+      })
+      expect(parsed.success, `reason ${reason} must survive the snapshot schema`).toBe(true)
+    }
+    // ... and this rejection is the cost the pins above exist to prevent.
+    const unknown = snapshotResultSchema.safeParse({
+      trees: [{ rootId: 'r1', closedAt: null, nodes: [nodeWithWaitingFor({ reason: 'budget' })] }],
+    })
+    expect(unknown.success).toBe(false)
   })
 })

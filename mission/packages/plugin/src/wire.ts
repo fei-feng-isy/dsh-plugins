@@ -91,8 +91,13 @@ function declare(name: string, schema: ZodType): DeclaredSchema {
  * `aging` is the fourth reason (an aged node has reserved the machine and is holding this one back);
  * a client that does not know it still renders, because the enum here and the view's fallback are
  * the only two readers.
+ *
+ * EXPORTED so `test/client-api.spec.ts` can pin it, reason by reason and field by field, to the
+ * engine's `WaitingFor` and the browser half's view. This is the one boundary where an unknown reason
+ * does not degrade but REJECTS the whole snapshot (a `strict` codec, then `safeParse` → the panel
+ * becomes one error line), so drift between these three spellings must be loud.
  */
-const waitingForSchema = z.object({
+export const waitingForSchema = z.object({
   reason: z.enum(['capacity', 'unit', 'slot', 'aging']),
   resource: z.enum(['cpu', 'memory']).optional(),
   needed: z.number().optional(),

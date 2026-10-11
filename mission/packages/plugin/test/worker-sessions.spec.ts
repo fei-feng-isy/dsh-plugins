@@ -602,7 +602,7 @@ describe('automatic retention: keep the newest N settled workers per owner', () 
     expect(state.retained).toHaveLength(13)
   })
 
-  it('releases the overflow through the archive → delete → unarchive → purge chain', async () => {
+  it('releases the overflow through the archive → delete → purge → unarchive chain', async () => {
     const ids = Array.from({ length: 13 }, (_, index) => workerId(index))
     const root = sessionRoot(ids)
     const cache = projectionCacheRoot(ids)
@@ -617,7 +617,12 @@ describe('automatic retention: keep the newest N settled workers per owner', () 
         return Promise.resolve()
       },
       unarchive: (id) => {
-        seen.push(`unarchive:${id}:${sessionDirFor(root, id) === undefined ? 'record-gone' : 'record-present'}`)
+        // The START of each seen entry is the step being observed. The purge (step 3) is internal to
+        // `cleanWorkers`, so the marker lift (step 4) is where its TIMING becomes observable: by now
+        // the record and its cache residue must ALREADY be gone.
+        const record = sessionDirFor(root, id) === undefined ? 'record-gone' : 'record-present'
+        const residue = existsSync(join(cache, `${id}.json`)) ? 'cache-present' : 'cache-purged'
+        seen.push(`unarchive:${id}:${record}:${residue}`)
         return Promise.resolve()
       },
       isLive: () => false,
@@ -631,14 +636,16 @@ describe('automatic retention: keep the newest N settled workers per owner', () 
     expect(result.cleaned.map((entry) => entry.id)).toEqual([ids[2], ids[1], ids[0]])
     for (const id of ids.slice(3)) expect(sessionDirFor(root, id)).toBeDefined()
     for (const id of ids.slice(0, 3)) expect(sessionDirFor(root, id)).toBeUndefined()
-    // Step 3 runs AFTER the record is gone, one worker at a time — the same pipeline `/clean` uses.
+    // The REAL order, one worker at a time, the same pipeline `/clean` uses: archive → delete →
+    // purge (proven by `cache-purged` before the marker lift) → unarchive.
     expect(seen).toEqual([
-      `archive:${ids[2]}`, `unarchive:${ids[2]}:record-gone`,
-      `archive:${ids[1]}`, `unarchive:${ids[1]}:record-gone`,
-      `archive:${ids[0]}`, `unarchive:${ids[0]}:record-gone`,
+      `archive:${ids[2]}`, `unarchive:${ids[2]}:record-gone:cache-purged`,
+      `archive:${ids[1]}`, `unarchive:${ids[1]}:record-gone:cache-purged`,
+      `archive:${ids[0]}`, `unarchive:${ids[0]}:record-gone:cache-purged`,
     ])
     // And the projection-cache residue of each released record is purged with it.
     expect([...result.purged].sort()).toEqual([ids[0], ids[1], ids[2]].sort())
+    for (const id of ids.slice(0, 3)) expect(existsSync(join(cache, `${id}.json`))).toBe(false)
     // Only the released overflow was ever archived: the ten retained records were not touched.
     expect(archived).toEqual([ids[2], ids[1], ids[0]])
   })

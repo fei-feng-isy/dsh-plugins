@@ -1,27 +1,31 @@
 /**
  * Finding, archiving and removing the session logs of this plugin's own workers.
  *
- * The lifecycle `/clean archive` completes has THREE steps, and the third is what keeps the
- * subagent list honest:
+ * The lifecycle `/clean archive` completes has FOUR steps, and the last two are what keep the
+ * subagent list honest — in this exact order:
  *   1. **mark archived** — `workspaceRegistry.archiveSession(id)` (the official interface);
  *   2. **release the record** — delete the session directory (there is NO harness delete API);
- *   3. **unarchive** — `workspaceRegistry.unarchiveSession(id)`, best-effort. The marker exists
+ *   3. **purge the projection cache** — remove the host's
+ *      `<dsh home>/storages/session_projcache/sessions/<id>.json` residue. Releasing the session
+ *      directory does NOT evict that checkpoint: the host keeps disposed sessions' records for a warm
+ *      reopen and exposes no eviction API (see `projectionCache.ts`), and the parent session reads
+ *      those stale rows back as subagents, so a released worker can still show up in the list.
+ *   4. **unarchive** — `workspaceRegistry.unarchiveSession(id)`, best-effort. The marker exists
  *      only to authorize step 2, so leaving it behind after the record is gone is a "ghost id":
  *      durable in the registry, absent on disk, and still listed by every surface that reads the
  *      archive set. A failed unarchive is reported and NEVER rolls back the deletion.
+ *
+ * The residue purge (step 3) runs BEFORE the marker is lifted (step 4), exactly as `cleanWorkers`
+ * does: the marker only authorizes the release, and the residue must go while the record is still
+ * known gone.
  *
  * `reconcileArchivedGhosts` clears the ghosts older runs left behind, under a deliberately narrow
  * scope: only `mission-*`-shaped ids, only when neither the session corpus nor the sessions root
  * knows them, and only when the corpus could actually be read (absence must be PROVEN, not assumed).
  *
- * There is a FOURTH trace, one layer below the record: the host's projection cache. Releasing a
- * session directory does not evict its `<dsh home>/storages/session_projcache/sessions/<id>.json`
- * checkpoint — the host keeps disposed sessions' records for a warm reopen and exposes no eviction
- * API (see `projectionCache.ts`). The parent session reads those stale rows back as subagents, so a
- * released worker can still show up in the list. This module therefore removes the residue alongside
- * the record: for what `/clean archive` releases, and — the reconcile pass's PRIMARY input, since
- * the archive set can legitimately be empty while residue persists — by enumerating the cache
- * directory itself and asking the same "is the record proven gone?" predicate.
+ * The reconcile pass enumerates the cache directory itself and asks the same "is the record proven
+ * gone?" predicate — the reconcile pass's PRIMARY input, since the archive set can legitimately be
+ * empty while residue persists.
  *
  * Removing has NO harness API, so this module deletes the directory itself — only for a session
  * this plugin dispatched, never a live one, and the directory named exactly the session id under
@@ -71,7 +75,7 @@ export interface WorkerSessionDeps {
   /** Durable archive of one session. Absent in a deployment without a registry. */
   archive?(id: string): Promise<void>
   /**
-   * Durable unarchive of one session — step 3 of the cleanup lifecycle. Absent without a registry,
+   * Durable unarchive of one session — step 4 of the cleanup lifecycle. Absent without a registry,
    * or on a host whose registry predates `unarchiveSession`; the pass then reports itself
    * unsupported instead of pretending the marker was lifted.
    */
@@ -339,7 +343,7 @@ export interface WorkerCleanup {
   readonly cleaned: readonly CleanedWorker[]
   readonly refused: readonly RefusedWorker[]
   /**
-   * Records that WERE removed, but whose archive marker could not be lifted (step 3 failed).
+   * Records that WERE removed, but whose archive marker could not be lifted (step 4 failed).
    * The deletion stands — the files are gone, so keeping the marker only adds a ghost — and the
    * failure is reported instead of rolled back.
    */
@@ -449,7 +453,7 @@ export async function cleanWorkers(
     const removal = removeProjectionCache(deps.projectionCacheRoot, worker.id)
     if (removal === 'removed') purged.push(worker.id)
     else if (removal === 'failed') purgeFailures.push({ id: worker.id, reason: 'projection cache file could not be removed' })
-    // Step 3, AFTER the record is gone: the marker authorized the release and has no other job.
+    // Step 4, AFTER the record is gone: the marker authorized the release and has no other job.
     // Best-effort on purpose — the deletion must not be undone because the marker outlived it.
     if (deps.unarchive !== undefined) {
       try {
