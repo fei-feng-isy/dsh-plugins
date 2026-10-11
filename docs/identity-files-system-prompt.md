@@ -162,6 +162,11 @@ function isMainAgent(context: AssembleContext): boolean {
   （`lib/index.js:113-115`：`map(...).filter(t => t.length > 0).join('\n\n')`），瀑布也不删任何东西 ⇒ **原生 prompt**。
   **部分存在**（只有 `SOUL.md` 等）→ 用存在的那几个，不视为缺失。
 - 不提供 `onMissing: 'error'`：装配路径上抛错会毁掉一次模型调用，收益为零。
+- **首次启用补种**：开关打开时若 `profiles/<name>/` 三个文件都为空，插件用内置 `assistant` 预设落地一份
+  **生效身份**（设置页的勾选触发宿主的 `ensureProfile` Remote 动作）。§5.3 的首次运行只释放**预设库**，不写
+  生效身份——没有这一步，"启用"就等于什么都没启用：提示词仍是原生、三个编辑器仍是空的。
+  已有**任一**非空文件 ⇒ 什么都不写（永不覆盖）；`assistant` 被用户删掉 ⇒ 用预设库里剩下的第一个；
+  预设库为空 ⇒ 明确报错，不凭空造一份身份。
 
 ### 3.5 读取、刷新、预算、插值
 
@@ -276,9 +281,14 @@ function isMainAgent(context: AssembleContext): boolean {
 ```
 <data home>/identity/
   profiles/<profile>/{IDENTITY,SOUL,RULES}.md            # 生效身份（平坦，任意语言）
-  presets/<preset>/<locale>/{IDENTITY,SOUL,RULES}.md     # 预设库（多语言）
+  profiles/<profile>/.edits/<id>/{IDENTITY,…}.md         # 本 profile 对该身份自己的版本
+  presets/<preset>/<locale>/{IDENTITY,SOUL,RULES}.md     # 预设库（多语言，永不被编辑改写）
   .provisioned                                           # 内置预设的释放标记（含包版本）
 ```
+
+`.edits/<id>/` 的存在理由：生效身份只有一份平坦三文件，所以"换身份"如果不先把离开的那个身份的内容存下来，
+用户写的东西就会被下一个人覆盖、切回来只能得到预设原文（实测报告）。它放在 `profiles/<profile>/` 之下，
+是因为这份版本属于**那个 profile 的人**，不能泄漏到别的 profile，也不能污染预设库里的出厂文本。
 
 仓库里的内置资源（**至少 `zh` 与 `en`**；三个预设 × 2 语言 × 3 文件 = 18 份）：
 
@@ -315,12 +325,18 @@ identity/packages/plugin/assets/presets/analyst/{zh,en}/{IDENTITY,SOUL,RULES}.md
 
 | 动作 | 行为 |
 | --- | --- |
-| 应用预设 | 按 §5.1 解析出语言 `L` → `presets/<id>/<L>/` 三个文件 → `profiles/<name>/`，**覆盖**（二次确认）；`<L>` 缺失则用 `en` |
+| 应用预设（切换身份） | 先把**离开的那个身份**的当前生效内容存进 `profiles/<name>/.edits/<离开的 id>/`（空内容不存）；再切到目标：`profiles/<name>/.edits/<id>/` 存在则恢复**本 profile 的版本**，否则按 §5.1 解析语言 `L` → `presets/<id>/<L>/` 三个文件 → `profiles/<name>/`（二次确认）；`<L>` 缺失用 `en`。**离开的身份没有预设 id 且内容非空 ⇒ 拒绝切换**（提示先「存为新预设」），绝不静默覆盖 |
 | 编辑当前身份 | 直接写 `profiles/<name>/`（平坦三文件，不涉及语言目录） |
 | 编辑预设 | 在 UI 选定的语言下写 `presets/<id>/<L>/`，**不影响当前生效身份**（UI 必须写明） |
+| 恢复预设原文 | 删掉 `profiles/<name>/.edits/<当前 id>/`，把 `presets/<id>/<L>/` 的文本写回生效位置（二次确认）；`status.hasLocalEdit` 决定 UI 何时提供它 |
+| 删除预设 | 连本 profile 对该身份的版本一起删（预设没了，那份版本就再也到不了），二次确认文案要说明 |
 | 存为新预设 | `profiles/<name>/` → `presets/<新 id>/<当前语言>/`；id 校验 `/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/`，同名拒绝；UI 提示"可再补其它语言版本" |
+| 首次启用补种 | 开关打开且 `profiles/<name>/` 三个文件都为空 → 用内置 `assistant` 落地生效身份（默认预设被删则用库里第一个；库为空则报错）；**已有任一非空文件 ⇒ 不写** |
 
 生效身份**只有一份来源**：`profiles/<name>/`。不做"预设被改动就自动同步生效身份"这种隐式联动。
+**反过来成立且是刻意的**：生效身份的内容按当前身份（`activePreset`）存进 `.edits/<id>/`，这是"切换身份可逆"的
+实现方式——用户改了身份提示词，意思就是"这个身份在当前 profile 里是我这份"，切走再切回来必须还是它。
+预设库本身永远只由包发布（只补缺失）、`编辑预设`与`存为新预设`写入，不被生效身份的编辑改写。
 
 ## 6. UI（需求 4/5）
 

@@ -9,6 +9,11 @@ place for anything that is about the WORKSPACE as a whole.
 - `CLOSURE-TIERS.md` — the two closure tiers (`pnpm check:fast` / `pnpm check:release`): what each
   covers and does not, the dedup, the measured before/after wall-clock, the mutation check that keeps
   the fast tier honest, and the parallelism verdict for the three trees.
+- `mission-cost-plan.md` — mission **插件侧**成本项的实施计划（N1 标签状态改轻量读取、N2 树内按可见行窗口化、
+  N3 快照增量（节点/树两档 + 全量回退）、N4 投影 key 文档修正）：背景是 2026-10-12 的「任务跑起来就卡」取证——结论是最强的剩余
+  路径在 **DSH 外壳**（投影流/列表重建/侧栏强制布局/store 驱逐），不在本插件；每项都写了改动点、代价与风险、
+  验收命令。§0 是派发前置：N1–N3 要动 `plugin/src/wire.ts` 与 `host.ts`，必须等另一会话的
+  `mission-vs-agent-team.md` 与 `review/2026-10-12-fix-workorder.md`「包 M」收口后再派。
 - `mission-vs-agent-team.md` — `mission/` 与 DSH 内建 Agent Teams（`packages/experimental/agent-team`
   一族）的对照（功能业务 / 设计实现）**加四项实施计划**（工具结果声明式 schema、工具面按 agent 作用域安装、
   关闭期「取消即预期」分类、unit 前缀重叠告警）：每项写了改动点、代价与风险、验收命令；收口档位与
