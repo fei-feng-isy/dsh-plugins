@@ -172,6 +172,21 @@ describe('慢持有告警在 base 自己的接线下可达（P15）', () => {
     expect(observed.length).toBeGreaterThan(0)
     for (const entry of observed) expect(entry.staleMs).toBeLessThan(entry.timeoutMs)
 
+    // The budgets are ONE decision, not one per call site. `provisioner.ts` (the family-root publish
+    // lock) and `providers/model.ts` (the model-placement lock) take the SAME lock file — `lockPath(ctx
+    // .home)` — so two independent constant pairs would let one path time out while the other is still
+    // waiting, with `slow_hold` staying green because each pair is internally ordered. State's short
+    // lock is a different file and deliberately keeps its own pair, so the invariant is grouped by path.
+    const budgetsByPath = new Map<string, Set<string>>()
+    for (const entry of observed) {
+      const pairs = budgetsByPath.get(entry.path) ?? new Set<string>()
+      pairs.add(`${String(entry.timeoutMs)}|${String(entry.staleMs)}`)
+      budgetsByPath.set(entry.path, pairs)
+    }
+    for (const [path, pairs] of budgetsByPath) {
+      expect([...pairs], `every acquire on ${path} must use one (timeoutMs, staleMs) pair`).toHaveLength(1)
+    }
+
     // Replay each distinct pair against the real lock: live holder + mtime past staleMs ⇒ warning,
     // then `lock/timeout` — the warning is no longer behind the timeout.
     const distinct = new Map(observed.map(entry => [`${entry.path}|${String(entry.timeoutMs)}|${String(entry.staleMs)}`, entry]))

@@ -9,7 +9,7 @@
  * of switches would be worse than the duplication it removes.
  *
  * The type-symbol convention is `<package>#<namespace>/<method>:<field>`; the probe, the runtime
- * registry and the report all key off it, so it must not drift between the two plugins.
+ * registry and the report all key off it, so it must not drift between plugin trees.
  *
  * @module @avantf/dsh-plugin-base/kit/typert
  */

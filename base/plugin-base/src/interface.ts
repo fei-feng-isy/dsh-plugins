@@ -26,8 +26,8 @@
  * {@link BaseRuntimeV2}. What keeps the newer-is-ok rule admissible is the replacement proof, asserted
  * in `test/public-surface.spec.ts`: `VALUE_NAMES_V3 ∪ PRUNED_VALUE_NAMES === VALUE_NAMES_V2` (nothing
  * was silently renamed or lost — every shed name is in the frozen {@link PRUNED_VALUE_NAMES}) and each
- * pruned name has zero consumers across the two plugin trees' non-test source and scripts. A generation
- * that drops a name with a consumer would fail that second half.
+ * pruned name has zero consumers across the DISCOVERED consumer trees' non-test source and scripts. A
+ * generation that drops a name with a consumer would fail that second half.
  *
  * `VALUE_NAMES_V1` / `TYPE_NAMES_V1` are the frozen v1 lists and `VALUE_NAMES_V2` / `TYPE_NAMES_V2`
  * the frozen v2 lists; `VALUE_NAMES_V3` / `TYPE_NAMES_V3` are the current ones. The v1/v2 interfaces
@@ -40,7 +40,8 @@
  * `INTERFACE_VERSION` is the integer the plugins bake at build time and compare against the value
  * reported by the base they actually loaded at startup. It moves only for an INTERFACE change (the set
  * of names below, a signature in it, or the meaning of a member) — not for a behaviour/flow change and
- * not for a fix. The package version remains the INSTALL-time gate (the plugin's peer range); this
+ * not for a fix. The package version remains the INSTALL-time gate (the plugin's declared
+ * `dependencies` range); this
  * constant is the RUNTIME one.
  *
  * @module @avantf/dsh-plugin-base/interface
@@ -281,10 +282,13 @@ export interface BaseRuntimeV2 extends BaseRuntimeV1 {
  * The VALUE half of the CURRENT (v3) `.` surface: the STABLE SUBSET the installed plugins consume.
  *
  * v3 does NOT `extends` {@link BaseRuntimeV2} — it is the first pruning generation (INTERFACE.md §9).
- * The 18 members with zero consumers across both plugin trees moved to `./internal`
+ * The 18 members with zero consumers across the discovered consumer trees moved to `./internal`
  * ({@link PRUNED_VALUE_NAMES}); the 32 below are what is left, and every one is either taken off the
- * loaded module by a plugin today or is an extension point a plugin author is meant to call
- * (`createProvisioner` + providers, family paths, the gate, the provisioner error type).
+ * loaded module by a plugin today OR registered as an extension point in `test/public-surface.spec.ts`'s
+ * `EXTENSION_POINTS` — an author-facing entry point the family's own plugins happen not to read (the
+ * verdict/gather pair, the family paths, `reasonOf`, `INTERFACE_VERSION`, the provisioner + providers).
+ * That consumer-or-registration split is a GATE there, not prose: a `.` member that is neither read by
+ * a tree nor registered is red.
  *
  * A real v3 module is still structurally a v1/v2 module — the shed values remain reachable through the
  * package (`./internal` and the `./compat` subpath) and, in practice, plugins never named them — but
@@ -688,9 +692,9 @@ export const TYPE_NAMES_V2 = [...TYPE_NAMES_V1] as const satisfies readonly (key
 /**
  * The VALUE names v3 shed from `.` — the frozen PRUNE list (INTERFACE.md §9).
  *
- * Every one of them has zero consumers across the two plugin trees' non-test source and scripts (the
- * proof is `PUBLIC-SURFACE`'s cross-tree check), and every one of them now lives on `./internal`
- * instead. This list is not documentation: `test/public-surface.spec.ts` asserts
+ * Every one of them has zero consumers across the discovered consumer trees' non-test source and
+ * scripts (the proof is `PUBLIC-SURFACE`'s cross-tree check), and every one of them now lives on
+ * `./internal` instead. This list is not documentation: `test/public-surface.spec.ts` asserts
  * `VALUE_NAMES_V2 === [...VALUE_NAMES_V3, ...PRUNED_VALUE_NAMES]` (both directions), so a v4 cannot
  * quietly drop a name that is neither in the surface nor on this list.
  */

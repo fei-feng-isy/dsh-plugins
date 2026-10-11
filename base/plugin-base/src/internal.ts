@@ -7,8 +7,8 @@
  *  - the framework's own seams (fs, locks, archives, layout, lint, semver …), and
  *  - the **composition pieces** of the pieces `.` does export: the individual probes and evidence
  *    helpers `compat.gatherEvidence` is built from, the provisioner's policy helpers and constants,
- *    the npm-package provider, and the Typert symbol kit whose symbols/wire helpers the two plugins
- *    keep as LOCAL mirrors by design (they are assembled at module load, before any base can be
+ *    the npm-package provider, and the Typert symbol kit whose symbols/wire helpers every plugin
+ *    keeps as a LOCAL mirror by design (they are assembled at module load, before any base can be
  *    imported).
  *
  * Generation v3 moved exactly those zero-consumer names here (INTERFACE.md §9). `./internal` is NOT
@@ -90,7 +90,7 @@ export {
 export type { FrameworkImportKind, FrameworkImportRef } from './artifact.js'
 
 // ── generation v3: the names `.` shed ────────────────────────────────────────────────────────────
-// Each of these has zero consumers across the two plugin trees' non-test source and scripts
+// Each of these has zero consumers across every discovered plugin tree's non-test source and scripts
 // (`test/public-surface.spec.ts` re-proves that mechanically). They are composition pieces of the
 // members `.` still exports, or kit mirrors the plugins keep locally on purpose — never a plugin's
 // entry point. Their canonical home is here; INTERFACE.md §9 records why each one moved.

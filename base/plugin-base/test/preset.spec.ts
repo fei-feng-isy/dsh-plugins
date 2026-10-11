@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -22,7 +22,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 interface Fixture {
   readonly cwd: string
   readonly frameworkDir: string
-  readonly peer: string
+  readonly dep: string
   readonly dev: string
   readonly server: string
   readonly client: string
@@ -53,8 +53,8 @@ describe('dsh-plugin-base preset', () => {
       JSON.stringify({
         name: 'demo-plugin',
         private: true,
-        peerDependencies: { '@avantf/dsh-plugin-base': overrides.peer ?? FRAMEWORK_RANGE },
-        devDependencies: { '@avantf/dsh-plugin-base': overrides.dev ?? overrides.peer ?? FRAMEWORK_RANGE },
+        dependencies: { '@avantf/dsh-plugin-base': overrides.dep ?? FRAMEWORK_RANGE },
+        devDependencies: { '@avantf/dsh-plugin-base': overrides.dev ?? overrides.dep ?? FRAMEWORK_RANGE },
       }),
     )
     await writeFile(
@@ -74,8 +74,8 @@ describe('dsh-plugin-base preset', () => {
     return {
       cwd,
       frameworkDir,
-      peer: overrides.peer ?? FRAMEWORK_RANGE,
-      dev: overrides.dev ?? overrides.peer ?? FRAMEWORK_RANGE,
+      dep: overrides.dep ?? FRAMEWORK_RANGE,
+      dev: overrides.dev ?? overrides.dep ?? FRAMEWORK_RANGE,
       server,
       client,
       frameworkVersion,
@@ -101,6 +101,33 @@ describe('dsh-plugin-base preset', () => {
     }).not.toThrow()
   })
 
+  it('passes on every real plugin tree in this repo (the base is a plain `dependencies` entry)', () => {
+    // The regression this pins. The declaration face moved from `peerDependencies` to `dependencies`
+    // when the base became an ordinary dependency that installs WITH the plugin (root AGENTS.md
+    // 「发布面」). The fixtures above are written by this file, so they cannot notice the REAL manifests
+    // drifting back — this test is the one that reads them.
+    const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
+    const trees = readdirSync(repoRoot, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map(entry => entry.name)
+      .filter(name => existsSync(join(repoRoot, name, 'packages', 'plugin', 'package.json')))
+      .sort()
+    for (const tree of ['mem', 'mission', 'identity']) {
+      expect(trees, `${tree}: plugin tree not discovered`).toContain(tree)
+    }
+    const failures: string[] = []
+    for (const tree of trees) {
+      const cwd = join(repoRoot, tree, 'packages', 'plugin')
+      const declared = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')).dependencies?.['@avantf/dsh-plugin-base']
+      const preset = envinitPreset({ cwd })
+      for (const check of preset.checks) {
+        if (check.status === 'fail') failures.push(`${tree}: [${check.id}] ${check.message}`)
+      }
+      expect(preset.ok, failures.join('\n')).toBe(true)
+      expect(preset.declaredRange, `${tree}: declared range`).toBe(declared)
+    }
+  })
+
   it('merges the plugin whitelist into external without duplicating the framework', async () => {
     const f = await fixture()
     const preset = envinitPreset({ cwd: f.cwd, external: ['react', '@avantf/dsh-plugin-base'] })
@@ -110,7 +137,7 @@ describe('dsh-plugin-base preset', () => {
   it('fails when no framework copy can be resolved', async () => {
     const cwd = join(root, 'empty-plugin')
     await mkdir(cwd, { recursive: true })
-    await writeFile(join(cwd, 'package.json'), JSON.stringify({ name: 'empty', peerDependencies: { '@avantf/dsh-plugin-base': FRAMEWORK_RANGE } }))
+    await writeFile(join(cwd, 'package.json'), JSON.stringify({ name: 'empty', dependencies: { '@avantf/dsh-plugin-base': FRAMEWORK_RANGE } }))
     const preset = envinitPreset({ cwd })
     expect(preset.ok).toBe(false)
     expect(statusOf(preset.checks, 'preset/framework-resolvable')).toBe('fail')
@@ -119,23 +146,23 @@ describe('dsh-plugin-base preset', () => {
     }).toThrow(/preset\/framework-resolvable/)
   })
 
-  it('fails when the plugin does not declare a peer range', async () => {
+  it('fails when the plugin does not declare the base in `dependencies`', async () => {
     const f = await fixture()
     await writeFile(join(f.cwd, 'package.json'), JSON.stringify({ name: 'demo-plugin' }))
     const preset = envinitPreset({ cwd: f.cwd })
-    expect(statusOf(preset.checks, 'preset/peer-range-declared')).toBe('fail')
+    expect(statusOf(preset.checks, 'preset/dependency-range-declared')).toBe('fail')
   })
 
-  it('fails when devDependencies disagrees with the peer range', async () => {
-    // A version picked to differ from the peer range wherever the base currently sits, without
+  it('fails when devDependencies disagrees with the dependency range', async () => {
+    // A version picked to differ from the declared range wherever the base currently sits, without
     // hard-coding the base's own number (which this suite derives on purpose).
     const f = await fixture({ dev: '^0.0.1' })
     const preset = envinitPreset({ cwd: f.cwd })
     expect(statusOf(preset.checks, 'preset/range-single-source')).toBe('fail')
-    expect(statusOf(preset.checks, 'preset/peer-range-declared')).toBe('pass')
+    expect(statusOf(preset.checks, 'preset/dependency-range-declared')).toBe('pass')
   })
 
-  it('fails when an explicit range contradicts peerDependencies', async () => {
+  it('fails when an explicit range contradicts `dependencies`', async () => {
     const f = await fixture()
     const preset = envinitPreset({ cwd: f.cwd, range: '~0.1.0' })
     expect(statusOf(preset.checks, 'preset/range-single-source')).toBe('fail')
@@ -176,7 +203,7 @@ describe('dsh-plugin-base preset', () => {
   })
 
   it('fails when the bootstrap version is outside the declared range', async () => {
-    const f = await fixture({ peer: '^9.0.0', dev: '^9.0.0' })
+    const f = await fixture({ dep: '^9.0.0', dev: '^9.0.0' })
     const preset = envinitPreset({ cwd: f.cwd })
     expect(statusOf(preset.checks, 'preset/bootstrap-version-in-range')).toBe('fail')
   })

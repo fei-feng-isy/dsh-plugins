@@ -30,7 +30,7 @@ export interface EnvinitPresetOptions {
   readonly cwd?: string
   /** Extra module names that must stay external (the plugin's own whitelist). */
   readonly external?: readonly string[]
-  /** The declared framework range; when given it must equal `peerDependencies`. */
+  /** The declared framework range; when given it must equal `dependencies`. */
   readonly range?: string
   /** Assert against this framework copy instead of resolving one from `cwd`. */
   readonly frameworkDir?: string
@@ -41,7 +41,7 @@ export interface EnvinitPreset {
   readonly frameworkDir: string
   /** The framework package version found there. */
   readonly frameworkVersion: string
-  /** The plugin's declared range (`peerDependencies`). */
+  /** The plugin's declared range (`dependencies`). */
   readonly declaredRange: string
   /** Names the bundler must keep external. */
   readonly external: readonly string[]
@@ -185,33 +185,39 @@ export function envinitPreset(options: EnvinitPresetOptions = {}): EnvinitPreset
   }
 
   // ── declared range ─────────────────────────────────────────────────────────
+  // The base is an ORDINARY dependency of a plugin, not a peer: the host provides only the DSH
+  // packages, and a dsh profile is written with `autoInstallPeers: false`, so a peer would simply
+  // never be installed. Installing the plugin must therefore bring the base along — the install-time
+  // range lives in `dependencies` (root `AGENTS.md` 「发布面」, `scripts/release-check.mjs`). The
+  // `devDependencies` entry carries the SAME range so the repo's own `pnpm install` links the
+  // workspace `base/`; the two must stay literally identical or pnpm can resolve a second copy.
   const pluginPkg = readJson(join(cwd, 'package.json'))
   if (pluginPkg === undefined) {
-    out.fail('preset/peer-range-declared', `${join(cwd, 'package.json')} 不可读`)
+    out.fail('preset/dependency-range-declared', `${join(cwd, 'package.json')} 不可读`)
     return { frameworkDir, frameworkVersion, declaredRange: '', external, noExternal, checks: out.checks, ok: false }
   }
-  const peer = pluginPkg['peerDependencies']
-  const declaredRange = typeof peer === 'object' && peer !== null ? str((peer as Record<string, unknown>)[FRAMEWORK_PACKAGE]) : undefined
+  const deps = pluginPkg['dependencies']
+  const declaredRange = typeof deps === 'object' && deps !== null ? str((deps as Record<string, unknown>)[FRAMEWORK_PACKAGE]) : undefined
   if (declaredRange === undefined) {
-    out.fail('preset/peer-range-declared', `插件必须在 peerDependencies 声明 ${FRAMEWORK_PACKAGE} 的区间`)
+    out.fail('preset/dependency-range-declared', `插件必须在 dependencies 声明 ${FRAMEWORK_PACKAGE} 的区间`)
     return { frameworkDir, frameworkVersion, declaredRange: '', external, noExternal, checks: out.checks, ok: false }
   }
   try {
     assertRange(declaredRange)
-    out.pass('preset/peer-range-declared', `peerDependencies["${FRAMEWORK_PACKAGE}"] = ${declaredRange}`)
+    out.pass('preset/dependency-range-declared', `dependencies["${FRAMEWORK_PACKAGE}"] = ${declaredRange}`)
   } catch (error) {
-    out.fail('preset/peer-range-declared', `区间不在支持的 semver 子集内：${declaredRange}（${error instanceof Error ? error.message : String(error)}）`)
+    out.fail('preset/dependency-range-declared', `区间不在支持的 semver 子集内：${declaredRange}（${error instanceof Error ? error.message : String(error)}）`)
   }
 
   const dev = pluginPkg['devDependencies']
   const devRange = typeof dev === 'object' && dev !== null ? str((dev as Record<string, unknown>)[FRAMEWORK_PACKAGE]) : undefined
   const rangeProblems: string[] = []
-  if (devRange !== declaredRange) rangeProblems.push(`devDependencies 是 ${devRange ?? '(缺失)'}，应与 peerDependencies 同区间`)
+  if (devRange !== declaredRange) rangeProblems.push(`devDependencies 是 ${devRange ?? '(缺失)'}，应与 dependencies 同区间`)
   if (options.range !== undefined && options.range !== declaredRange) {
-    rangeProblems.push(`传入的 range 是 ${options.range}，应等于 peerDependencies`)
+    rangeProblems.push(`传入的 range 是 ${options.range}，应等于 dependencies`)
   }
   if (rangeProblems.length === 0) {
-    out.pass('preset/range-single-source', `peerDependencies ≡ devDependencies = ${declaredRange}`)
+    out.pass('preset/range-single-source', `dependencies ≡ devDependencies = ${declaredRange}`)
   } else {
     out.fail('preset/range-single-source', rangeProblems.join('；'))
   }

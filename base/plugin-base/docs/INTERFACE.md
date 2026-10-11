@@ -357,9 +357,11 @@ base 模块取 `kit.wellFormedText` / `kit.wellFormedDeep`，取不到就用本�
 **判据（写进 §2）**：这个成员是不是"插件真取用的、或插件作者被期望调用的"？是 ⇒ `.`；否 ⇒ `./internal`。
 `./internal` 明确**不在兼容承诺内**。
 
-**剪掉的 18 个（逐个 + 证据）** —— 每个在**两棵插件树的非测试源码 + scripts** 里都**零消费者**；证据由
-`test/public-surface.spec.ts` 的跨树检查机械执行（断言没有 `?.NAME` 形式的成员访问、也没有从
-`@avantf/dsh-plugin-base` 的 import 提到它），不留人读结论：
+**剪掉的 18 个（逐个 + 证据）** —— 每个在**所有被发现的插件树（今天 identity / mem / mission）的非测试源码 + scripts**
+里都**零消费者**；证据由 `test/public-surface.spec.ts` 的跨树检查机械执行，用**三种仪器**：成员访问 `?.NAME`、括号字符串键
+`['NAME']`（`member(kit,'wellFormedText')` 这种真实消费形态）、以及从 `@avantf/dsh-plugin-base` 的 named import。
+同一份检查**反向**也跑：留在 `.` 上的每个名字要么有消费者、要么登记在 `EXTENSION_POINTS`（登记不是消费证明），
+所以"面向插件作者的扩展点"是一份可 review 的名单，而不是注释里的断言：
 
 | 成员 | 归属 | 为什么没有消费者 |
 | --- | --- | --- |

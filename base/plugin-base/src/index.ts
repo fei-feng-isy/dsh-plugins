@@ -8,6 +8,13 @@
  * installed plugins actually consume plus the extension points a plugin author is expected to call,
  * and nothing else: the zero-consumer composition pieces moved to `./internal` (see that module).
  *
+ * Those are two DIFFERENT kinds of claim, and `test/public-surface.spec.ts` keeps them apart instead of
+ * describing both as "consumed": the consumer half is PROVEN by a cross-tree scan (every `.` member must
+ * be read by a discovered plugin tree), while a member no tree reads today — an author-facing entry
+ * point such as `verdictOf` / `gatherEvidence` or the family paths — must be REGISTERED in that file's
+ * `EXTENSION_POINTS` with a one-line reason. A `.` member that is neither consumed nor registered is a
+ * red gate, not a hidden promise.
+ *
  * The same surface is stated as a type + two name lists in `./interface.js`; `api/interface-v3.json`
  * is its snapshot, and `test/public-surface.spec.ts` keeps the three in step. Do not add a member
  * here without a generation decision.
@@ -61,10 +68,10 @@ export type {
 // base release, without rebuilding or republishing any plugin. Plugins therefore never inline this
 // code: they load the base at startup and take these capabilities from it at runtime.
 //
-// Generation v3 moved the members with no runtime consumer off `.`: `createPluginLogger` (both trees
-// use their own logger, which must exist before the base is resolved) and the Typert symbol kit
-// (`strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol`), which both trees keep as local
-// two-line mirrors because the Remote/wire faces are assembled at module load. Both live on
+// Generation v3 moved the members with no runtime consumer off `.`: `createPluginLogger` (each tree
+// uses its own logger, which must exist before the base is resolved) and the Typert symbol kit
+// (`strictCodec` / `endpointId` / `fieldSymbol` / `resultSymbol`), which each tree keeps as a local
+// two-line mirror because the Remote/wire faces are assembled at module load. Both live on
 // `./internal` now.
 export { expandHome, familyHome, familyModelsDir, familyToolsDir, resolveDataHome } from './kit/family.js'
 export type { DataHomeInput } from './kit/family.js'

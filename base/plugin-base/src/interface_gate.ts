@@ -32,7 +32,7 @@
  *  - an ADDITIVE generation states `Vn extends Vn-1` and the snapshot gate checks the name superset
  *    (`v1 → v2`, INTERFACE.md §5);
  *  - a PRUNING generation (`v2 → v3`, INTERFACE.md §9) instead proves `Vn-1 = Vn ⊎ PRUNED` plus that
- *    every `PRUNED` name has zero consumers across the two plugin trees
+ *    every `PRUNED` name has zero consumers across every discovered plugin tree
  *    (`test/public-surface.spec.ts`), and `test/interface_gate.spec.ts` pins it against the real module.
  *
  * The `loaded > required` branch below is admissible ONLY while one of those proofs holds. A generation

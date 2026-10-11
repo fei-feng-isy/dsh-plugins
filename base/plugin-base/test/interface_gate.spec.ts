@@ -98,7 +98,7 @@ describe('the `loaded > required` = ok rule rests on a MECHANICAL safety proof',
   // PRUNING generation, so the proof is now:
   //
   //   `VALUE_NAMES_V2 = VALUE_NAMES_V3 ⊎ PRUNED_VALUE_NAMES`, and every pruned name has zero consumers
-  //   in the two plugin trees (proven in `public-surface.spec.ts`).
+  //   in every discovered plugin tree (proven in `public-surface.spec.ts`).
   //
   // These assertions tie the gate's admission rule to that proof: if a future generation drops a name
   // that is not on the frozen prune list, this block fails — the signal that the newer-is-ok branch

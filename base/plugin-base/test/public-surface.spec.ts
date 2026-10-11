@@ -21,9 +21,17 @@
  *   1. `VALUE_NAMES_V2` is exactly `VALUE_NAMES_V3 ⊎ PRUNED_VALUE_NAMES` (and the type halves line up
  *      modulo `ADDED_TYPE_NAMES` / `PRUNED_TYPE_NAMES`) — every shed name is on the frozen list, so
  *      nothing was silently renamed or lost, and
- *   2. every `PRUNED_VALUE_NAMES` entry has ZERO consumers in the two plugin trees' non-test source and
- *      scripts — the cross-tree check at the bottom of this file, which reads `mem` and `mission` (the
- *      base's suite is the only tree allowed to read both).
+ *   2. every `PRUNED_VALUE_NAMES` entry has ZERO consumers in every DISCOVERED consumer tree's
+ *      non-test source and scripts — the cross-tree check at the bottom of this file. The trees are
+ *      discovered by the consumer convention (`packages/plugin/src/interface_gate.ts`), which is
+ *      `mem`, `mission` and `identity` today; the base's suite is the only tree allowed to read all of
+ *      them.
+ *
+ * The SAME scan runs in the other direction, and that half is new: every `VALUE_NAMES_V3` entry must
+ * either have a consumer in those trees or be registered in `EXTENSION_POINTS` with a one-line reason.
+ * That turns "the `.` face is what the plugins consume plus the extension points an author calls" from
+ * a claim in a comment into a gate — some names that older prose called "consumed by the plugins" have
+ * no reader in the tree at all and are promises to plugin AUTHORS, not consumers.
  *
  * Together those keep `checkInterface`'s `loaded > required ⇒ ok` branch admissible for v3 — see
  * `test/interface_gate.spec.ts`.
@@ -37,7 +45,7 @@
  *
  * @module test/public-surface
  */
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -258,12 +266,18 @@ describe('the private seams and the pruned surface stay off the public entry', (
 })
 
 /**
- * The other half of the v3 pruning proof: every pruned value name has ZERO consumers across the two
- * plugin trees' non-test source and scripts. This is what makes `checkInterface`'s `loaded > required
+ * The other half of the v3 pruning proof: every pruned value name has ZERO consumers across the
+ * consumer trees' non-test source and scripts. This is what makes `checkInterface`'s `loaded > required
  * ⇒ ok` branch admissible for a generation that is not a name superset of the one before it.
  *
- * The check is deliberately conservative and code-shaped, not a comment match: a pruned name must not
- * be (a) accessed as a member of anything (`base.floorOf`, `kit?.strictCodec`) nor (b) imported from
+ * The trees are DISCOVERED — every top-level directory carrying the consumer shim
+ * `packages/plugin/src/interface_gate.ts`, the same convention `test/interface_consumers.spec.ts` pins —
+ * never listed, so adding a consumer tree adds it to this proof without anyone having to remember.
+ *
+ * The check is deliberately conservative and code-shaped, not a comment match: a name must not be
+ * (a) accessed as a member of anything (`base.floorOf`, `kit?.strictCodec`), (b) read as a bracket
+ * STRING KEY — `member(kit, 'wellFormedText')` is how `mem/packages/contract/src/text.ts` takes the
+ * well-formed helpers, and the `.NAME` instrument alone cannot see it — nor (c) imported by name from
  * the base specifier. A local mirror of the same NAME is allowed and expected for the Typert symbols,
  * which is exactly why a bare word-boundary search would be the wrong instrument here.
  */
@@ -280,33 +294,142 @@ function walkSources(dir: string, out: string[] = []): string[] {
   return out
 }
 
-const BASE_IMPORT = /import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]@avantf\/dsh-plugin-base['"]/gu
+/** The consumer convention: a tree that carries the gate shim is a tree these proofs must read. */
+const SHIM = join('packages', 'plugin', 'src', 'interface_gate.ts')
 
-describe('the v3 prune list has zero consumers in the two plugin trees', () => {
-  const files = ['mem', 'mission'].flatMap((tree) => walkSources(join(repo, tree)))
+/** Every top-level tree carrying the shim — DISCOVERED, never listed. */
+function discoverConsumerTrees(): string[] {
+  return readdirSync(repo, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map(entry => entry.name)
+    .filter(tree => existsSync(join(repo, tree, SHIM)))
+    .sort()
+}
 
-  it('reads both plugin trees (the convention this file was written against did not move)', () => {
-    expect(files.length).toBeGreaterThan(20)
-    for (const tree of ['mem', 'mission']) {
-      expect(files.some((file) => file.startsWith(join(repo, tree)))).toBe(true)
+const CONSUMER_TREES = discoverConsumerTrees()
+const CONSUMER_FILES = CONSUMER_TREES.flatMap((tree) => walkSources(join(repo, tree)))
+
+/** Scan files are read once and reused by every name (each name runs both regexes + the import scan). */
+const SOURCE_CACHE = new Map<string, string>()
+function sourceOf(file: string): string {
+  const cached = SOURCE_CACHE.get(file)
+  if (cached !== undefined) return cached
+  const text = readFileSync(file, 'utf8')
+  SOURCE_CACHE.set(file, text)
+  return text
+}
+
+/**
+ * The THREE instruments by which a `.` member can be taken off the loaded module. They are all
+ * retained on purpose: the bracket form is the one the `.NAME` regex misses, and it is how the real
+ * live consumer of `wellFormedText`/`wellFormedDeep` reaches them.
+ */
+function consumerInstruments(name: string): readonly RegExp[] {
+  return [
+    new RegExp(`\\??\\.${name}\\b`, 'u'), // member access: `base.floorOf`, `kit?.strictCodec`
+    new RegExp(`['"]${name}['"]`, 'u'), // bracket string key: `member(kit, 'wellFormedText')`
+  ]
+}
+
+/**
+ * Named bindings of a bare base import: `import { a, b as c } from '@avantf/dsh-plugin-base'`, its
+ * `import type` form, and the default / `* as ns` forms. The character class refuses quotes, so the
+ * match cannot run past the end of the statement into a later import from another package (which is
+ * what made the older span-based reading report names imported from elsewhere as base imports).
+ */
+const BASE_IMPORT = /(?:^|[;\n])[ \t]*import\s+(?:type\s+)?([\w*{}\s,$]+?)\s+from\s+['"]@avantf\/dsh-plugin-base['"]/gu
+
+function importedNames(clause: string): string[] {
+  const braced = /\{([^}]*)\}/u.exec(clause)
+  if (braced !== null) {
+    return (braced[1] ?? '')
+      .split(',')
+      .map(part => (part.trim().replace(/^type\s+/u, '').split(/\s+as\s+/u)[0] ?? '').trim())
+      .filter(name => name.length > 0)
+  }
+  const leading = /^\s*([A-Za-z_$][\w$]*)/u.exec(clause)
+  return leading === null ? [] : [leading[1] ?? ''].filter(name => name.length > 0)
+}
+
+/** Every scanned file that consumes `name` through one of the three instruments. */
+function consumersOf(name: string, files: readonly string[] = CONSUMER_FILES): string[] {
+  const instruments = consumerInstruments(name)
+  const hits: string[] = []
+  for (const file of files) {
+    const text = sourceOf(file)
+    if (instruments.some(instrument => instrument.test(text))) {
+      hits.push(file)
+      continue
     }
+    if ([...text.matchAll(BASE_IMPORT)].some(match => importedNames(match[1] ?? '').includes(name))) hits.push(file)
+  }
+  return hits
+}
+
+describe('the v3 prune list has zero consumers in every consumer tree', () => {
+  it('discovers the trees that carry the consumer shim (the convention did not move)', () => {
+    expect(CONSUMER_TREES).toEqual(['identity', 'mem', 'mission'])
+    expect(CONSUMER_FILES.length).toBeGreaterThan(20)
+    for (const tree of CONSUMER_TREES) {
+      expect(CONSUMER_FILES.some(file => file.startsWith(join(repo, tree)))).toBe(true)
+    }
+    // The discovered set is only ONE convention while every copy really is the same shim: the pin with
+    // the readable per-line diff is `test/interface_consumers.spec.ts`, and this asserts the same fact
+    // where it matters for THIS scan — a tree whose shim drifted is no longer a tree this proof's
+    // instruments describe, so the scan must not stay green on it.
+    const normalise = (source: string): string =>
+      source.replace(/^ \* @module @avantf\/dsh-[\w-]+\/interface_gate$/mu, '<module>')
+    const reference = normalise(readFileSync(join(repo, CONSUMER_TREES[0] ?? '', SHIM), 'utf8'))
+    const drifted = CONSUMER_TREES.filter(tree => normalise(readFileSync(join(repo, tree, SHIM), 'utf8')) !== reference)
+    expect(drifted).toEqual([])
   })
 
-  it('no pruned name is member-accessed or imported from the base specifier', () => {
-    const offences: string[] = []
-    for (const file of files) {
-      const text = readFileSync(file, 'utf8')
-      for (const name of PRUNED_VALUE_NAMES) {
-        const memberAccess = new RegExp(`\\??\\.${name}\\b`, 'u')
-        if (memberAccess.test(text)) offences.push(`${file}: member access .${name}`)
-      }
-      for (const match of text.matchAll(BASE_IMPORT)) {
-        const clause = match[1] ?? ''
-        for (const name of PRUNED_VALUE_NAMES) {
-          if (new RegExp(`\\b${name}\\b`, 'u').test(clause)) offences.push(`${file}: imports ${name} from the base`)
-        }
-      }
-    }
+  it('no pruned name is member-accessed, bracket-read or imported from the base specifier', () => {
+    const offences = PRUNED_VALUE_NAMES.flatMap(name => consumersOf(name).map(file => `${file}: consumes ${name}`))
     expect(sortedUnique(offences)).toEqual([])
+  })
+})
+
+/**
+ * The registration half of the v3 proof. **This is a registration, NOT a consumer proof**: each name
+ * below has no reader in the discovered trees today, and the reason states why it is nevertheless part
+ * of the promised `.` face — an entry point a third-party plugin AUTHOR calls, which the family's own
+ * plugins happen not to use because their orchestration goes through another member (`resolveDataHome`
+ * instead of `familyHome`, `readInterfaceRequirement` instead of `INTERFACE_VERSION`, …).
+ *
+ * Removing such a name from `.` would be an interface change (a new generation, INTERFACE.md §9), not a
+ * cleanup — which is exactly why this file registers them instead of the names being deleted.
+ */
+const EXTENSION_POINTS: Readonly<Partial<Record<(typeof VALUE_NAMES_V3)[number], string>>> = {
+  INTERFACE_VERSION:
+    'the generation integer a plugin AUTHOR branches on; the shipped plugins let readInterfaceRequirement/checkInterface compare it for them',
+  verdictOf:
+    'the gate rules as a pure function, for an author reaching a verdict without a live context — the reason the verdict semantics can be fixed in ONE base release',
+  gatherEvidence:
+    'the live-context half of that author-facing pair: collects the plain evidence verdictOf consumes',
+  familyHome:
+    'the family root, promised to authors and to tooling with no DSH host; the shipped plugins read their DATA root through resolveDataHome instead',
+  familyToolsDir:
+    '<family root>/tools — the promised destination of a plugin\'s own provisioned resources',
+  familyModelsDir:
+    '<family root>/models — the promised location of the shared model cache',
+  reasonOf:
+    'the machine-readable code accessor of a ProvisionError, promised to authors handling a failed provision',
+}
+
+describe('every `.` member is consumed by a tree or registered as an extension point', () => {
+  it('registers only real `.` names, each with a reason', () => {
+    // Keys outside the surface would be a typo'd registry (the annotation above makes that a compile
+    // error too — this is its runtime half); an empty reason would make the list a second, silent
+    // prune list rather than the documented promise this file claims it is.
+    const outsideSurface = Object.keys(EXTENSION_POINTS).filter(name => !(VALUE_NAMES_V3 as readonly string[]).includes(name))
+    expect(outsideSurface).toEqual([])
+    const withoutReason = Object.entries(EXTENSION_POINTS).filter(([, reason]) => (reason ?? '').trim().length === 0)
+    expect(withoutReason).toEqual([])
+  })
+
+  it('no `.` member is neither consumed in the discovered trees nor registered', () => {
+    const orphans = VALUE_NAMES_V3.filter(name => consumersOf(name).length === 0 && EXTENSION_POINTS[name] === undefined)
+    expect(orphans).toEqual([])
   })
 })

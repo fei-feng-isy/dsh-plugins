@@ -13,7 +13,8 @@ export const VERSION = '0.4.2'
 /**
  * The framework interval this bootstrap can launch.
  *
- * Kept equal to the plugins' peer range for the base: the plugin passes no override, so THIS is the
+ * Kept equal to the plugins' declared `dependencies` range for the base (the install-time face; the
+ * base is a plain dependency, not a peer): the plugin passes no override, so THIS is the
  * runtime gate. It is a plain comparator interval, NOT a caret: the package version is ordinary
  * semver again and no longer tracks the interface, so the interval stays as wide as the family's
  * compatibility promise — `>=0.3.0 <1.0.0` admits every 0.x base this generation of plugins can
