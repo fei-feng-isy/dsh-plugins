@@ -116,7 +116,7 @@ if (mount && problems.length === 0) {
     note: (message) => notes.push(message),
     scratchPrefix: 'avf-pack-mount-',
     smokeArgs: [],
-    absentEnv: 'AVANTF_ENVINIT_ABSENT',
+    absentEnv: 'AVANTF_COMPAT_ABSENT',
     packageDirName: 'dsh-mem',
     prepare({ scratch, linkBase, note }) {
       // The runtime externals an npm install would have put next to the package. Every `@avantf/*`

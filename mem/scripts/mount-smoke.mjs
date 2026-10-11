@@ -3,7 +3,7 @@
  * DSH real-Cordis mount smoke for @avantf/dsh-mem (DSH-standard plugin form).
  *
  * Loads the host plugin in an actual `@deepseek-ai/cordis` Context and asserts it
- * provides the `avantfMemory` service, registers the 5 model tools via the `tools`
+ * provides the `avantfMemory` service, registers the 8 model tools via the `tools`
  * service (`ctx.tools.register`), and exposes the `avantfMem` Typert Remote gateway.
  *
  * The plugin's `@deepseek-ai/*` peers come from the INSTALLED global dsh (`npm root -g`), whose
@@ -35,8 +35,11 @@
  *                           nothing is downloaded. Both download switches are forced off, so
  *                           `mem:model` settles `skipped (policy/download-disabled)` without any
  *                           network — the engine then warms a LOCAL model only.
- *   - AVANTF_ENVINIT_ABSENT=1: the caller made the base unresolvable — the plugin must warn and fall
- *                           back to the legacy `provision:` sweep, and still mount in full.
+ *   - AVANTF_COMPAT_ABSENT=1: the caller made the base unresolvable — the plugin must warn and fall
+ *                           back to the legacy `provision:` sweep, and still mount in full. (The flag
+ *                           name is the family-wide one mission and identity use; the fact is the same
+ *                           "the base is out of reach", and mem's consequence of it is the legacy
+ *                           envinit/provision sweep.)
  */
 import { createRequire } from 'node:module'
 import { mkdtempSync, readFileSync, rmSync, mkdirSync, symlinkSync, writeFileSync, existsSync } from 'node:fs'
@@ -128,12 +131,12 @@ const editedKbEdit = '不要新建一个补充文档。因为这样才能保持�
 writeFileSync(join(promptDir, 'mem-kb-edit.md'), `${editedKbEdit}\n`, 'utf8')
 
 // The profile is chosen by the FACT — can the plugin's tree resolve the base? — not by the flag: in
-// the workspace the base is always linked, so `AVANTF_ENVINIT_ABSENT=1` alone cannot make it
+// the workspace the base is always linked, so `AVANTF_COMPAT_ABSENT=1` alone cannot make it
 // unresolvable. The flag is the packed caller's intent and must agree with the fact; the linked and
 // unlinked variants of `pack-plugin --mount` are the two real cases.
 const envinitAbsent = !baseAvailable
-if (process.env['AVANTF_ENVINIT_ABSENT'] === '1' && !envinitAbsent) {
-  console.error('mount-smoke: AVANTF_ENVINIT_ABSENT=1 but @avantf/dsh-plugin-base still resolves from the plugin entry')
+if (process.env['AVANTF_COMPAT_ABSENT'] === '1' && !envinitAbsent) {
+  console.error('mount-smoke: AVANTF_COMPAT_ABSENT=1 but @avantf/dsh-plugin-base still resolves from the plugin entry')
   console.error('  the workspace link is always present; use `pack-plugin --mount` (unlinked variant) for the base-absent profile')
   process.exit(2)
 }
@@ -514,7 +517,7 @@ try {
 // ── degraded mount: a store that cannot open must not stop the host booting ────────────────────
 // `buildRuntime` throws for a corrupt or locked database, an unwritable data home, or a database
 // written by a NEWER build (migrations are one-way), and a throwing `apply` is a failed loader row
-// — which is enough to fail the whole `dsh web` boot. So the plugin degrades instead: the five tools
+// — which is enough to fail the whole `dsh web` boot. So the plugin degrades instead: the eight tools
 // stay registered and answer with the reason.
 //
 // The scenario is "the RESOLVED data root cannot be opened", so both layers are pointed at the
@@ -562,7 +565,7 @@ const degradedOk =
 // (`bundleHasNoKit` here, and the artifact gates), so "the prompt files worked" cannot be explained
 // by an inlined copy.
 //
-// BASE-ABSENT profile (`AVANTF_ENVINIT_ABSENT=1`): nothing can resolve the base, so the plugin warns
+// BASE-ABSENT profile (`AVANTF_COMPAT_ABSENT=1`): nothing can resolve the base, so the plugin warns
 // and takes the legacy sweep, which the provisioning guard below asserts instead. That is also the
 // end-to-end proof that the bundled bootstrap code ran (a static import would have thrown during
 // module evaluation instead).
@@ -703,14 +706,31 @@ const promptFilesOk = envinitAbsent
     provisionLines.some((line) => line.includes('prompt text:') && line.includes('explains why')) &&
     promptSections.every((section, index) => readFileSync(join(promptDir, promptFileNames[index]), 'utf8').trim() === section.text)
 
+// ── the Remote face must agree with the gateway PROTOTYPE, in BOTH directions ─────────────────────
+// `typertFace.invocations` is the hand-written descriptor list in `src/remote.ts`; the prototype's own
+// methods are what the `@Remote` decorator marked. A method on only ONE side is a real defect — a
+// descriptor with no handler, or a `@Remote` handler the wire face never publishes — and a hand-typed
+// list plus a `=== 10` count could only ever see the first side (a missing descriptor was invisible in
+// every tier; a missing handler only failed in the release tier's mount smoke). `constructor` and the
+// compile-time-private `call` helper are the two prototype members that are not `@Remote` methods; the
+// decorator's marker key is a non-function property, so the `typeof … === 'function'` filter drops it.
+const gatewayMethods = gateway === undefined || gateway === null
+  ? []
+  : Object.getOwnPropertyNames(Object.getPrototypeOf(gateway))
+    .filter((name) => name !== 'constructor' && name !== 'call' && typeof gateway[name] === 'function')
+const faceMethods = (typertFace?.invocations ?? []).map((descriptor) => descriptor.method)
+const methodSetsAgree = faceMethods.length > 0
+  && gatewayMethods.every((method) => faceMethods.includes(method))
+  && faceMethods.every((method) => gatewayMethods.includes(method))
+
 const ok =
   !!service &&
   typeof service.query === 'function' &&
   !!gateway &&
   // Five tool-backed methods plus the UI-only ones (`openDoc`, `classifySource`, `browseDir`,
-  // `kbDomains`, `kbAddDomain`).
-  ['remember', 'recall', 'admin', 'kb', 'query', 'openDoc', 'classifySource', 'browseDir', 'kbDomains', 'kbAddDomain']
-    .every((m) => typeof gateway[m] === 'function') &&
+  // `kbDomains`, `kbAddDomain`) — pinned by `methodSetsAgree` against BOTH the descriptors and the
+  // decorated prototype, not by a copied list.
+  methodSetsAgree &&
   functionalOk &&
   managedOk &&
   openDocOk &&
@@ -721,7 +741,6 @@ const ok =
   addDomainOk &&
   provisionOk &&
   typertFace?.face === 'host' &&
-  typertFace?.invocations.length === 10 &&
   typertFace?.invocations.every((d) => d.namespace === 'avantfMem' && d.service === 'avantfMem') &&
   ['mem_remember', 'mem_recall', 'mem_admin', 'kb_add', 'kb_list', 'kb_remove', 'kb_reindex', 'kb_query'].every((t) => registeredTools.includes(t)) &&
   // `kb_manage` and `sync` are deliberately NOT model-facing any more (the UI keeps them).

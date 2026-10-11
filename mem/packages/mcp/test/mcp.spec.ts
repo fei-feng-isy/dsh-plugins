@@ -114,33 +114,42 @@ describe('MCP server', () => {
     expect(removed.isError).toBeUndefined()
   })
 
-  it('dispatch routes to the runtime', async () => {
-    const { dispatchTool } = await import('../src/index.js')
-    const res = await dispatchTool(rt, 'remember', { action: 'add', content: '陈静加入平台组' })
-    expect((res as { fact_id: number; is_new: boolean }).is_new).toBe(true)
+  it('runToolSpec routes to the runtime', async () => {
+    // The MCP boundary is the engine's `runToolSpec` — the very call the transport handler makes
+    // (`buildMcpServer`). The `dispatchTool` wrapper this used to exercise was this package's second,
+    // production-unused copy of the model-facing shaping; the coverage moves here unchanged.
+    const envelope = await runToolSpec(rt, REMEMBER_TOOL, { action: 'add', content: '陈静加入平台组' })
+    if (!envelope.ok) throw new Error(`expected an ok envelope, got: ${envelope.error}`)
+    expect((envelope.result as { fact_id: number; is_new: boolean }).is_new).toBe(true)
   })
 
   it('shapes mem_admin fact views for the model, but keeps diagnostics on request', async () => {
-    // The MCP dispatch IS a model-facing boundary: a fact view must not carry the retention
+    // `runToolSpec` IS the model-facing boundary: a fact view must not carry the retention
     // diagnostics (trust value, forget clock, reinforcement counter), while a diagnostic the
     // caller asked for by name passes through — and the runtime itself keeps everything for
     // the Remote gateway that drives the operator UI.
-    const { dispatchTool } = await import('../src/index.js')
-    const created = await dispatchTool(rt, 'remember', { action: 'add', content: '形状检查的事实' }) as { fact_id: number }
+    const createdEnvelope = await runToolSpec(rt, REMEMBER_TOOL, { action: 'add', content: '形状检查的事实' })
+    if (!createdEnvelope.ok) throw new Error(`expected an ok envelope, got: ${createdEnvelope.error}`)
+    const created = createdEnvelope.result as { fact_id: number }
 
-    const page = await dispatchTool(rt, 'admin', { action: 'list', limit: 5 }) as { facts: Record<string, unknown>[] }
+    const pageEnvelope = await runToolSpec(rt, ADMIN_TOOL, { action: 'list', limit: 5 })
+    if (!pageEnvelope.ok) throw new Error(`expected an ok envelope, got: ${pageEnvelope.error}`)
+    const page = pageEnvelope.result as { facts: Record<string, unknown>[] }
     expect(page.facts.length).toBeGreaterThan(0)
     expect(page.facts[0]).not.toHaveProperty('trust_score')
     expect(page.facts[0]).not.toHaveProperty('remaining_days')
     expect(page.facts[0]).toHaveProperty('fact_id')
 
-    const detail = await dispatchTool(rt, 'admin', { action: 'detail', fact_id: created.fact_id }) as Record<string, unknown>
+    const detailEnvelope = await runToolSpec(rt, ADMIN_TOOL, { action: 'detail', fact_id: created.fact_id })
+    if (!detailEnvelope.ok) throw new Error(`expected an ok envelope, got: ${detailEnvelope.error}`)
+    const detail = detailEnvelope.result as Record<string, unknown>
     expect(detail).not.toHaveProperty('trust_score')
     expect(detail).not.toHaveProperty('helpful_count')
     expect(detail).toHaveProperty('entities')
 
-    const diagnose = await dispatchTool(rt, 'admin', { action: 'trust_diagnose' }) as Record<string, unknown>
-    expect(diagnose).toHaveProperty('forgetting_soon')
+    const diagnoseEnvelope = await runToolSpec(rt, ADMIN_TOOL, { action: 'trust_diagnose' })
+    if (!diagnoseEnvelope.ok) throw new Error(`expected an ok envelope, got: ${diagnoseEnvelope.error}`)
+    expect(diagnoseEnvelope.result as Record<string, unknown>).toHaveProperty('forgetting_soon')
 
     // Same database, unfiltered runtime payload: the operator surface keeps the numbers. No cast
     // here — `rt.admin` returns the real `FactSummary`, which is what MAKES these two assertions

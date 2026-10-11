@@ -64,7 +64,7 @@ import {
   type AvantfLogger,
   type ToolSpec,
 } from '@avantf/mem-contract'
-import { hostContribution, wireErr, wireOk } from './remote.js'
+import { hostContribution, descriptors, wireErr, wireOk } from './remote.js'
 import { configDataHome } from './data_home.js'
 import { provision, registerCompatMegaphone, verifyRegisteredFaces, type CompatVerdict } from './provision.js'
 import { createCorpusReconciler } from './reconcile.js'
@@ -489,7 +489,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const compat = env?.compat
   let verdict: CompatVerdict | undefined
   if (compat === undefined) {
-    logger.warn('plugin mount: the dsh compatibility gate is ABSENT (@avantf/dsh-plugin-base unavailable — see the WARNING above); mounting the full plugin anyway')
+    // `undefined` here means ONE of two things, and the loader's WARNING above is the only place that
+    // says which: the base could not be made available at all, or it loaded and the INTERFACE gate
+    // withheld it (another generation — `interface_gate.ts` has already logged "shared capabilities
+    // are NOT used"). Naming only the first read as "the base is missing" on a host where it is
+    // present but refused.
+    logger.warn('plugin mount: the dsh compatibility gate is UNAVAILABLE (@avantf/dsh-plugin-base is absent, or it is another interface generation — see the WARNING above); mounting the full plugin anyway')
   } else {
     const run = provision(ctx, logger, compat)
     if (!run.verdict.load) {
@@ -807,7 +812,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // documented manual path (see src/remote.ts). Without this the gateway falls
   // back to SRC discovery, which needs the generator workspace.
   const disposeTypert = ctx.typert.register(hostContribution)
-  logger.info('typert registered: avantfMem host face (5 tools + 5 UI-only)')
+  // The host face's composition is COUNTED, never typed. The old line was "(5 tools + 5 UI-only)";
+  // the 5 is right — it is the five TOOL-BACKED Remote methods (one per `call(...)` above), the same
+  // five `client/index.ts` means by "mirrors the five tools" — but writing it as a literal is what let
+  // a reviewer read it as the model-tool count (8) and "find" a defect that is not there. Both
+  // numbers now come from `descriptors` (the face itself): a method added or removed moves the line.
+  const toolBackedMethods = descriptors.filter(
+    descriptor => toolSpecs.some(spec => spec.key === descriptor.method),
+  ).length
+  logger.info(
+    `typert registered: avantfMem host face (${String(toolBackedMethods)} tool-backed + `
+    + `${String(descriptors.length - toolBackedMethods)} UI-only Remote methods)`,
+  )
 
   // Post-registration health check: every REAL schema key (and every real tool name) must have
   // landed, matched by exact key — never by a bare `list()` total, which a not-yet-withdrawn probe

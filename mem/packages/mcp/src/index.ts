@@ -2,11 +2,10 @@ import { readFileSync } from 'node:fs'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { buildRuntime, dispatchToolKey, installTrustHeartbeat, provisionToolchainAsync, runToolSpec, type AvantfRuntime } from '@avantf/mem'
+import { buildRuntime, installTrustHeartbeat, provisionToolchainAsync, runToolSpec, type AvantfRuntime } from '@avantf/mem'
 import {
   TOOL_SPECS,
   toolInputJsonSchema,
-  modelFacingToolResult,
   toolErr,
   toWellFormedDeep,
   type ToolSpec,
@@ -60,24 +59,11 @@ export async function buildMcpServer(rt: AvantfRuntime): Promise<Server> {
   return server
 }
 
-/**
- * Dispatch one validated tool call. The tool key selects the runtime surface.
- *
- * This IS the model-facing boundary on the MCP side, so the result is shaped like the dsh
- * tool runner's: `mem_admin`'s fact views drop the retention diagnostics
- * ({@link modelFacingToolResult}), while diagnostics the caller asked for explicitly
- * (`trust_diagnose`, `vectors_diagnose`, …) pass through.
- *
- * The key → runtime mapping is the engine's ONE table (`dispatchToolKey`, shared with the DSH
- * plugin), not a switch maintained here: this file used to hand-maintain the key set and fell
- * behind the contract, so the four `kb_*` tools were advertised by `tools/list` and answered
- * `unknown tool key` on every call. An unknown key throws and the caller's `catch` routes it
- * through the same `toolErr` envelope as any other failure.
- */
-export async function dispatchTool(rt: AvantfRuntime, key: string, args: Record<string, unknown>): Promise<unknown> {
-  const value = await dispatchToolKey(rt, key, args)
-  return modelFacingToolResult(key, args['action'], value)
-}
+// `dispatchTool` used to live here: a second, MCP-only copy of the validate → dispatch →
+// `modelFacingToolResult` sequence. The engine's `runToolSpec` is the ONE implementation of that
+// boundary (shared with the DSH plugin) and `buildMcpServer` calls it directly, so the wrapper was
+// dead code with a misleading comment — it claimed the model-facing shaping was MCP's, when
+// `core/src/dispatch.ts` is where it happens.
 
 export async function main(opts?: { dataHome?: string }): Promise<void> {
   const rt = buildRuntime({ dataHome: opts?.dataHome })
