@@ -4,7 +4,7 @@
  *
  * WHY TIERS. The pre-2026-10-03 closure ran the same full sequence for every change: each tree's
  * `release:check` (link → build → typecheck → the whole test suite → pack → the old-dsh floor gate)
- * plus a separate `pnpm test`, `build:dsh mem`, `build:dsh mission`, two mount smokes, `guard`, the
+ * plus a separate `pnpm test`, `build:dsh mem`, `build:dsh mission`, three mount smokes, `guard`, the
  * four self-tests, `prepublish:assert` and the root `release:check`. Everything appeared as many times
  * over, so a one-line copy change cost the same as a release candidate. The tiers split that:
  *
@@ -20,7 +20,7 @@
  * contain build/typecheck/tests). `base` is built once by the fast tier, before the target tree.
  *
  * USAGE
- *   pnpm check:fast <base|mem|mission|root>   # one named tree
+ *   pnpm check:fast <base|identity|mem|mission|root>   # one named tree
  *   pnpm check:fast                           # auto-detect the changed tree(s) from git
  *   pnpm check:release                        # the release tier (every strict gate + root surface)
  *   pnpm check:release --parallel             # run the strict gates at once (opt-in)
@@ -39,11 +39,26 @@
  */
 import { execFileSync, spawn } from 'node:child_process'
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { repoRoot as repo } from './lib/plugins.mjs'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { discoverPlugins, repoRoot as repo } from './lib/plugins.mjs'
 import { spawnToolSync, toolInvocation } from './lib/win-spawn.mjs'
 
 const NODE = process.execPath
+
+/**
+ * The plugin trees, DISCOVERED — never listed (E1).
+ *
+ * `scripts/lib/plugins.mjs` owns the rule ("a top-level directory whose manifest defines
+ * `build:dsh`"), so a new tree is a tier target the moment it exists. Before this, the four names
+ * were hardcoded: a change under a NEW tree fell into `rootTouched`, the fast tier returned `root`,
+ * and `check:fast` printed ok while that tree's build/typecheck/tests never ran.
+ */
+const PLUGIN_IDS = discoverPlugins().map((plugin) => plugin.id)
+/** Every tree name a tier can take: the base, the discovered plugins, and the tree-less `root`. */
+const KNOWN_TREES = ['base', ...PLUGIN_IDS, 'root']
+/** The same set, spelled for the human-facing usage/error lines. */
+const TREE_LIST = KNOWN_TREES.join(' | ')
 
 /** @typedef {{ label: string, command: string, args: string[], cwd?: string, tree?: string }} Step */
 
@@ -80,7 +95,7 @@ const rootGates = [
  * hoisted out. `root` is the tree-less target (only the root-wide gates, for a change that touched
  * none of the plugin trees).
  */
-const FAST = {
+export const FAST = {
   base: [
     { label: 'build base', command: 'pnpm', args: ['-C', 'base/plugin-base', 'build'] },
     { label: 'typecheck base (src + tests)', command: 'pnpm', args: ['-C', 'base/plugin-base', 'typecheck'] },
@@ -133,12 +148,15 @@ const FAST = {
  * The RELEASE steps. Each is that package's own strict gate (`release:check`), which already contains
  * pack and the old-dsh floor gate; the plugins' also contain their real-Cordis mount smoke.
  */
-const RELEASE = [
+export const RELEASE = [
   { label: 'strict gate: base (@avantf/dsh-plugin-base)', command: 'pnpm', args: ['-C', 'base/plugin-base', 'release:check'], tree: 'base' },
   { label: 'strict gate: mem (@avantf/dsh-mem, incl. mount smoke)', command: 'pnpm', args: ['-C', 'mem', 'release:check'], tree: 'mem' },
   { label: 'strict gate: mission (@avantf/dsh-mission, incl. mount smoke)', command: 'pnpm', args: ['-C', 'mission', 'release:check'], tree: 'mission' },
   { label: 'strict gate: identity (@avantf/dsh-identity, incl. mount smoke)', command: 'pnpm', args: ['-C', 'identity', 'release:check'], tree: 'identity' },
 ]
+
+/** The trees the RELEASE steps actually gate — the set a discovered plugin must be in (E1). */
+const RELEASE_TREES = RELEASE.map((step) => step.tree).filter((tree) => tree !== undefined)
 
 /** The root surface runs last and serially: it judges the manifests the gates just packed. */
 const ROOT_RELEASE = { label: 'release surface (publishable set, peers, one zod, published base)', command: 'pnpm', args: ['release:check'] }
@@ -149,7 +167,7 @@ const RELEASE_ASSERT = { label: 'prepublish assertions (publish surface)', comma
 // ── plumbing ──────────────────────────────────────────────────────────────────────────────────────
 
 const USAGE = `usage:
-  pnpm check:fast <base|mem|mission|identity|root>   # fast tier for one tree (or 'root' for the repo-wide gates)
+  pnpm check:fast <${TREE_LIST}>   # fast tier for one tree (or 'root' for the repo-wide gates)
   pnpm check:fast                           # auto-detect the changed tree(s) from git
   pnpm check:release                        # release tier: every strict gate + the root surface
   pnpm check:release --parallel             # run the strict gates at once (opt-in: shared base/ + install)
@@ -222,6 +240,27 @@ function tail(logPath, count = 30) {
 // ── target detection ──────────────────────────────────────────────────────────────────────────────
 
 /**
+ * The tier target a changed path's leading segment names, or `undefined` when it names no tree.
+ *
+ * Exported so the self-test can pin the discovery rule: `identity/...` is a target the moment
+ * `discoverPlugins()` sees the tree, and an unclassified segment means the change is repo-level.
+ */
+export function targetOfPath(path) {
+  const segment = path.split('/')[0]
+  return segment === 'base' || PLUGIN_IDS.includes(segment) ? segment : undefined
+}
+
+/**
+ * The targets a tier's table does NOT cover — the set that must be printed and must fail the run.
+ *
+ * Exported because "known to the repo but absent from the tier" is exactly the silent hole E1 fixed:
+ * a discovered tree missing from FAST contributes zero steps while the run still says ok.
+ */
+export function uncoveredTargets(knownTargets, targets) {
+  return targets.filter((target) => !knownTargets.includes(target))
+}
+
+/**
  * The trees a git-visible change touches, derived from `git status --porcelain`.
  *
  * Only the leading path segment is read; a change that touches no tree selects
@@ -242,9 +281,9 @@ function detectTargets() {
     // `XY <path>`; a rename shows `old -> new`, and both sides count.
     for (const raw of line.slice(3).split(' -> ')) {
       const path = raw.replace(/^"|"$/gu, '')
-      const segment = path.split('/')[0]
-      if (segment === 'base' || segment === 'mem' || segment === 'mission' || segment === 'identity') trees.add(segment)
-      else rootTouched = true
+      const target = targetOfPath(path)
+      if (target === undefined) rootTouched = true
+      else trees.add(target)
     }
   }
   if (trees.size === 0) return rootTouched ? ['root'] : []
@@ -263,11 +302,16 @@ function fast(argv) {
   let targets = argv.filter((arg) => !arg.startsWith('-'))
   if (targets.length === 0) {
     targets = detectTargets()
-    if (targets.length === 0) fail('no changed tree detected — name one: base | mem | mission | identity | root')
+    if (targets.length === 0) fail(`no changed tree detected — name one: ${TREE_LIST}`)
     console.log(`check:fast — no tree named; git says: ${targets.join(', ')}`)
   }
-  for (const target of targets) {
-    if (!Object.hasOwn(FAST, target)) fail(`unknown tree '${target}' (expected base | mem | mission | identity | root)`)
+  const unknownTrees = targets.filter((target) => !KNOWN_TREES.includes(target))
+  if (unknownTrees.length > 0) fail(`unknown tree ${unknownTrees.join(', ')} (expected ${TREE_LIST})`)
+  // A DISCOVERED tree the FAST table does not name contributes no build/typecheck/test step at all,
+  // so it must never end as a green run (E1). The covered targets still run; the exit is non-zero.
+  const uncovered = uncoveredTargets(Object.keys(FAST), targets)
+  for (const target of uncovered) {
+    console.error(`check:fast — ${target} 未在该档覆盖（FAST 表未登记它；build/typecheck/test 都不会跑）`)
   }
   const steps = []
   // The base is built once: the `base` target has its own build step, and any other target's hoisted
@@ -275,7 +319,7 @@ function fast(argv) {
   const baseTargeted = targets.includes('base')
   let baseAdded = false
   for (const target of targets) {
-    for (const step of FAST[target]) {
+    for (const step of FAST[target] ?? []) {
       if (step === baseBuild) {
         if (baseAdded || baseTargeted) continue
         baseAdded = true
@@ -289,6 +333,10 @@ function fast(argv) {
   const failed = runSerial(steps)
   if (failed !== undefined) {
     console.error(`\ncheck:fast FAILED at: ${failed}`)
+    process.exit(1)
+  }
+  if (uncovered.length > 0) {
+    console.error(`\ncheck:fast FAILED — 未在该档覆盖: ${uncovered.join(', ')}（已发现但 FAST 表未登记，本档对它们什么都没跑）`)
     process.exit(1)
   }
   console.log(`\ncheck:fast ok (${targets.join(', ')})`)
@@ -308,6 +356,13 @@ async function release(argv) {
   const logsDir = join(repo, 'logs')
   mkdirSync(logsDir, { recursive: true })
   const results = []
+
+  // A discovered plugin the RELEASE table does not gate must never look like a green release tier (E1):
+  // its strict gate (pack + old-dsh floor + mount smoke) would simply not run.
+  const uncovered = PLUGIN_IDS.filter((id) => !RELEASE_TREES.includes(id))
+  for (const target of uncovered) {
+    console.error(`check:release — ${target} 未在该档覆盖（RELEASE 表未登记它；严格门禁不会跑）`)
+  }
 
   if (parallel) {
     console.log('check:release — strict gates in PARALLEL (opt-in; each writes its own log)')
@@ -330,7 +385,7 @@ async function release(argv) {
   results.push([RELEASE_ASSERT, assertOk, assertOk ? 0 : 1, undefined])
 
   console.log('\n──────── check:release summary ────────')
-  let failed = false
+  let failed = uncovered.length > 0
   for (const [step, ok, code, logPath] of results) {
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${step.label}${code === null || code === undefined ? '' : ` (exit ${String(code)})`}`)
     if (!ok) {
@@ -342,7 +397,8 @@ async function release(argv) {
     }
   }
   if (failed) {
-    console.error(`\ncheck:release FAILED — per-tree logs in ${logsDir}`)
+    const suffix = uncovered.length > 0 ? ` — 未在该档覆盖: ${uncovered.join(', ')}` : ''
+    console.error(`\ncheck:release FAILED${suffix} — per-tree logs in ${logsDir}`)
     process.exit(1)
   }
   console.log('\ncheck:release ok')
@@ -350,14 +406,25 @@ async function release(argv) {
 
 // ── entry ─────────────────────────────────────────────────────────────────────────────────────────
 
-const argv = process.argv.slice(2)
-const mode = argv[0]
-if (mode === '--help' || mode === '-h') {
-  console.log(USAGE)
-} else if (mode === 'fast') {
-  fast(argv.slice(1))
-} else if (mode === 'release') {
-  await release(argv.slice(1))
-} else {
-  fail(mode === undefined ? 'pass a tier: fast | release' : `unknown tier '${mode}' (expected fast | release)`)
+/**
+ * The CLI body runs only when this file IS the process entry point.
+ *
+ * `scripts/toolchain.test.mjs` imports `FAST`/`RELEASE` (E1's coverage self-test), and without this
+ * guard that import would run a tier. Importing must stay read-only.
+ */
+const invokedDirectly = process.argv[1] !== undefined
+  && pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+
+if (invokedDirectly) {
+  const argv = process.argv.slice(2)
+  const mode = argv[0]
+  if (mode === '--help' || mode === '-h') {
+    console.log(USAGE)
+  } else if (mode === 'fast') {
+    fast(argv.slice(1))
+  } else if (mode === 'release') {
+    await release(argv.slice(1))
+  } else {
+    fail(mode === undefined ? 'pass a tier: fast | release' : `unknown tier '${mode}' (expected fast | release)`)
+  }
 }

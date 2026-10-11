@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Self-tests for the three toolchain fixes of W2-E, all on CONSTRUCTED input (no build, no registry,
+ * Self-tests for the toolchain fixes of W2-E, all on CONSTRUCTED input (no build, no registry,
  * no workspace mutation):
  *
  *   1. `check-old-dsh.mjs` — the throwaway closure is keyed by `(group, floor)`, so two groups gating
@@ -12,6 +12,9 @@
  *   3. `scripts/boundary-guard.mjs` — the base is scanned, and a reverse import from the base into a
  *      plugin tree is a violation, while the base's own files are exempt from the "no value import of
  *      the base" rule (which is about plugins) and a plugin importing the base stays legal.
+ *   4. `scripts/check-tier.mjs` — the FAST/RELEASE tables COVER every tree `discoverPlugins()` finds
+ *      (E1): a discovered tree whose steps are missing would otherwise run zero steps behind a green
+ *      `check:fast ok`, and a change under it would be silently classified as repo-level.
  *
  *   node scripts/toolchain.test.mjs
  */
@@ -23,6 +26,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { cacheRootFor, fakeDshDir, groupRoots, npmGlobalRoot } from './check-old-dsh.mjs'
+import { FAST, RELEASE, targetOfPath, uncoveredTargets } from './check-tier.mjs'
 import { spawnToolSync } from './lib/win-spawn.mjs'
 import { judgeTrees } from './boundary-guard.mjs'
 import { discoverGuardTrees, discoverPlugins } from './lib/plugins.mjs'
@@ -228,4 +232,33 @@ test('boundary-guard: the real workspace is clean with the base included', () =>
   assert.equal(result.status, 0, output)
   assert.match(output, /scan {2}base:/u, 'the base must be scanned')
   assert.match(output, /boundary-guard ok/u)
+})
+
+// ── 4 · check-tier: every DISCOVERED tree is a target, and both tiers must cover it ───────────────
+
+test('check-tier: the FAST and RELEASE tables cover every discovered plugin tree', () => {
+  const discovered = discoverPlugins().map((tree) => tree.id)
+  assert.ok(discovered.length > 0, 'the repo must discover at least one plugin tree')
+  const fast = new Set(Object.keys(FAST))
+  const release = new Set(RELEASE.map((step) => step.tree).filter((tree) => tree !== undefined))
+  for (const id of discovered) {
+    assert.ok(fast.has(id), `check:fast has no step table for discovered tree '${id}' (E1: it would run nothing)`)
+    assert.ok(release.has(id), `check:release has no strict gate for discovered tree '${id}' (E1)`)
+  }
+  // The base is not a plugin (discoverPlugins() never returns it) but both tiers target it.
+  assert.ok(fast.has('base') && release.has('base'), 'the base is a target of both tiers')
+})
+
+test('check-tier: any discovered tree maps to itself, an unowned segment to root, and a gap is reported', () => {
+  for (const tree of discoverPlugins()) {
+    assert.equal(targetOfPath(`${tree.id}/packages/plugin/src/x.ts`), tree.id)
+    assert.equal(targetOfPath(tree.id), tree.id)
+  }
+  assert.equal(targetOfPath('base/plugin-base/src/bootstrap.ts'), 'base')
+  // A segment no discovered tree owns is repo-level — that is what selects the `root` target.
+  assert.equal(targetOfPath('scripts/check-tier.mjs'), undefined)
+  assert.equal(targetOfPath('docs/review/x.md'), undefined)
+  // The hole E1 fixed: a discovered tree the tier table does not name is REPORTED, never silent.
+  assert.deepEqual(uncoveredTargets(Object.keys(FAST), ['mem', 'notes']), ['notes'])
+  assert.deepEqual(uncoveredTargets(Object.keys(FAST), ['mem', 'base', 'root']), [])
 })

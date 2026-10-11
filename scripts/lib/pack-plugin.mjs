@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * The assertions `pack-plugin` runs on a plugin's tarball — ONE implementation for both trees, with
- * the union of what each tree used to check.
+ * The assertions `pack-plugin` runs on a plugin's tarball — ONE implementation for every plugin tree,
+ * with the union of what each tree used to check.
  *
  * WHY THIS EXISTS. Two trees each wrote their own packer, and the two assertion sets were
  * non-overlapping: mem asserted the tarball carried no strays, that the bundles are self-contained,
@@ -12,7 +12,7 @@
  * guard lets every tree reach), and each tree's `scripts/pack-plugin.mjs` is a thin entry that binds
  * this module to its own package names, bootstrap shape and carried-types directory.
  *
- * The union is real, not nominal: BOTH trees now run BOTH sets. Where a check is a property of the
+ * The union is real, not nominal: every plugin tree now runs BOTH sets. Where a check is a property of the
  * tree's shape (mem inlines the base bootstrap into the entry, mission ships it as a copied file and
  * imports it relatively; mem carries engine declarations into `lib/engine/`, mission into
  * `lib/mission-core/`) the SHAPE is configuration and the CHECK is shared.
@@ -426,7 +426,7 @@ function contextOf(config) {
  * @param config.versionPackagesFile - the source file declaring `VERSION_PACKAGES`.
  * @param config.allowBakedSuperset - `true` when the tree deliberately bakes every linked dsh package
  *   while its gate compares a named subset (mem). The reverse direction (every package the gate names
- *   is baked) is enforced for both trees either way.
+ *   is baked) is enforced for every tree either way.
  *
  *   **这处不对称是接受的（用户 2026-10-02 决定，落档在此，免去后来者考古）**：mem 故意 bake 整个 linked 集合
  *   （这样该文件不会与实际链接到的版本漂移），而它的门禁只比对 `provision.ts` 里的两个名字；正向断言会要求
@@ -445,7 +445,7 @@ export function assertCheckout(config) {
   // The base is the plugin's one RUNTIME dependency: dsh writes `autoInstallPeers: false` into every
   // profile, so a peer would not be installed and "install the plugin → get the base" would be false.
   // The one-copy invariant is not "a peer, never a runtime dep" — measured on the real artifacts, pnpm
-  // isolated / pnpm hoisted / npm flat all install exactly one copy as long as both plugins name the
+  // One base copy across every plugin: all the plugin trees must name the
   // SAME range, so that sameness is what this asserts (see the sibling check below).
   const baseRange = manifest.dependencies?.[FRAMEWORK_PEER]
   if (typeof baseRange !== 'string' || baseRange.trim() === '') {
@@ -466,7 +466,7 @@ export function assertCheckout(config) {
     && typeof baseRange === 'string' && manifest.devDependencies[FRAMEWORK_PEER] !== baseRange) {
     fail(`manifest: "${FRAMEWORK_PEER}" is "${baseRange}" in dependencies but "${manifest.devDependencies[FRAMEWORK_PEER]}" in devDependencies — both must name the SAME range`)
   }
-  // Two plugins, one base copy: the two trees must ask for the IDENTICAL range. Read from the sibling
+  // One base copy across every plugin: the plugin trees must ask for the IDENTICAL range. Read from the sibling
   // tree rather than a constant here, so the number still lives in exactly one place (the manifests).
   const siblingName = manifest.name === '@avantf/dsh-mem' ? '@avantf/dsh-mission' : '@avantf/dsh-mem'
   const siblingDir = manifest.name === '@avantf/dsh-mem' ? 'mission/packages/plugin' : 'mem/packages/plugin'
@@ -474,7 +474,7 @@ export function assertCheckout(config) {
   if (existsSync(siblingManifest)) {
     const siblingRange = JSON.parse(readFileSync(siblingManifest, 'utf8')).dependencies?.[FRAMEWORK_PEER]
     if (typeof baseRange === 'string' && siblingRange !== baseRange) {
-      fail(`manifest: this tree declares "${FRAMEWORK_PEER}": "${baseRange}" but ${siblingName} declares "${String(siblingRange)}" — the two plugins must name the SAME range, or the installer resolves them to two physical copies of the base`)
+      fail(`manifest: this tree declares "${FRAMEWORK_PEER}": "${baseRange}" but ${siblingName} declares "${String(siblingRange)}" — the plugin trees must name the SAME range, or the installer resolves them to two physical copies of the base`)
     }
   }
   for (const section of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
@@ -866,6 +866,72 @@ export function documentationCountNote(config) {
   }
 }
 
+// ── the bundle layer: `dsh.bundle.patch` and the row it inserts (E4) ─────────────────────────────
+//
+// `dsh.bundle.patch` names a file the HOST reads when this package is installed as a bundle — it is
+// how `dsh plugin add` mounts the plugin without the user hand-editing a profile. Nothing checked it:
+// `assertTarball` only looked at `dsh.client.platform`, npm does not error on a `files` entry that
+// matches nothing, and no script read the patch's contents. These two assertions close that.
+
+/**
+ * The `name:` values of the rows a `cordis.patch.yml` INSERTS, read by a DELIBERATELY MINIMAL line
+ * parser — enough for the one shape this repo writes (`- insert:` followed by `- id:` / `name:`
+ * rows) and deliberately without pulling in a YAML dependency.
+ *
+ * Rules: find the `insert:` key; read only deeper-indented lines; each `name:` there is one inserted
+ * row's package. A `#` preceded by whitespace is treated as a comment, and the quotes around a YAML
+ * scalar are stripped.
+ *
+ * @param {string} text - the patch file's contents.
+ * @returns {string[]} the inserted rows' names, in file order.
+ */
+export function insertedRowNames(text) {
+  const names = []
+  let insertIndent
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\s+#.*$/u, '')
+    if (line.trim() === '') continue
+    const indent = line.length - line.trimStart().length
+    const trimmed = line.trim()
+    if (insertIndent === undefined) {
+      if (/^(?:-\s*)?insert:\s*$/u.test(trimmed)) insertIndent = indent
+      continue
+    }
+    if (indent <= insertIndent) break // the `insert:` block ended
+    const name = /^(?:-\s*)?name:\s*(.+?)\s*$/u.exec(trimmed)
+    if (name !== null) names.push(name[1].replace(/^['"]|['"]$/gu, ''))
+  }
+  return names
+}
+
+/**
+ * The pure half of the bundle-patch assertion, replayed by `scripts/gates.test.mjs`.
+ *
+ * @param {string[]} contents - the tarball's entry names (`package/…`).
+ * @param {(entry: string) => string} read - reads one entry's text.
+ * @param {string} packedName - the packed manifest's `name`.
+ * @returns {string[]} the problems; empty when the patch ships and inserts this package.
+ */
+export function cordisPatchProblems(contents, read, packedName) {
+  const problems = []
+  const entry = 'package/cordis.patch.yml'
+  if (!contents.includes(entry)) {
+    problems.push(`tarball: missing ${entry} — \`dsh.bundle.patch\` names it, so the bundle layer a host applies would be absent`)
+    return problems
+  }
+  const names = insertedRowNames(read(entry))
+  if (names.length === 0) {
+    problems.push(`tarball:${entry}: no inserted row \`name:\` was readable — a bundle patch must insert the row the host mounts`)
+    return problems
+  }
+  for (const name of names) {
+    if (name !== packedName) {
+      problems.push(`tarball:${entry}: inserts row name ${JSON.stringify(name)} but this package is ${JSON.stringify(packedName)} — installing it as a bundle would mount the WRONG package`)
+    }
+  }
+  return problems
+}
+
 /**
  * The tarball-side assertions: what the registry would actually serve. Runs on the bytes, so a
  * `files` whitelist that drops a needed file or lets a stale one through is caught here and nowhere
@@ -926,6 +992,10 @@ export function assertTarball(config, tarball) {
   }
   if (packed.exports?.['./client'] === undefined) fail('tarball manifest: exports["./client"] is missing (the browser half)')
   if (packed.dsh?.client?.platform !== 'web') fail('tarball manifest: dsh.client.platform must be "web"')
+  // The bundle layer (E4): the file `dsh.bundle.patch` names must ship, and the row it inserts must
+  // be THIS package. Unconditional — every plugin pack in this repo installs through a bundle, and
+  // npm itself does not fail a `files` entry that matches nothing.
+  for (const problem of cordisPatchProblems(contents, read, String(packed.name))) fail(problem)
   if (typeof packed.dependencies?.[FRAMEWORK_PEER] !== 'string') {
     fail(`tarball manifest: "${FRAMEWORK_PEER}" must be a runtime dependency (installing the plugin installs the base)`)
   }

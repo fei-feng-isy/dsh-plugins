@@ -7,10 +7,13 @@
  * group's manifests?" and "does one tree missing a dsh line fail the gate?". So the decisions live in
  * `scripts/lib/` (versions.mjs, gates.mjs, published-base.mjs, pack-plugin.mjs) and this file replays
  * them — M7 (group-scoped version materialization), the base-as-dependency wiring (one copy is
- * guaranteed by the two trees declaring the IDENTICAL range, so drift is fatal), M8 (per-tree
+ * guaranteed by the plugin trees declaring the IDENTICAL range, so drift is fatal) plus E2 (that range
+ * IS the base bootstrap's `supportedRange`, byte for byte), M8 (per-tree
  * dsh-line coverage), M10 (the plugin prepublishOnly wiring), N15 (the plugin half of the one-zod rule,
- * for BOTH trees), R1 (the published base's interface generation vs the plugin's bake) and S2 (the
- * documented-count observation a pack prints — silent on agreement or a missing input).
+ * for every discovered tree), R1 (the published base's interface generation vs the plugin's bake),
+ * E3 (publishConfig.access is "public" with a registry), E4 (the bundle patch ships and inserts this
+ * package) and S2 (the documented-count observation a pack prints — silent on agreement or a missing
+ * input).
  *
  *   node scripts/gates.test.mjs
  *
@@ -24,7 +27,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
@@ -38,12 +41,30 @@ import {
   publishedInterfaceGeneration,
   readTarballEntry,
 } from './lib/published-base.mjs'
+import { discoverPlugins } from './lib/plugins.mjs'
 import { execToolSync } from './lib/win-spawn.mjs'
-import { arrayEntries, documentedCountMismatches, exportedSymbolNames, shippedDeclarationNote, unconsumedExports, versionPackageNames } from './lib/pack-plugin.mjs'
+import { arrayEntries, cordisPatchProblems, documentedCountMismatches, exportedSymbolNames, insertedRowNames, shippedDeclarationNote, unconsumedExports, versionPackageNames } from './lib/pack-plugin.mjs'
 import { groupWorkspaceTargets, workspaceTargets, withWorkspaceVersions } from './lib/versions.mjs'
+import { PUBLISHABLE, publishConfigProblems } from './prepublish-assert.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BASE = '@avantf/dsh-plugin-base'
+
+/**
+ * The `supportedRange` literal the inlined bootstrap gates the RESOLVED base with. Read from source,
+ * never spelled here: the whole point of the E2 pin below is that this one literal and every tree's
+ * install-time range are the same window.
+ */
+function readSupportedRange() {
+  const source = readFileSync(join(workspace, 'base/plugin-base/src/bootstrap.ts'), 'utf8')
+  const match = /supportedRange\s*=\s*['"]([^'"]+)['"]/u.exec(source)
+  assert.ok(match !== null, 'base/plugin-base/src/bootstrap.ts must declare the supportedRange literal')
+  return match[1]
+}
+
+const SUPPORTED_RANGE = readSupportedRange()
+/** Every discovered plugin tree's `packages/plugin` directory, with its id (E1/E2 discovery). */
+const PLUGIN_TREES = discoverPlugins()
 
 // ── M7 · the version materializer writes ONLY the declared group's manifests ─────────────────────
 
@@ -163,12 +184,12 @@ test('M7: calling with no { group } refuses to cross groups instead of guessing'
 //
 // dsh writes `autoInstallPeers: false` into every profile it manages, so the base has to be a plain
 // `dependencies` entry for "install the plugin, get the base" to be true. The one-copy invariant is
-// then the two trees naming the IDENTICAL range — measured on the real packed artifacts under pnpm
+// then the plugin trees naming the IDENTICAL range — measured on the real packed artifacts under pnpm
 // isolated / pnpm hoisted / npm flat, each of which installs one physical copy when the ranges agree
 // and forks only when they differ. Each way the rule can be broken is replayed below.
 
 test('release-check: the base is a plain runtime dependency of the plugin, never merely a peer', () => {
-  const range = '>=0.3.0 <1.0.0'
+  const range = SUPPORTED_RANGE
   assert.deepEqual(
     baseDependencyProblems('@avantf/dsh-mem', { dependencies: { [BASE]: range } }, BASE),
     { problems: [], range },
@@ -208,17 +229,17 @@ test('release-check: the base is a plain runtime dependency of the plugin, never
   const local = baseDependencyProblems('@avantf/dsh-mem', { dependencies: { [BASE]: 'workspace:*' } }, BASE)
   assert.match(local.problems.join('\n'), /publishable registry range/u)
 
-  // MUTATION 5 — the two trees drifting apart: EXACTLY the case that makes the installer fork a copy.
+  // MUTATION 5 — the trees drifting apart: EXACTLY the case that makes the installer fork a copy.
   const drifted = baseDependencyProblems(
     '@avantf/dsh-mission',
-    { dependencies: { [BASE]: '>=0.3.0 <1.0.0' } },
+    { dependencies: { [BASE]: range } },
     BASE,
     { plugin: '@avantf/dsh-mem', range: '^0.3.0' },
   )
   assert.match(drifted.problems.join('\n'), /SAME range/u)
   assert.match(drifted.problems.join('\n'), /two physical copies/u)
 
-  // Same range in both trees: green even with a `previous` in play.
+  // Same range everywhere: green even with a `previous` in play.
   assert.deepEqual(
     baseDependencyProblems(
       '@avantf/dsh-mission',
@@ -230,13 +251,39 @@ test('release-check: the base is a plain runtime dependency of the plugin, never
   )
 })
 
-test('release-check: the two REAL plugin manifests declare a matching, wide base dependency', () => {
+test('E2: every discovered plugin tree declares the SAME base range the bootstrap gates on', () => {
+  // The runtime gate is `supportedRange` in `base/plugin-base/src/bootstrap.ts`; the install-time gate
+  // is each tree's `dependencies['@avantf/dsh-plugin-base']`. Nothing asserted the two windows were
+  // EQUAL — only that the base's version fell inside the declared range — so one side could accept a
+  // base the other refuses. Read both from source and require byte equality.
+  assert.notEqual(SUPPORTED_RANGE, '', 'the bootstrap supportedRange must not be empty')
+  assert.ok(PLUGIN_TREES.length > 0, 'the repo must discover at least one plugin tree')
+  for (const tree of PLUGIN_TREES) {
+    assert.ok(tree.packageDir !== undefined, `${tree.id} must follow the <tree>/packages/plugin layout`)
+    const manifest = JSON.parse(readFileSync(join(tree.packageDir, 'package.json'), 'utf8'))
+    assert.equal(
+      manifest.dependencies?.[BASE],
+      SUPPORTED_RANGE,
+      `${tree.id} declares ${BASE} as ${JSON.stringify(manifest.dependencies?.[BASE])} but `
+      + `base/plugin-base/src/bootstrap.ts gates on ${JSON.stringify(SUPPORTED_RANGE)} — the install-time `
+      + 'gate and the runtime gate must be the same window (change BOTH, or neither)',
+    )
+    assert.equal(
+      manifest.devDependencies?.[BASE],
+      SUPPORTED_RANGE,
+      `${tree.id} devDependencies must mirror the bootstrap's supportedRange (it is what links the workspace base)`,
+    )
+  }
+})
+
+test('release-check: every discovered plugin manifest declares a matching, wide base dependency', () => {
   const seen = []
-  for (const dir of ['mem/packages/plugin', 'mission/packages/plugin']) {
-    const manifest = JSON.parse(readFileSync(join(workspace, dir, 'package.json'), 'utf8'))
+  for (const tree of PLUGIN_TREES) {
+    const dir = relative(workspace, tree.packageDir)
+    const manifest = JSON.parse(readFileSync(join(tree.packageDir, 'package.json'), 'utf8'))
     const wiring = baseDependencyProblems(manifest.name, manifest, BASE, seen.at(-1))
     assert.deepEqual(wiring.problems, [], `${dir} must declare ${BASE} as a runtime dependency`)
-    assert.equal(wiring.range, '>=0.3.0 <1.0.0', `${dir} must keep the shared, wide base range`)
+    assert.equal(wiring.range, SUPPORTED_RANGE, `${dir} must keep the shared, wide base range`)
     seen.push({ plugin: manifest.name, range: wiring.range })
   }
 })
@@ -244,7 +291,7 @@ test('release-check: the two REAL plugin manifests declare a matching, wide base
 // ── N15 · the one-zod rule reaches the plugin PUBLISH manifest, not just catalog and base ──────────
 
 test('N15: a HOST-provided dependency must stay a REQUIRED peer, in peerDependencies only', () => {
-  // BOTH trees: a host install is judged by whichever manifest it reads, so each must declare the
+  // Every plugin tree: a host install is judged by whichever manifest it reads, so each must declare the
   // same disposition — zod required, in peerDependencies, never nested. (`^4.4.3` and `>=4.4.3 <5`
   // both pass: the rule is about WHERE zod comes from, not the spelling of the range. The base is NOT
   // in this class: it is the plugin's own runtime dependency and is asserted by the base-wiring test.)
@@ -278,15 +325,88 @@ test('N15: a HOST-provided dependency must stay a REQUIRED peer, in peerDependen
   }
 })
 
-test('N15: the REAL manifests of BOTH trees get their single zod from the host', () => {
-  for (const dir of ['mem/packages/plugin', 'mission/packages/plugin']) {
-    const manifest = JSON.parse(readFileSync(join(workspace, dir, 'package.json'), 'utf8'))
+test('N15: the REAL manifests of every discovered tree get their single zod from the host', () => {
+  for (const tree of PLUGIN_TREES) {
+    const dir = relative(workspace, tree.packageDir)
+    const manifest = JSON.parse(readFileSync(join(tree.packageDir, 'package.json'), 'utf8'))
     assert.deepEqual(
       requiredPeerProblems(manifest.name, manifest, 'zod'),
       [],
       `${dir} must take zod as a required peer (S1 aligned mission with mem — both use it at runtime)`,
     )
   }
+})
+
+// ── E3 · the publishConfig access contract has a machine check ────────────────────────────────────
+//
+// Every publishable manifest says `publishConfig.access: "public"` today, but before this the string
+// was asserted NOWHERE (E3). A scoped package published without it becomes restricted. The check now
+// lives in `scripts/prepublish-assert.mjs`; this replays the pure half on constructed manifests and
+// then runs it over the four REAL ones.
+
+test('E3: publishConfig must be { access: "public", registry } — or the publish is not asserted', () => {
+  const ok = { name: '@avantf/dsh-mem', publishConfig: { access: 'public', registry: 'https://registry.npmjs.org' } }
+  assert.deepEqual(publishConfigProblems('@avantf/dsh-mem', ok), [])
+
+  // MUTATION 1 — no publishConfig at all: npm publishes a scoped package as restricted.
+  const missing = publishConfigProblems('@avantf/dsh-mem', { name: '@avantf/dsh-mem' })
+  assert.equal(missing.length, 1)
+  assert.match(missing.join('\n'), /no publishConfig/u)
+  assert.match(missing.join('\n'), /access/u)
+
+  // MUTATION 2 — access present but not "public".
+  const restricted = publishConfigProblems('@avantf/dsh-mem', {
+    name: '@avantf/dsh-mem', publishConfig: { access: 'restricted', registry: 'https://registry.npmjs.org' },
+  })
+  assert.match(restricted.join('\n'), /access is "restricted"/u)
+
+  // MUTATION 3 — no registry to publish to.
+  const noRegistry = publishConfigProblems('@avantf/dsh-mem', { publishConfig: { access: 'public' } })
+  assert.match(noRegistry.join('\n'), /registry/u)
+
+  // MUTATION 4 — an unreadable manifest is a problem, not a silent pass.
+  assert.match(publishConfigProblems('@avantf/dsh-mem', undefined).join('\n'), /no package.json/u)
+
+  // The gate's own four packages, read from disk.
+  for (const [dir, name] of PUBLISHABLE) {
+    const manifest = JSON.parse(readFileSync(join(workspace, dir, 'package.json'), 'utf8'))
+    assert.deepEqual(publishConfigProblems(name, manifest), [], `${dir} must declare publishConfig.access = "public" + a registry`)
+  }
+})
+
+// ── E4 · the bundle layer ships, and inserts THIS package ─────────────────────────────────────────
+
+test('E4: the tarball must carry cordis.patch.yml and its inserted row must name the packed package', () => {
+  const entry = 'package/cordis.patch.yml'
+  const patch = [
+    '# a comment the parser must ignore',
+    '- insert:',
+    '    - id: avantf-mem',
+    "      name: '@avantf/dsh-mem'",
+    '      config:',
+    '        mode: cordis',
+  ].join('\n')
+  const read = () => patch
+
+  // The shape this repo writes parses to exactly one inserted name, quotes stripped.
+  assert.deepEqual(insertedRowNames(patch), ['@avantf/dsh-mem'])
+  assert.deepEqual(insertedRowNames("- insert:\n    - id: x\n      name: '@avantf/dsh-mission'\n"), ['@avantf/dsh-mission'])
+  assert.deepEqual(cordisPatchProblems([entry, 'package/README.md'], read, '@avantf/dsh-mem'), [])
+
+  // MUTATION 1 — the file `dsh.bundle.patch` names is not in the tarball (npm does not error on a
+  // `files` entry that matches nothing, so this is the only place it can be caught).
+  const missing = cordisPatchProblems(['package/README.md'], read, '@avantf/dsh-mem')
+  assert.equal(missing.length, 1)
+  assert.match(missing.join('\n'), /package\/cordis\.patch\.yml/u)
+
+  // MUTATION 2 — the patch inserts a DIFFERENT package (a copy/rename slip in the bundle layer).
+  const wrong = cordisPatchProblems([entry], () => patch.replace('@avantf/dsh-mem', '@avantf/dsh-mission'), '@avantf/dsh-mem')
+  assert.match(wrong.join('\n'), /inserts row name "@avantf\/dsh-mission"/u)
+  assert.match(wrong.join('\n'), /"@avantf\/dsh-mem"/u)
+
+  // MUTATION 3 — an insert with no readable row name.
+  const empty = cordisPatchProblems([entry], () => '- insert: []\n', '@avantf/dsh-mem')
+  assert.match(empty.join('\n'), /no inserted row/u)
 })
 
 // ── M8 · a line ONE tree misses is a failure, even when the union covers it ──────────────────────
@@ -698,11 +818,12 @@ test('S2: the measured count is read from the code, object entries with commas i
   assert.equal(arrayEntries('const OTHER: string[] = []', 'PROMPT_FILES'), undefined)
 })
 
-// ── M10 · both plugins run their own packer before publishing ─────────────────────────────────────
+// ── M10 · every discovered tree runs its own packer before publishing ─────────────────────────────
 
-test('M10: both plugins declare prepublishOnly → (assert, then) their own packer, with no recursion', () => {
-  for (const dir of ['mem/packages/plugin', 'mission/packages/plugin']) {
-    const manifest = JSON.parse(readFileSync(join(workspace, dir, 'package.json'), 'utf8'))
+test('M10: every discovered plugin declares prepublishOnly → (assert, then) its own packer, no recursion', () => {
+  for (const tree of PLUGIN_TREES) {
+    const dir = relative(workspace, tree.packageDir)
+    const manifest = JSON.parse(readFileSync(join(tree.packageDir, 'package.json'), 'utf8'))
     const script = manifest.scripts?.prepublishOnly
     // The packer is the load-bearing half and must stay LAST: it is what turns the tree into a tarball.
     assert.ok(
@@ -716,7 +837,7 @@ test('M10: both plugins declare prepublishOnly → (assert, then) their own pack
     if (asserted !== null) {
       assert.equal(asserted[1], manifest.name, `${dir}: the pre-publish assertion must name this package`)
     }
-    assert.ok(existsSync(join(workspace, dir, '..', '..', 'scripts', 'pack-plugin.mjs')), `${dir}: the packer must exist`)
+    assert.ok(existsSync(join(tree.packageDir, '..', '..', 'scripts', 'pack-plugin.mjs')), `${dir}: the packer must exist`)
     // `prepublishOnly` must not call `publish`/`pnpm publish`: that is the recursion. `\b` matters —
     // a bare `/publish/` also matches the `prepublish-assert` step we deliberately run first.
     assert.doesNotMatch(script, /\bpublish\b/u)

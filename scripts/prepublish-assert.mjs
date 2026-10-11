@@ -20,12 +20,14 @@
  *      (the SAME rules as `pnpm version:check`, reused from `scripts/lib/`, never re-implemented);
  *   3. **each package ships its own README** and its first line is `# <package name>` — the npm page.
  *
- * Plus the invariant the whole release surface hangs on: **the publishable set is exactly three
- * packages** (base + the two plugins, in publish order).
+ * Plus the invariant the whole release surface hangs on: **the publishable set is exactly the
+ * packages in {@link PUBLISHABLE}** (base + the three plugins, in publish order), and each of them
+ * declares `publishConfig.access: "public"` with a registry — the machine check of the access
+ * contract (P1-8a).
  *
  * Usage:
  *   node scripts/prepublish-assert.mjs                                  # the whole release surface
- *   node scripts/prepublish-assert.mjs --package @avantf/dsh-mem        # + assert this is one of the three
+ *   node scripts/prepublish-assert.mjs --package @avantf/dsh-mem        # + assert this is publishable
  *   node scripts/prepublish-assert.mjs --tarball dist/avantf-dsh-mem-*.tgz   # + assert the packed bytes
  *
  * It only READS: no build, no pack, no publish, no network. Wire it into each publishable manifest's
@@ -37,14 +39,20 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { bakedVersionProblems } from './lib/bootstrap-version.mjs'
 import { repoRoot as repo } from './lib/plugins.mjs'
 import { versionState } from './lib/versions.mjs'
 
-/** The packages that may be published, and where they live. Order is the PUBLISH order. */
-const PUBLISHABLE = new Map([
+/**
+ * The packages that may be published, and where they live. Order is the PUBLISH order.
+ *
+ * Exported so `scripts/gates.test.mjs` replays the publishConfig check over the REAL four manifests
+ * (E3) instead of a copy of this list.
+ */
+export const PUBLISHABLE = new Map([
   ['base/plugin-base', '@avantf/dsh-plugin-base'],
   ['mem/packages/plugin', '@avantf/dsh-mem'],
   ['mission/packages/plugin', '@avantf/dsh-mission'],
@@ -96,7 +104,7 @@ function expandWorkspacePattern(pattern) {
   return { dirs, problem: undefined }
 }
 
-// ── 1. the publishable set is exactly the three ─────────────────────────────────────────────────
+// ── 1. the publishable set is exactly the PUBLISHABLE packages ──────────────────────────────────
 function checkPublishableSet() {
   const found = []
   const workspaceFile = join(repo, 'pnpm-workspace.yaml')
@@ -125,11 +133,11 @@ function checkPublishableSet() {
     const expected = PUBLISHABLE.get(dir)
     const publishable = manifest.private !== true
     if (publishable && expected === undefined) {
-      found.push(`${manifest.name ?? dir} (${dir}) is publishable but is NOT one of the three release packages — `
+      found.push(`${manifest.name ?? dir} (${dir}) is publishable but is NOT one of the ${String(PUBLISHABLE.size)} release packages — `
         + 'add `"private": true` (an internal engine/kit package must never reach npm)')
     }
     if (!publishable && expected !== undefined) {
-      found.push(`${dir} is one of the three release packages but declares \`"private": true\``)
+      found.push(`${dir} is one of the ${String(PUBLISHABLE.size)} release packages but declares \`"private": true\``)
     }
     if (expected !== undefined) {
       seen.add(dir)
@@ -211,6 +219,50 @@ function checkNoReleaseTooling() {
   return { problems: found, note: found.length === 0 ? 'no publishable package ships (or points at) repository release tooling' : undefined }
 }
 
+// ── 4b. publishConfig: the access/registry contract (P1-8a) ──────────────────────────────────────
+// The four manifests all say `"access": "public"` today, but nothing machine-checked it: `grep -rn
+// publishConfig scripts/ */scripts/` had zero hits before this. A scoped package published without
+// `access: public` becomes restricted (or fails outright), and a publish from a tree that dropped
+// the field would only find out at the registry. This is the only gate that reads it.
+
+/**
+ * The pure half of the publishConfig check, replayed by `scripts/gates.test.mjs`.
+ *
+ * @param {string} name - the package name, for the message.
+ * @param {object|undefined} manifest - the parsed manifest (`undefined` when unreadable).
+ * @returns {string[]} one problem per broken invariant; empty when publishable.
+ */
+export function publishConfigProblems(name, manifest) {
+  if (manifest === undefined || manifest === null) return [`${name}: no package.json could be read`]
+  const config = manifest.publishConfig
+  if (config === undefined || typeof config !== 'object') {
+    return [`${name}: has no publishConfig — a scoped package must declare \`publishConfig.access: "public"\`, `
+      + 'or npm publishes it as restricted and the release gate has no other place to see it']
+  }
+  const found = []
+  if (config.access !== 'public') {
+    found.push(`${name}: publishConfig.access is ${JSON.stringify(config.access)} — it must be "public" `
+      + '(the access contract has no other machine check)')
+  }
+  if (typeof config.registry !== 'string' || config.registry.trim() === '') {
+    found.push(`${name}: publishConfig.registry is ${JSON.stringify(config.registry)} — it must name the registry this release goes to`)
+  }
+  return found
+}
+
+function checkPublishConfig() {
+  const found = []
+  for (const [dir, name] of PUBLISHABLE) {
+    for (const problem of publishConfigProblems(name, readManifest(dir))) found.push(`${dir}: ${problem}`)
+  }
+  return {
+    problems: found,
+    note: found.length === 0
+      ? `each of the ${String(PUBLISHABLE.size)} publishable packages declares publishConfig.access = "public" with a registry`
+      : undefined,
+  }
+}
+
 // ── 5. optional: assert the packed BYTES too ─────────────────────────────────────────────────────
 function tarEntries(tarball) {
   return execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
@@ -258,65 +310,78 @@ const USAGE = `usage:
   node scripts/prepublish-assert.mjs [--package <name|dir>] [--tarball <path>]…
 
 asserts the release surface before publishing straight from this checkout:
-  · the publishable set is exactly base + the two plugins;
+  · the publishable set is exactly the packages in PUBLISHABLE (base + the plugins);
+  · each publishable package declares publishConfig.access = "public" with a registry;
   · each group's version is stamped in ONE manifest and the base's baked VERSION agrees;
   · each package ships its own README (first line "# <package name>");
   · nothing that ships carries repository release tooling.
 --tarball additionally inspects a tarball a previous \`pnpm pack\` produced.`
 
-const argv = process.argv.slice(2)
-if (argv.includes('--help') || argv.includes('-h')) {
-  console.log(USAGE)
-  process.exit(0)
-}
+/**
+ * The CLI body runs only when this file IS the process entry point.
+ *
+ * `scripts/gates.test.mjs` imports the pure `publishConfigProblems` (E3's constructed-input replay),
+ * and importing must stay read-only — no surface scan, no process exit.
+ */
+const invokedDirectly = process.argv[1] !== undefined
+  && pathToFileURL(resolve(process.argv[1])).href === import.meta.url
 
-const problems = []
-const notes = []
-let selected
-const tarballs = []
-for (let index = 0; index < argv.length; index += 1) {
-  const arg = argv[index]
-  const takeValue = () => {
-    const value = argv[index + 1]
-    if (value === undefined || value.startsWith('--')) {
-      console.error(`prepublish-assert: ${arg} needs a value`)
+if (invokedDirectly) {
+  const argv = process.argv.slice(2)
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(USAGE)
+    process.exit(0)
+  }
+
+  const problems = []
+  const notes = []
+  let selected
+  const tarballs = []
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    const takeValue = () => {
+      const value = argv[index + 1]
+      if (value === undefined || value.startsWith('--')) {
+        console.error(`prepublish-assert: ${arg} needs a value`)
+        process.exit(2)
+      }
+      index += 1
+      return value
+    }
+    if (arg === '--package') selected = takeValue()
+    else if (arg === '--tarball') tarballs.push(takeValue())
+    else {
+      console.error(`prepublish-assert: unknown option ${arg}`)
+      console.error(USAGE)
       process.exit(2)
     }
-    index += 1
-    return value
   }
-  if (arg === '--package') selected = takeValue()
-  else if (arg === '--tarball') tarballs.push(takeValue())
-  else {
-    console.error(`prepublish-assert: unknown option ${arg}`)
-    console.error(USAGE)
-    process.exit(2)
+
+  if (selected !== undefined && !PUBLISHABLE.has(selected) && ![...PUBLISHABLE.values()].includes(selected)) {
+    problems.push(`--package ${selected}: not one of the publishable packages (${[...PUBLISHABLE.values()].join(', ')})`)
+  } else if (selected !== undefined) {
+    notes.push(`--package ${selected}: is a publishable package`)
   }
-}
 
-if (selected !== undefined && !PUBLISHABLE.has(selected) && ![...PUBLISHABLE.values()].includes(selected)) {
-  problems.push(`--package ${selected}: not one of the publishable packages (${[...PUBLISHABLE.values()].join(', ')})`)
-} else if (selected !== undefined) {
-  notes.push(`--package ${selected}: is a publishable package`)
-}
+  // ── run the checks ─────────────────────────────────────────────────────────────────────────────
+  const checks = [checkPublishableSet(), checkPublishConfig(), checkVersionStamping(), checkReadmes(), checkNoReleaseTooling()]
+  for (const check of checks) {
+    problems.push(...check.problems)
+    if (check.note !== undefined) notes.push(check.note)
+  }
+  if (tarballs.length > 0) {
+    const packed = checkTarballs(tarballs)
+    problems.push(...packed.problems)
+    if (packed.note !== undefined) notes.push(packed.note)
+  }
 
-// ── run the checks ───────────────────────────────────────────────────────────────────────────────
-for (const check of [checkPublishableSet(), checkVersionStamping(), checkReadmes(), checkNoReleaseTooling()]) {
-  problems.push(...check.problems)
-  if (check.note !== undefined) notes.push(check.note)
+  // ── report ─────────────────────────────────────────────────────────────────────────────────────
+  for (const note of notes) console.log(`ok   ${note}`)
+  if (problems.length > 0) {
+    console.error(`\nprepublish-assert FAILED (${String(problems.length)}):`)
+    for (const problem of problems) console.error(`  - ${problem}`)
+    console.error('\nA failing assertion means this tree is NOT safe to publish. Fix the cause; never publish around it.')
+    process.exit(1)
+  }
+  console.log('\n✓ prepublish-assert ok — the development tree satisfies the release invariants the RC projection used to enforce')
 }
-if (tarballs.length > 0) {
-  const packed = checkTarballs(tarballs)
-  problems.push(...packed.problems)
-  if (packed.note !== undefined) notes.push(packed.note)
-}
-
-// ── report ───────────────────────────────────────────────────────────────────────────────────────
-for (const note of notes) console.log(`ok   ${note}`)
-if (problems.length > 0) {
-  console.error(`\nprepublish-assert FAILED (${String(problems.length)}):`)
-  for (const problem of problems) console.error(`  - ${problem}`)
-  console.error('\nA failing assertion means this tree is NOT safe to publish. Fix the cause; never publish around it.')
-  process.exit(1)
-}
-console.log('\n✓ prepublish-assert ok — the development tree satisfies the release invariants the RC projection used to enforce')
