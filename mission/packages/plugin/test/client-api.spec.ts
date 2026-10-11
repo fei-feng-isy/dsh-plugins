@@ -16,6 +16,7 @@ import {
   SNAPSHOT_WIRE_VERSION,
   detailResultSchema,
   snapshotResultSchema,
+  statusResultSchema,
   waitingForSchema,
 } from '../src/wire.js'
 import type { WaitingForView } from '../src/client/contract.js'
@@ -77,6 +78,64 @@ describe('fetchSnapshot', () => {
   it('rejects a payload it cannot recognise', async () => {
     const remote = remoteReturning({ ok: true, value: { nope: true } })
     await expect(fetchSnapshot(remote, 'session-1')).rejects.toThrow('无法识别的数据')
+  })
+})
+
+/**
+ * N3's FIRST step, client half: the per-frame cost line. What it must prove is narrow but load-
+ * bearing — the line carries the host's reported frame size plus the two timings, and the debug field
+ * it reads is NOT a wire promise (the schema strips it, so an older client is untouched).
+ */
+describe('the per-frame snapshot instrumentation', () => {
+  const tree = { rootId: 'r1', nodes: [], closedAt: null }
+
+  it('logs one line per frame: the host-reported size, the parse time and the merge time', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    try {
+      const payload = { wire: SNAPSHOT_WIRE_VERSION, bytes: 2048, trees: [tree] }
+      const snapshot = await fetchSnapshot(remoteReturning({ ok: true, value: payload }), 'session-1')
+      expect(snapshot.trees[0]?.rootId).toBe('r1')
+      expect(debug).toHaveBeenCalledTimes(1)
+      const line = String(debug.mock.calls[0]?.[0] ?? '')
+      expect(line).toContain('[avantf-mission] snapshot frame')
+      // The size comes from the HOST's field, converted to KB, so the line needs no second serialise.
+      expect(line).toContain('2.0 KB')
+      expect(line).toMatch(/parse \d+\.\d{2} ms/u)
+      expect(line).toMatch(/merge \d+\.\d{2} ms/u)
+      expect(line).toContain('1 tree(s) / 0 node(s)')
+    } finally {
+      debug.mockRestore()
+    }
+  })
+
+  it('keeps `bytes` an instrumentation field, never a promise: the schema strips it', async () => {
+    // A debug number that became a schema field could fail an older client's parse, and declaring it
+    // would tempt the revision marker to move for a shape change it explicitly does not track.
+    expect(Object.keys(snapshotResultSchema.shape)).toEqual(['wire', 'trees'])
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    try {
+      const snapshot = await fetchSnapshot(
+        remoteReturning({ ok: true, value: { wire: SNAPSHOT_WIRE_VERSION, bytes: 123, trees: [tree] } }),
+        'session-1',
+      )
+      expect(snapshot).not.toHaveProperty('bytes')
+      expect(snapshot.trees[0]?.rootId).toBe('r1')
+    } finally {
+      debug.mockRestore()
+    }
+  })
+
+  it('stays silent — and pays nothing — against an older host that reports no size', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    try {
+      const snapshot = await fetchSnapshot(remoteReturning({ ok: true, value: { trees: [tree] } }), 'session-1')
+      // The read still works; only the instrumentation line is skipped. Printing a size here would mean
+      // a second serialise per frame on the very path the instrumentation exists to keep cheap.
+      expect(snapshot.trees[0]?.rootId).toBe('r1')
+      expect(debug).not.toHaveBeenCalled()
+    } finally {
+      debug.mockRestore()
+    }
   })
 })
 
@@ -143,6 +202,52 @@ describe('the snapshot wire version', () => {
     expect(snapshot.trees[0]?.rootId).toBe('r1')
     expect(snapshot.skew).toContain(`wire 版本是 ${SNAPSHOT_WIRE_VERSION + 1}`)
     expect(snapshot.skew).toContain(`只认识 ${SNAPSHOT_WIRE_VERSION}`)
+  })
+})
+
+/**
+ * The LIGHT read behind the tab marker: one boolean, and an OLD snapshot payload is still not a
+ * failure (the two halves update separately, so a wire revision the client merely does not recognise
+ * is a note beside the trees — never a blank panel).
+ *
+ * The CALL the light path makes is asserted in `client-status.spec.ts`, where the fake Remote records
+ * the method name per tick; this file pins the payload contract it must satisfy.
+ */
+describe('the status schema', () => {
+  it('accepts exactly { running: true | false } and nothing else', () => {
+    for (const running of [true, false]) {
+      const parsed = statusResultSchema.safeParse({ running })
+      expect(parsed.success, `running=${String(running)}`).toBe(true)
+      expect(parsed.data?.running).toBe(running)
+    }
+    // The shape is deliberately ONE key: a row projection here would re-create the cost the method
+    // exists to remove. The DECLARED codec is `strict` (wire.ts), which refuses extra keys outright;
+    // the bare schema additionally cannot invent one.
+    expect(Object.keys(statusResultSchema.shape)).toEqual(['running'])
+    // A missing key, a wrong type or a non-object are all refusals.
+    for (const bad of [{}, { running: 'true' }, { running: 1 }, true, null, []]) {
+      expect(statusResultSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false)
+    }
+    // An extra key cannot survive the parse: whatever the host sent, the client sees only `running`.
+    const extra = statusResultSchema.safeParse({ running: true, trees: [{ rootId: 'r1', nodes: [], closedAt: null }] })
+    expect(extra.success).toBe(true)
+    expect(extra.data).toEqual({ running: true })
+  })
+
+  it('an OLD snapshot payload (no `status`, wire 3) still parses, with a note rather than a failure', async () => {
+    // This is the version-mismatch degradation the wire marker exists for: the host half can be older
+    // than the bundle, and the panel must keep rendering from what it does send.
+    const snapshot = await fetchSnapshot(
+      remoteReturning({ ok: true, value: { wire: 3, trees: [{ rootId: 'r1', nodes: [], closedAt: null }] } }),
+      'session-1',
+    )
+    expect(snapshot.trees[0]?.rootId).toBe('r1')
+    expect(snapshot.wire).toBe(3)
+    expect(snapshot.skew).toContain('wire 版本是 3')
+    expect(snapshot.skew).toContain(`只认识 ${String(SNAPSHOT_WIRE_VERSION)}`)
+    // And the payload is what it always was: no `status` key, no parse failure.
+    const parsed = snapshotResultSchema.safeParse({ wire: 3, trees: [{ rootId: 'r1', nodes: [], closedAt: null }] })
+    expect(parsed.success).toBe(true)
   })
 })
 

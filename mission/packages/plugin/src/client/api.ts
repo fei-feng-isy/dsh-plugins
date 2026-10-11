@@ -179,17 +179,86 @@ export function snapshotSkew(value: unknown): string | undefined {
 export async function fetchSnapshot(remote: MissionRemote, sessionId: string): Promise<MissionSnapshot> {
   const { value, error } = unwrap(await remote.snapshot({ sessionId }))
   if (error !== undefined) throw new Error(error)
+  const parseStartedAt = nowMs()
   const parsed = snapshotResultSchema.safeParse(value)
+  const parseMs = nowMs() - parseStartedAt
   if (!parsed.success) throw new Error(skewHint('任务树', issueText(parsed.error)))
   // A version skew is a NOTE on a usable snapshot, not a failure: see `snapshotSkew`.
   const skew = snapshotSkew(value)
   // The revision travels with the snapshot so a later click can gate on it (see
   // `fetchExecutorSession`): the host half is loaded once, so this cannot change under a session.
   const wire = parsed.data.wire
-  return {
+  // The step timed as the "merge": what turns the validated payload into the snapshot the view reads.
+  // For a full frame that is this assignment; an incremental frame (see the N3 plan) replaces it with
+  // a by-id merge, and that merge's own cost lands on the same line.
+  const mergeStartedAt = nowMs()
+  const snapshot: MissionSnapshot = {
     trees: parsed.data.trees as MissionSnapshot['trees'],
     ...wire === undefined ? {} : { wire },
     ...skew === undefined ? {} : { skew },
+  }
+  const mergeMs = nowMs() - mergeStartedAt
+  logSnapshotFrame({
+    bytes: reportedBytes(value),
+    parseMs,
+    mergeMs,
+    trees: snapshot.trees.length,
+    nodes: snapshot.trees.reduce((sum, tree) => sum + tree.nodes.length, 0),
+  })
+  return snapshot
+}
+
+/** A monotonic clock when the platform has one, so the timings are not quantised by the wall clock. */
+function nowMs(): number {
+  return typeof performance === 'object' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
+}
+
+/**
+ * The frame size the HOST reported, when it rode the payload.
+ *
+ * Read off the RAW value, not `parsed.data`: the wire schema deliberately does not name `bytes` (see
+ * `wire.ts`), so `safeParse` strips it. `undefined` against an older host — and that case must stay
+ * FREE: measuring the frame here would mean a second `JSON.stringify` of a payload this client just
+ * walked, on the very path the instrumentation exists to keep cheap.
+ */
+function reportedBytes(value: unknown): number | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const bytes = (value as { bytes?: unknown }).bytes
+  return typeof bytes === 'number' && Number.isFinite(bytes) ? bytes : undefined
+}
+
+/**
+ * One line per frame, on the browser's DEBUG channel — instrumentation, not an error, and
+ * `console.debug` stays out of the way unless the console's verbose level is on. This is what turns
+ * the N3 question ("每帧 X KB / Y ms") into a number read off a real tree; when step 2 is NOT done,
+ * `merge` is the full-replace assignment above and reads as the near-zero it is.
+ *
+ * SILENT when the host reported no size (an older host): there is then nothing to print that this
+ * client did not have to measure, and paying a second `JSON.stringify` per frame to print it would
+ * make the instrumentation cost the very thing it exists to measure.
+ *
+ * Total on purpose: a logger that threw (a sandboxed console) must not be able to fail the read it
+ * describes.
+ */
+function logSnapshotFrame(input: {
+  readonly bytes: number | undefined
+  readonly parseMs: number
+  readonly mergeMs: number
+  readonly trees: number
+  readonly nodes: number
+}): void {
+  if (input.bytes === undefined) return
+  try {
+    if (typeof console === 'undefined' || typeof console.debug !== 'function') return
+    console.debug(
+      `[avantf-mission] snapshot frame: ${(input.bytes / 1024).toFixed(1)} KB,`
+      + ` parse ${input.parseMs.toFixed(2)} ms, merge ${input.mergeMs.toFixed(2)} ms`
+      + ` (${String(input.trees)} tree(s) / ${String(input.nodes)} node(s))`,
+    )
+  } catch {
+    // A logging failure must never break the read it describes.
   }
 }
 

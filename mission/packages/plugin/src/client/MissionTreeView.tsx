@@ -8,7 +8,7 @@
  * folded once it has finished — that folding is the tree, not the detail.
  * @module @avantf/dsh-mission/client/MissionTreeView
  */
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type {
   ExecutorSessionLookup,
@@ -28,18 +28,43 @@ const TERMINAL: readonly string[] = ['done', 'failed']
 /** How long an armed delete button waits before it disarms itself. */
 const CONFIRM_MS = 4000
 
-/** Trees worth windowing; below it the list renders plainly. */
-const VIRTUALIZE_FROM = 25
+/**
+ * VISIBLE ROWS worth windowing; below it the list renders plainly.
+ *
+ * The unit changed when the window moved inside a tree. It used to count TREES (25), which only
+ * helped a session with a long history: one active tree is fully expanded while it runs
+ * (`expanded = override ?? !settled`), so the engine's own 200-node budget could hang as one
+ * card of ~2000–2800 DOM elements. Keeping the old magnitude means "about 25 trees' worth of
+ * rows": at a typical 4–5 visible rows per tree that is ~100–125, rounded to 120. This is an
+ * observed ORDER OF MAGNITUDE, not an exact boundary — nothing is wrong on either side of it, it
+ * only decides whether the window's bookkeeping (a canvas, per-row measurement) is worth it.
+ */
+export const VIRTUALIZE_FROM = 120
 
-const VIRTUAL_OVERSCAN = 5
+export const VIRTUAL_OVERSCAN = 5
 
-const VIRTUAL_ESTIMATED_TREE_PX = 120
+/**
+ * One visible row's estimated height, in pixels. The estimate only has to be CLOSE: every mounted
+ * row is measured (`measureElement`) and the window is recomputed from the measured sizes, so a
+ * wrong guess costs one extra frame at the edge, never a wrong row.
+ */
+export const VIRTUAL_ESTIMATED_ROW_PX = 24
+
+/** A tree header, including the {@link VIRTUAL_TREE_GAP_PX} air above its card. */
+const VIRTUAL_ESTIMATED_HEADER_PX = 48
+
+/**
+ * The air between two trees' cards, carried by the header item's slot (the virtualizer subtracts
+ * no gap of its own — see the windowed branch of {@link MissionTreeView}). Rows inside one tree
+ * get no gap: they are one table, not a stack of cards.
+ */
+const VIRTUAL_TREE_GAP_PX = 8
 
 /**
  * Viewport assumed for the first paint: without it the first frame renders nothing and then
  * measures as nothing — the flash of an empty panel.
  */
-const VIRTUAL_INITIAL_VIEWPORT_PX = 600
+export const VIRTUAL_INITIAL_VIEWPORT_PX = 600
 
 /**
  * The browser half's own copy of the status vocabulary: it cannot import the engine (`contract.ts`
@@ -105,21 +130,24 @@ interface DialogState {
 }
 
 /**
- * The shared row state, passed down as one object so adding a field cannot go stale in half
- * the tree. The delete action is deliberately NOT here: it belongs to the tree.
+ * The shared row state, passed down as one object so adding a field cannot go stale in half the
+ * tree. The delete action is deliberately NOT here: it belongs to the tree.
  *
- * `overrides`/`rememberOverride` are the session's module-level view state (see `viewState.ts`): the
- * host remounts this whole view whenever the tab's running marker flips, so a row's expand/collapse
- * click is seeded from there and written back — otherwise a mission starting would fold the tree the
- * reader had just opened.
+ * Expand/collapse is NOT here either, in the sense that a row no longer owns its own expanded
+ * state: `onToggle` writes the module-level override (see `viewState.ts`) and re-reads the flat,
+ * windowed list of visible rows — the row that gained or lost children is decided up there, once.
+ * The override has to be module-level anyway because the host remounts this whole view whenever
+ * the tab's running marker flips, and a reader's click must survive that.
  */
 interface RowActions {
   /** The node whose dialog is open, if any; the row uses it to mark itself as the source. */
   readonly openId: string | undefined
   readonly onOpenDetail: (nodeId: string) => void
-  /** Survives the remount: a Map so mutating it does not invalidate this memoized object. */
-  readonly overrides: ReadonlyMap<string, boolean>
-  readonly rememberOverride: (nodeId: string, expanded: boolean) => void
+  /**
+   * Flip one row: remember the override and rebuild the visible-row list. The row renders the
+   * glyph it is handed and never decides for itself whether its children are on screen.
+   */
+  readonly onToggle: (nodeId: string, expanded: boolean) => void
 }
 
 /**
@@ -127,9 +155,9 @@ interface RowActions {
  * `parentId`: a reused prerequisite keeps the parent it was born under, so filtering by
  * `parentId` renders it as a leaf — a node that looks like it is waiting for nothing.
  *
- * `byId` is built ONCE per tree by {@link Tree} (`useMemo`), not per row: rebuilding the whole
- * tree's map inside every row is O(N²) map insertions per frame, and the panel re-reads on every
- * engine change. Lookups are O(1).
+ * `byId` is built ONCE per tree where the visible rows are computed ({@link buildVisibleItems}),
+ * not per row: rebuilding the whole tree's map inside every row is O(N²) map insertions per frame,
+ * and the panel re-reads on every engine change. Lookups are O(1).
  */
 function childrenOf(byId: ReadonlyMap<string, MissionNodeView>, parent: MissionNodeView): readonly MissionNodeView[] {
   return parent.children
@@ -139,6 +167,123 @@ function childrenOf(byId: ReadonlyMap<string, MissionNodeView>, parent: MissionN
 
 /** The empty ancestor path, shared so a root row does not allocate one. */
 const NO_ANCESTORS: ReadonlySet<string> = new Set<string>()
+
+/**
+ * One visible line of the panel: a tree's header, or ONE node row.
+ *
+ * The tree used to render its rows by recursing, which meant a tree was the smallest unit the
+ * window could mount. The recursion now happens once, up front, into this flat list (see
+ * {@link buildVisibleItems}), so the window works in ROWS and a single 200-node tree is as cheap
+ * as 200 one-node trees.
+ */
+interface TreeHeaderItem {
+  readonly kind: 'tree'
+  /** Stable identity for React and for the virtualizer's item cache. */
+  readonly key: string
+  readonly tree: MissionTreeViewData
+  /** The tree's root reached a terminal status: its card is dashed and its delete button is live. */
+  readonly settled: boolean
+  /** A wire document whose `rootId` names no node: rendered as the empty-root message. */
+  readonly rootMissing: boolean
+}
+
+/** One row, with everything the row renders already resolved — a leaf, not a subtree. */
+interface NodeRowItem {
+  readonly kind: 'row'
+  readonly key: string
+  readonly treeId: string
+  readonly node: MissionNodeView
+  readonly depth: number
+  /** The parent that LISTED this row; `undefined` for a tree's root (see `reused`). */
+  readonly viaParentId: string | undefined
+  /** Whether the cycle guard left it any children — i.e. whether its twisty is live. */
+  readonly expandable: boolean
+  /** `override ?? !settled`, resolved when the list is built; the click writes the override. */
+  readonly expanded: boolean
+}
+
+type VisibleItem = TreeHeaderItem | NodeRowItem
+
+/** One tree as the flat list sees it: its header item plus its visible rows, in render order. */
+interface TreeGroup {
+  readonly header: TreeHeaderItem
+  readonly rows: readonly NodeRowItem[]
+  /** The header's index in the flat list (a card's top in the windowed canvas). */
+  readonly first: number
+  /** The last visible row's index in the flat list (a card's bottom). */
+  readonly last: number
+}
+
+/**
+ * Flatten every tree into the rows a reader can actually see, in render order.
+ *
+ * This is the recursion `NodeRow` used to do, moved out of rendering: `expanded = override ??
+ * !settled` is resolved per node, children come from {@link childrenOf} (which follows `children`,
+ * NOT `parentId`, so a reused prerequisite draws under every parent that lists it), and a child
+ * already on the path is a CYCLE and is dropped — the guard that used to bound the render
+ * recursion, now bounding this walk.
+ *
+ * Pure and exported because this suite renders to static markup with no DOM to scroll or click in:
+ * "which rows are visible" is a fact about the data, and this is where it is decided.
+ */
+export function buildVisibleItems(
+  trees: readonly MissionTreeViewData[],
+  overrides: ReadonlyMap<string, boolean>,
+): { readonly items: readonly VisibleItem[]; readonly groups: readonly TreeGroup[] } {
+  const items: VisibleItem[] = []
+  const groups: TreeGroup[] = []
+  for (const tree of trees) {
+    const first = items.length
+    const root = tree.nodes.find((node) => node.id === tree.rootId)
+    const header: TreeHeaderItem = {
+      kind: 'tree',
+      key: `tree:${tree.rootId}`,
+      tree,
+      settled: root !== undefined && TERMINAL.includes(root.status),
+      rootMissing: root === undefined,
+    }
+    items.push(header)
+    const rows: NodeRowItem[] = []
+    if (root !== undefined) {
+      const byId = new Map(tree.nodes.map((node) => [node.id, node]))
+      // A sibling's index is part of the key so two rows for the SAME reused node are still two
+      // distinct React children (a node may be listed by more than one parent).
+      const walk = (
+        node: MissionNodeView,
+        depth: number,
+        viaParentId: string | undefined,
+        parentKey: string,
+        ancestors: ReadonlySet<string>,
+      ): void => {
+        const children = childrenOf(byId, node).filter((child) => !ancestors.has(child.id))
+        // The default follows the node: open while its mission is in play, folded once it
+        // finished. A click is stored as an OVERRIDE rather than as the state itself, so the
+        // default keeps tracking the node afterwards and "I opened this one" survives it finishing.
+        const expanded = overrides.get(node.id) ?? !TERMINAL.includes(node.status)
+        const row: NodeRowItem = {
+          kind: 'row',
+          key: `${parentKey}>${node.id}`,
+          treeId: tree.rootId,
+          node,
+          depth,
+          viaParentId,
+          expandable: children.length > 0,
+          expanded,
+        }
+        items.push(row)
+        rows.push(row)
+        if (!expanded) return
+        const next = new Set([...ancestors, node.id])
+        children.forEach((child, index) => {
+          walk(child, depth + 1, node.id, `${row.key}:${String(index)}`, next)
+        })
+      }
+      walk(root, 0, undefined, header.key, NO_ANCESTORS)
+    }
+    groups.push({ header, rows, first, last: items.length - 1 })
+  }
+  return { items, groups }
+}
 
 /** How one on-demand full-result read is going, or `undefined` before it has been asked for. */
 export interface FullResultState {
@@ -894,51 +1039,30 @@ function sameWaiting(a: MissionNodeView['waitingFor'], b: MissionNodeView['waiti
     && a.available === b.available && a.unit === b.unit
 }
 
-/** Two ancestor sets hold the same ids. Sets are rebuilt per render, so identity never holds. */
-function sameAncestors(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
-  if (a === b) return true
-  if (a.size !== b.size) return false
-  for (const id of a) if (!b.has(id)) return false
-  return true
-}
-
 /**
  * One row of a tree. `memo` because a frame re-reads the whole snapshot: without it every row
  * re-renders on every engine change even when its own picture is unchanged.
+ *
+ * A LEAF, deliberately: it renders its own line and nothing below it. Its children are separate
+ * items of the flat list ({@link buildVisibleItems}) that decides which are visible, so the row
+ * never recurses — that is what lets the window cut a long tree anywhere, not just between trees.
+ * `depth`, `viaParentId`, `expandable` and `expanded` arrive resolved; `onToggle` writes the
+ * module-level override and rebuilds the list.
  */
-const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestors = NO_ANCESTORS, actions }: {
+const NodeRow = memo(function NodeRow({ node, depth, viaParentId, expandable, expanded, actions }: {
   node: MissionNodeView
-  /** The tree's id→node index, built once by {@link Tree}: `childrenOf` must not rebuild it per row. */
-  byId: ReadonlyMap<string, MissionNodeView>
   depth: number
-  /** The parent that listed this node; absent for a tree's root. */
+  /** The parent that listed this row; absent for a tree's root. */
   viaParentId?: string
-  /**
-   * The ids on the path from the root down to this row. `children` is an arbitrary id list in a
-   * persisted document, and the core's own dedup only excludes ancestors while BUILDING a tree —
-   * a document corrupted from outside (or a wire payload from a wildly skewed host) could point a
-   * node back at one of its ancestors, and the recursion would run until the browser's stack died,
-   * taking the whole panel with it. Dropping an already-visited child is the cheap guard.
-   */
-  ancestors?: ReadonlySet<string>
+  /** Whether the cycle guard left it any children — i.e. whether its twisty is live. */
+  expandable: boolean
+  /** `override ?? !settled`, resolved by {@link buildVisibleItems}. */
+  expanded: boolean
   actions: RowActions
 }): ReactNode {
-  const { openId, onOpenDetail, overrides, rememberOverride: remember } = actions
-  // A child already on this path is a cycle, not a dependency: it stops here instead of descending.
-  const children = childrenOf(byId, node).filter((child) => !ancestors.has(child.id))
+  const { openId, onOpenDetail, onToggle } = actions
   // Listed here as a prerequisite: marked so a repeated row does not read as a duplicate.
   const reused = viaParentId !== undefined && node.parentId !== viaParentId
-  // The default follows the node: open while its mission is in play, folded once it finished.
-  // A click is stored as an OVERRIDE rather than as the state itself, so the default keeps
-  // tracking the node afterwards and "I opened this one" survives it finishing.
-  //
-  // The override is seeded from and written back to the module-level view state: this component is
-  // unmounted whenever the tab's running marker flips (the host keys entries by identity), and a
-  // reader's click must not be undone by a mission starting.
-  const [override, setOverride] = useState<boolean | undefined>(() => overrides.get(node.id))
-  const settled = TERMINAL.includes(node.status)
-  const expanded = override ?? !settled
-  const expandable = children.length > 0
   const indent = { paddingLeft: `${String(depth * 14 + 6)}px` }
   const detailOpen = openId === node.id
   // Why this mission is queued (skipped by an admission gate), or `undefined` when it is not. Being
@@ -954,16 +1078,14 @@ const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestor
   const rowTiming = timingBadge(node)
 
   return (
-    <div className="avwf-node">
+    // `data-node-id` is the DOM-level answer to "which rows are mounted", which is exactly what the
+    // windowing is about — a test (or a profiler) counts rows without reading React's tree.
+    <div className="avwf-node" data-node-id={node.id}>
       <div className="avwf-row" style={indent}>
         <button
           type="button"
           className={expandable ? 'avwf-twisty' : 'avwf-twisty avwf-twisty-empty'}
-          onClick={() => {
-            const next = !expanded
-            setOverride(next)
-            remember(node.id, next)
-          }}
+          onClick={() => { onToggle(node.id, !expanded) }}
           aria-expanded={expandable ? expanded : undefined}
           tabIndex={expandable ? 0 : -1}
           title={expandable ? '展开/收起子任务' : undefined}
@@ -1020,36 +1142,31 @@ const NodeRow = memo(function NodeRow({ node, byId, depth, viaParentId, ancestor
           背景 {contextCount} 条（详情里可见）
         </div>
       ) : null}
-      {expanded && expandable
-        ? children.map((child) => (
-          <NodeRow
-            key={child.id}
-            node={child}
-            byId={byId}
-            depth={depth + 1}
-            viaParentId={node.id}
-            ancestors={new Set([...ancestors, node.id])}
-            actions={actions}
-          />
-        ))
-        : null}
     </div>
   )
 }, (prev, next) =>
+  // The same field-level "is this the same PICTURE" comparison as before, on the leaf's own props:
+  // `expanded`/`expandable` replaced `ancestors`, because the cycle guard moved into the flat-list
+  // walk (two different paths can leave a node with different visible children).
   prev.depth === next.depth
   && prev.viaParentId === next.viaParentId
-  && prev.byId === next.byId
+  && prev.expandable === next.expandable
+  && prev.expanded === next.expanded
   && prev.actions === next.actions
-  && sameAncestors(prev.ancestors ?? NO_ANCESTORS, next.ancestors ?? NO_ANCESTORS)
   && sameNode(prev.node, next.node))
 
 /**
- * One whole tree, with its own action. The delete button is here and not on the rows
- * because the unit of deletion is the TREE; a live tree's button says so instead of hiding.
+ * One tree's HEADER: its root entry, its status summary and the whole-tree delete button. The
+ * delete button is here and not on the rows because the unit of deletion is the TREE; a live
+ * tree's button says so instead of hiding.
+ *
+ * It used to render the rows too, and the card around them was its `<section>`. The rows are now
+ * items of the flat, windowed list, so this renders the header alone; the card is drawn by
+ * {@link MissionTreeView} — the same markup in the plain path, an absolutely positioned box in the
+ * windowed one — because a card cannot be split across two virtual items.
  */
-function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession, resolveWorkerSession }: {
-  tree: MissionTreeViewData
-  actions: RowActions
+function TreeHeader({ item, busy, onDeleteTree, sessionId, openWorkerSession, resolveWorkerSession }: {
+  item: TreeHeaderItem
   busy: string | undefined
   onDeleteTree: (rootId: string) => void
   /** The owner session, and the optional opener — the tree header's root id opens the ROOT's
@@ -1058,8 +1175,8 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession,
   openWorkerSession?: (target: WorkerSessionTarget) => void
   resolveWorkerSession?: (nodeId: string) => Promise<ExecutorSessionLookup>
 }): ReactNode {
+  const { tree, settled, rootMissing } = item
   const root = tree.nodes.find((node) => node.id === tree.rootId)
-  const settled = root !== undefined && TERMINAL.includes(root.status)
   const counts = tree.nodes.reduce<Record<string, number>>((acc, node) => {
     acc[node.status] = (acc[node.status] ?? 0) + 1
     return acc
@@ -1071,9 +1188,6 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession,
   // A refused `openSession` on THIS tree's root id, shown beside the id it came from. Per tree, so a
   // stale session on one tree does not print an error on all of them.
   const [workerFailure, setWorkerFailure] = useState<string | undefined>(undefined)
-  // The tree's id→node index, built ONCE per tree object instead of once per row. Every row used to
-  // rebuild it inside `childrenOf`, which is O(N²) map insertions for a single tree on every frame.
-  const byId = useMemo(() => new Map(tree.nodes.map((node) => [node.id, node])), [tree.nodes])
 
   // An armed button must not stay armed, or a later click deletes a whole tree unconfirmed.
   useEffect(() => {
@@ -1083,7 +1197,7 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession,
   }, [confirming])
 
   return (
-    <section className={settled ? 'avwf-tree avwf-tree-settled' : 'avwf-tree'}>
+    <>
       <header className="avwf-tree-header">
         {/* The tree's ROOT ID is the node id a reader sees here; it is the entry to the session that
             ran the root mission, exactly as the dialog's heading id is (see `NodeIdEntry`). */}
@@ -1121,10 +1235,8 @@ function Tree({ tree, actions, busy, onDeleteTree, sessionId, openWorkerSession,
           {busy === tree.rootId ? '删除中…' : confirming ? '确认删除' : '删除'}
         </button>
       </header>
-      {root === undefined
-        ? <div className="avwf-empty">根节点缺失</div>
-        : <NodeRow node={root} byId={byId} depth={0} actions={actions} />}
-    </section>
+      {rootMissing ? <div className="avwf-empty">根节点缺失</div> : null}
+    </>
   )
 }
 
@@ -1189,6 +1301,10 @@ export function MissionTreeView({
   const [cleanFailed, setCleanFailed] = useState(false)
   const [openId, setOpenIdState] = useState<string | undefined>(() => ui.openId)
   const [dialog, setDialog] = useState<DialogState | undefined>(undefined)
+  // Bumped by a twisty click. The expand/collapse overrides live in `ui.overrides` (a module-level
+  // Map, so it survives the remount the running marker forces) and a Map mutation is invisible to
+  // React; this counter is the re-read trigger for the memo that builds the visible rows.
+  const [expandVersion, setExpandVersion] = useState(0)
 
   /** The open dialog is part of the remount-resistant state: reopening it re-reads its detail. */
   const setOpenId = useCallback((nodeId: string | undefined): void => {
@@ -1262,28 +1378,42 @@ export function MissionTreeView({
   }, [state.data, openId])
 
   const trees = state.data?.trees ?? []
-  // Windowing is only worth its bookkeeping once the list is long; under it the plain column is the list.
-  const windowed = trees.length > VIRTUALIZE_FROM
+  // The flat list of what a reader can actually see: one item per tree header plus one per VISIBLE
+  // row. Rebuilt when the tree data changes or when a click writes an override (`expandVersion`); a
+  // Map mutation alone would not invalidate this memo, which is why the click also bumps a counter.
+  const overrides = ui.overrides
+  const { items, groups } = useMemo(
+    () => buildVisibleItems(trees, overrides),
+    [trees, overrides, expandVersion],
+  )
+  // Windowing is worth its bookkeeping once the ROW list is long; under it the plain column is the
+  // list. Headers count as lines too — a header is mounted work like any other.
+  const windowed = items.length > VIRTUALIZE_FROM
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const virtualizer = useVirtualizer({
-    count: windowed ? trees.length : 0,
+    count: windowed ? items.length : 0,
     enabled: windowed,
-    estimateSize: () => VIRTUAL_ESTIMATED_TREE_PX,
-    getItemKey: (index) => trees[index]?.rootId ?? index,
+    estimateSize: (index) => (items[index]?.kind === 'tree' ? VIRTUAL_ESTIMATED_HEADER_PX : VIRTUAL_ESTIMATED_ROW_PX),
+    getItemKey: (index) => items[index]?.key ?? index,
     getScrollElement: () => scrollRef.current,
     initialRect: { width: 0, height: VIRTUAL_INITIAL_VIEWPORT_PX },
+    // The offset the reader left behind is the FIRST frame's offset, from the module-level view
+    // state — not something a later effect applies after an empty frame. In the browser the
+    // element's own `scrollTop` takes over as soon as it is measured; this only seeds the window.
+    initialOffset: ui.scrollTop,
     overscan: VIRTUAL_OVERSCAN,
   })
 
   // Stable identities matter for the row memo: a fresh `actions` object (or callback) on every render
   // would invalidate every `NodeRow` even when nothing it renders changed.
   const openDetail = useCallback((nodeId: string): void => { setOpenId(nodeId) }, [setOpenId])
-  const rememberRowOverride = useCallback((nodeId: string, expanded: boolean): void => {
+  const toggleRow = useCallback((nodeId: string, expanded: boolean): void => {
     rememberOverride(ui, nodeId, expanded)
+    setExpandVersion((version) => version + 1)
   }, [ui])
   const actions: RowActions = useMemo(
-    () => ({ openId, onOpenDetail: openDetail, overrides: ui.overrides, rememberOverride: rememberRowOverride }),
-    [openId, openDetail, ui, rememberRowOverride],
+    () => ({ openId, onOpenDetail: openDetail, onToggle: toggleRow }),
+    [openId, openDetail, toggleRow],
   )
   // Only CLOSED trees (finish_mission) are batch-clean candidates; an un-retired tree is skipped and
   // reported by the host. Counting here is for the button's label and its enabled/disabled state.
@@ -1300,25 +1430,70 @@ export function MissionTreeView({
     if (element !== null && ui.scrollTop > 0) element.scrollTop = ui.scrollTop
   }, [state.data, ui])
 
-  const renderTree = (tree: MissionTreeViewData, slot?: { style: CSSProperties; index: number }): ReactNode => (
-    <div
-      key={tree.rootId}
-      className={slot === undefined ? undefined : 'avwf-slot'}
-      data-index={slot?.index}
-      ref={slot === undefined ? undefined : virtualizer.measureElement}
-      style={slot?.style}
+  /** One tree as the PLAIN column draws it: a card in flow, its header and every visible row. */
+  const plainTree = (group: TreeGroup): ReactNode => (
+    <section
+      key={group.header.key}
+      className={group.header.settled ? 'avwf-tree avwf-tree-settled' : 'avwf-tree'}
     >
-      <Tree
-        tree={tree}
-        actions={actions}
+      <TreeHeader
+        item={group.header}
         busy={busy}
         onDeleteTree={remove}
         sessionId={sessionId}
         {...openWorkerSession === undefined ? {} : { openWorkerSession }}
         {...resolveWorkerSession === undefined ? {} : { resolveWorkerSession }}
       />
-    </div>
+      {group.rows.map((row) => (
+        <NodeRow
+          key={row.key}
+          node={row.node}
+          depth={row.depth}
+          viaParentId={row.viaParentId}
+          expandable={row.expandable}
+          expanded={row.expanded}
+          actions={actions}
+        />
+      ))}
+    </section>
   )
+
+  // The windowed path: the same items, each one a slot positioned by the virtualizer. `totalSize`
+  // and the items are computed first because both of them populate `measurementsCache`, which the
+  // cards below read for each tree's own top and bottom.
+  const virtualItems = windowed ? virtualizer.getVirtualItems() : []
+  const totalSize = windowed ? virtualizer.getTotalSize() : 0
+  const measurements = virtualizer.measurementsCache
+  const firstWindow = virtualItems[0]?.index ?? 0
+  const lastWindow = virtualItems[virtualItems.length - 1]?.index ?? -1
+  // A card cannot be split between two virtual items, so it is a box of its own, one per tree that
+  // has a line in the window, spanning the tree's FULL estimated height (which is what keeps the
+  // border around rows that are not mounted). The header item carries the gap above the card
+  // ({@link VIRTUAL_TREE_GAP_PX}), so the box starts that far below the tree's first item.
+  const cards = windowed
+    ? groups.map((group) => {
+      if (group.last < firstWindow || group.first > lastWindow) return null
+      const top = (measurements[group.first]?.start ?? 0) + VIRTUAL_TREE_GAP_PX
+      const bottom = measurements[group.last]?.end ?? top
+      return (
+        <div
+          key={`card:${group.header.tree.rootId}`}
+          className={group.header.settled ? 'avwf-tree avwf-tree-settled' : 'avwf-tree'}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: `${String(Math.max(0, bottom - top))}px`,
+            // The card's own padding must sit INSIDE the height, or every card would overlap the
+            // next one by its padding.
+            boxSizing: 'border-box',
+            transform: `translateY(${String(top)}px)`,
+          }}
+        />
+      )
+    })
+    : null
 
   return (
     <div className="avwf-root">
@@ -1347,18 +1522,53 @@ export function MissionTreeView({
       >
         {windowed
           ? (
-            <div className="avwf-canvas" style={{ height: `${String(virtualizer.getTotalSize())}px` }}>
-              {virtualizer.getVirtualItems().map((item) => {
-                const tree = trees[item.index]
-                if (tree === undefined) return null
-                return renderTree(tree, {
-                  index: item.index,
-                  style: { transform: `translateY(${String(item.start)}px)` },
-                })
+            <div className="avwf-canvas" style={{ height: `${String(totalSize)}px` }}>
+              {cards}
+              {virtualItems.map((entry) => {
+                const item = items[entry.index]
+                if (item === undefined) return null
+                // The header's slot carries the air above its card; a row's does not (rows are one
+                // table, and `.avwf-slot`'s own bottom padding was the gap between TREES).
+                const gap = item.kind === 'tree' ? VIRTUAL_TREE_GAP_PX : 0
+                return (
+                  <div
+                    key={item.key}
+                    className="avwf-slot"
+                    data-index={entry.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      transform: `translateY(${String(entry.start)}px)`,
+                      paddingTop: `${String(gap)}px`,
+                      paddingBottom: 0,
+                    }}
+                  >
+                    {item.kind === 'tree'
+                      ? (
+                        <TreeHeader
+                          item={item}
+                          busy={busy}
+                          onDeleteTree={remove}
+                          sessionId={sessionId}
+                          {...openWorkerSession === undefined ? {} : { openWorkerSession }}
+                          {...resolveWorkerSession === undefined ? {} : { resolveWorkerSession }}
+                        />
+                      )
+                      : (
+                        <NodeRow
+                          node={item.node}
+                          depth={item.depth}
+                          viaParentId={item.viaParentId}
+                          expandable={item.expandable}
+                          expanded={item.expanded}
+                          actions={actions}
+                        />
+                      )}
+                  </div>
+                )
               })}
             </div>
           )
-          : trees.map((tree) => renderTree(tree))}
+          : groups.map((group) => plainTree(group))}
       </div>
       {/* Rendered HERE, at the view root, and not inside a row: rows live in the virtualizer and
           unmount when scrolled past, which would close the dialog under the reader's pointer. The

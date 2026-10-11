@@ -19,6 +19,7 @@ import {
   MissionTreeView,
   ResultPane,
   WorkerSessionHint,
+  buildVisibleItems,
   detailTabs,
   createWorkerSessionClick,
   nodeIdLinkLabel,
@@ -26,8 +27,13 @@ import {
   workerSessionBusyText,
   workerSessionOpen,
   workerSessionTarget,
+  VIRTUALIZE_FROM,
+  VIRTUAL_ESTIMATED_ROW_PX,
+  VIRTUAL_INITIAL_VIEWPORT_PX,
+  VIRTUAL_OVERSCAN,
 } from '../src/client/MissionTreeView.js'
 import { apply } from '../src/client/index.js'
+import { rememberOverride, viewStateFor } from '../src/client/viewState.js'
 import type {
   ExecutorSessionLookup,
   MissionNodeDetail,
@@ -902,6 +908,48 @@ function history(count: number): MissionSnapshot {
   }
 }
 
+/**
+ * ONE active tree with `count` nodes, shaped like the engine's limit: a 6-ary tree (`MAX_CHILDREN`)
+ * whose nodes are all still in play, so `expanded = override ?? !settled` opens every one of them
+ * and every node is a visible row. This is the case the row-level window exists for: the old
+ * tree-level window saw `trees.length === 1` and mounted all 200 nodes at once.
+ */
+function activeTree(count: number): MissionSnapshot {
+  const nodes: MissionNodeView[] = []
+  for (let index = 0; index < count; index++) {
+    const children: string[] = []
+    for (let child = index * 6 + 1; child <= index * 6 + 6 && child < count; child++) children.push(`n${String(child)}`)
+    nodes.push({
+      id: `n${String(index)}`,
+      parentId: index === 0 ? null : `n${String(Math.floor((index - 1) / 6))}`,
+      children,
+      title: `mission ${String(index)}`,
+      context: [],
+      corrections: [],
+      status: 'running',
+      attempts: 1,
+      depth: 1,
+      createdAt: index,
+      hasResult: false,
+      resultRef: null,
+      workerSessionId: null,
+    })
+  }
+  return { trees: [{ rootId: 'n0', closedAt: null, nodes }] }
+}
+
+/**
+ * The rows actually in the markup, split at each `data-node-id` marker. Rows are SIBLINGS on the
+ * flat list — one row never nests another — so each chunk is exactly one row's markup, which is
+ * what lets a marker be attributed to the node that carries it.
+ */
+function mountedRows(html: string): { id: string; html: string }[] {
+  return html.split('data-node-id="').slice(1).map((chunk) => ({
+    id: chunk.slice(0, chunk.indexOf('"')),
+    html: chunk,
+  }))
+}
+
 describe('mission timing in the panel', () => {
   it('puts a compact duration on a finished row and the start clock on a running one', () => {
     // Real render, not the formatter: the row must actually carry the marker. Two snapshots because a
@@ -1221,6 +1269,134 @@ describe('MissionTreeView', () => {
     expect(html.match(/avwf-tree-header/g) ?? []).toHaveLength(5)
     expect(html).not.toContain('avwf-canvas')
     expect(html).not.toContain('avwf-slot')
+  })
+
+  /** Render the view against one snapshot and session id — the windowing tests need both. */
+  const renderData = (data: MissionSnapshot, sessionId: string): string => renderToStaticMarkup(
+    <MissionTreeView
+      useSnapshot={() => ({ data, loading: false, error: undefined, refresh: () => Promise.resolve() })}
+      onDeleteTree={() => Promise.resolve()}
+      loadDetail={() => Promise.reject(new Error('not clicked'))}
+      loadResult={() => Promise.reject(new Error('not clicked'))}
+      sessionId={sessionId}
+    />,
+  )
+
+  it('windows ONE active tree by row: a 200-node tree mounts a screenful, not the whole tree', () => {
+    // The old window counted TREES, and this is exactly one — `trees.length > 25` was false, so all
+    // 200 nodes (every one of them expanded while running) used to be mounted on the first frame.
+    const data = activeTree(200)
+    expect(data.trees).toHaveLength(1)
+    const items = buildVisibleItems(data.trees, new Map()).items
+    // One tree, but 201 visible lines — the threshold is now counted in ROWS.
+    expect(items.length).toBeGreaterThan(VIRTUALIZE_FROM)
+    const last = items[items.length - 1]
+    expect(last?.kind).toBe('row')
+    const lastId = last?.kind === 'row' ? last.node.id : ''
+    const html = renderData(data, 'owner-window-200')
+    expect(html).toContain('avwf-canvas')
+    const rows = html.match(/data-node-id="/gu) ?? []
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.length).toBeLessThan(200)
+    // "window + overscan": the window is the assumed first-paint viewport divided by one row's
+    // height, and the overscan adds up to {@link VIRTUAL_OVERSCAN} rows past its end (none before
+    // it — index 0 is already the top of the list).
+    const windowSize = Math.ceil(VIRTUAL_INITIAL_VIEWPORT_PX / VIRTUAL_ESTIMATED_ROW_PX)
+    expect(rows.length).toBeLessThanOrEqual(windowSize + VIRTUAL_OVERSCAN)
+    // The rows can be scrolled to, but the far end of the tree is not mounted on the first frame.
+    expect(html).not.toContain(`data-node-id="${lastId}"`)
+  })
+
+  it('folds a middle node: the visible rows shrink by exactly its subtree', () => {
+    const sessionId = 'owner-window-fold'
+    const data = activeTree(30)
+    // 31 items (header + 30 rows) is under the threshold, so every visible row is in the markup.
+    const before = mountedRows(renderData(data, sessionId))
+    expect(before).toHaveLength(30)
+    expect(buildVisibleItems(data.trees, new Map()).items.length).toBeLessThanOrEqual(VIRTUALIZE_FROM)
+    // Fold n1. It is `running`, so the DEFAULT is open — this is the module-level OVERRIDE a twisty
+    // click writes, read back by the next mount (the remount the running marker forces included).
+    rememberOverride(viewStateFor(sessionId), 'n1', false)
+    const after = mountedRows(renderData(data, sessionId))
+    // n1's six children (n7..n12, leaves at this size) go away; n1 itself stays a row.
+    expect(after).toHaveLength(24)
+    expect(after.map((row) => row.id)).toContain('n1')
+    expect(after.map((row) => row.id)).not.toContain('n7')
+    // The flat list the renderer reads from agrees: 30 rows + its header became 24 + its header.
+    expect(buildVisibleItems(data.trees, viewStateFor(sessionId).overrides).items).toHaveLength(25)
+  })
+
+  it('honours a stored expand override over the node’s own status, in both directions', () => {
+    // Running nodes open by default; an override to `false` must fold one anyway.
+    const collapsed = 'owner-override-collapse'
+    rememberOverride(viewStateFor(collapsed), 'r1', false)
+    const folded = renderData(snapshot(), collapsed)
+    expect(folded).toContain('Ship it')
+    expect(folded).not.toContain('the part')
+
+    // A finished mission folds by default; the reader who had opened it keeps it open. Its child is
+    // itself finished and was never overridden, so that child's own children stay folded.
+    const opened = 'owner-override-open'
+    rememberOverride(viewStateFor(opened), 'r1', true)
+    const html = renderData(snapshot({ root: 'done', child: 'done' }), opened)
+    expect(html).toContain('the part')
+    expect(html).not.toContain('the sub-part')
+  })
+
+  it('keeps the reused and the queued marker on the rows they belong to', () => {
+    const node = (
+      id: string, parentId: string | null, children: readonly string[], extra: Partial<MissionNodeView> = {},
+    ): MissionNodeView => ({
+      id, parentId, children, title: `mission ${id}`, context: [], corrections: [], status: 'blocked',
+      attempts: 1, depth: 1, createdAt: 1, hasResult: false, resultRef: null, workerSessionId: null, ...extra,
+    })
+    const data: MissionSnapshot = {
+      trees: [{
+        rootId: 'r1',
+        closedAt: null,
+        nodes: [
+          node('r1', null, ['a', 'b']),
+          node('a', 'r1', ['s']),
+          node('b', 'r1', ['s', 'q']),
+          node('s', 'a', [], { status: 'done' }),
+          node('q', 'b', [], {
+            status: 'ready',
+            waitingFor: { reason: 'capacity', resource: 'cpu', needed: 2, available: 1 },
+          }),
+        ],
+      }],
+    }
+    const rows = mountedRows(renderData(data, 'owner-marks'))
+    // A and B both list `s`; only the copy under its NON-birth parent wears the mark.
+    const shared = rows.filter((row) => row.id === 's')
+    expect(shared).toHaveLength(2)
+    expect(shared[0]?.html).not.toContain('avwf-reused')
+    expect(shared[1]?.html).toContain('avwf-reused')
+    // The queued marker is on `q`'s row — and nowhere else.
+    const queued = rows.filter((row) => row.id === 'q')
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.html).toContain('avwf-waiting')
+    expect(rows.filter((row) => row.html.includes('avwf-waiting'))).toHaveLength(1)
+  })
+
+  it('scrolls to the bottom of one tree and mounts the LAST row there', () => {
+    const sessionId = 'owner-window-bottom'
+    const data = activeTree(200)
+    const items = buildVisibleItems(data.trees, new Map()).items
+    const last = items[items.length - 1]
+    expect(last?.kind).toBe('row')
+    const lastId = last?.kind === 'row' ? last.node.id : ''
+    expect(renderData(data, sessionId)).not.toContain(`data-node-id="${lastId}"`)
+    // The module-level offset is what a remount restores. A static render has no scroll element for
+    // the virtualizer to read, so this is also the first frame a reader gets when they come back to
+    // a list they had scrolled to the end of.
+    viewStateFor(sessionId).scrollTop = 1_000_000
+    const bottom = renderData(data, sessionId)
+    expect(bottom).toContain(`data-node-id="${lastId}"`)
+    expect(bottom).not.toContain('data-node-id="n0"')
+    // The canvas still covers every row, so the scrollbar can reach the end.
+    const height = Number(/avwf-canvas[^>]*height:\s*(\d+)px/u.exec(bottom)?.[1])
+    expect(height).toBeGreaterThanOrEqual(200 * VIRTUAL_ESTIMATED_ROW_PX)
   })
 
   it('aligns the panel with the conversation column, like the 记忆 tab', () => {
