@@ -6,7 +6,14 @@
  * executor from reading the tree it is only one node of.
  */
 import { describe, expect, it } from 'vitest'
-import { OWNER_TOOL_DENY, WORKER_TOOL_DENY, visibleTo } from '../src/faces.js'
+import {
+  OWNER_FACE_TOOLS,
+  OWNER_TOOL_DENY,
+  WORKER_TOOL_DENY,
+  MISSION_TOOL_NAMES,
+  hiddenMissionTools,
+  visibleTo,
+} from '../src/faces.js'
 import { agent, callTool, mount } from './mount.js'
 
 /** Every name this plugin registers, as the mount harness saw it. */
@@ -149,15 +156,22 @@ describe('the owner face', () => {
     expect(filtered.tools.map((tool) => tool.name)).toEqual(['bash', 'create_mission'])
   })
 
-  it('leaves a worker\'s assembly untouched', async () => {
+  it('filters the owner half, not the executor half, out of a worker\'s assembly', async () => {
+    // The stateless half for a dispatched worker: it keeps `note_mission` / `decompose_mission` /
+    // `submit_mission` and loses the six owner tools. `mission-1234abcd` is a real claim id — a
+    // worker's face is decided by `isWorkerClaim`, not by the `origin: 'subagent'` header alone.
     const mounted = await mount()
     const assembly = {
       sections: [],
       contexts: [],
-      tools: [{ name: 'bash', description: '', parameters: {} }, { name: 'decompose_mission', description: '', parameters: {} }],
+      tools: [
+        { name: 'bash', description: '', parameters: {} },
+        { name: 'decompose_mission', description: '', parameters: {} },
+        { name: 'create_mission', description: '', parameters: {} },
+      ],
       variables: {},
     }
-    const worker = agent('mission-1', { origin: 'subagent', delegationDepth: 1 })
+    const worker = agent('mission-1234abcd', { origin: 'subagent', delegationDepth: 1 })
     const filtered = await mounted.ctx.waterfall(
       'system-prompt/assemble',
       assembly,
@@ -165,5 +179,90 @@ describe('the owner face', () => {
       () => Promise.resolve(assembly as never),
     )
     expect(filtered.tools.map((tool) => tool.name)).toEqual(['bash', 'decompose_mission'])
+  })
+})
+
+/**
+ * The three roles the assembly waterfall now tells apart, and the one thing it must never touch:
+ * which of the nine mission tools are REGISTERED. Hiding is usability only — `create_mission`
+ * still answers `no-authority` and `note/decompose/submit` still answer `not-owner`.
+ */
+describe('the assembly face by session role', () => {
+  const NON_MISSION = 'bash'
+
+  /** The nine registered tools plus one host tool, as the assembler hands them over. */
+  function allTools(): { name: string; description: string; parameters: Record<string, never> }[] {
+    return [NON_MISSION, ...MISSION_TOOL_NAMES].map((name) => ({ name, description: '', parameters: {} }))
+  }
+
+  async function visibleFor(
+    mounted: Awaited<ReturnType<typeof mount>>,
+    caller: unknown,
+    tools = allTools(),
+  ): Promise<string[]> {
+    const assembly = { sections: [], contexts: [], tools, variables: {} }
+    const filtered = await mounted.ctx.waterfall(
+      'system-prompt/assemble',
+      assembly,
+      { agent: caller as never },
+      () => Promise.resolve(assembly as never),
+    )
+    return filtered.tools.map((tool) => tool.name)
+  }
+
+  it('① a top-level session keeps the owner six and loses the executor three', async () => {
+    const mounted = await mount()
+    const visible = await visibleFor(mounted, mounted.owner)
+    expect(visible).toEqual([NON_MISSION, ...OWNER_FACE_TOOLS])
+    for (const name of OWNER_TOOL_DENY) expect(visible).not.toContain(name)
+  })
+
+  it('② a worker keeps the executor three and loses the owner six', async () => {
+    const mounted = await mount()
+    const visible = await visibleFor(
+      mounted,
+      agent('mission-1234abcd', { origin: 'subagent', delegationDepth: 1 }),
+    )
+    expect(visible).toEqual([NON_MISSION, ...OWNER_TOOL_DENY])
+    for (const name of OWNER_FACE_TOOLS) expect(visible).not.toContain(name)
+  })
+
+  it('③ a session that is neither owner nor worker sees no mission tool at all', async () => {
+    // A teammate subagent: `origin: 'subagent'` (so it cannot root a tree) with an id that is not one
+    // of our claim ids. Before this change it carried all nine, one of which refuses on every call.
+    const mounted = await mount()
+    const teammate = agent('f4f3163b-1111-2222-3333-444455556666', { origin: 'subagent' })
+    const visible = await visibleFor(mounted, teammate)
+    expect(visible).toEqual([NON_MISSION])
+    for (const name of MISSION_TOOL_NAMES) expect(visible).not.toContain(name)
+  })
+
+  it('④ filtering is visibility only: every tool stays registered and globally visible', async () => {
+    const mounted = await mount()
+    const registeredBefore = mounted.registered.map((entry) => entry.name).sort()
+    expect(registeredBefore).toEqual([...MISSION_TOOL_NAMES].sort())
+
+    for (const caller of [
+      mounted.owner,
+      agent('mission-1234abcd', { origin: 'subagent', delegationDepth: 1 }),
+      agent('f4f3163b-1111-2222-3333-444455556666', { origin: 'subagent' }),
+    ]) {
+      await visibleFor(mounted, caller)
+    }
+
+    // The three assemblies above changed what a model reads, not what is registered: the global
+    // `tools.get()` view (what `restrict()` and the compat gate judge) still resolves all nine.
+    const tools = mounted.ctx.get('tools') as unknown as { get: (name: string) => unknown }
+    for (const name of MISSION_TOOL_NAMES) {
+      expect(tools.get(name), `${name} must stay registered`).toBeDefined()
+    }
+    expect(mounted.registered.map((entry) => entry.name).sort()).toEqual(registeredBefore)
+    expect(registeredBefore).toHaveLength(9)
+  })
+
+  it('the role helper is the same judgement the waterfall applies', () => {
+    expect(hiddenMissionTools('owner')).toEqual(OWNER_TOOL_DENY)
+    expect(hiddenMissionTools('worker')).toEqual(OWNER_FACE_TOOLS)
+    expect(hiddenMissionTools('other')).toEqual(MISSION_TOOL_NAMES)
   })
 })

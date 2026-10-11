@@ -217,7 +217,7 @@ describe('the note_mission face', () => {
     expect(visibleTo(tools, WORKER_TOOL_DENY).map((tool) => tool.name)).toEqual(['note_mission', 'decompose_mission'])
   })
 
-  it('keeps note_mission out of the owner assembly and leaves a worker list untouched', async () => {
+  it('keeps note_mission out of the owner assembly and the owner half out of a worker\'s', async () => {
     const mounted = await mount()
     const assembly = {
       sections: [],
@@ -236,12 +236,14 @@ describe('the note_mission face', () => {
     )
     expect(filtered.tools.map((tool) => tool.name)).toEqual(['create_mission'])
 
-    const untouched = await mounted.ctx.waterfall(
+    // A real claim id: the worker branch is decided by `isWorkerClaim`, so the assembly keeps the
+    // executor half and drops the owner half.
+    const asWorker = await mounted.ctx.waterfall(
       'system-prompt/assemble',
       assembly,
-      { agent: worker('mission-1') as never },
+      { agent: worker('mission-1234abcd') as never },
       () => Promise.resolve(assembly as never),
     )
-    expect(untouched.tools.map((tool) => tool.name)).toEqual(['note_mission', 'create_mission'])
+    expect(asWorker.tools.map((tool) => tool.name)).toEqual(['note_mission'])
   })
 })

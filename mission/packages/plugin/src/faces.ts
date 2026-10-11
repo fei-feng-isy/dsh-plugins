@@ -5,11 +5,53 @@
  * @module @avantf/dsh-mission/faces
  */
 
+/**
+ * What an OWNER must not see: the executor half, which a session that roots trees can never call.
+ * The name is read the other way round by the worker-side tables below — this is the deny list
+ * applied when the caller is the owner.
+ */
 export const OWNER_TOOL_DENY: readonly string[] = [
   'note_mission',
   'decompose_mission',
   'submit_mission',
 ]
+
+/**
+ * The owner half of the mission-tree face: the six tools only a session that can root a tree may
+ * call. Kept as its own list because it is the deny list for a WORKER (and, with the executor half,
+ * the full registration set): the worker-side table below no longer restates it inline.
+ */
+export const OWNER_FACE_TOOLS: readonly string[] = [
+  'create_mission',
+  'adjust_mission',
+  'mission_result',
+  'list_missions',
+  'finish_mission',
+  'cancel_mission',
+]
+
+/** Every mission-tree tool this plugin registers — the two faces, whichever side they land on. */
+export const MISSION_TOOL_NAMES: readonly string[] = [...OWNER_TOOL_DENY, ...OWNER_FACE_TOOLS]
+
+/** What a session IS for the tool face: it may root trees, it is one of our dispatched workers, or
+ *  it is neither (a teammate, another plugin's child, anyone who is not part of a mission tree). */
+export type MissionSessionRole = 'owner' | 'worker' | 'other'
+
+/**
+ * The mission tools a session of this role must NOT be shown.
+ *
+ * One judgement for every caller: an owner loses the executor half, one of our workers loses the
+ * owner half, and a session that is neither loses both — otherwise a teammate subagent would carry
+ * nine tools it can never call, and one of them (`create_mission`) would answer `no-authority` on
+ * every attempt. Visibility only: the refusals inside the tool bodies stay the boundary.
+ */
+export function hiddenMissionTools(role: MissionSessionRole): readonly string[] {
+  switch (role) {
+    case 'owner': return OWNER_TOOL_DENY
+    case 'worker': return OWNER_FACE_TOOLS
+    case 'other': return MISSION_TOOL_NAMES
+  }
+}
 
 /**
  * Everything an executor must not hold, grouped by WHY it is dangerous here:
@@ -37,12 +79,7 @@ export const WORKER_TOOL_DENY: readonly string[] = [
   'create_goal',
   'get_goal',
   'update_goal',
-  'create_mission',
-  'adjust_mission',
-  'mission_result',
-  'list_missions',
-  'finish_mission',
-  'cancel_mission',
+  ...OWNER_FACE_TOOLS,
 ]
 
 export function visibleTo<T extends { readonly name: string }>(

@@ -9,10 +9,12 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import {
   defineTool,
   type GenericCallView,
+  type ParameterPropertySpec,
   type ParameterSchemaSpec,
   type ToolCallView,
   type ToolDefinition,
   type ToolRunContext,
+  type ValueSchemaSpec,
 } from '@deepseek-ai/dsh-tools'
 import { CAPACITY, spillPointer, statusLabel, type Refusal, type WellFormedSource } from '@avantf/mission-core'
 import type { AvantfMissionHost } from './host.js'
@@ -25,9 +27,154 @@ interface MissionToolResult {
   data?: JsonValue
 }
 
+/**
+ * The declared OUTPUT contract of every tool, in the author-facing value-schema DSL `defineTool`
+ * compiles (`valueSchemaSpecToJsonSchema`) and `tools.register` asserts (`assertSupportedJsonSchema`).
+ * The registry validates EVERY canonical value against the compiled schema before it is rendered
+ * (`INVALID_TOOL_OUTPUT`, `packages/core/tools/src/index.ts`), so a body that drifts from this
+ * declaration fails its call instead of quietly promising the model something else — while `schemas()`
+ * whitelists only name/description/parameters, so none of this ever reaches the model (zero prompt
+ * tokens).
+ *
+ * Each tool is a `oneOf` of exactly TWO branches, discriminated by `ok`:
+ *
+ * - success: `{ ok: true, summary: string, data?: <that tool's own fields> }`;
+ * - failure: `{ ok: false, summary: string, data: { code: string, message?: string } }` — the single
+ *   shape `fail(refusal)` / `notReady` / `NO_CALLER` all produce.
+ *
+ * The per-tool `data` fields below were read off the `execute` bodies themselves (not off a
+ * document), so `additionalProperties: false` turns a field that stops being written — or one that
+ * starts being written — into a refused call.
+ */
+function dataObject(properties: ParameterSchemaSpec): ValueSchemaSpec {
+  return { type: 'object', additionalProperties: false, properties }
+}
+
+/** `string | null` / `number | null`: the persisted node fields' own shapes. */
+const NULLABLE_STRING: ValueSchemaSpec = { oneOf: [{ type: 'string' }, { type: 'null' }] }
+const NULLABLE_NUMBER: ValueSchemaSpec = { oneOf: [{ type: 'number' }, { type: 'null' }] }
+
+/** Attach `required: true` to one property schema (requiredness lives on the property, not the node). */
+function requiredProperty(schema: ValueSchemaSpec): ParameterPropertySpec {
+  return { ...schema, required: true }
+}
+
+/** The `data` of EVERY failure / degradation answer (`fail`, `notReady`, `NO_CALLER`). */
+const FAILURE_DATA: ValueSchemaSpec = dataObject({
+  code: { type: 'string', required: true },
+  message: { type: 'string' },
+})
+
+/**
+ * One tool's full answer: exactly one of the two branches. `data` stays DECLARED in the success
+ * branch even when it is optional, because `additionalProperties: false` would otherwise reject a
+ * success value that carries it; `optionalData` is for `list_missions` alone, whose empty case
+ * answers with no `data` at all.
+ */
+function toolOutput(data: ValueSchemaSpec, options: { optionalData?: boolean } = {}): ValueSchemaSpec {
+  return {
+    oneOf: [
+      dataObject({
+        ok: { type: 'boolean', const: true, required: true },
+        summary: { type: 'string', required: true },
+        data: options.optionalData === true ? data : requiredProperty(data),
+      }),
+      dataObject({
+        ok: { type: 'boolean', const: false, required: true },
+        summary: { type: 'string', required: true },
+        data: requiredProperty(FAILURE_DATA),
+      }),
+    ],
+  }
+}
+
+/** `create_mission`: the new root's id. */
+const CREATE_MISSION_DATA: ValueSchemaSpec = dataObject({
+  root_id: { type: 'string', required: true },
+})
+
+/** `adjust_mission`: delivery of the correction and how many unfinished children it voided. */
+const ADJUST_MISSION_DATA: ValueSchemaSpec = dataObject({
+  root_id: { type: 'string', required: true },
+  delivered: { type: 'boolean', required: true },
+  voided: { type: 'number', required: true },
+})
+
+/** `cancel_mission`: how many unfinished nodes were recorded as failed. */
+const CANCEL_MISSION_DATA: ValueSchemaSpec = dataObject({
+  root_id: { type: 'string', required: true },
+  failed_nodes: { type: 'number', required: true },
+})
+
+/** `decompose_mission`: the children created now and the existing ones reused (dedup). */
+const DECOMPOSE_MISSION_DATA: ValueSchemaSpec = dataObject({
+  created: { type: 'array', items: { type: 'string' }, required: true },
+  reused: { type: 'array', items: { type: 'string' }, required: true },
+})
+
+/** `note_mission`: the node and the dispatch generation the note belongs to. */
+const NOTE_MISSION_DATA: ValueSchemaSpec = dataObject({
+  node_id: { type: 'string', required: true },
+  analysis_attempt: { type: 'number', required: true },
+})
+
+/** `submit_mission`: the node and whether its parent now has every child result. */
+const SUBMIT_MISSION_DATA: ValueSchemaSpec = dataObject({
+  node_id: { type: 'string', required: true },
+  parent_ready: { type: 'boolean', required: true },
+})
+
+/** `mission_result`: the node projection plus the result text / spill pointer. */
+const MISSION_RESULT_DATA: ValueSchemaSpec = dataObject({
+  node_id: { type: 'string', required: true },
+  title: { type: 'string', required: true },
+  status: { type: 'string', required: true },
+  weight: { type: 'number', required: true },
+  created_at: { type: 'number', required: true },
+  dispatched_at: requiredProperty(NULLABLE_NUMBER),
+  ended_at: requiredProperty(NULLABLE_NUMBER),
+  waiting_for: {
+    required: true,
+    oneOf: [
+      { type: 'null' },
+      dataObject({
+        reason: { type: 'string', required: true },
+        resource: { type: 'string' },
+        needed: { type: 'number' },
+        available: { type: 'number' },
+        unit: { type: 'string' },
+      }),
+    ],
+  },
+  corrections: { type: 'array', items: { type: 'string' }, required: true },
+  result: requiredProperty(NULLABLE_STRING),
+  result_ref: requiredProperty(NULLABLE_STRING),
+  result_hint: requiredProperty(NULLABLE_STRING),
+})
+
+/** `list_missions`: one row per owned tree; `status`/`title` are null when the root record is gone. */
+const LIST_MISSIONS_DATA: ValueSchemaSpec = dataObject({
+  missions: {
+    type: 'array',
+    required: true,
+    items: dataObject({
+      root_id: { type: 'string', required: true },
+      status: requiredProperty(NULLABLE_STRING),
+      title: requiredProperty(NULLABLE_STRING),
+      closed: { type: 'boolean', required: true },
+      troubled: { type: 'boolean', required: true },
+    }),
+  },
+})
+
+/** `finish_mission`: the archived root. */
+const FINISH_MISSION_DATA: ValueSchemaSpec = dataObject({
+  root_id: { type: 'string', required: true },
+})
+
 /** The output contract `defineTool` is given: every tool's answer is one text block. */
 interface ToolOutput {
-  readonly schema: { readonly type: 'object'; readonly additionalProperties: true }
+  readonly schema: ValueSchemaSpec
   readonly render: (args: unknown, value: JsonValue) => { type: 'text'; text: string }[]
 }
 
@@ -47,9 +194,9 @@ interface ToolOutput {
  * there. `wellFormed` is the host's resolved pair — the loaded base kit when available, the local
  * degradation copy otherwise.
  */
-function outputFor(wellFormed: WellFormedSource): ToolOutput {
+function outputFor(wellFormed: WellFormedSource, schema: ValueSchemaSpec): ToolOutput {
   return {
-    schema: { type: 'object', additionalProperties: true },
+    schema,
     render: (_args: unknown, value: JsonValue): { type: 'text'; text: string }[] => {
       const repaired = wellFormed.deep(value)
       const summary = (repaired as Record<string, JsonValue>)['summary']
@@ -72,12 +219,14 @@ function workTool(host: AvantfMissionHost, options: {
   name: string
   description: string
   parameters: ParameterSchemaSpec
+  /** This tool's own declared answer shape; see the schema block above. */
+  outputSchema: ValueSchemaSpec
   presentCall?: (args: Record<string, unknown>) => ToolCallView | undefined
   execute: (args: Record<string, unknown>, exec: ToolRunContext) => Promise<MissionToolResult>
 }): ToolDefinition {
   return (defineTool as unknown as (definition: typeof options & { output: ToolOutput }) => ToolDefinition)({
     ...options,
-    output: outputFor(host.wellFormed),
+    output: outputFor(host.wellFormed, options.outputSchema),
     execute: (args: Record<string, unknown>, exec: ToolRunContext): Promise<MissionToolResult> => {
       const reason = host.degradedReason()
       return reason === undefined ? options.execute(args, exec) : Promise.resolve(notReady(reason))
@@ -292,6 +441,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       },
     },
     presentCall: (args) => present('create_mission', args),
+    outputSchema: toolOutput(CREATE_MISSION_DATA),
     async execute(args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return NO_CALLER
@@ -368,6 +518,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       },
     },
     presentCall: (args) => present('decompose_mission', args),
+    outputSchema: toolOutput(DECOMPOSE_MISSION_DATA),
     async execute(args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return NO_CALLER
@@ -402,6 +553,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       },
     },
     presentCall: (args) => present('note_mission', args),
+    outputSchema: toolOutput(NOTE_MISSION_DATA),
     async execute(args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return NO_CALLER
@@ -432,6 +584,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       },
     },
     presentCall: (args) => present('submit_mission', args),
+    outputSchema: toolOutput(SUBMIT_MISSION_DATA),
     async execute(args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return NO_CALLER
@@ -460,6 +613,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       node_id: { type: 'string', required: true, description: '要读结果的任务 id。' },
     },
     presentCall: (args) => present('mission_result', args),
+    outputSchema: toolOutput(MISSION_RESULT_DATA),
     async execute(args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return NO_CALLER
@@ -521,6 +675,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
     ].join('\n'),
     parameters: {},
     presentCall: (args) => present('list_missions', args),
+    outputSchema: toolOutput(LIST_MISSIONS_DATA, { optionalData: true }),
     execute(_args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return Promise.resolve(NO_CALLER)
@@ -562,6 +717,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       root_id: { type: 'string', required: true, description: '要收尾哪个任务。' },
     },
     presentCall: (args) => present('finish_mission', args),
+    outputSchema: toolOutput(FINISH_MISSION_DATA),
     async execute(args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return NO_CALLER
@@ -581,6 +737,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       root_id: { type: 'string', required: true, description: '要取消哪个任务。' },
     },
     presentCall: (args) => present('cancel_mission', args),
+    outputSchema: toolOutput(CANCEL_MISSION_DATA),
     async execute(args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return NO_CALLER
@@ -606,6 +763,7 @@ export function defineWorkTools(host: AvantfMissionHost): ToolDefinition[] {
       adjustment: { type: 'string', required: true, description: '哪里不对、应该改成什么。' },
     },
     presentCall: (args) => present('adjust_mission', args),
+    outputSchema: toolOutput(ADJUST_MISSION_DATA),
     async execute(args, exec): Promise<MissionToolResult> {
       const agent = exec.agent
       if (agent === undefined) return NO_CALLER

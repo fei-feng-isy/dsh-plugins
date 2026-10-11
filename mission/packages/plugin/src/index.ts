@@ -41,7 +41,7 @@ import {
   promptDir,
   promptFileSpecs,
 } from './prompt.js'
-import { OWNER_TOOL_DENY, visibleTo } from './faces.js'
+import { hiddenMissionTools, visibleTo } from './faces.js'
 import {
   archiveWorkers,
   bytes,
@@ -299,7 +299,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       log.info(
         `typert host face registered (namespace avantfMission, ${
           String((hostContribution as unknown as { invocations?: readonly unknown[] }).invocations?.length ?? 0)
-        } invocations: snapshot, detail, result, delete, cleanFinished, resolveExecutorSession, watch)`,
+        } invocations: snapshot, status, detail, result, delete, cleanFinished, resolveExecutorSession, watch)`,
       )
       // One line that settles "which half is stale?" without a debugger: the two halves of this plugin
       // update on different schedules (the browser bundle per page load, this face only when `dsh web`
@@ -378,9 +378,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
     const agent = context.agent
-    if (agent === undefined || !host.canCreateTree(agent)) return assembled
-    applyOwnerFace(agent)
-    return { ...assembled, tools: visibleTo(assembled.tools, OWNER_TOOL_DENY) }
+    if (agent === undefined) return assembled
+    // ONE judgement drives both halves of the face: a session that may root a tree is an owner, one of
+    // our claim ids is a worker, and anything else (a teammate subagent, another plugin's child) is
+    // neither. The owner face is still applied on the agent as well — that is the live restriction —
+    // while this waterfall is the stateless filter every role gets. Hiding is usability only: the
+    // refusals inside the tool bodies (`no-authority`, `not-owner`) stay the boundary.
+    const role = host.canCreateTree(agent) ? 'owner' : host.isWorkerClaim(agent.id) ? 'worker' : 'other'
+    if (role === 'owner') applyOwnerFace(agent)
+    return { ...assembled, tools: visibleTo(assembled.tools, hiddenMissionTools(role)) }
   })
 
   // ── the routing policy: when a tree is the right shape ──────────────────
