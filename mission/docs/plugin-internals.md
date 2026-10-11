@@ -123,7 +123,7 @@ worker 是真实会话，所以每派活一次就多一个会话目录（本机�
 
 **"幽灵 id"对账（为什么存在第四步）**：归档标记的唯一作用是授权释放记录。记录一删，标记就再没有意义 —— 但它是 durable 写进 registry 的，删除目录并不会顺手清掉它。留下的后果是**子智能体列表**（以及一切读 `archivedSessionIds` 的面）会一直把已经删掉的会话显示出来：本机实测 `archivedSessionIds` 里积了 64 个 `mission-*`，而磁盘上只剩 3 个。因此插件在**挂载时**与 **`/clean archive all` 里**各跑一次对账（`reconcileArchivedGhosts`），对每条"已归档、`mission-*` 形状、且**会话语料库 `sessionQuery.listSessions()` 与 `sessionsRoot` 都查不到**"的 id 调 `unarchiveSession`。边界是刻意收窄的：只用 `mission-*` 形状（非本插件形状绝不碰）、只在**缺席被证实**时动手（没有 `sessionQuery` 时判"无法证明"而不是"不存在"，一条都不动）、仍然存在的记录不动。宿主接口本身是幂等的（"An id that is not archived resolves without writing"），所以重复挂载/重复对账安全。
 
-**第四层：投影缓存残留（"看不见的 worker"）。** 释放会话目录并不是最后一个落盘痕迹。宿主 `dsh-session-projection-cache` 给每个会话在 `<dsh home>/storages/session_projcache/sessions/<id>.json` 存一份 durable 投影检查点：`session/created` 时写、`session/disposed` 时 `flushSoft('detach')` 后**刻意保留**（为了重开时预热），而且**没有公开的驱逐 API**（域里的 `delete(`/`clear(` 只是它内部 Map 的操作）。于是记录删掉之后，父会话仍能把这份缓存里的 `rows.subagent` 读回来，把它当作一个子代理列出来 —— 用户看到"清完 worker 但列表里还在"。实测现场（2026-10-03）：磁盘上 mission 会话目录 **0**、归档登记表里 mission id **0**，而缓存目录里有 **70 个 `mission-*.json`**，与 UI 上那批 worker 数量一致。
+**第四层：投影缓存残留（"看不见的 worker"）。** 释放会话目录并不是最后一个落盘痕迹。宿主 `dsh-session-projection-cache` 给每个会话在 `<dsh home>/storages/session_projcache/sessions/<id>.json` 存一份 durable 投影检查点：`session/created` 时写、`session/disposed` 时 `flushSoft('detach')` 后**刻意保留**（为了重开时预热），而且**没有公开的驱逐 API**（域里的 `delete(`/`clear(` 只是它内部 Map 的操作）。于是记录删掉之后，父会话仍能把这份缓存里 `subagentCatalog` 这个投影 key 读回来，把它当作一个子代理列出来 —— 用户看到"清完 worker 但列表里还在"。实测现场（2026-10-03）：磁盘上 mission 会话目录 **0**、归档登记表里 mission id **0**，而缓存目录里有 **70 个 `mission-*.json`**，与 UI 上那批 worker 数量一致。
 
 所以 `/clean` 在**释放记录的同一步**删掉该 worker 的缓存文件，对账也把它当作一层：
 

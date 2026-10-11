@@ -888,7 +888,7 @@ worker 是真实会话，所以磁盘占用随派活次数线性增长（本机�
 - corpus **读不到**（部署里没有 `sessionQuery`）时判"**无法证明缺席**"，一条都不动，而不是把"问不到"当成"不存在"；
 - 宿主接口 `unarchiveSession` 本身幂等（"An id that is not archived resolves without writing"），所以挂载对账可以无条件重复跑。
 
-**第四层：投影缓存残留（"看不见的 worker"）。** 释放会话目录并不是最后一个落盘痕迹。宿主 `dsh-session-projection-cache` 给每个会话在 `<dsh home>/storages/session_projcache/sessions/<id>.json` 存一份 durable 投影检查点：`session/created` 时写，`session/disposed` 时 `flushSoft('detach')` 之后**刻意保留**（重开时预热），而且**没有公开的驱逐 API**（域里的 `delete(` / `clear(` 只是它内部 Map 的操作）。于是记录删掉之后，父会话仍能把缓存里的 `rows.subagent` 读回来，把它当作子代理列出来 —— 用户看到的是"清完 worker 但列表里还在"。实测现场（2026-10-03 02:3x）：磁盘上 mission 会话目录 **0**、归档登记表里 mission id **0**，而缓存目录里有 **70 个 `mission-*.json`**，与 UI 上那批 worker 的数量一致。同一现场还证实了对账的输入必须换：U2 之后"删除记录会取消归档"，归档集合为 **0**，若从归档集合出发（`ghostArchiveIds(archived, …)`）一个文件都清不到。
+**第四层：投影缓存残留（"看不见的 worker"）。** 释放会话目录并不是最后一个落盘痕迹。宿主 `dsh-session-projection-cache` 给每个会话在 `<dsh home>/storages/session_projcache/sessions/<id>.json` 存一份 durable 投影检查点：`session/created` 时写，`session/disposed` 时 `flushSoft('detach')` 之后**刻意保留**（重开时预热），而且**没有公开的驱逐 API**（域里的 `delete(` / `clear(` 只是它内部 Map 的操作）。于是记录删掉之后，父会话仍能把缓存里 `subagentCatalog` 这个投影 key 读回来，把它当作子代理列出来 —— 用户看到的是"清完 worker 但列表里还在"。实测现场（2026-10-03 02:3x）：磁盘上 mission 会话目录 **0**、归档登记表里 mission id **0**，而缓存目录里有 **70 个 `mission-*.json`**，与 UI 上那批 worker 的数量一致。同一现场还证实了对账的输入必须换：U2 之后"删除记录会取消归档"，归档集合为 **0**，若从归档集合出发（`ghostArchiveIds(archived, …)`）一个文件都清不到。
 
 因此 `projectionCache.ts` 与 `workerSessions.ts` 一起补上这一层，规则与幽灵 id 同源、范围刻意收窄：
 

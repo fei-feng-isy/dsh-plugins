@@ -6,8 +6,15 @@
  * `unit-lease.spec.ts`; these cases prove the model-facing half — the parameters, the inheritance
  * default, and that a real mount serializes two roots that declared the same scope.
  */
-import { describe, expect, it } from 'vitest'
-import { callTool, callToolChecked, executorFor, mount, type StubAgent } from './mount.js'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  callTool,
+  callToolChecked,
+  executorFor,
+  mount,
+  noteAndSplit,
+  type StubAgent,
+} from './mount.js'
 
 /** The child ids of a node, keyed by title (the only label the test wrote). */
 async function childIds(
@@ -127,5 +134,74 @@ describe('one executor per scope, across roots', () => {
     expect(submitted.ok).toBe(true)
     expect(mounted.dispatched).toHaveLength(2)
     expect(mounted.nodeFor(secondId)?.status).toBe('running')
+  })
+})
+
+describe('overlapping scopes are an advisory, never a state change', () => {
+  it('⑫ warns the owner once when a container and a scope inside it run together', async () => {
+    // The WARN line goes to stderr through the plugin's own logger (`createLogger` mirrors there).
+    const warnings: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '))
+    })
+    try {
+      const mounted = await mount()
+      const created = await callToolChecked(
+        mounted,
+        'create_mission',
+        { title: 'lanes', description: 'd', analysis: [], unit: 'pkg/a' },
+        mounted.owner,
+      )
+      expect(created.ok).toBe(true)
+      const rootId = String(created.data?.['root_id'] ?? '')
+      const worker = executorFor(mounted, rootId)
+      const split = await noteAndSplit(mounted, rootId, [
+        { title: 'dir', description: 'd', context: ['why'], unit: 'pkg/a' },
+        { title: 'file', description: 'd', context: ['why'], unit: 'pkg/a/b' },
+      ], worker)
+      expect(split.ok).toBe(true)
+      await mounted.flush()
+
+      const ids = await childIds(mounted, rootId)
+      const dirId = ids.get('dir') ?? ''
+      const fileId = ids.get('file') ?? ''
+      // Both children ARE running: the lease only serializes the EXACT key, by design.
+      expect(mounted.nodeFor(dirId)?.status).toBe('running')
+      expect(mounted.nodeFor(fileId)?.status).toBe('running')
+      expect(mounted.nodeFor(dirId)?.unit).toBe('pkg/a')
+      expect(mounted.nodeFor(fileId)?.unit).toBe('pkg/a/b')
+
+      const ownerText = (): string[] =>
+        mounted.owner.received.map((message) => message.content.map((block) => block.text).join(''))
+      // Exactly ONE owner message, naming both nodes and both units.
+      const overlap = ownerText().filter((text) => text.includes('互相包含'))
+      expect(overlap).toHaveLength(1)
+      expect(overlap[0]).toContain(dirId)
+      expect(overlap[0]).toContain(fileId)
+      expect(overlap[0]).toContain('pkg/a')
+      expect(overlap[0]).toContain('pkg/a/b')
+
+      // And exactly ONE WARN line for the log. The logger has two sinks (stderr and `ctx.logger`),
+      // so the line is counted by the stderr sink's own `WARN` formatting, not by substring alone.
+      const warnLines = warnings.filter((line) => line.includes('WARN unit overlap'))
+      expect(warnLines).toHaveLength(1)
+
+      // NO node state or `waitingFor` changed: a second pass over the same two runners is inert.
+      const stateOf = (id: string) => ({
+        status: mounted.nodeFor(id)?.status ?? null,
+        waitingFor: mounted.host.waitingForOf(id),
+      })
+      const before = [rootId, dirId, fileId].map(stateOf)
+      expect(before).toEqual([
+        { status: 'blocked', waitingFor: null },
+        { status: 'running', waitingFor: null },
+        { status: 'running', waitingFor: null },
+      ])
+      await mounted.flush()
+      expect([rootId, dirId, fileId].map(stateOf)).toEqual(before)
+      expect(ownerText().filter((text) => text.includes('互相包含'))).toHaveLength(1)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
