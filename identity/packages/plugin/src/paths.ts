@@ -18,6 +18,7 @@
  *
  *   <data home>/identity/
  *     profiles/<profile>/{IDENTITY,SOUL,RULES}.md      # the effective identity (flat, any language)
+ *     profiles/<profile>/.edits/<id>/{IDENTITY,…}.md   # THIS profile's own version of identity <id>
  *     presets/<preset>/<locale>/{IDENTITY,SOUL,RULES}.md
  *     .provisioned                                    # the built-in release marker
  *
@@ -83,6 +84,20 @@ export function profileDir(root: string, profile: string): string {
 /** `<identity root>/presets` — the preset library. */
 export function presetsRoot(root: string): string {
   return join(root, 'presets')
+}
+
+/**
+ * `<identity root>/profiles/<profile>/.edits` — this profile's own versions of identities it has
+ * edited. A subdirectory of the profile so the three effective files stay the profile's only FLAT
+ * files (the reader only ever looks for `IDENTITY/SOUL/RULES.md`, and the prompt path is unchanged).
+ */
+export function profileEditsRoot(root: string, profile: string): string {
+  return join(profileDir(root, profile), '.edits')
+}
+
+/** `<identity root>/profiles/<profile>/.edits/<id>` — this profile's version of identity `id`. */
+export function profileEditDir(root: string, profile: string, id: string): string {
+  return join(profileEditsRoot(root, profile), id)
 }
 
 /** `<identity root>/presets/<id>/<locale>`. */

@@ -7,14 +7,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  DEFAULT_PRESET_ID,
   applyPresetToProfile,
+  applyProfileEditToProfile,
   deletePreset,
+  dropProfileEdit,
   isValidPresetId,
   listPresets,
   materializePresets,
+  profileDiffersFromPreset,
   readPreset,
+  readProfileEdit,
   readReleasedPresets,
   saveProfileAsPreset,
+  seedProfileIfEmpty,
+  snapshotProfileEdit,
   writePresetFile,
 } from '../src/presets.js'
 import { provisionMarker } from '../src/paths.js'
@@ -56,7 +63,7 @@ describe('materializePresets', () => {
     const result = materializePresets({ assetsDir: assets, root, version: '1.2.3' })
     expect([...result.copied].sort()).toEqual(['assistant', 'coder'])
     expect(existsSync(join(root, 'presets', 'coder', 'zh', 'SOUL.md'))).toBe(true)
-    expect(readReleasedPresets(provisionMarker(root)).sort()).toEqual(['assistant', 'coder'])
+    expect(readReleasedPresets(provisionMarker(root))?.sort()).toEqual(['assistant', 'coder'])
     expect(JSON.parse(readFileSync(provisionMarker(root), 'utf8')).version).toBe('1.2.3')
   })
 
@@ -75,6 +82,32 @@ describe('materializePresets', () => {
     const again = materializePresets({ assetsDir: assets, root, version: '1.0.1' })
     expect(again.copied).toEqual([])
     expect(existsSync(join(root, 'presets', 'coder'))).toBe(false)
+  })
+
+  it('reads a missing marker as "first run" and an unreadable one as "unknown", never as "empty"', () => {
+    // The two are NOT the same fact. No marker at all is the genuine first run (release everything);
+    // a marker that exists but cannot be used means the ids a previous release put down are unknown,
+    // and the caller must be conservative rather than copy over the user's deletions.
+    expect(readReleasedPresets(provisionMarker(root))).toEqual([])
+    writeFileSync(provisionMarker(root), 'not json at all\n', 'utf8')
+    expect(readReleasedPresets(provisionMarker(root))).toBeUndefined()
+    writeFileSync(provisionMarker(root), JSON.stringify({ version: '1.0.0' }), 'utf8')
+    expect(readReleasedPresets(provisionMarker(root))).toBeUndefined()
+  })
+
+  it('does NOT resurrect a deleted preset when the marker is unreadable', () => {
+    materializePresets({ assetsDir: assets, root, version: '1.0.0' })
+    deletePreset(root, 'coder')
+    writeFileSync(provisionMarker(root), '{ not json\n', 'utf8')
+    const again = materializePresets({ assetsDir: assets, root, version: '1.0.1' })
+    expect(again.copied).toEqual([])
+    expect(existsSync(join(root, 'presets', 'coder'))).toBe(false)
+    // The rewrite records the packaged set, so the corruption does not freeze the library forever: a
+    // preset the package GAINS in a later release is still released, while none of these can come back.
+    expect(readReleasedPresets(provisionMarker(root))?.sort()).toEqual(['assistant', 'coder'])
+    mkdirSync(join(assets, 'analyst', 'en'), { recursive: true })
+    writeFileSync(join(assets, 'analyst', 'en', 'IDENTITY.md'), 'analyst/en identity\n')
+    expect(materializePresets({ assetsDir: assets, root, version: '1.1.0' }).copied).toEqual(['analyst'])
   })
 
   it('DOES release a preset the package gained after a previous release', () => {
@@ -195,10 +228,142 @@ describe('the four write actions', () => {
     expect(readFileSync(join(root, 'presets', 'mine', 'zh', 'SOUL.md'), 'utf8')).toBe('profile soul\n')
   })
 
+  it('a save-as with nothing to save leaves no preset directory behind', () => {
+    // A blank profile must not leave an empty id in the library: the next save-as under that id would be
+    // refused as "already exists", and the user's retry (after writing something) would be stuck.
+    for (const name of ['IDENTITY', 'SOUL', 'RULES']) writeFileSync(join(root, 'profiles', 'web', `${name}.md`), '  \n')
+    expect(saveProfileAsPreset({ root, profile: 'web', id: 'empty', locale: 'zh' })?.written).toEqual([])
+    expect(existsSync(join(root, 'presets', 'empty'))).toBe(false)
+    writeFileSync(join(root, 'profiles', 'web', 'IDENTITY.md'), 'now there is text\n')
+    expect(saveProfileAsPreset({ root, profile: 'web', id: 'empty', locale: 'zh' })?.written).toEqual(['IDENTITY.md'])
+  })
+
   it('delete removes the preset directory', () => {
     expect(deletePreset(root, 'coder')).toBe(true)
     expect(existsSync(join(root, 'presets', 'coder'))).toBe(false)
     expect(deletePreset(root, 'coder')).toBe(false)
     expect(deletePreset(root, '../escape')).toBe(false)
+  })
+})
+
+/**
+ * The switch's first enable: the first run releases the preset LIBRARY only, so a profile that was never
+ * given files had nothing to turn on — enabling it left the prompt native and the three editors empty.
+ */
+describe('seeding a profile that has no identity', () => {
+  beforeEach(() => {
+    materializePresets({ assetsDir: assets, root, version: '1.0.0' })
+  })
+
+  it('writes the default preset into the profile when it has no files at all', () => {
+    const seed = seedProfileIfEmpty({ root, profile: 'web', locale: 'zh' })
+    expect(seed).toMatchObject({ seeded: true, preset: DEFAULT_PRESET_ID, resolvedLocale: 'zh', fellBack: false })
+    expect(readFileSync(join(root, 'profiles', 'web', 'IDENTITY.md'), 'utf8')).toBe(`${DEFAULT_PRESET_ID}/zh identity\n`)
+    expect(readFileSync(join(root, 'profiles', 'web', 'SOUL.md'), 'utf8')).toBe(`${DEFAULT_PRESET_ID}/zh soul\n`)
+    expect(readFileSync(join(root, 'profiles', 'web', 'RULES.md'), 'utf8')).toBe(`${DEFAULT_PRESET_ID}/zh rules\n`)
+  })
+
+  it('NEVER overwrites an identity the profile already has', () => {
+    mkdirSync(join(root, 'profiles', 'web'), { recursive: true })
+    writeFileSync(join(root, 'profiles', 'web', 'IDENTITY.md'), 'MINE\n')
+    const seed = seedProfileIfEmpty({ root, profile: 'web', locale: 'zh' })
+    expect(seed).toMatchObject({ seeded: false, written: [] })
+    expect(readFileSync(join(root, 'profiles', 'web', 'IDENTITY.md'), 'utf8')).toBe('MINE\n')
+    // The other two files are NOT filled in either: one non-empty file means the user has an identity.
+    expect(existsSync(join(root, 'profiles', 'web', 'SOUL.md'))).toBe(false)
+  })
+
+  it('treats files that exist but are blank as "no identity", exactly like the prompt assembly does', () => {
+    mkdirSync(join(root, 'profiles', 'web'), { recursive: true })
+    writeFileSync(join(root, 'profiles', 'web', 'IDENTITY.md'), '   \n')
+    const seed = seedProfileIfEmpty({ root, profile: 'web', locale: 'zh' })
+    expect(seed.seeded).toBe(true)
+    expect(readFileSync(join(root, 'profiles', 'web', 'IDENTITY.md'), 'utf8')).toBe(`${DEFAULT_PRESET_ID}/zh identity\n`)
+  })
+
+  it('stands in with the first preset still in the library when the default was deleted', () => {
+    deletePreset(root, DEFAULT_PRESET_ID)
+    const seed = seedProfileIfEmpty({ root, profile: 'web', locale: 'zh' })
+    expect(seed).toMatchObject({ seeded: true, preset: 'coder' })
+    expect(readFileSync(join(root, 'profiles', 'web', 'SOUL.md'), 'utf8')).toBe('coder/zh soul\n')
+  })
+
+  it('reports an empty library instead of inventing an identity', () => {
+    rmSync(join(root, 'presets'), { recursive: true, force: true })
+    const seed = seedProfileIfEmpty({ root, profile: 'web', locale: 'zh' })
+    expect(seed.seeded).toBe(false)
+    expect(seed.error).toContain('no preset is available')
+    expect(existsSync(join(root, 'profiles', 'web'))).toBe(false)
+  })
+})
+
+/**
+ * A profile's OWN version of an identity (`.edits/<id>/`).
+ *
+ * This is what makes "switch away and come back" restore the user's text instead of the library's: the
+ * effective identity is a single flat set, so leaving an identity has to file that set away somewhere
+ * before the next one overwrites it.
+ */
+describe("a profile's own version of an identity", () => {
+  beforeEach(() => {
+    materializePresets({ assetsDir: assets, root, version: '1.0.0' })
+    mkdirSync(join(root, 'profiles', 'web'), { recursive: true })
+    writeFileSync(join(root, 'profiles', 'web', 'IDENTITY.md'), 'MINE identity\n')
+    writeFileSync(join(root, 'profiles', 'web', 'SOUL.md'), 'MINE soul\n')
+    writeFileSync(join(root, 'profiles', 'web', 'RULES.md'), 'MINE rules\n')
+  })
+
+  it('files the effective identity away under the identity being left', () => {
+    const snapshot = snapshotProfileEdit({ root, profile: 'web', id: 'assistant' })
+    expect(snapshot?.written).toEqual(['IDENTITY.md', 'SOUL.md', 'RULES.md'])
+    expect(readFileSync(join(root, 'profiles', 'web', '.edits', 'assistant', 'SOUL.md'), 'utf8')).toBe('MINE soul\n')
+    // Filing away does not disturb the effective files themselves.
+    expect(readFileSync(join(root, 'profiles', 'web', 'SOUL.md'), 'utf8')).toBe('MINE soul\n')
+  })
+
+  it('files nothing away for a blank effective identity', () => {
+    for (const name of ['IDENTITY', 'SOUL', 'RULES']) writeFileSync(join(root, 'profiles', 'web', `${name}.md`), '  \n')
+    expect(snapshotProfileEdit({ root, profile: 'web', id: 'assistant' })?.written).toEqual([])
+    expect(existsSync(join(root, 'profiles', 'web', '.edits', 'assistant'))).toBe(false)
+  })
+
+  it("restores the profile's version over whatever the library now says", () => {
+    snapshotProfileEdit({ root, profile: 'web', id: 'assistant' })
+    writeFileSync(join(root, 'presets', 'assistant', 'zh', 'SOUL.md'), 'LIBRARY soul\n')
+    const restored = applyProfileEditToProfile({ root, profile: 'web', id: 'assistant' })
+    expect(restored?.written).toEqual(['IDENTITY.md', 'SOUL.md', 'RULES.md'])
+    expect(readFileSync(join(root, 'profiles', 'web', 'SOUL.md'), 'utf8')).toBe('MINE soul\n')
+  })
+
+  it('has nothing to read or apply when this profile never had a version', () => {
+    expect(readProfileEdit({ root, profile: 'web', id: 'coder' })).toBeUndefined()
+    expect(applyProfileEditToProfile({ root, profile: 'web', id: 'coder' })).toBeUndefined()
+  })
+
+  it('drops it on request, so the library text applies again', () => {
+    snapshotProfileEdit({ root, profile: 'web', id: 'assistant' })
+    expect(dropProfileEdit({ root, profile: 'web', id: 'assistant' })).toBe(true)
+    expect(dropProfileEdit({ root, profile: 'web', id: 'assistant' })).toBe(false)
+    const applied = applyPresetToProfile({ root, profile: 'web', id: 'assistant', locale: 'zh' })
+    expect(applied?.written).toEqual(['IDENTITY.md', 'SOUL.md', 'RULES.md'])
+    expect(readFileSync(join(root, 'profiles', 'web', 'SOUL.md'), 'utf8')).toBe('assistant/zh soul\n')
+  })
+
+  it('refuses path-like ids on every entry point', () => {
+    expect(snapshotProfileEdit({ root, profile: 'web', id: '../escape' })).toBeUndefined()
+    expect(readProfileEdit({ root, profile: 'web', id: '../escape' })).toBeUndefined()
+    expect(applyProfileEditToProfile({ root, profile: 'web', id: '../escape' })).toBeUndefined()
+    expect(dropProfileEdit({ root, profile: 'web', id: '../escape' })).toBe(false)
+  })
+
+  it('says whether the effective identity differs from the preset it is on', () => {
+    expect(profileDiffersFromPreset({ root, profile: 'web', id: 'assistant', locale: 'zh' })).toBe(true)
+    writeFileSync(join(root, 'profiles', 'web', 'IDENTITY.md'), 'assistant/zh identity\n')
+    writeFileSync(join(root, 'profiles', 'web', 'SOUL.md'), 'assistant/zh soul\n')
+    writeFileSync(join(root, 'profiles', 'web', 'RULES.md'), 'assistant/zh rules\n')
+    expect(profileDiffersFromPreset({ root, profile: 'web', id: 'assistant', locale: 'zh' })).toBe(false)
+    // Reading it from a DIFFERENT locale is not a local edit: every locale the preset ships counts as a
+    // match, so switching the UI language cannot offer a destructive restore of the other language.
+    expect(profileDiffersFromPreset({ root, profile: 'web', id: 'assistant', locale: 'en' })).toBe(false)
   })
 })

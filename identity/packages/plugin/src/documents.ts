@@ -13,8 +13,9 @@
  *
  * @module @avantf/dsh-identity/documents
  */
-import { mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { writeFileAtomically } from './atomic-write.js'
 import type { IdentityLogger } from './log.js'
 import { IDENTITY_FILES, type IdentityFileName } from './paths.js'
 
@@ -45,12 +46,6 @@ interface CacheEntry {
 /** `IDENTITY` → `IDENTITY.md`. */
 export function fileNameOf(name: string): string {
   return `${name}.md`
-}
-
-/** `IDENTITY.md` → `IDENTITY`, or `undefined` when the name is not one of the three. */
-export function identityNameOf(file: string): IdentityFileName | undefined {
-  const bare = file.endsWith('.md') ? file.slice(0, -3) : file
-  return (IDENTITY_FILES as readonly string[]).includes(bare) ? bare as IdentityFileName : undefined
 }
 
 /** The rendered text of one identity directory, plus its per-file provenance. */
@@ -147,26 +142,18 @@ export class IdentityDocuments {
   }
 
   /**
-   * Write one file atomically (temp + rename), so an assembly reading concurrently sees either the old
-   * text or the new one, never a half-written file.
+   * Write one file atomically, so an assembly reading concurrently sees either the old text or the new
+   * one, never a half-written file. The write itself is `writeFileAtomically`'s (shared with the preset
+   * writers); the cache is dropped here, in a `finally`, so a failed write cannot leave it serving text
+   * that is no longer on disk.
    */
   write(name: IdentityFileName, text: string): void {
     // Defence in depth: the callers validate too, and a name that is not one of the three must never
     // be turned into a path segment under the data home.
     if (!(IDENTITY_FILES as readonly string[]).includes(name)) throw new Error(`unknown identity file: ${String(name)}`)
     mkdirSync(this.dir, { recursive: true })
-    const target = this.pathOf(name)
-    const temporary = `${target}.tmp-${String(process.pid)}`
     try {
-      writeFileSync(temporary, text, 'utf8')
-      renameSync(temporary, target)
-    } catch (error) {
-      try {
-        unlinkSync(temporary)
-      } catch {
-        // The temp file may not exist; the original failure is the one that matters.
-      }
-      throw error
+      writeFileAtomically(this.pathOf(name), text)
     } finally {
       this.invalidate()
     }

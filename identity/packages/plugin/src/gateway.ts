@@ -78,15 +78,62 @@ export class IdentityGateway extends TypertRemoteService {
     return result
   }
 
-  /** Apply a preset to the effective identity, then record which preset/locale is in force. */
+  /**
+   * Materialize an identity for the current profile when it has none: the switch's FIRST enable calls
+   * this, so turning the identity on produces something to edit instead of three empty editors over a
+   * prompt that still says `harness:identity` (the first run releases the preset LIBRARY only).
+   *
+   * A no-op once any file carries text — it never overwrites what the user wrote — and a reported error,
+   * never a silent nothing, when the library is empty.
+   */
+  @Remote('ensureProfile')
+  async ensureProfile(args: LocaleArg): Promise<WriteResult> {
+    const { locale } = this.localeInfo(args.locale)
+    const seed = this.state.ensureProfile(locale)
+    if (seed.error !== undefined) return { ok: false, error: seed.error }
+    if (seed.seeded) {
+      this.log.info(`seeded the effective identity for profile ${this.state.profile} from preset ${String(seed.preset ?? '')} (${String(seed.resolvedLocale ?? locale)})`)
+      // Record which preset is in force, exactly like an explicit apply: the dropdown must not say
+      // "custom" over files that came from a preset.
+      await this.remember({ activePreset: seed.preset ?? '', activeLocale: seed.resolvedLocale ?? locale })
+    }
+    return {
+      ok: true,
+      ...(seed.resolvedLocale === undefined ? {} : { resolvedLocale: seed.resolvedLocale }),
+      ...(seed.fellBack === undefined ? {} : { fellBack: seed.fellBack }),
+      ...(seed.written.length === 0 ? {} : { files: seed.written }),
+    }
+  }
+
+  /**
+   * Switch to a preset, then record which preset/locale is in force.
+   *
+   * The identity being LEFT is named to the state, which files its current content away under that id
+   * before the write — that is what makes coming back to it restore the user's own text instead of the
+   * library's. Leaving an identity that no preset owns is refused (see `IdentityState.applyPreset`).
+   */
   @Remote('applyPreset')
   async applyPreset(args: { id: string; locale?: string }): Promise<WriteResult> {
     const { locale } = this.localeInfo(args.locale)
-    const result = this.state.applyPreset(args.id, locale)
+    const result = this.state.applyPreset(args.id, locale, this.settings().activePreset)
     if (result.ok) {
-      this.log.info(`applied preset ${args.id} (${String(result.resolvedLocale ?? locale)}${result.fellBack === true ? ', fell back to en' : ''})`)
-      await this.remember({ activePreset: args.id, activeLocale: result.resolvedLocale ?? locale })
+      this.log.info(result.restoredEdit === true
+        ? `switched to ${args.id}: restored this profile's own version`
+        : `applied preset ${args.id} (${String(result.resolvedLocale ?? locale)}${result.fellBack === true ? ', fell back to en' : ''})`)
+      await this.remember({ activePreset: args.id, activeLocale: result.resolvedLocale ?? this.settings().activeLocale ?? locale })
     }
+    return result
+  }
+
+  /**
+   * Drop this profile's own version of `id` and put the library preset's text back in force — the way
+   * out of a customized identity. Destructive by intent; the page confirms it.
+   */
+  @Remote('resetToPreset')
+  async resetToPreset(args: { id: string; locale?: string }): Promise<WriteResult> {
+    const { locale } = this.localeInfo(args.locale)
+    const result = this.state.resetToPreset(args.id, locale)
+    if (result.ok) this.log.info(`restored the preset text of ${args.id} (dropped this profile's version: ${String(result.dropped === true)})`)
     return result
   }
 
@@ -111,11 +158,21 @@ export class IdentityGateway extends TypertRemoteService {
     return this.state.writePresetFile(args.id, args.name, args.text, locale)
   }
 
-  /** Delete one preset from the library. */
+  /**
+   * Delete one preset from the library (and, with it, this profile's version of it).
+   *
+   * Deleting the identity that is IN FORCE also forgets it: the effective files stay where they are, but
+   * their id is gone, so the state must treat them as unowned from here on — otherwise the next switch
+   * would file them away under a name the dropdown no longer shows.
+   */
   @Remote('deletePreset')
-  deletePreset(args: { id: string }): WriteResult {
+  async deletePreset(args: { id: string }): Promise<WriteResult> {
+    const wasActive = this.settings().activePreset === args.id
     const result = this.state.deletePreset(args.id)
-    if (result.ok) this.log.info(`deleted preset ${args.id}`)
+    if (result.ok) {
+      this.log.info(`deleted preset ${args.id}`)
+      if (wasActive) await this.remember({ activePreset: '', activeLocale: '' })
+    }
     return result
   }
 

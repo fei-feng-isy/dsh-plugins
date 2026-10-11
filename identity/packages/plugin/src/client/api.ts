@@ -50,6 +50,8 @@ export interface StatusView {
   readonly fallbackToNative: boolean
   readonly activePreset: string
   readonly activeLocale: string
+  /** Whether the effective identity differs from what the active preset ships. */
+  readonly hasLocalEdit: boolean
   readonly locale: string
   readonly localeSource: string
   readonly files: readonly FileStatus[]
@@ -88,7 +90,11 @@ export interface IdentityRemote {
   /** No parameters on the wire: the host method takes none (see `directNoArgs` in `wire.ts`). */
   readProfile(): Promise<ProfileView>
   writeProfileFile(args: { name: string; text: string }): Promise<WriteResult>
+  /** Give this profile an identity to start from when it has none (the switch's first enable). */
+  ensureProfile(args: { locale?: string }): Promise<WriteResult>
   applyPreset(args: { id: string; locale?: string }): Promise<WriteResult>
+  /** Drop this profile's own version of `id` and put the preset's text back in force. */
+  resetToPreset(args: { id: string; locale?: string }): Promise<WriteResult>
   saveAsPreset(args: { id: string; locale?: string }): Promise<WriteResult>
   readPreset(args: { id: string; locale?: string }): Promise<PresetView>
   writePresetFile(args: { id: string; name: string; text: string; locale?: string }): Promise<WriteResult>
@@ -151,9 +157,6 @@ export function resolveConfigForm(service: unknown, entryId: string): ConfigForm
   }
 }
 
-/** The fields the page may edit through the config form. */
-export type ConfigField = 'enabled' | 'activePreset' | 'activeLocale'
-
 /**
  * The Remote methods this page calls, in the order the wire face declares them.
  *
@@ -166,7 +169,9 @@ export const REMOTE_METHODS = [
   'listPresets',
   'readProfile',
   'writeProfileFile',
+  'ensureProfile',
   'applyPreset',
+  'resetToPreset',
   'saveAsPreset',
   'readPreset',
   'writePresetFile',

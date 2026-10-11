@@ -16,7 +16,7 @@
  */
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import vm from 'node:vm'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -36,6 +36,20 @@ if (!existsSync(bundlePath)) {
   console.error(`client-smoke: missing ${bundlePath}; run scripts/build-client.mjs first`)
   process.exit(1)
 }
+
+/**
+ * The methods the PAGE calls, read from the client half's own compiled module — never copied here.
+ *
+ * The check below used to carry a hand-written array, and it had already lost `ensureProfile` and
+ * `resetToPreset`, so a mounted face that stopped publishing either one stayed green. Comparing the
+ * mounted contribution against this list (in both directions) covers every method by construction.
+ */
+const clientApiPath = join(repo, 'packages', 'plugin', 'lib', 'client', 'api.js')
+if (!existsSync(clientApiPath)) {
+  console.error(`client-smoke: missing ${clientApiPath}; run scripts/build.mjs (tsc) before this smoke`)
+  process.exit(1)
+}
+const { REMOTE_METHODS } = await import(pathToFileURL(clientApiPath).href)
 
 console.log('avantf-identity client smoke')
 
@@ -136,11 +150,13 @@ if (typeof exports.apply === 'function') {
     mountCalls[0]?.package === '@avantf/dsh-identity',
     JSON.stringify(mountCalls[0]?.package),
   )
+  const mounted = (mountCalls[0]?.descriptors ?? []).map((entry) => entry.method)
   check(
-    'the mounted face publishes every settings method',
-    ['status', 'listPresets', 'readProfile', 'writeProfileFile', 'applyPreset', 'saveAsPreset', 'readPreset', 'writePresetFile', 'deletePreset']
-      .every((method) => mountCalls[0]?.descriptors?.some((entry) => entry.method === method)),
-    JSON.stringify(mountCalls[0]?.descriptors?.map((entry) => entry.method)),
+    'the mounted face publishes exactly the methods the page calls',
+    mounted.length > 0
+      && REMOTE_METHODS.length > 0
+      && JSON.stringify([...mounted].sort()) === JSON.stringify([...REMOTE_METHODS].sort()),
+    `mounted=${mounted.join(',')} called=${REMOTE_METHODS.join(',')}`,
   )
   check('registers exactly one settings section', registered.length === 1, `got ${String(registered.length)}`)
   const section = registered[0]

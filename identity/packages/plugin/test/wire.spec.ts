@@ -17,7 +17,9 @@ const SENT: Record<string, readonly string[]> = {
   listPresets: [],
   readProfile: [],
   writeProfileFile: ['name', 'text'],
+  ensureProfile: ['locale'],
   applyPreset: ['id', 'locale'],
+  resetToPreset: ['id', 'locale'],
   saveAsPreset: ['id', 'locale'],
   readPreset: ['id', 'locale'],
   writePresetFile: ['id', 'name', 'text', 'locale'],
@@ -103,6 +105,11 @@ describe('the Remote descriptors', () => {
   })
 })
 
+interface SchemaLike {
+  readonly name?: string
+  readonly schema?: { readonly def?: { readonly shape?: Record<string, unknown> } }
+}
+
 describe('the contributions', () => {
   it('name this package and both faces', () => {
     const host = hostContribution as unknown as { package?: string; face?: string; invocations?: readonly unknown[] }
@@ -114,15 +121,31 @@ describe('the contributions', () => {
     expect(client.descriptors).toHaveLength(all.length)
   })
 
-  it('declare a schema name for every args and result slot', () => {
-    const host = hostContribution as unknown as { schemas?: readonly { name?: string }[] }
-    const names = new Set((host.schemas ?? []).map((entry) => entry.name))
+  it('registers the args schema of every descriptor with the SAME shape', () => {
+    const host = hostContribution as unknown as { schemas?: readonly SchemaLike[] }
+    const registered = new Map((host.schemas ?? []).map(entry => [entry.name, entry.schema]))
     for (const descriptor of all) {
-      // A method with no parameters has no args slot to declare; the result slots are named below.
-      if (!noArgs(descriptor.method)) expect(names.has(`${descriptor.method}args`), `${descriptor.method}args`).toBe(true)
+      const args = descriptor.parameters?.[0]?.codec?.schema
+      if (noArgs(descriptor.method)) {
+        // Arity is part of the wire contract (see `noArgs` above): a stray `<method>args` entry would
+        // describe a request the host method does not take.
+        expect(registered.has(`${descriptor.method}args`), `${descriptor.method}args must not be declared`).toBe(false)
+        continue
+      }
+      const declaredSchema = registered.get(`${descriptor.method}args`)
+      expect(declaredSchema, `${descriptor.method}args`).toBeDefined()
+      // SHAPE, not just the name: the schema the registry names must be the descriptor's own args
+      // schema — key-for-key and type-for-type, read through zod's public projector. A stale
+      // hand-written copy would agree on the name and disagree here, which is the drift this pins.
+      expect(Object.keys(declaredSchema?.def?.shape ?? {}).sort(), descriptor.method)
+        .toEqual(Object.keys(args?.def?.shape ?? {}).sort())
+      expect(
+        z.toJSONSchema(declaredSchema as never, { io: 'input' }),
+        `${descriptor.method}args schema shape`,
+      ).toEqual(z.toJSONSchema(args as never, { io: 'input' }))
     }
     for (const name of ['statusResult', 'profileResult', 'presetResult', 'writeResult']) {
-      expect(names.has(name), name).toBe(true)
+      expect(registered.has(name), name).toBe(true)
     }
   })
 

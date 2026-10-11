@@ -93,7 +93,9 @@ export const descriptors: readonly InvocationDescriptor[] = [
   directNoArgs('listPresets'),
   directNoArgs('readProfile'),
   direct('writeProfileFile', z.object({ name: text, text: text })),
+  direct('ensureProfile', z.object({ locale: optionalText })),
   direct('applyPreset', z.object({ id: text, locale: optionalText })),
+  direct('resetToPreset', z.object({ id: text, locale: optionalText })),
   direct('saveAsPreset', z.object({ id: text, locale: optionalText })),
   direct('readPreset', z.object({ id: text, locale: optionalText })),
   direct('writePresetFile', z.object({ id: text, name: text, text: text, locale: optionalText })),
@@ -144,6 +146,7 @@ export const statusResultSchema = z.object({
   fallbackToNative: z.boolean(),
   activePreset: text,
   activeLocale: text,
+  hasLocalEdit: z.boolean(),
   locale: text,
   localeSource: text,
   files: z.array(fileStatusSchema),
@@ -182,22 +185,36 @@ interface DeclaredSchema {
   readonly create: () => ZodType
 }
 
-const declaredSchemas: DeclaredSchema[] = []
 const declare = (name: string, schema: ZodType): DeclaredSchema => ({ name, schema, create: () => schema })
 
-declaredSchemas.push(
-  declare('statusargs', z.object({ locale: optionalText })),
+/** The descriptor fields this module reads back when deriving the registered `args` schemas. */
+interface DescriptorLike {
+  readonly method: string
+  readonly parameters: readonly { readonly name: string; readonly codec: { readonly schema: ZodType } }[]
+}
+
+/**
+ * Every schema the host face registers: the `args` slots DERIVED from {@link descriptors}, plus the
+ * four result schemas written by hand.
+ *
+ * The derivation is the point. These entries used to be a second hand-written copy of the nine args
+ * objects, so an edit to one side left the registry describing a request the Remote call no longer
+ * accepted — the same "one wire, two descriptions" drift the sibling trees paid for. The descriptor's
+ * own codec IS the schema the call validates against, so naming it here cannot disagree with it.
+ *
+ * The results stay hand-written on purpose: `direct()` declares `z.any()` for them (a result codec that
+ * rejected a host reply would blank the panel), while the real shapes are the `*ResultSchema`
+ * constants above, which is what the registry and the compatibility gate project.
+ */
+const declaredSchemas: DeclaredSchema[] = [
+  ...(descriptors as unknown as readonly DescriptorLike[]).flatMap(descriptor =>
+    descriptor.parameters.map(parameter => declare(`${descriptor.method}${parameter.name}`, parameter.codec.schema)),
+  ),
   declare('statusResult', statusResultSchema),
   declare('profileResult', profileResultSchema),
-  declare('writeProfileFileargs', z.object({ name: text, text: text })),
   declare('writeResult', writeResultSchema),
-  declare('applyPresetargs', z.object({ id: text, locale: optionalText })),
-  declare('saveAsPresetargs', z.object({ id: text, locale: optionalText })),
-  declare('readPresetargs', z.object({ id: text, locale: optionalText })),
   declare('presetResult', presetResultSchema),
-  declare('writePresetFileargs', z.object({ id: text, name: text, text: text, locale: optionalText })),
-  declare('deletePresetargs', z.object({ id: text })),
-)
+]
 
 const model = {
   services: [

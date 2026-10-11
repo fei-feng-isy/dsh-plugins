@@ -142,8 +142,14 @@ const S: Record<string, CSSProperties> = {
 
 const statusLabel: Record<FileName, string> = { IDENTITY: 'fileIdentity', SOUL: 'fileSoul', RULES: 'fileRules' }
 
-/** Fields the status card needs. A missing one is reported IN the page instead of blanking it. */
-const REQUIRED_STATUS_FIELDS = ['profile', 'dataHome', 'fileCount', 'drop', 'files', 'presets'] as const
+/**
+ * Fields the status card needs. A missing one is reported IN the page instead of blanking it.
+ *
+ * `satisfies` ties this list to `StatusView`, and `test/state.spec.ts` pins `StatusView` to the wire
+ * schema's keys — so a field this page insists on cannot be one the wire never declares (which would
+ * make every status read look "incomplete" instead of showing the real state).
+ */
+const REQUIRED_STATUS_FIELDS = ['profile', 'dataHome', 'fileCount', 'drop', 'files', 'presets'] as const satisfies readonly (keyof StatusView)[]
 
 export function IdentitySection(props: IdentitySectionProps): ReactNode {
   const { t, getRemote, whenMounted, getConfigForm, locale } = props
@@ -161,7 +167,7 @@ export function IdentitySection(props: IdentitySectionProps): ReactNode {
    * never calls a browser dialog (grep over `packages/client/**` finds none), and `window.prompt` is not
    * implemented in an Electron renderer at all — a silent no-op on Desktop.
    */
-  const [confirming, setConfirming] = useState<{ readonly kind: 'apply' | 'delete'; readonly id: string } | undefined>(undefined)
+  const [confirming, setConfirming] = useState<{ readonly kind: 'apply' | 'delete' | 'restore'; readonly id: string } | undefined>(undefined)
   const [naming, setNaming] = useState(false)
 
   const fail = (cause: unknown): void => {
@@ -211,13 +217,20 @@ export function IdentitySection(props: IdentitySectionProps): ReactNode {
     return () => { live = false }
   }, [whenMounted, refresh])
 
-  const toggle = async (next: boolean): Promise<void> => {
-    if (form === undefined) return
+  /**
+   * The envelope every action shares: busy while it runs, a refusal lands in the error line instead of
+   * escaping the handler, and the page re-reads whatever the action changed. `run` only says WHAT to do,
+   * and throws the host's reason when the host refuses.
+   *
+   * `act` adds the rule every REMOTE action needs (do nothing when the namespace never mounted); the
+   * master switch goes through `run` directly, because the switch is the host's config form and a failed
+   * typert mount must not turn the one control on the page into a dead checkbox.
+   */
+  const run = async (action: () => Promise<void>): Promise<void> => {
     setBusy(true)
     try {
-      // The config form's own snapshot subscription keeps `enabled` current; mirroring the click here only
-      // when the host accepted the write means a refusal cannot leave the switch showing an unstored value.
-      if (await form.set('enabled', next)) setEnabled(next)
+      await action()
+      setError(undefined)
       await refresh()
     } catch (cause) {
       fail(cause)
@@ -226,73 +239,84 @@ export function IdentitySection(props: IdentitySectionProps): ReactNode {
     }
   }
 
-  const save = async (): Promise<void> => {
+  const act = async (action: (remote: IdentityRemote) => Promise<void>): Promise<void> => {
     const remote = getRemote()
     if (remote === undefined) return
-    setBusy(true)
-    try {
+    await run(() => action(remote))
+  }
+
+  const toggle = async (next: boolean): Promise<void> => {
+    if (form === undefined) return
+    await run(async () => {
+      // The config form's own snapshot subscription keeps `enabled` current; mirroring the click here only
+      // when the host accepted the write means a refusal cannot leave the switch showing an unstored value.
+      if (await form.set('enabled', next)) setEnabled(next)
+      if (next) {
+        // Turning the identity ON for a profile that has no files yet: the first run releases the preset
+        // LIBRARY only, so without this the switch would enable nothing and the three editors below would
+        // stay empty. The host seeds `assistant` (never overwriting what is already there) and records it
+        // as the active preset; a host too old to have the method simply skips it.
+        const remote = getRemote()
+        if (remote?.ensureProfile !== undefined) {
+          const seeded = await remote.ensureProfile({ locale: locale() })
+          if (!seeded.ok) throw new Error(seeded.error ?? 'seeding the identity failed')
+        }
+      }
+    })
+  }
+
+  const save = async (): Promise<void> => {
+    await act(async (remote) => {
       for (const name of FILES) {
         if (drafts[name] === baseline[name]) continue
         const result = await remote.writeProfileFile({ name, text: drafts[name] })
         if (!result.ok) throw new Error(result.error ?? `writing ${name}.md failed`)
       }
       setNotice(t('saved'))
-      setError(undefined)
-      await refresh()
-    } catch (cause) {
-      fail(cause)
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const applyPreset = async (id: string): Promise<void> => {
-    const remote = getRemote()
-    if (remote === undefined) return
-    setBusy(true)
-    try {
+    // No notice on success: the dropdown shows which preset is now active, and the three editors show what
+    // it wrote. A preset with no file in the requested language still applies (the host falls back to
+    // `en`), and the English text in the editors is the signal for that. The identity being LEFT was filed
+    // away by the host, so coming back here restores the user's own text rather than the preset's — that
+    // is why the dropdown can be selected freely.
+    await act(async (remote) => {
       const result = await remote.applyPreset({ id, locale: locale() })
       if (!result.ok) throw new Error(result.error ?? 'apply failed')
-      // No notice: the dropdown itself shows which preset is now active, and the three editors show what
-      // it wrote. A preset that has no file in the requested language still applies (the host falls back
-      // to `en`), and the English text in the editors is the signal for that.
-      setError(undefined)
-      await refresh()
-    } catch (cause) {
-      fail(cause)
-    } finally {
-      setBusy(false)
+    })
+  }
+
+  /** Throw away this profile's own version of the active identity and take the preset's text back. */
+  const resetToPreset = async (id: string): Promise<void> => {
+    const remote = getRemote()
+    if (remote === undefined) return
+    // A host from before this action has no such method; say so instead of failing on a missing function.
+    if (remote.resetToPreset === undefined) {
+      setError(t('unavailable'))
+      return
     }
+    await act(async (host) => {
+      const result = await host.resetToPreset({ id, locale: locale() })
+      if (!result.ok) throw new Error(result.error ?? 'restore failed')
+    })
   }
 
   const removePreset = async (id: string): Promise<void> => {
-    const remote = getRemote()
-    if (remote === undefined) return
-    try {
+    await act(async (remote) => {
       const result = await remote.deletePreset({ id })
       if (!result.ok) throw new Error(result.error ?? 'delete failed')
-      await refresh()
-    } catch (cause) {
-      fail(cause)
-    }
+    })
   }
 
   const saveAsPreset = async (): Promise<void> => {
-    const remote = getRemote()
-    if (remote === undefined) return
-    setBusy(true)
-    try {
+    // No notice: the new id turns up in the dropdown, which is the visible result of saving as.
+    await act(async (remote) => {
       const result = await remote.saveAsPreset({ id: newPresetId.trim(), locale: locale() })
       if (!result.ok) throw new Error(result.error ?? 'save-as failed')
-      // No notice: the new id turns up in the dropdown, which is the visible result of saving as.
       setNewPresetId('')
-      setError(undefined)
-      await refresh()
-    } catch (cause) {
-      fail(cause)
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const remoteMissing = getRemote() === undefined
@@ -366,6 +390,22 @@ export function IdentitySection(props: IdentitySectionProps): ReactNode {
                 {t('del')}
               </button>
             </div>
+            {/* Leaving an identity keeps what you wrote (the host files it under that id), so the only way
+                back to the preset's own text is here — and it is offered exactly when it would change
+                something. */}
+            {status?.hasLocalEdit === true ? (
+              <div style={S.row as CSSProperties}>
+                <span style={S.hint as CSSProperties}>{t('modified')}</span>
+                <button
+                  type="button"
+                  style={S.button as CSSProperties}
+                  disabled={busy || remoteMissing || activePresetId === ''}
+                  onClick={() => { setConfirming({ kind: 'restore', id: activePresetId }) }}
+                >
+                  {t('restore')}
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div style={S.card as CSSProperties}>
@@ -400,7 +440,7 @@ export function IdentitySection(props: IdentitySectionProps): ReactNode {
         <div style={S.overlay as CSSProperties} role="presentation">
           <div style={S.dialog as CSSProperties} role="dialog" aria-modal="true">
             <h3 style={S.dialogTitle as CSSProperties}>
-              {t(confirming.kind === 'apply' ? 'confirmApply' : 'confirmDelete', { id: confirming.id })}
+              {t(confirming.kind === 'apply' ? 'confirmApply' : confirming.kind === 'restore' ? 'confirmReset' : 'confirmDelete', { id: confirming.id })}
             </h3>
             <div style={S.dialogFooter as CSSProperties}>
               <button type="button" style={S.button as CSSProperties} onClick={() => { setConfirming(undefined) }}>{t('cancel')}</button>
@@ -411,7 +451,7 @@ export function IdentitySection(props: IdentitySectionProps): ReactNode {
                 onClick={() => {
                   const action = confirming
                   setConfirming(undefined)
-                  void (action.kind === 'apply' ? applyPreset(action.id) : removePreset(action.id))
+                  void (action.kind === 'apply' ? applyPreset(action.id) : action.kind === 'restore' ? resetToPreset(action.id) : removePreset(action.id))
                 }}
               >
                 {t('ok')}

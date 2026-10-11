@@ -109,6 +109,10 @@ const { Context } = require(join(peersDir, 'cordis'))
 const promptModule = await import(pathToFileURL(join(peersDir, 'dsh-system-prompt', 'lib', 'index.js')).href)
 const SystemPrompt = promptModule.default
 const PERSONA_PREFIX_SECTION = promptModule.PERSONA_PREFIX_SECTION
+// The protocol's own reader for the `@Remote` markers on a service prototype — the same descriptor the
+// gateway discovers its face from. Used to compare the wire face the plugin registers against the face
+// the mount actually published, instead of a third hand-written method list (see the check below).
+const { remoteMethods } = await import(pathToFileURL(join(peersDir, 'dsh-typert-protocol', 'lib', 'index.js')).href)
 const plugin = await import(pathToFileURL(pluginEntry).href)
 
 // ── the profile's identity files (written BEFORE the mount: the section reads the disk) ─────────
@@ -168,21 +172,48 @@ const stderr = []
 const realConsoleError = console.error.bind(console)
 console.error = (...args) => { stderr.push(args.map(String).join(' ')); realConsoleError(...args) }
 
+/**
+ * The host wire face each mounted Context registered, keyed by that Context.
+ *
+ * `ctx.typert.register(hostContribution)` is what the plugin itself hands over (unconditionally, gate
+ * or no gate), so this capture is the TRUE source for "which Remote methods this mount declares" —
+ * no list is copied into this script.
+ */
+const hostFaces = new Map()
+
 /** Mount the real prompt service + the stand-in packages + (optionally) this plugin. */
-async function boot(enabled) {
+async function boot(enabled, profile = PROFILE) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt, { personaPrefix: NATIVE_PERSONA, personaSuffix: SUFFIX })
   await ctx.plugin(otherPackages())
-  ctx.provide('typert', { register: () => () => undefined })
-  ctx.provide('profileContext', { name: PROFILE, dir: scratch, patchPath: join(scratch, 'cordis.patch.yml'), home: scratch })
+  ctx.provide('typert', { register: (contribution) => { hostFaces.set(ctx, contribution); return () => undefined } })
+  ctx.provide('profileContext', { name: profile, dir: scratch, patchPath: join(scratch, 'cordis.patch.yml'), home: scratch })
   if (enabled !== undefined) {
-    await ctx.plugin({ name: plugin.name, inject: plugin.inject, apply: plugin.apply }, {
+    /**
+     * The plugin's own Config object, kept here so the settings stub below can do what the real host
+     * does: `settings.update(ns, patch)` lands in the profile patch, and the loader commits the volatile
+     * values into the RUNNING plugin. This smoke has no loader, so the observable half — the running
+     * plugin reading the new value — is reproduced by writing the same object the plugin holds.
+     */
+    const config = {
       enabled,
       interpolate: false,
       replaceScope: 'session',
       drop: ['harness:identity', 'deployment:persona-prefix'],
       maxBytes: 65536,
+      activePreset: '',
+      activeLocale: '',
+      profile: '',
+      dataHome: '',
+    }
+    ctx.provide('settings', {
+      update: (namespace, patch) => {
+        if (namespace === 'avantf-identity') Object.assign(config, patch)
+        return Promise.resolve()
+      },
+      describe: () => [],
     })
+    await ctx.plugin({ name: plugin.name, inject: plugin.inject, apply: plugin.apply }, config)
   }
   return ctx
 }
@@ -206,9 +237,26 @@ const onCtx = await boot(true)
 // ── the mount itself ─────────────────────────────────────────────────────────
 const service = onCtx.get('avantfIdentity')
 check('the avantfIdentity service is published', service !== undefined)
-check('the service exposes every Remote method', [
-  'status', 'listPresets', 'readProfile', 'writeProfileFile', 'applyPreset', 'saveAsPreset', 'readPreset', 'writePresetFile', 'deletePreset',
-].every((method) => typeof service?.[method] === 'function'), Object.keys(service ?? {}).filter((k) => typeof service[k] === 'function').join(','))
+// The method set is DERIVED from both real faces, never listed here.
+//
+// The old check was a hand-written array of names plus `.every(...)`, and it had already lost
+// `resetToPreset`: a method the host stopped publishing stayed invisible. The plugin's `wire.ts`
+// descriptors are what it hands to `ctx.typert.register()` (captured above), and `remoteMethods` reads
+// the `@Remote` markers off the service this mount actually published — so the two are compared in
+// BOTH directions, and every method is covered by construction.
+const declaredMethods = (hostFaces.get(onCtx)?.invocations ?? []).map((descriptor) => descriptor.method)
+const markedMethods = service === undefined ? [] : remoteMethods(service).map((marker) => marker.method)
+const callable = declaredMethods.filter((method) => typeof service?.[method] !== 'function')
+check(
+  'every method of the registered wire face is callable on the published service',
+  declaredMethods.length > 0 && callable.length === 0,
+  `declared=${declaredMethods.join(',')} not-callable=${callable.join(',')}`,
+)
+check(
+  'the published service marks exactly the methods the wire face declares',
+  declaredMethods.length > 0 && JSON.stringify([...declaredMethods].sort()) === JSON.stringify([...markedMethods].sort()),
+  `declared=${declaredMethods.join(',')} marked=${markedMethods.join(',')}`,
+)
 
 const native = await nativeCtx.systemPrompt.assemble(MAIN)
 check('native prompt starts with harness:identity', native.sections[0]?.name === 'harness:identity', names(native)[0])
@@ -246,6 +294,56 @@ check(
   readFileSync(editedPreset, 'utf8') === 'USER EDITED PRESET\n',
   JSON.stringify(readFileSync(editedPreset, 'utf8').slice(0, 40)),
 )
+
+// ── the switch's first enable: seed the profile the user has no identity for ──────────────────
+// The first run materializes the preset LIBRARY only (checked above); the effective identity is
+// materialized by `ensureProfile`, which is what the settings page calls when the switch is turned on.
+const freshProfile = 'fresh-profile'
+const freshDir = join(dataHome, 'identity', 'profiles', freshProfile)
+check('a profile that was never given files starts empty', !existsSync(freshDir))
+const seedCtx = await boot(true, freshProfile)
+const seeded = await seedCtx.get('avantfIdentity').ensureProfile({ locale: 'zh' })
+check('ensureProfile seeds it from the built-in default preset', seeded?.ok === true && seeded?.files?.length === 3, JSON.stringify(seeded))
+check(
+  'the seeded text is the library preset’s CURRENT text (a user-edited preset is what gets copied)',
+  existsSync(join(freshDir, 'IDENTITY.md'))
+    && readFileSync(join(freshDir, 'SOUL.md'), 'utf8') === readFileSync(join(dataHome, 'identity', 'presets', 'assistant', 'zh', 'SOUL.md'), 'utf8'),
+  JSON.stringify(readFileSync(join(freshDir, 'SOUL.md'), 'utf8').slice(0, 40)),
+)
+check(
+  'ensureProfile NEVER overwrites a profile that already has an identity',
+  await service.ensureProfile({ locale: 'zh' }).then(() => readFileSync(join(profileDir, 'IDENTITY.md'), 'utf8') === '你是「小身份」。\n'),
+)
+
+// ── switching away from an identity and coming back must keep the user's own text ─────────────
+const freshService = seedCtx.get('avantfIdentity')
+const OWN = 'MY OWN IDENTITY\n'
+await freshService.writeProfileFile({ name: 'IDENTITY', text: OWN })
+const coderText = readFileSync(join(dataHome, 'identity', 'presets', 'coder', 'zh', 'IDENTITY.md'), 'utf8')
+const away = await freshService.applyPreset({ id: 'coder', locale: 'zh' })
+check('switching to another identity applies that preset', away?.ok === true && readFileSync(join(freshDir, 'IDENTITY.md'), 'utf8') === coderText)
+const back = await freshService.applyPreset({ id: 'assistant', locale: 'zh' })
+check(
+  "switching back restores the user's own text, not the preset's",
+  back?.ok === true && readFileSync(join(freshDir, 'IDENTITY.md'), 'utf8') === OWN,
+  JSON.stringify(readFileSync(join(freshDir, 'IDENTITY.md'), 'utf8').slice(0, 40)),
+)
+check(
+  'the preset library itself is never rewritten by an edit',
+  readFileSync(join(dataHome, 'identity', 'presets', 'assistant', 'zh', 'IDENTITY.md'), 'utf8') !== OWN,
+)
+const reset = await freshService.resetToPreset({ id: 'assistant', locale: 'zh' })
+check(
+  'resetToPreset puts the library text back',
+  reset?.ok === true && readFileSync(join(freshDir, 'IDENTITY.md'), 'utf8') === readFileSync(join(dataHome, 'identity', 'presets', 'assistant', 'zh', 'IDENTITY.md'), 'utf8'),
+)
+check('the status reports no local version once reset', (await freshService.status({ locale: 'zh' }))?.hasLocalEdit === false)
+
+// Deleting the identity that is in force must forget it: the effective files stay, but nothing owns them
+// any more, so a later switch cannot file them away under an id the dropdown no longer offers. (That a
+// delete also drops this profile's stored version is pinned in `state.spec.ts`.)
+const removed = await freshService.deletePreset({ id: 'assistant' })
+check('deleting the identity in force forgets it', removed?.ok === true && (await freshService.status({ locale: 'zh' }))?.activePreset === '')
 
 // ── the mechanism ────────────────────────────────────────────────────────────
 const off = await offCtx.systemPrompt.assemble(MAIN)

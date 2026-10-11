@@ -24,10 +24,19 @@ DSH（DeepSeek Harness）的**身份文件**插件：`@avantf/dsh-identity`。
 
 ## 本树专有约定
 
-- **磁盘布局**（`src/paths.ts` 是唯一定义处）：`<data home>/identity/{profiles/<profile>/{IDENTITY,SOUL,RULES}.md, presets/<id>/<locale>/*.md, .provisioned}`。
-  生效身份**只有一份来源** `profiles/<profile>/`；改预设不影响它，只有"应用"写它。
+- **磁盘布局**（`src/paths.ts` 是唯一定义处）：`<data home>/identity/{profiles/<profile>/{IDENTITY,SOUL,RULES}.md, profiles/<profile>/.edits/<id>/*.md, presets/<id>/<locale>/*.md, .provisioned}`。
+  生效身份**只有一份来源** `profiles/<profile>/`；改预设不影响它，只有"应用预设"写它。
+- **切换身份是可逆的**（`src/presets.ts` 的 `snapshotProfileEdit` / `applyProfileEditToProfile` /
+  `dropProfileEdit`）：离开一个身份时把当时的生效内容存进 `.edits/<离开的 id>/`，切回该 id 时**优先**用它
+  （没有才用预设文本）。用户改过的身份就是"他在本 profile 里该身份的内容"，切回来不能变成预设原文（实测报告）。
+  `status.hasLocalEdit`（生效内容 vs 预设文本）决定 UI 何时提供「恢复预设原文」；离开的身份没有预设 id 且内容非空时
+  **拒绝切换**，因为那份内容无处可回退。删除预设会连本 profile 的该身份版本一起删。
 - **只补缺失、永不覆盖**：内置预设的释放记录在 `.provisioned` 的 `presets` 列表里，所以"删掉一个内置预设"是永久的，
   而"包内新增的预设"仍会被补出来。
+- **首次启用补种生效身份**（`src/presets.ts` 的 `seedProfileIfEmpty`，由设置页勾选触发的 `ensureProfile`
+  Remote 动作）：开关打开且 `profiles/<profile>/` 三个文件都为空 ⇒ 用内置 `assistant` 落地一份（默认预设被删
+  则用库里第一个；库为空则报错）；已有**任一**非空文件 ⇒ 一字不写。首次运行（§5.3）只释放预设库，这条才是
+  "启用"真正生效的前提。
 - **数据根的 base-less 兜底是一份刻意的镜像**（`src/paths.ts` 的 `resolveDataHomeMirror`），
   由 `test/paths.spec.ts` 对着**已链接的 base** 逐例比对钉住；改它 = base + identity 两处。
 - **两个必须避开的坑**：绝不把 `remote.avantfIdentity` 写进 cordis `inject`（client entry 会永久 pending、

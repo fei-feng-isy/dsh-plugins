@@ -52,7 +52,10 @@ const zh = {
   unavailable: '身份 Remote 尚未挂载：请重启 dsh 后再试。',
   noConfigForm: '设置表单尚未就绪，开关暂不可用。',
   confirmApply: '是否启用 {id}？确定后新会话生效。',
-  confirmDelete: '删除这个预设？',
+  confirmDelete: '删除这个预设？（你在本 profile 保存的该身份版本也会一起删除）',
+  restore: '恢复预设原文',
+  confirmReset: '把「{id}」恢复为预设原文？你在本 profile 对它做的修改会被丢弃。',
+  modified: '已修改（本 profile）',
   missingFields: '状态字段缺失',
   received: '实收字段',
 }
@@ -75,7 +78,10 @@ const en = {
   unavailable: 'The identity Remote is not mounted yet; restart dsh and try again.',
   noConfigForm: 'The settings form is not ready yet, so the switch is unavailable.',
   confirmApply: 'Enable {id}? It takes effect in a new session.',
-  confirmDelete: 'Delete this preset?',
+  confirmDelete: 'Delete this preset? Your saved version of it in this profile goes too.',
+  restore: 'Restore preset text',
+  confirmReset: 'Restore “{id}” to its preset text? Your changes to it in this profile are discarded.',
+  modified: 'modified (this profile)',
   missingFields: 'status fields missing',
   received: 'received',
 }
@@ -167,17 +173,27 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     label: () => t('nav'),
   }
+  /**
+   * The page's props, built ONCE — not per render.
+   *
+   * Props built inside the component are fresh objects with fresh function identities on every render.
+   * `IdentitySection` memoizes `refresh` on `getRemote` / `locale` and its load effect on `refresh`, so
+   * unstable props made that effect re-run on EVERY render: one Remote read per render, forever, with no
+   * ticket to stop an older response from landing last. The face here reads live state (`state.remote`
+   * appears when the mount settles) and the `t` binding is re-resolved per call, so a single object is
+   * also the correct one.
+   */
+  const pageProps = {
+    t,
+    getRemote: () => state.remote,
+    whenMounted: () => mounted.promise,
+    // The SERVICE is not a form: the form is `service.get(rowId)`. Handing the service straight to the
+    // page made `next.subscribe` throw inside the effect, and React then blanked the whole pane.
+    getConfigForm: (): ConfigFormLike | undefined => resolveConfigForm(ctx.get('configForms'), ROW_ID),
+    locale: activeLocale,
+  }
   const component = (props: { close: () => void }): ReactNode =>
-    h(IdentitySection, {
-      close: props.close,
-      t,
-      getRemote: () => state.remote,
-      whenMounted: () => mounted.promise,
-      // The SERVICE is not a form: the form is `service.get(rowId)`. Handing the service straight to the
-      // page made `next.subscribe` throw inside the effect, and React then blanked the whole pane.
-      getConfigForm: (): ConfigFormLike | undefined => resolveConfigForm(ctx.get('configForms'), ROW_ID),
-      locale: activeLocale,
-    })
+    h(IdentitySection, { close: props.close, ...pageProps })
 
   ctx.slots.inject('settings.section', () => ctx.slots.register(sectionOptions, component))
   log('log', 'registered the settings.section page: id=identity order=25')

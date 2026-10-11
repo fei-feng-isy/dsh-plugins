@@ -22,21 +22,26 @@ import {
   presetLocaleDir,
   presetsRoot,
   profileDir,
-  resolveDataHomeMirror,
   type IdentityFileName,
 } from './paths.js'
 import {
   applyPresetToProfile,
+  applyProfileEditToProfile,
   deletePreset,
+  dropProfileEdit,
   isValidPresetId,
   listPresets,
   materializePresets,
+  profileDiffersFromPreset,
   readPreset,
   resolveAssetsDir,
   saveProfileAsPreset,
+  seedProfileIfEmpty,
+  snapshotProfileEdit,
   writePresetFile,
   type PresetFileText,
   type PresetSummary,
+  type ProfileSeed,
 } from './presets.js'
 
 /** One live snapshot of the plugin's Config, read at the moment of use. */
@@ -68,6 +73,8 @@ export interface IdentityStatusView {
   readonly fallbackToNative: boolean
   readonly activePreset: string
   readonly activeLocale: string
+  /** Whether the effective identity differs from what the active preset ships. */
+  readonly hasLocalEdit: boolean
   readonly locale: string
   readonly localeSource: string
   readonly files: readonly DocumentStatus[]
@@ -225,17 +232,83 @@ export class IdentityState {
     }
   }
 
-  /** Apply a preset to the effective identity (overwrite; the UI owns the confirmation). */
-  applyPreset(id: string, locale: string): { readonly ok: boolean; readonly error?: string; readonly resolvedLocale?: string; readonly fellBack?: boolean; readonly files?: readonly string[] } {
+  /**
+   * Switch the effective identity to `id`.
+   *
+   * `previousId` is the identity being LEFT (the caller's live `activePreset`): its current content is
+   * filed away under that id FIRST, so coming back to it later restores what the user wrote instead of
+   * the library's factory text. The incoming identity is then taken from this profile's own version when
+   * one exists, and from the library preset otherwise.
+   *
+   * `previousId === ''` with a non-empty effective identity means the user hand-wrote content that no
+   * identity owns: switching away would leave it nowhere to come back to, so it is REFUSED with an
+   * explanation rather than silently destroyed.
+   */
+  applyPreset(id: string, locale: string, previousId = ''): { readonly ok: boolean; readonly error?: string; readonly resolvedLocale?: string; readonly fellBack?: boolean; readonly files?: readonly string[]; readonly restoredEdit?: boolean } {
     try {
-      const applied = applyPresetToProfile({ root: this.root, profile: this.profile, id, locale })
-      if (applied === undefined) return { ok: false, error: `preset not found or has no ${FALLBACK_LOCALE} copy: ${id}` }
-      // Refresh the reader: the write went behind its back, and a stale cache would keep serving the
-      // old identity until the mtime happened to move.
-      this.documents.invalidate()
-      return { ok: true, resolvedLocale: applied.resolvedLocale, fellBack: applied.fellBack, files: applied.written }
+      const effective = this.documents.readAll()
+      if (previousId === '' && effective.some((file) => file.present)) {
+        return { ok: false, error: 'this identity has no preset id, so switching away would destroy it; use "save as preset" first' }
+      }
+      // The same read serves the refusal check and the file-away, so a switch reads the effective identity once.
+      if (previousId !== '') snapshotProfileEdit({ root: this.root, profile: this.profile, id: previousId, files: effective })
+      const restored = applyProfileEditToProfile({ root: this.root, profile: this.profile, id })
+      if (restored !== undefined) {
+        this.documents.invalidate()
+        return { ok: true, files: restored.written, restoredEdit: true }
+      }
+      return this.fromLibraryPreset(id, locale)
     } catch (error) {
       return { ok: false, error: reasonOf(error) }
+    }
+  }
+
+  /** Discard this profile's own version of `id` and put the library preset's text back in force. */
+  resetToPreset(id: string, locale: string): { readonly ok: boolean; readonly error?: string; readonly resolvedLocale?: string; readonly fellBack?: boolean; readonly files?: readonly string[]; readonly dropped?: boolean } {
+    try {
+      const dropped = dropProfileEdit({ root: this.root, profile: this.profile, id })
+      const applied = this.fromLibraryPreset(id, locale)
+      return applied.ok ? { ...applied, dropped } : applied
+    } catch (error) {
+      return { ok: false, error: reasonOf(error) }
+    }
+  }
+
+  /**
+   * Write a library preset's text into the effective identity and shape the answer both callers return.
+   *
+   * Always invalidates the reader: the write went behind its back, and a stale cache would keep serving
+   * the old identity until the mtime happened to move.
+   */
+  private fromLibraryPreset(id: string, locale: string): { readonly ok: boolean; readonly error?: string; readonly resolvedLocale?: string; readonly fellBack?: boolean; readonly files?: readonly string[] } {
+    const applied = applyPresetToProfile({ root: this.root, profile: this.profile, id, locale })
+    if (applied === undefined) return { ok: false, error: `preset not found or has no ${FALLBACK_LOCALE} copy: ${id}` }
+    this.documents.invalidate()
+    return { ok: true, resolvedLocale: applied.resolvedLocale, fellBack: applied.fellBack, files: applied.written }
+  }
+
+  /**
+   * Whether the effective identity differs from what preset `id` ships in `locale`.
+   * @param effectiveFiles - the effective files already read, when the caller has them.
+   */
+  hasLocalEdit(id: string, locale: string, effectiveFiles?: readonly DocumentText[]): boolean {
+    return profileDiffersFromPreset({ root: this.root, profile: this.profile, id, locale, ...effectiveFiles === undefined ? {} : { effectiveFiles } })
+  }
+
+  /**
+   * Materialize an effective identity for THIS profile when it has none — what the switch's first
+   * enable asks the host for (see `presets.seedProfileIfEmpty`). Never overwrites the user's files.
+   */
+  ensureProfile(locale: string): ProfileSeed {
+    try {
+      const seed = seedProfileIfEmpty({ root: this.root, profile: this.profile, locale })
+      // Every write in this module invalidates the reader. The seed only writes where there was nothing
+      // to read (a failed `stat` is never cached), so this is not load-bearing today — it is here because
+      // "wrote files, kept serving the old text" must not become possible by accident.
+      this.documents.invalidate()
+      return seed
+    } catch (error) {
+      return { seeded: false, written: [], error: reasonOf(error) }
     }
   }
 
@@ -252,18 +325,38 @@ export class IdentityState {
     }
   }
 
-  /** Delete one preset from the library. */
+  /**
+   * Delete one preset from the library.
+   *
+   * This profile's own version of it goes too: once the identity is out of the dropdown, that version
+   * is unreachable — keeping it would only leave a shadow that a future release could resurrect.
+   */
   deletePreset(id: string): { readonly ok: boolean; readonly error?: string } {
     try {
-      return deletePreset(this.root, id) ? { ok: true } : { ok: false, error: `preset not found: ${id}` }
+      if (!deletePreset(this.root, id)) return { ok: false, error: `preset not found: ${id}` }
+      dropProfileEdit({ root: this.root, profile: this.profile, id })
+      return { ok: true }
     } catch (error) {
       return { ok: false, error: reasonOf(error) }
     }
   }
 
-  /** The header's one call: everything the settings page renders above the editors. */
+  /**
+   * The header's one call: everything the settings page renders above the editors.
+   *
+   * The three effective files are read ONCE here and reused for both the status rows and the
+   * "you have your own version" comparison — reading them a second time was pure work, and this call
+   * also walks the preset library (see `presetSummaries`).
+   */
   status(settings: IdentitySettings, locale: { readonly locale: string; readonly source: string }): IdentityStatusView {
-    const files = this.documents.status()
+    const entries = this.documents.readAll()
+    const files: DocumentStatus[] = entries.map((file) => ({
+      name: file.name,
+      file: file.file,
+      path: this.documents.pathOf(file.name),
+      present: file.present,
+      bytes: file.bytes,
+    }))
     const present = files.filter((file) => file.present)
     return {
       enabled: settings.enabled,
@@ -280,6 +373,8 @@ export class IdentityState {
       fallbackToNative: !settings.enabled || present.length === 0,
       activePreset: settings.activePreset,
       activeLocale: settings.activeLocale,
+      // "You have your own version of the identity in force" — what enables 「恢复预设原文」.
+      hasLocalEdit: settings.activePreset !== '' && this.hasLocalEdit(settings.activePreset, locale.locale, entries),
       locale: locale.locale,
       localeSource: locale.source,
       files,
@@ -290,11 +385,6 @@ export class IdentityState {
   /** The preset locale directory (read-only accessor for diagnostics and tests). */
   presetDir(id: string, locale: string): string {
     return presetLocaleDir(this.root, id, locale)
-  }
-
-  /** The data home the local mirror answers, used before the base loads. */
-  static mirrorDataHome(input: { readonly explicit?: string; readonly configured?: string } = {}): string {
-    return resolveDataHomeMirror(input)
   }
 }
 
