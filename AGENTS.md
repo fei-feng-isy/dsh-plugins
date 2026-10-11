@@ -85,9 +85,12 @@ ERROR/WARN、工具面回答"未就绪 + 原因"、`/mem` · `/mission` 命令�
 
 - **装载**：唯一静态引用是 vendor 并**内联**的零依赖 bootstrap；用 `@avantf/dsh-plugin-base/bootstrap` 的
   `loadFramework()` 解析 → 校验版本 → 动态 import。**源码里绝不静态 import 本包**。
-- **取用**：`PromptFiles` / `familyHome` / `resolveDataHome` / 兼容门禁（`provision` / `verdictOf` /
-  `gatherEvidence` / `compatReport` / `verifyRegisteredFaces`）/ `checkInterface` 等，都从**加载到的那个模块**
-  上取，不复制、不内联。`.` 是显式列举的稳定子集（成员归置与 `./internal` 的规矩见 `base/README.md`）。
+- **取用**：`PromptFiles` / `resolveDataHome` / 兼容门禁（`provision` / `compatReport` /
+  `verifyRegisteredFaces`）/ `checkInterface` 等，都从**加载到的那个模块**上取，不复制、不内联。`.` 是显式列举的
+  稳定子集（成员归置与 `./internal` 的规矩见 `base/README.md`）；`familyHome` / `familyToolsDir` /
+  `familyModelsDir` / `verdictOf` / `gatherEvidence` / `reasonOf` 等**当前零消费者**，它们留在 `.` 上是因为
+  `test/public-surface.spec.ts` 的 `EXTENSION_POINTS` 把"面向插件作者的扩展点"登记下来了——**登记不是消费证明**，
+  那份名单是可 review、可证伪的。
 - **接口世代**：`checkInterface(required, module)` + `readInterfaceRequirement(url)` 比对"构建时所对"与
   "运行时加载到"的世代；构建期把自己的世代 bake 进 `lib/interface-version.json`。
 - **降级义务**：非对称判定与逐项降级见上文「降级」一节——任何情况下**绝不拒载**。
@@ -100,10 +103,11 @@ ERROR/WARN、工具面回答"未就绪 + 原因"、`/mem` · `/mission` 命令�
 
 **归属判据只有一句：这条知识必须能靠一次 base 发版修好吗？**
 
-- **能 → base 拥有它**，插件在运行时从加载到的模块上取。今天从 base 取的有：兼容门禁（`gatherEvidence` /
-  `verdictOf` / `compatReport` / `provision` / `verifyRegisteredFaces`）、envinit provisioner 与三个 provider
-  工厂（archive / model / npm）、`PromptFiles`、家族与数据路径解析、接口门禁（`checkInterface` /
-  `readInterfaceRequirement`）。
+- **能 → base 拥有它**，插件在运行时从加载到的模块上取。今天 `.` 上**被真正取用**的有：兼容门禁的组合层
+  （`provision` / `compatReport` / `verifyRegisteredFaces`）、envinit provisioner 与三个 provider
+  工厂（archive / model / npm）、`PromptFiles`、数据路径解析（`resolveDataHome`）、接口门禁（`checkInterface` /
+  `readInterfaceRequirement`）；`familyHome` / `familyToolsDir` / `familyModelsDir` / `verdictOf` /
+  `gatherEvidence` / `reasonOf` 今天零消费者，属**登记的扩展点**（见上文「取用」）。
 - **不能 → 留在插件里**，但要在本文写明，并接受"改它需要一次**插件**发版"。已记录的本地知识：Typert
   `strict` codec 与端点 / 字段 / 结果符号那几行（wire 面在模块加载时拼装，各插件树各留本地镜像）；插件自己的
   logger（base 解析之前就要用）；各插件的 compat SPEC 与 envinit item 清单；各插件内置的默认提示词正文与

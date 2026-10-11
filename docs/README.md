@@ -9,6 +9,10 @@ place for anything that is about the WORKSPACE as a whole.
 - `CLOSURE-TIERS.md` — the two closure tiers (`pnpm check:fast` / `pnpm check:release`): what each
   covers and does not, the dedup, the measured before/after wall-clock, the mutation check that keeps
   the fast tier honest, and the parallelism verdict for the three trees.
+- `mission-vs-agent-team.md` — `mission/` 与 DSH 内建 Agent Teams（`packages/experimental/agent-team`
+  一族）的对照（功能业务 / 设计实现）**加四项实施计划**（工具结果声明式 schema、工具面按 agent 作用域安装、
+  关闭期「取消即预期」分类、unit 前缀重叠告警）：每项写了改动点、代价与风险、验收命令；收口档位与
+  CHANGELOG 口径在 §4。全部结论来自读码（未跑测试），文末 §5 是证据索引。
 - `identity-files-system-prompt.md` — 需求 + 实施规格（**v2**）：用 `IDENTITY.md` / `SOUL.md` / `RULES.md`
   三个文件**只替换 system prompt 里的身份部分**——按 `system-prompt/assemble` 瀑布具名删除
   `harness:identity` / `deployment:persona-prefix`，其余 20 个包注册的能力指引逐字不动，子代理零影响；
