@@ -1241,7 +1241,10 @@ export class MissionTree {
    * and only `stalled` also increments `stalls`. `spawn-failed`: no worker ever started — charges
    * `spawnFailures` and pushes the next dispatch back by a cooldown. `wake-failed`: an adoption
    * that could not be delivered — back to `ready`, charging neither budget, so the caller's fresh
-   * dispatch proceeds. `hung`: the worker was still alive but produced nothing for a whole window
+   * dispatch proceeds. `unloading`: the host cancelled the start because the plugin is unloading —
+   * like `wake-failed` it is back to `ready` charging NEITHER budget with no cooldown, because a
+   * start that never happened is not a failure of the mission; the host's departure is not the
+   * node's fault. `hung`: the worker was still alive but produced nothing for a whole window
    * (or exceeded the round cap) — like `wake-failed` it charges NEITHER budget and adds no cooldown,
    * because an apparatus outage is not a failed mission and must not spend the budget that ends the
    * node; unlike `wake-failed` it lands in `interrupted`, the ordinary re-queue, and it advances the
@@ -1260,7 +1263,7 @@ export class MissionTree {
    * `undefined` means "no expectation" — the callers that act on a value they just read use that. */
   async reclaim(
     nodeId: string,
-    cause: 'vanished' | 'stalled' | 'hung' | 'spawn-failed' | 'wake-failed' = 'vanished',
+    cause: 'vanished' | 'stalled' | 'hung' | 'spawn-failed' | 'wake-failed' | 'unloading' = 'vanished',
     expectedHolder?: string | null,
   ): Promise<MutationResult<NodeRecord>> {
     return this.withLock(async () => {
@@ -1276,9 +1279,12 @@ export class MissionTree {
           `任务 ${nodeId} 的持有者已从 ${String(expectedHolder)} 变为 ${String(node.claimedBy)}；这次回收已过期`,
         )
       }
-      if (cause === 'wake-failed') {
+      if (cause === 'wake-failed' || cause === 'unloading') {
         // Undo the adoption: the address is already consumed, so the node is an ordinary `ready`
-        // candidate again — exactly what the caller's fresh dispatch needs.
+        // candidate again — exactly what the caller's fresh dispatch needs. `unloading` had no address
+        // to consume: the host aborted a start that never happened, so this is the same reading as
+        // `wake-failed` — nothing to charge, because the mission did not fail and the plugin leaving
+        // is the host's own cancellation.
         const reverted = this.replace(state, node, {
           status: 'ready',
           claimedBy: null,

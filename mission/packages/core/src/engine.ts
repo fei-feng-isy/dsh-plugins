@@ -10,7 +10,7 @@ import {
   DEFAULT_CAPACITY_WAIT_MS,
   DEFAULT_MIN_FREE_MEMORY_BYTES,
 } from './capacity.js'
-import type { CapacityPolicy, DeferredCandidate } from './dispatch.js'
+import { unitsOverlap, type CapacityPolicy, type DeferredCandidate } from './dispatch.js'
 import type { ResourceProbe } from './resources.js'
 import { TERMINAL, type NodeRecord, type WaitingFor } from './types.js'
 
@@ -108,6 +108,15 @@ export interface EngineHooks {
    */
   notifyDeferred?(info: DispatchDeferral): void
   /**
+   * ADVISORY: two nodes in one tree are `running` on scopes that overlap — a container and the scope
+   * inside it (`a` vs `a/b`). The lease is an exact-key comparison and deliberately lets this
+   * through, so this is NOT a scheduling fact: nothing is deferred, interrupted or marked, and the
+   * report exists only so the owner can narrow one of the two units before two executors edit one
+   * directory. Reported once per (root, node pair); the dedup set is in memory, so a restart may
+   * repeat one notice — acceptable for advisory information, and not worth a schema change.
+   */
+  notifyUnitOverlap?(info: UnitOverlapReport): void
+  /**
    * Report nodes waiting for a parked session to be woken; the engine cannot wake anything itself, because a wake is a delivery through `ctx.subagents` that only the host owns and must be authorized by the child's live direct parent.
    * Its whole job is to say a convergence pass is due on an idle session, as a BATCH: an owner that was offline can materialize with several parked nodes at once, and one wake per node would be a wake storm.
    * The host performs the actual wake inside the owner's next turn; a host that cannot wake leaves the address on the node, and this reports again on the next pass.
@@ -157,6 +166,22 @@ export interface HungReport {
   readonly idleMs: number
   /** Consecutive hangs after this reclaim, including it — the streak `isTroubledNode` reads. */
   readonly hungCount: number
+}
+
+/**
+ * Two nodes in one tree are `running` on scopes that overlap: equal (which the exact-key lease
+ * already prevents, so seeing it here means something else went wrong) or one CONTAINED in the other
+ * (`a` vs `a/b`, which the lease deliberately does NOT prevent). Advisory only — the engine changes
+ * nothing about either node — so the owner can decide to rename or narrow a unit.
+ */
+export interface UnitOverlapReport {
+  readonly rootId: string
+  /** The two `running` nodes, ordered by id so the pair is stable across passes. */
+  readonly nodeIds: readonly [string, string]
+  /** The unit of `nodeIds[0]`. */
+  readonly unit: string
+  /** The unit of `nodeIds[1]`. */
+  readonly other: string
 }
 
 /** Why a dispatch is waiting, for the engine's rate-limited diagnostic log. This is NOT an
@@ -271,6 +296,10 @@ export class MissionEngine {
   /** Nodes whose RESERVATION transition has already been logged. A reservation overrides the rate
    *  limit: it changes what the engine admits, so it must not be swallowed by a recent deferral line. */
   private readonly reservedLogged = new Set<string>()
+  /** `<rootId>|<idA>|<idB>` (ids sorted) for the pairs the overlap advisory already reported.
+   *  In-memory on purpose: a restart repeats at most one advisory notice, which is acceptable — the
+   *  information is a heads-up, not a decision, and no durable field is worth it. */
+  private readonly unitOverlapReported = new Set<string>()
 
   constructor(
     private readonly tree: MissionTree,
@@ -622,7 +651,41 @@ export class MissionEngine {
         })
     }
     this.publishWaiting(planned, planReserved)
+    this.reportUnitOverlaps()
     return dispatched
+  }
+
+  /**
+   * Report overlapping scopes among the nodes that are `running` in one snapshot — the advisory the
+   * exact-key lease cannot give, because `a` and `a/b` are two keys and two lanes. Pairs are compared
+   * only WITHIN one tree: the report carries one `rootId`, and a cross-tree pair has two owners who
+   * could not act on one message. Nothing here decides anything — no node is deferred, interrupted or
+   * marked, `waitingFor` is untouched — and the only effect is one hook call per (root, pair), once.
+   */
+  private reportUnitOverlaps(): void {
+    const notify = this.hooks.notifyUnitOverlap
+    if (notify === undefined) return
+    for (const tree of this.tree.trees()) {
+      const runners: { id: string; unit: string }[] = []
+      for (const node of this.tree.nodesOf(tree.rootId)) {
+        if (node.status !== 'running') continue
+        if (node.unit === null || node.unit === '') continue
+        runners.push({ id: node.id, unit: node.unit })
+      }
+      // Sorted so the pair key (and the reported order) is the same on every pass over one snapshot.
+      runners.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      for (let i = 0; i < runners.length; i += 1) {
+        for (let j = i + 1; j < runners.length; j += 1) {
+          const left = runners[i] as { id: string; unit: string }
+          const right = runners[j] as { id: string; unit: string }
+          if (!unitsOverlap(left.unit, right.unit)) continue
+          const key = `${tree.rootId}|${left.id}|${right.id}`
+          if (this.unitOverlapReported.has(key)) continue
+          this.unitOverlapReported.add(key)
+          notify({ rootId: tree.rootId, nodeIds: [left.id, right.id], unit: left.unit, other: right.unit })
+        }
+      }
+    }
   }
 
   /**

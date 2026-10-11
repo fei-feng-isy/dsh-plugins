@@ -146,6 +146,23 @@ export function normalizeUnit(raw: string | null | undefined): string | null {
 }
 
 /**
+ * Whether two NORMALIZED unit keys name overlapping scopes: the SAME scope, or one CONTAINED in the
+ * other (`a` vs `a/b`). The inputs are {@link normalizeUnit} keys, so callers must not hand over raw
+ * model text — normalization is what makes `a//b`, `./a/b` and `a\b` one key before this is asked.
+ *
+ * This is deliberately NOT the lease. Mutual exclusion stays an exact-key comparison
+ * ({@link heldUnits} / {@link unitHolder}), so `a` and `a/b` still run at the same time; containment
+ * is a different SHAPE of the same accident ("two executors on one piece of the tree") that an exact
+ * key cannot see. The engine reports it to the owner as an advisory instead of silently serializing
+ * a directory against every file under it, which would be a scheduling change with no opt-out. The
+ * boundary is the path separator: `a` and `ab` are different scopes, never a prefix match.
+ */
+export function unitsOverlap(a: string, b: string): boolean {
+  if (a === b) return true
+  return a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+}
+
+/**
  * The unit a decomposed child runs under. `undefined` — the spec said nothing — INHERITS the
  * parent's unit, which is the safe default: siblings of one decomposition then cannot run at the
  * same time. An explicit value (including a blank string = "no lease") overrides that.

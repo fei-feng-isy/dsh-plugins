@@ -290,6 +290,27 @@ describe('the failure budget', () => {
     tree.noteSpawnSuccess(id)
     expect(tree.node(id)?.spawnFailures).toBe(0)
   })
+
+  it('returns an unloading-cancelled start to the pool without charging any budget', async () => {
+    // The plugin unloaded in the middle of a start: the worker never materialized, and the
+    // cancellation was the host's own doing. Charging it as `spawn-failed` would burn the
+    // start-failure budget on the host's departure and start a cooldown, so — like `wake-failed` —
+    // it lands in `ready` charging NEITHER budget (nor `stalls`), and the next pump may dispatch it
+    // immediately.
+    const { tree, live } = makeTree()
+    const id = await rootOf(tree)
+    live.add('mission-1')
+    await tree.dispatch(id, 'mission-1')
+    const undone = await tree.reclaim(id, 'unloading')
+    expect(undone.ok).toBe(true)
+    expect(tree.node(id)?.status).toBe('ready')
+    expect(tree.node(id)?.claimedBy).toBeNull()
+    expect(tree.node(id)?.failures).toBe(0)
+    expect(tree.node(id)?.spawnFailures).toBe(0)
+    expect(tree.node(id)?.stalls).toBe(0)
+    // Immediately dispatchable: no cooldown, because no budget was spent.
+    expect(tree.nextDispatchable()?.id).toBe(id)
+  })
 })
 
 describe('the tree-size backstop', () => {

@@ -19,6 +19,11 @@ import {
   type TreeState,
   type TreeStore,
 } from '../src/index.js'
+// Two direct module imports: `unitsOverlap` and the advisory payload live in their own modules and
+// the core's public export list is deliberately unchanged by the advisory (it is not a scheduling
+// fact). Importing the source module keeps this spec asserting the real function, not a copy.
+import { unitsOverlap } from '../src/dispatch.js'
+import type { UnitOverlapReport } from '../src/engine.js'
 
 function memoryStore(): TreeStore & { documents: Map<string, TreeState> } {
   const documents = new Map<string, TreeState>()
@@ -41,6 +46,7 @@ function makeWorld(options: { maxConcurrent?: number } = {}) {
   const store = memoryStore()
   const live = new Set<string>(['owner'])
   const started: string[] = []
+  const overlaps: UnitOverlapReport[] = []
   let sequence = 0
   let tick = 0
   const tree = new MissionTree(store, {
@@ -63,6 +69,7 @@ function makeWorld(options: { maxConcurrent?: number } = {}) {
       },
       interruptWorker: () => Promise.resolve(),
       notifyOwner: () => undefined,
+      notifyUnitOverlap: (info) => { overlaps.push(info) },
     },
     {
       maxConcurrent: options.maxConcurrent ?? 4,
@@ -73,7 +80,7 @@ function makeWorld(options: { maxConcurrent?: number } = {}) {
       minFreeMemoryBytes: DEFAULT_ENGINE_OPTIONS.minFreeMemoryBytes,
     },
   )
-  return { tree, engine, store, live, started }
+  return { tree, engine, store, live, started, overlaps }
 }
 
 /** Root one mission; `unit` is omitted (not passed) unless the caller names it, so the "nothing
@@ -287,6 +294,62 @@ describe('one executor per unit', () => {
     expect(submitted.ok).toBe(true)
     expect(await engine.pump()).toBe(1)
     expect(running(tree).map((node) => node.id)).toEqual([waiting])
+  })
+})
+
+describe('contested scope detection (advisory)', () => {
+  it('⑫ `unitsOverlap` is true for equality or containment, false for a bare string prefix', () => {
+    // Containment is the case the EXACT-key lease deliberately does not catch — the advisory's job.
+    expect(unitsOverlap('a', 'a/b')).toBe(true)
+    expect(unitsOverlap('a/b', 'a')).toBe(true)
+    expect(unitsOverlap('a', 'a/b/c')).toBe(true)
+    // Equality: already serialized by the lease, but overlapping in the pure predicate's sense.
+    expect(unitsOverlap('a', 'a')).toBe(true)
+    // The boundary is the SEPARATOR: `ab` merely shares a prefix with `a` and is a different scope.
+    expect(unitsOverlap('a', 'ab')).toBe(false)
+    expect(unitsOverlap('pkg/a', 'pkg/ab')).toBe(false)
+    expect(unitsOverlap('a/b', 'a/c')).toBe(false)
+    // Blank is "nothing declared", never a container of everything.
+    expect(unitsOverlap('', 'a')).toBe(false)
+  })
+
+  it('⑬ reports ONE advisory when a container and a scope inside it run at the same time', async () => {
+    const { tree, engine, overlaps } = makeWorld({ maxConcurrent: 5 })
+    const rootId = await root(tree, { title: 'lanes' })
+    await tree.dispatch(rootId, 'mission-w1')
+    const children = await split(tree, rootId, 'mission-w1', [
+      { title: 'dir', description: 'd', context: ['why'], unit: 'pkg/a' },
+      { title: 'file', description: 'd', context: ['why'], unit: 'pkg/a/b' },
+    ])
+    // Both ARE admitted in one pass: containment is not a refusal, only a heads-up.
+    expect(await engine.pump()).toBe(2)
+    expect(running(tree)).toHaveLength(2)
+    // Exactly one report, naming the pair and both units.
+    expect(overlaps).toHaveLength(1)
+    const report = overlaps[0]
+    expect(report?.rootId).toBe(rootId)
+    expect([...(report?.nodeIds ?? [])].sort()).toEqual([...children].sort())
+    expect([report?.unit, report?.other].sort()).toEqual(['pkg/a', 'pkg/a/b'])
+
+    // ③ The next pass sees the very same two runners and does NOT repeat the advisory.
+    expect(await engine.pump()).toBe(0)
+    expect(running(tree)).toHaveLength(2)
+    expect(overlaps).toHaveLength(1)
+  })
+
+  it('⑭ does NOT report the advisory for one EXACT scope: the lease serializes them first', async () => {
+    const { tree, engine, overlaps } = makeWorld({ maxConcurrent: 5 })
+    const rootId = await root(tree, { title: 'same' })
+    await tree.dispatch(rootId, 'mission-w1')
+    await split(tree, rootId, 'mission-w1', [
+      { title: 'a', description: 'd', context: ['why'], unit: 'pkg/same' },
+      { title: 'b', description: 'd', context: ['why'], unit: 'pkg/same' },
+    ])
+    // One executor holds the scope; the other waits on the unit lease. Two runners never coexist.
+    expect(await engine.pump()).toBe(1)
+    expect(running(tree)).toHaveLength(1)
+    expect(tree.trees().flatMap((entry) => tree.nodesOf(entry.rootId)).filter((n) => n.status === 'ready')).toHaveLength(1)
+    expect(overlaps).toHaveLength(0)
   })
 })
 
