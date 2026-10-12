@@ -202,6 +202,38 @@ describe('the post-registration check', () => {
     expect(lines).toEqual([])
   })
 
+  it('calls the service METHOD, so a `this`-dependent `get` really runs (the 0.5.1 defect)', () => {
+    // The defect this pins, measured on dsh 0.2.0-rc.2: a live Cordis service hands out PROXIED
+    // methods, and `@deepseek-ai/dsh-tools`' `get` body is `this.view(scope).visible.get(name)`. An
+    // extracted call (`const g = tools.get; g(name, scope)`) runs with `this === undefined`, throws
+    // `Cannot read properties of undefined (reading 'view')`, and the wide catch turned that into
+    // `missing` — every scoped name reported as not-visible on a registry that was answering fine.
+    //
+    // The double therefore refuses to answer unless it is called as a method (`this` bound to the
+    // service, exactly as cordis' shadow-method proxy does). A plain arrow-function double cannot
+    // catch this class of bug at all: it ignores `this` and looks healthy either way.
+    const service = {
+      calls: 0,
+      get(this: { calls: number }, name: string, scope?: unknown): unknown {
+        this.calls += 1
+        return scope === 'agent-1' ? { name } : undefined
+      },
+    }
+    const ctx = { get: (name: string) => (name === 'tools' ? service : undefined) }
+    const { lines, log } = recorder()
+
+    const { missing } = verifyRegisteredFaces({
+      ctx: ctx as unknown as CompatContext,
+      packageId: PACKAGE,
+      toolNames: ['create_job', 'adjust_job'],
+      log,
+      scope: 'agent-1',
+    })
+    expect(service.calls).toBe(2)
+    expect(missing).toEqual([])
+    expect(lines).toEqual([])
+  })
+
   it('falls back to the GLOBAL tools view when `scope` is omitted — the v3 reading, exactly', () => {
     // The scoped `get` below answers ONLY for the scope it was handed. With no `scope` in the input,
     // `verifyRegisteredFaces` must call `tools.get(name)` — the one-argument, global reading every

@@ -3,7 +3,7 @@
  * @module bootstrap
  */
 /** The bootstrap version; the resolved framework must satisfy {@link supportedRange}. */
-export declare const VERSION = "0.5.1";
+export declare const VERSION = "0.5.2";
 /**
  * The framework interval this bootstrap can launch.
  *

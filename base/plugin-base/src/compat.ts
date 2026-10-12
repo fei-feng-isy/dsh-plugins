@@ -911,7 +911,8 @@ export function declaredSchemaKeys(packageId: string, names: readonly string[]):
  * dependency and does not know what a scope IS: the value is passed through opaquely, exactly as the
  * caller's own registry expects it. Omitting it keeps the older reading — the second argument is then
  * `undefined`, which any registry that ignores it (every one that existed through v3) treats exactly as
- * it treated the single-argument call.
+ * it treated the single-argument call. The call is made through `Reflect.apply` with the service as
+ * `this`, because a live service's method must not be extracted (see the note at the call site).
  * @param input - the live context, the real tool names, the logger, and the caller's optional scope.
  * @returns the registrations that did not show up (empty on success).
  */
@@ -951,11 +952,16 @@ export function verifyRegisteredFaces(input: {
   if (isRecord(tools) && typeof tools['get'] === 'function') {
     for (const name of input.toolNames) {
       try {
-        // The property is read once and called with the caller's scope; a `get` that only accepts one
-        // parameter (every registry v3 and earlier knew) simply ignores the second argument, so the
-        // omitted-scope reading is unchanged.
-        const get = tools['get'] as (name: string, scope?: unknown) => unknown
-        if (get(name, input.scope) === undefined) missing.push(name)
+        // The property is read once and APPLIED WITH THE SERVICE AS `this` — the receiver is not
+        // decoration. A live Cordis service hands out PROXIED methods, and the dsh tools registry
+        // implements this one as `this.view(scope).visible.get(name)`: extract the function and call
+        // it bare and `this` is `undefined`, so it throws `Cannot read properties of undefined
+        // (reading 'view')`, falls into the catch below, and EVERY name is reported missing even
+        // though the registry was answering fine. Measured on dsh 0.2.0-rc.2:
+        // `tools.get(n, scope)` resolves while `const g = tools.get; g(n, scope)` throws. A registry
+        // whose `get` ignores the second argument (every generation through v3) is unaffected: the
+        // omitted-scope reading stays the one-argument lookup it always was.
+        if (Reflect.apply(tools['get'], tools, [name, input.scope]) === undefined) missing.push(name)
       } catch {
         missing.push(name)
       }
