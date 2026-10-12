@@ -166,6 +166,12 @@ export interface CompatModule {
     readonly schemaNames?: readonly string[]
     readonly toolNames: readonly string[]
     readonly log: CompatLogger
+    /**
+     * Interface v4: the opaque second argument `tools.get(name, scope)` receives, so a registration
+     * made in ONE agent's scope can be read back. Omitted (or an older base) degrades to the global
+     * one-argument read, which is what every registry before v4 answered.
+     */
+    readonly scope?: unknown
   }): { readonly missing: readonly string[] }
   readDeclaredVersions(manifestUrl: string | URL, packages: readonly string[]): Record<string, string | undefined>
   readBuildVersions(

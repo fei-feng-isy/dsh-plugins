@@ -58,17 +58,15 @@ describe('a typert registry that throws', () => {
     expect(mounted.ctx.get('avantfMission')).toBeDefined()
     expect(mounted.domainOpens).toBe(1)
 
-    // ② all nine tools are registered — nothing was dropped for want of a browser face.
-    expect(mounted.registered.map((tool) => tool.name)).toEqual([
-      'create_mission',
+    // ② the owner's six tools are installed into its scope — nothing was dropped for want of a browser
+    // face. (The executor three live in a WORKER's scope now; `faces.spec.ts` pins that half.)
+    expect(mounted.scopedNamesOf(mounted.owner)).toEqual([
       'adjust_mission',
-      'note_mission',
-      'decompose_mission',
-      'submit_mission',
-      'mission_result',
-      'list_missions',
-      'finish_mission',
       'cancel_mission',
+      'create_mission',
+      'finish_mission',
+      'list_missions',
+      'mission_result',
     ])
 
     // ③ the three commands and the prompt contributions are there.

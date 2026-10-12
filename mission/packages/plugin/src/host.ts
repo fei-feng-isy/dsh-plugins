@@ -2008,11 +2008,21 @@ export class AvantfMissionHost extends TypertRemoteService {
    * name no tool provides, so a hardcoded list would fail every dispatch in a composition without (say)
    * the goal tools. Names a child cannot inherit are caught by the retry in `startChild`.
    *
+   * A scoped installation is invisible to those calls in a SECOND way, and it is the one that matters
+   * now that the mission tools live in the worker's/owner's own scope: `tools.get(name, parent)` still
+   * resolves a name the PARENT registered for itself (the parent's own layer is part of its view), but
+   * `restrict()` only accepts names in the GLOBAL layer — a child does not inherit the parent's own
+   * registrations, so naming one throws "unknown global tool" and costs every dispatch a failed
+   * attempt plus a WARN. The two reads are therefore compared: `global` is the one-argument lookup
+   * (the global layer only), `visible` the parent-scoped one. A name the parent alone holds is exactly
+   * `visible && !global`, and dropping it here says what `startChild`'s retry would otherwise discover
+   * by failing.
+   *
    * A dropped name is a REAL divergence between the face this build intends and the one it sends, so it
    * is reported rather than swallowed: silence here is how the intended face and the delivered one drifted
    * apart unobserved (measured: 11 of 12 names went out). This does NOT double up with `startChild`: that
-   * retry handles a name the PARENT has but the child cannot inherit, while a name dropped here has no
-   * tool at all and could never be carried by any filter.
+   * retry handles a name the PARENT has but the child cannot inherit for a runtime-specific reason,
+   * while a name dropped here is not addressable by `restrict()` at all.
    */
   private deniableFor(
     parent: Agent,
@@ -2024,12 +2034,17 @@ export class AvantfMissionHost extends TypertRemoteService {
     const kept: string[] = []
     const dropped: string[] = []
     for (const name of names) {
-      if (tools.get(name, parent) === undefined) dropped.push(name)
+      const visible = tools.get(name, parent)
+      const global = visible === undefined ? undefined : tools.get(name)
+      if (visible === undefined || global === undefined) dropped.push(name)
       else kept.push(name)
     }
-    if (dropped.length > 0) {
+    // Only a DIVERGENCE is worth a line. In the scoped world an owner's whole face is scope-registered,
+    // so `ownerFaceFor` legitimately comes back empty on every call; warning there would be one line
+    // per assembly for a deployment that is behaving exactly as designed.
+    if (dropped.length > 0 && kept.length > 0) {
       this.log.warn(
-        `${face} tool face: dropped ${String(dropped.length)} name${dropped.length > 1 ? 's' : ''} this deployment does not provide — ${dropped.join(', ')}`,
+        `${face} tool face: dropped ${String(dropped.length)} name${dropped.length > 1 ? 's' : ''} this deployment does not offer globally — ${dropped.join(', ')}`,
       )
     }
     return kept

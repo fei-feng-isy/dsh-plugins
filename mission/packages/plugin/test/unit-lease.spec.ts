@@ -50,6 +50,9 @@ describe('declaring a scope', () => {
 
   it('declares `unit` as an optional parameter, and admits it at the harness boundary', async () => {
     const mounted = await mount()
+    // `decompose_mission` is installed in the WORKER's scope, so one has to exist before the union
+    // ledger can name it (`faces.spec.ts`).
+    mounted.workerFor('mission-00000001')
     const create = mounted.registered.find((entry) => entry.name === 'create_mission')
     expect(create?.parameters).toMatchObject({
       properties: { unit: { type: 'string' } },

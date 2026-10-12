@@ -9,12 +9,13 @@ owner 的对话里。
 
 ## 主要功能
 
-- **9 个模型工具**，按角色分成两张面孔，**并且只出现在能用上它们的会话里**：
+- **9 个模型工具**，按角色分成两张面孔，**并且只注册到能用上它们的会话里**：
   - owner（顶层会话）6 个：`create_mission` / `adjust_mission` / `mission_result` / `list_missions` /
     `finish_mission` / `cancel_mission`
   - executor（任务单元）3 个：`note_mission` / `decompose_mission` / `submit_mission`
-  - 其余会话（例如 Agent Teams 的 teammate、别的插件的子代理）：**一个都看不到**。这是可见性层面的收口，
-    不是授权——越权调用仍会被拒绝。
+  - 其余会话（例如 Agent Teams 的 teammate、别的插件的子代理）：**一个都看不到、也不会被注册**。这是可见性
+    与注册层面的收口，不是授权——越权调用仍会被拒绝。
+  - 需要底座 `@avantf/dsh-plugin-base` 的接口世代 **v4**（`verifyRegisteredFaces` 多了一个可选的作用域入参）。
 - **一段静态系统提示词段**：什么时候该把活交出去 —— 判据是"能不能连验收标准一起交出去"，
   不是复不复杂。
 - **一段引导上下文**：每轮把本会话任务树的状态写进 owner 的 prompt。

@@ -65,16 +65,18 @@ vi.mock('../src/envinit.js', async (importOriginal) => {
 const { callTool, mount } = await import('./mount.js')
 
 const LONE_HIGH = '\uD800'
-const NINE_TOOLS = [
-  'create_mission',
+/**
+ * The tools a WELL-FORMED mount installs for one ordinary OWNER — the surface whose text this file is
+ * about. The executor three live in a WORKER's scope (`faces.spec.ts`), so a mount with no worker has
+ * exactly these; the point here is that the base's kit changes nothing about the surface.
+ */
+const OWNER_TOOLS = [
   'adjust_mission',
-  'note_mission',
-  'decompose_mission',
-  'submit_mission',
-  'mission_result',
-  'list_missions',
-  'finish_mission',
   'cancel_mission',
+  'create_mission',
+  'finish_mission',
+  'list_missions',
+  'mission_result',
 ]
 
 /** `String.prototype.isWellFormed` where the engine has it, and an equivalent scan where it does not. */
@@ -112,7 +114,7 @@ describe('the loaded base carries the two functions (v2)', () => {
   it('uses THEM for every boundary, not the local copy', async () => {
     spies.mode = 'v2'
     const mounted = await mount()
-    expect(mounted.registered.map((tool) => tool.name)).toEqual(NINE_TOOLS)
+    expect(mounted.scopedNamesOf(mounted.owner)).toEqual(OWNER_TOOLS)
 
     // The host's resolved pair IS the loaded kit's: calling it must be the spy.
     expect(mounted.host.wellFormed.text(LONE_HIGH)).toBe('\uFFFD')
@@ -129,7 +131,7 @@ describe('the loaded base lacks them (absent, or older than v2)', () => {
     spies.mode = 'absent'
     const mounted = await mount()
     // Mount behaviour is untouched: the same tools, the same commands.
-    expect(mounted.registered.map((tool) => tool.name)).toEqual(NINE_TOOLS)
+    expect(mounted.scopedNamesOf(mounted.owner)).toEqual(OWNER_TOOLS)
     expect(mounted.commands.map((command) => command.name).sort()).toEqual(['archive', 'clean', 'mission'])
     // The local copy is what repairs — and it repairs.
     expect(spies.deep).toBe(0)
@@ -141,7 +143,7 @@ describe('the loaded base lacks them (absent, or older than v2)', () => {
   it('mounts unchanged and falls back when the base is v1 (no well-formed members)', async () => {
     spies.mode = 'v1'
     const mounted = await mount()
-    expect(mounted.registered.map((tool) => tool.name)).toEqual(NINE_TOOLS)
+    expect(mounted.scopedNamesOf(mounted.owner)).toEqual(OWNER_TOOLS)
     // The v1 member is still usable: the prompt layer is not the subject here, but a mount that lost
     // it would be a degradation of the MOUNT, which is exactly what must not happen.
     expect(mounted.host.wellFormed.text(LONE_HIGH)).toBe('\uFFFD')

@@ -60,11 +60,28 @@ interface Branch {
   properties?: Record<string, { const?: unknown }>
 }
 
-/** The registered definition of one tool, with its output contract. */
+/**
+ * The registered definition of one tool, with its output contract.
+ *
+ * The nine tools live in TWO agent scopes now (six with an owner, three with a worker), so a spec that
+ * wants to inspect any of them has to make both faces exist. This materializes them once per mount
+ * through the fixture's own lifecycle (`create_mission` + the dispatch it starts) and then looks the
+ * definition up in the harness's union ledger.
+ */
 function definitionOf(mounted: Mounted, name: string): Mounted['registered'][number] {
+  materializeBothFaces(mounted)
   const tool = mounted.registered.find((entry) => entry.name === name)
   if (tool === undefined) throw new Error(`tool ${name} is not registered`)
   return tool
+}
+
+const facesReady = new WeakSet<Mounted>()
+function materializeBothFaces(mounted: Mounted): void {
+  if (facesReady.has(mounted)) return
+  facesReady.add(mounted)
+  // The owner face is installed at mount; the worker face needs a real dispatched worker session.
+  // `workerFor` is the fixture's stand-in for one, and it is idempotent.
+  mounted.workerFor('mission-00000001')
 }
 
 function outputOf(mounted: Mounted, name: string): RegisteredOutput {
@@ -95,8 +112,7 @@ async function degradedMount(): Promise<Mounted> {
  * create → adjust (recorded, nobody holds it yet) → dispatch → note → decompose → dispatch the child →
  * submit the child → read it → list → cancel the tree → read the root (the finish gate) → finish.
  */
-async function successReturns(): Promise<Map<string, unknown>> {
-  const mounted = await mount()
+async function successReturns(mounted: Mounted): Promise<Map<string, unknown>> {
   const owner = mounted.owner
   const returns = new Map<string, unknown>()
 
@@ -140,7 +156,7 @@ async function successReturns(): Promise<Map<string, unknown>> {
 describe('each mission tool validates its own declared output schema', () => {
   it('admits one real SUCCESS value per tool', async () => {
     const mounted = await mount()
-    const returns = await successReturns()
+    const returns = await successReturns(mounted)
     for (const name of TOOL_NAMES) {
       const value = returns.get(name)
       expect(value, `${name} produced no success value`).toMatchObject({ ok: true })

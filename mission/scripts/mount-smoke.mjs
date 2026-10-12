@@ -226,21 +226,66 @@ const DEPLOYED_TOOLS = new Set([
   'update_goal',
 ])
 
-const registeredTools = []
+// ── the tool registry, scoped the way the real one is ────────────────────────────────────────────
+//
+// This plugin no longer registers its nine tools globally: it installs a per-role face into the
+// AGENT's scope (`agent.ctx.get('tools').register`), so a session only sees the tools it can call.
+// The stub must therefore model the contract the plugin's own code reads:
+//
+//   * `register` on a scoped context lands in THAT scope's own layer;
+//   * `get(name)` — no scope — is the GLOBAL view (a plain `ctx.tools.get`);
+//   * `get(name, scope)` answers that scope's own layer first, then the global one;
+//   * a scope's layer is NOT inherited by its children.
+//
+// `registeredTools` is the UNION ledger (every layer + global): identity is what `indexOf`-based
+// withdrawal needs, and it lets one assertion still say "this build publishes these nine".
+const globalTools = []
+const scopedTools = new Map()
+const restrictions = []
+
+const registeredTools = [
+  ...globalTools,
+]
+const unionTools = () => [
+  ...globalTools,
+  ...[...scopedTools.values()].flatMap((layer) => [...layer.values()]),
+]
+
 const toolsService = {
   register: (definition) => {
-    registeredTools.push(definition)
-    // Withdraw by identity: a disposer that ignores its argument leaves the gate's throwaway
-    // `__dshCompatProbe` counted as a registered tool.
+    globalTools.push(definition)
     return () => {
-      const index = registeredTools.indexOf(definition)
-      if (index >= 0) registeredTools.splice(index, 1)
+      const index = globalTools.indexOf(definition)
+      if (index >= 0) globalTools.splice(index, 1)
     }
   },
-  get: (toolName) =>
-    registeredTools.find((definition) => definition.name === toolName)
-    ?? (DEPLOYED_TOOLS.has(toolName) ? { name: toolName } : undefined),
+  get: (toolName, scope) => {
+    const own = scope === undefined ? undefined : scopedTools.get(scope)?.get(toolName)
+    if (own !== undefined) return own
+    return globalTools.find((definition) => definition.name === toolName)
+      ?? (DEPLOYED_TOOLS.has(toolName) ? { name: toolName } : undefined)
+  },
 }
+
+/** The scoped tool surface one agent's context hands out; its layer is created on demand. */
+const toolsForScope = (agent) => {
+  const layer = scopedTools.get(agent) ?? new Map()
+  scopedTools.set(agent, layer)
+  return {
+    register: (definition) => {
+      layer.set(definition.name, definition)
+      return () => { layer.delete(definition.name) }
+    },
+    get: (toolName) => layer.get(toolName),
+    restrict: (filter) => {
+      restrictions.push({ agent, filter })
+      return () => undefined
+    },
+  }
+}
+
+/** What the deployment as a whole published, for the "nine tools" assertions below. */
+const publishedTools = () => unionTools()
 
 const promptSections = []
 const promptContexts = []
@@ -262,6 +307,12 @@ const dispatches = []
 const subagentService = {
   startContinuable: (spec) => {
     dispatches.push(spec)
+    // A dispatched unit is a REAL child agent in dsh: its scope exists before the caller gets the
+    // handle, and `agent/created` is what installs this plugin's per-role tool face on it. Without
+    // this the smoke would exercise a deployment where a worker has no mission tools at all —
+    // a shape the scoped install deliberately produces for a plain subagent, but never for a
+    // dispatched unit.
+    spawnDispatchedAgent(spec.childId)
     return Promise.resolve({ childId: spec.childId, messageId: 'msg-1' })
   },
   interrupt: () => undefined,
@@ -314,6 +365,9 @@ const ctx = new Context()
 ctx.provide('tools', toolsService)
 ctx.provide('agents', {
   get: (id) => agents.get(id),
+  // The cold-recovery sweep: a session that already exists when the plugin mounts has to get its
+  // tool face by replay, since it will never see `agent/created` again.
+  list: () => [...agents.values()],
 })
 ctx.provide('subagents', subagentService)
 ctx.provide('systemPrompt', systemPromptService)
@@ -373,8 +427,29 @@ const owner = {
     },
   },
   followup: (message) => ownerReceived.push(message),
+  // Every real agent has its own context; the plugin installs this session's tool face into
+  // `agent.ctx.get('tools')`, so a stub owner without one would simply never receive any tool.
+  ctx: { get: (name) => (name === 'tools' ? toolsForScope(owner) : undefined) },
 }
 agents.set(owner.id, owner)
+
+/**
+ * Register a dispatched unit the way dsh does: the child agent and its scope exist before the
+ * dispatcher gets the handle, and `agent/created` is what installs the per-role face on it.
+ */
+const spawnedWorkers = new Set()
+function spawnDispatchedAgent(childId) {
+  if (spawnedWorkers.has(childId)) return
+  spawnedWorkers.add(childId)
+  const child = {
+    id: String(childId),
+    session: { header: { parentSession: owner.id, origin: 'subagent', delegationDepth: 1 } },
+    ctx: { get: (name) => (name === 'tools' ? toolsForScope(child) : undefined) },
+  }
+  agents.set(child.id, child)
+  // After the scope exists, matching the real `AgentRegistry.announce`.
+  emitAgentCreated(child)
+}
 
 // One worker slot: the second tree's root stays `ready` instead of being dispatched, keeping the
 // wake assertions below independent of core count. stderr is tapped because the gate's verdict
@@ -393,6 +468,16 @@ console.error = (...args) => {
   realConsoleError(...args)
 }
 await ctx.plugin({ name: plugin.name, inject: plugin.inject, apply: plugin.apply }, { maxConcurrent: 1 })
+
+/**
+ * Announce a session the way `AgentRegistry.announce` does. The plugin installs its per-role tool
+ * face from this event (and replays those already present when it mounts), so a fixture that never
+ * emits it would leave every session faceless.
+ */
+function emitAgentCreated(agent) {
+  ctx.emit('agent/created', { agent, source: 'startup' })
+}
+
 const host = ctx.get('avantfMission')
 // The gate REFUSES a proven-incompatible host and registers nothing, so `host` is undefined; say
 // what happened instead of failing later as a property write on undefined.
@@ -471,17 +556,27 @@ check(
 check('service published', ctx.get('avantfMission') !== undefined)
 // The service is Remote-capable: the browser half reaches `snapshot` over the Typert gateway.
 check('service exposes the Remote snapshot method', typeof ctx.get('avantfMission')?.snapshot === 'function')
-check('nine tools registered', registeredTools.length === 9, `got ${String(registeredTools.length)}`)
+/** The names one scope's own layer holds, sorted. The plugin installed them per agent. */
+const namesInScope = (agent) => [...(scopedTools.get(agent)?.keys() ?? [])].sort()
+const OWNER_FACE = ['adjust_mission', 'cancel_mission', 'create_mission', 'finish_mission', 'list_missions', 'mission_result']
+const WORKER_FACE = ['decompose_mission', 'note_mission', 'submit_mission']
+
+// The nine tools are installed PER ROLE now, so the assertions have to name the scope: a top-level
+// session gets the owner six and nothing else, and a dispatched unit gets the executor three.
 check(
-  'the correction tool is among them, and voiding is NOT a model tool',
-  registeredTools.some((tool) => tool.name === 'adjust_mission')
-    && !registeredTools.some((tool) => tool.name === 'cancel_subworks'),
-  registeredTools.map((tool) => tool.name).join(', '),
+  'the tree-rooting session is installed exactly the owner six, in its own scope',
+  JSON.stringify(namesInScope(owner)) === JSON.stringify(OWNER_FACE),
+  JSON.stringify(namesInScope(owner)),
 )
 check(
-  'note_mission is registered for the executor half',
-  registeredTools.some((tool) => tool.name === 'note_mission'),
-  registeredTools.map((tool) => tool.name).join(', '),
+  'the correction tool is on the owner face, and voiding is NOT a model tool',
+  namesInScope(owner).includes('adjust_mission') && !publishedTools().some((tool) => tool.name === 'cancel_subworks'),
+  publishedTools().map((tool) => tool.name).join(', '),
+)
+check(
+  'nothing is registered globally any more — the faces live in scopes',
+  globalTools.length === 0,
+  globalTools.map((tool) => tool.name).join(', '),
 )
 check('guidance context registered', promptContexts.some((c) => c.name === 'avantf:mission-tree'))
 const workCommand = commands.find((command) => command.name === 'mission')
@@ -492,7 +587,7 @@ check(
   JSON.stringify(typertContributions.length),
 )
 
-const tool = (toolName) => registeredTools.find((definition) => definition.name === toolName)
+const tool = (toolName) => publishedTools().find((definition) => definition.name === toolName)
 
 const recordsOf = () => {
   for (const [, records] of units) return records
@@ -522,6 +617,15 @@ if (process.env['SMOKE_DEBUG'] !== undefined) {
 }
 
 check('root dispatched', dispatches.length === 1, `got ${String(dispatches.length)}`)
+
+// A dispatched unit is a real child agent: its scope is where the executor face must land, and the
+// owner's scope must not leak into it.
+check(
+  'a dispatched unit is installed exactly the executor three, in its own scope',
+  dispatches.length === 1
+    && JSON.stringify(namesInScope(agents.get(String(dispatches[0].childId)))) === JSON.stringify(WORKER_FACE),
+  JSON.stringify(namesInScope(agents.get(String(dispatches[0]?.childId)))),
+)
 check(
   'worker tool filter denies messaging but leaves internal delegation open',
   Array.isArray(dispatches[0]?.request?.toolFilter?.deny)
@@ -532,16 +636,16 @@ check(
 )
 // The deny list draws on the deployment's tools and this plugin's registrations: a name from neither
 // makes `tools.restrict()` throw and kills every dispatch.
-const providedTools = new Set([...DEPLOYED_TOOLS, ...registeredTools.map((tool) => tool.name)])
+const providedTools = new Set([...DEPLOYED_TOOLS, ...publishedTools().map((tool) => tool.name)])
 check(
   'worker tool filter only names tools the deployment provides',
   (dispatches[0]?.request?.toolFilter?.deny ?? []).every((name) => providedTools.has(name)),
   JSON.stringify(dispatches[0]?.request?.toolFilter?.deny ?? []),
 )
 check(
-  'worker tool filter denies the owner half of the mission-tree face',
+  'worker tool filter no longer names the owner half — those tools are scope-local now, and a filter that names them would throw on every dispatch',
   ['create_mission', 'adjust_mission', 'mission_result', 'list_missions', 'finish_mission', 'cancel_mission']
-    .every((name) => (dispatches[0]?.request?.toolFilter?.deny ?? []).includes(name)),
+    .every((name) => !(dispatches[0]?.request?.toolFilter?.deny ?? []).includes(name)),
   JSON.stringify(dispatches[0]?.request?.toolFilter?.deny ?? []),
 )
 check(

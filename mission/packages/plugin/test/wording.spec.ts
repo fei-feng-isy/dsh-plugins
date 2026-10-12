@@ -28,6 +28,9 @@ function expectNoTreeWording(text: string, where: string): void {
 describe('the model-facing wording', () => {
   it('declares every tool without naming the shape', async () => {
     const mounted = await mount()
+    // Both faces: six tools live in the owner's scope, three in a worker's (`faces.spec.ts`), so a
+    // worker session has to exist before the union ledger holds all nine.
+    mounted.workerFor('mission-00000001')
     // Non-vacuity: the loop below proves nothing if the registry came back empty.
     expect(mounted.registered).toHaveLength(9)
     for (const tool of mounted.registered) {
@@ -46,6 +49,7 @@ describe('the model-facing wording', () => {
       'ask_user_question', 'job_list', 'job_output', 'job_kill', 'bash', 'web_search', 'web_fetch',
     ]
     const mounted = await mount()
+    mounted.workerFor('mission-00000001')
     expect(mounted.registered).toHaveLength(9)
     for (const tool of mounted.registered) {
       const text = `${tool.description ?? ''} ${JSON.stringify(tool.parameters ?? {})}`

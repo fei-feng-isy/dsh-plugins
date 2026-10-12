@@ -62,16 +62,17 @@ vi.mock('../src/envinit.js', async (importOriginal) => {
 const { mount } = await import('./mount.js')
 const { PROMPT_NAMESPACE, promptDir } = await import('../src/prompt.js')
 
-const NINE_TOOLS = [
-  'create_mission',
+/**
+ * The tools installed into the OWNER's own scope by a mounted plugin. The executor three are installed
+ * into a WORKER's scope when one exists (`faces.spec.ts`), so a mount with no worker has exactly these.
+ */
+const OWNER_TOOLS = [
   'adjust_mission',
-  'note_mission',
-  'decompose_mission',
-  'submit_mission',
-  'mission_result',
-  'list_missions',
-  'finish_mission',
   'cancel_mission',
+  'create_mission',
+  'finish_mission',
+  'list_missions',
+  'mission_result',
 ]
 const THREE_COMMANDS = ['archive', 'clean', 'mission']
 const SECTION = 'avantf:mission-tree-guide'
@@ -111,7 +112,7 @@ describe('a base older than v3 (its PromptFiles ignores `namespace`)', () => {
       // The plugin still ASKS for the namespace; the older base simply ignores the extra field.
       expect(spies.constructed[0]?.namespace).toBe('mission')
       // No degradation: the same tools, commands and sections, and the user's text wins.
-      expect(mounted.registered.map((tool) => tool.name)).toEqual(NINE_TOOLS)
+      expect(mounted.scopedNamesOf(mounted.owner)).toEqual(OWNER_TOOLS)
       expect(mounted.commands.map((command) => command.name).sort()).toEqual(THREE_COMMANDS)
       expect(guide(mounted)).toBe(edited)
     } finally {

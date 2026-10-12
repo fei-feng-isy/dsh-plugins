@@ -69,6 +69,9 @@ function expectNodeWellFormed(node: NodeRecord | undefined): void {
 
 /** Render one registered tool's answer the way the model receives it (the terminal text block). */
 function renderTool(mounted: Mounted, name: string, value: unknown): string {
+  // A mission tool may be installed in the WORKER's scope (the executor half); make both faces exist
+  // so the union ledger can name any of the nine.
+  mounted.workerFor('mission-00000001')
   const tool = mounted.registered.find((entry) => entry.name === name)
   if (tool?.output === undefined) throw new Error(`tool ${name} has no output contract`)
   return tool.output.render({}, value).map((block) => block.text).join('')

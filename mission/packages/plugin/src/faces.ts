@@ -1,7 +1,8 @@
 /**
  * The two tool faces, split so neither caller carries the other's tools: an executor's
- * rides `toolFilter.deny` on dispatch, the owner's is applied at `agent/created` and in the
- * assembly waterfall. Hiding is usability only — the refusals stay the boundary.
+ * rides `toolFilter.deny` on dispatch, the owner's is INSTALLED in that agent's own tool
+ * scope when the agent appears, with the assembly waterfall as the stateless backstop.
+ * Hiding is usability only — the refusals stay the boundary.
  * @module @avantf/dsh-mission/faces
  */
 
@@ -9,6 +10,10 @@
  * What an OWNER must not see: the executor half, which a session that roots trees can never call.
  * The name is read the other way round by the worker-side tables below — this is the deny list
  * applied when the caller is the owner.
+ *
+ * Since the face is installed per agent scope (see {@link MISSION_FACE_TOOLS}), this list is what
+ * the owner's live `restrict()` and the assembly waterfall filter out; it is NOT a registration
+ * list any more.
  */
 export const OWNER_TOOL_DENY: readonly string[] = [
   'note_mission',
@@ -17,9 +22,11 @@ export const OWNER_TOOL_DENY: readonly string[] = [
 ]
 
 /**
- * The owner half of the mission-tree face: the six tools only a session that can root a tree may
- * call. Kept as its own list because it is the deny list for a WORKER (and, with the executor half,
- * the full registration set): the worker-side table below no longer restates it inline.
+ * The owner half of the mission-tree face: the six tools a session that can root a tree gets
+ * REGISTERED in its own scope. Also the deny list for a WORKER (see {@link WORKER_TOOL_DENY}).
+ *
+ * This is the positive install list: `index.ts` registers exactly these into the owner agent's
+ * `agent.ctx.tools.register`, so a session that is neither owner nor worker never sees them at all.
  */
 export const OWNER_FACE_TOOLS: readonly string[] = [
   'create_mission',
@@ -30,20 +37,50 @@ export const OWNER_FACE_TOOLS: readonly string[] = [
   'cancel_mission',
 ]
 
-/** Every mission-tree tool this plugin registers — the two faces, whichever side they land on. */
-export const MISSION_TOOL_NAMES: readonly string[] = [...OWNER_TOOL_DENY, ...OWNER_FACE_TOOLS]
+/** The executor half: the three tools a dispatched worker gets registered in its own scope. */
+export const WORKER_FACE_TOOLS: readonly string[] = [...OWNER_TOOL_DENY]
+
+/** Every mission-tree tool this plugin registers — the two faces, whichever scope they land in. */
+export const MISSION_TOOL_NAMES: readonly string[] = [...OWNER_FACE_TOOLS, ...WORKER_FACE_TOOLS]
 
 /** What a session IS for the tool face: it may root trees, it is one of our dispatched workers, or
  *  it is neither (a teammate, another plugin's child, anyone who is not part of a mission tree). */
 export type MissionSessionRole = 'owner' | 'worker' | 'other'
 
+/** The two halves a session can be given, as {@link missionFaceOf} decides. */
+export type MissionFace = Exclude<MissionSessionRole, 'other'>
+
+/**
+ * Whether this session gets a face at all, and which one.
+ *
+ * ONE judgement for the whole plugin: the registration (`index.ts`'s `installFace`), the live owner
+ * restriction and the assembly waterfall all read this, so the schema a model sees and the scope it
+ * was registered in cannot disagree. `canCreateTree` is the authority check the tools themselves
+ * use; `isWorkerClaim` is the id-shape check that recognizes every worker this plugin ever minted.
+ * Anything else is `undefined` — a teammate subagent carries no mission tool at all.
+ */
+export function missionFaceOf(judge: {
+  canCreateTree(agent: never): boolean
+  isWorkerClaim(sessionId: string): boolean
+}, agent: { id: string }): MissionFace | undefined {
+  if (judge.canCreateTree(agent as never)) return 'owner'
+  return judge.isWorkerClaim(agent.id) ? 'worker' : undefined
+}
+
+/** The tools one face registers, as a positive list. */
+export function faceTools(face: MissionFace): readonly string[] {
+  return face === 'owner' ? OWNER_FACE_TOOLS : WORKER_FACE_TOOLS
+}
+
 /**
  * The mission tools a session of this role must NOT be shown.
  *
- * One judgement for every caller: an owner loses the executor half, one of our workers loses the
- * owner half, and a session that is neither loses both — otherwise a teammate subagent would carry
- * nine tools it can never call, and one of them (`create_mission`) would answer `no-authority` on
- * every attempt. Visibility only: the refusals inside the tool bodies stay the boundary.
+ * The assembly waterfall's half of the judgement: an owner loses the executor half, one of our
+ * workers loses the owner half, and a session that is neither loses both. It stays even though the
+ * registration above already decides what a live scope holds — the waterfall also runs for an agent
+ * this plugin never saw created (a restored/harness-owned session) and for runtimes whose scoped
+ * registry is unavailable, where hiding is the only thing left. Visibility only: the refusals inside
+ * the tool bodies stay the boundary.
  */
 export function hiddenMissionTools(role: MissionSessionRole): readonly string[] {
   switch (role) {

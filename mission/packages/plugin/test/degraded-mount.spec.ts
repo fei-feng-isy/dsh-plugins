@@ -35,13 +35,14 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** The nine tools the mount must keep registering even when nothing can be read or written. */
+/**
+ * The tools a mounted plugin installs into the OWNER's scope — all six of them, even when nothing can
+ * be read or written. The executor half is installed into a WORKER's scope when a worker exists, so it
+ * is deliberately absent here (see `faces.spec.ts` for the scoped contract).
+ */
 const TOOL_NAMES = [
   'create_mission',
   'adjust_mission',
-  'note_mission',
-  'decompose_mission',
-  'submit_mission',
   'mission_result',
   'list_missions',
   'finish_mission',
@@ -66,7 +67,7 @@ describe('a storage domain that will not open', () => {
       expect(mounted.ctx.get('avantfMission')).toBeDefined()
       expect(mounted.host.degradedReason()).toContain('could not be opened')
 
-      // ② the whole tool surface is still registered.
+      // ② the owner's whole tool surface is still installed (degraded says nothing about the face).
       expect(mounted.registered.map((tool) => tool.name)).toEqual(TOOL_NAMES)
       expect(mounted.commands.map((command) => command.name).sort()).toEqual(['archive', 'clean', 'mission'])
 

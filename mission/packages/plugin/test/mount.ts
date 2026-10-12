@@ -15,7 +15,8 @@ import { join } from 'node:path'
 import { AvantfMissionHost } from '../src/host.js'
 import { createTreeStore, type TreesTable } from '../src/store.js'
 import type { TreeDocument } from '../src/domain.js'
-import { apply as applyPlugin, inject, name } from '../src/index.js'
+import { apply as applyPlugin, inject, name, TEST_FACE_SEAM } from '../src/index.js'
+import { sharedAgentScopes, type ScopedTools, type ToolDefinition } from './agentScope.js'
 import { checkEventFilters, type SentEventFilter } from './sessionQueryContract.js'
 
 // The plugin's environment initialisation loads the family base `@avantf/dsh-plugin-base` through the
@@ -63,9 +64,14 @@ interface StubInbox {
   remove: (messageId: string) => boolean
 }
 
+/**
+ * The scoped context one stub carries, as `agent.ctx.get('tools')` answers it. Spelled structurally
+ * (`get(name)`) so the plugin's own `agent.ctx.get('tools')` read is typed at this boundary without
+ * a cast to the real `Agent`.
+ */
 export interface StubAgent {
   id: string
-  /** The agent-scoped context, as `tools.restrict()` requires. Set by `mount()`. */
+  /** The agent-scoped context, as `tools.restrict()` / `tools.register()` require. Set by `mount()`. */
   ctx?: { get: (name: string) => unknown }
   header: { origin?: 'subagent'; delegationDepth?: number }
   session: { header: { origin?: 'subagent'; delegationDepth?: number } }
@@ -74,14 +80,61 @@ export interface StubAgent {
   received: Message[]
 }
 
-export function agent(id: string, header: StubAgent['header'] = {}): StubAgent {
+/**
+ * The ONE scoped-tool registry every stub in this harness shares (see `agentScope.ts` for the
+ * contract it mirrors). It has to be shared, not per-`mount()`: an agent OBJECT is the scope key the
+ * plugin's `installFace` addresses, and the specs build their own stubs (`agent('mission-…')`,
+ * `executorFor(...)`) and hand them to tool calls. `index.ts` binds its installer into this registry
+ * when it mounts; before that a scope resolves only from the global layer.
+ */
+const scopes = sharedAgentScopes()
+
+/**
+ * Seeded deployment ("harness") global tools that are still live in the shared registry, with the
+ * disposers that own them. Module-level because the registry outlives one `mount()`: the next mount
+ * empties this list BEFORE it seeds its own tools, so a mount declaring `tools: []` never sees a
+ * previous mount's global names.
+ */
+const liveHarnessDisposers: (() => void)[] = []
+
+/** The scoped context handed to one stub, memoized so `agent.ctx` is a stable identity. */
+const scopedContexts = new WeakMap<StubAgent, StubAgent['ctx']>()
+
+/** Give a stub its scoped context, idempotently (the same object every time for the same subject). */
+function assignScoped(subject: StubAgent): StubAgent['ctx'] {
+  const existing = scopedContexts.get(subject)
+  if (existing !== undefined) {
+    subject.ctx = existing
+    return existing
+  }
+  const built = scopes.contextOf(subject)
+  scopedContexts.set(subject, built)
+  // The plugin reads `agent.ctx` as a PROPERTY (`Agent.ctx`), so the stub has to carry it too — the
+  // memo map only guarantees the identity, it does not put the field on the object.
+  subject.ctx = built
+  return built
+}
+
+/**
+ * Infer the descriptor a session with this id really carries. A mission claim id IS a dispatched
+ * worker's session id (see `src/claims.ts`), so a stub built from one is a subagent by construction —
+ * `canCreateTree` must say no for it, exactly as it does in a live profile. Anything else defaults to
+ * a top-level session.
+ */
+function headerFor(id: string, header?: StubAgent['header']): StubAgent['header'] {
+  if (header !== undefined) return header
+  return /^mission-[0-9a-f]{8}$/u.test(id) ? { origin: 'subagent', delegationDepth: 1 } : {}
+}
+
+export function agent(id: string, header?: StubAgent['header']): StubAgent {
+  const described = headerFor(id, header)
   const received: Message[] = []
   const nextTurn: Message[] = []
   const nextStep: Message[] = []
-  return {
+  const stub: StubAgent = {
     id,
-    header,
-    session: { header },
+    header: described,
+    session: { header: described },
     received,
     inbox: {
       nextTurn,
@@ -105,6 +158,10 @@ export function agent(id: string, header: StubAgent['header'] = {}): StubAgent {
       received.push(input)
     },
   }
+  // Every stub carries a scoped context (the real Agent always has one). It is not ANNOUNCED yet:
+  // only `mount()`'s hub agents are, which is what makes "no agent ⇒ no registered face" provable.
+  assignScoped(stub)
+  return stub
 }
 
 /**
@@ -142,8 +199,22 @@ export interface Mounted {
   owner: StubAgent
   dispatched: Dispatched[]
   interrupts: string[]
-  /** Scoped restrictions the host applied through an agent's own context. */
-  restrictions: { agentId: string; filter: { deny?: readonly string[]; allow?: readonly string[] } }[]
+  /** Scoped restrictions THIS mount's host applied through an agent's own context, in order. */
+  restrictions: () => { agentId: string; filter: { deny?: readonly string[]; allow?: readonly string[] } }[]
+  /**
+   * The LIVE agent behind one session id, created on first ask and announced (so its face is
+   * installed) — the fixture's stand-in for a dispatcher that materializes a worker session.
+   * `makeLive` is the same thing under its older name.
+   */
+  workerFor: (sessionId: string) => StubAgent
+  /** Install the face of an inline stub (see `ensureFace` at its definition). */
+  ensureFace: (subject: StubAgent | undefined) => void
+  /**
+   * Install the caller's own face if it has none yet — for the many cases that build a worker stub
+   * inline (`agent('mission-…')`, `executorFor(...)`) instead of going through `makeLive`. A real
+   * session's face is installed when it is announced; this is the fixture's shortcut for "it calls a
+   * tool, so it exists". Idempotent, and a no-op for a session with no mission face.
+   */
   /** What `sessionQuery.listSessions()` reports, for `/archive` and `/clean` tests. */
   listedSessions: { header: Record<string, unknown>; live: boolean }[]
   /**
@@ -267,11 +338,29 @@ export interface Mounted {
    * wants a dispatched worker to keep holding its node — rather than being
    * reclaimed as vanished — has to put it in the registry.
    */
-  makeLive: (sessionId: string) => StubAgent
+  makeLive: (sessionId: string, header?: StubAgent['header']) => StubAgent
   /** Let every start held by `deferStart` finish (the child accepts its prompt). */
   releaseStarts: () => void
   /** Let every delivery held by `deferSend` finish (the message reaches the child). */
   releaseSends: () => void
+  /**
+   * The scoped registry behind one agent's own context. `agentCtxOf` gives EVERY agent stub one, so
+   * a case can register/inspect through the same object the plugin's `installFace` drives.
+   */
+  scopedTools: (subject: StubAgent) => ScopedTools
+  /** The mission tools currently registered in ONE agent's OWN scope, sorted. */
+  scopedNamesOf: (subject: StubAgent) => string[]
+  /**
+   * Every tool a face registered into a scope, in registration order, as
+   * `{ agentId, name }` — what `agent/disposed` and the plugin's `ctx.effect` must unwind. The
+   * GLOBAL registrations (the compat probe, a host tool) are deliberately absent: this list is the
+   * scoped installation's ledger.
+   */
+  installedFaces: () => { agentId: string; name: string }[]
+  /** Announce one agent, exactly as `AgentRegistry.announce` does (`agent/created`). */
+  emitCreated: (subject: StubAgent) => void
+  /** Dispose one agent, exactly as the registry does (`agent/disposed`). */
+  emitDisposed: (subject: StubAgent) => void
   /** Host-facing Typert contributions the plugin registered. */
   typertContributions: unknown[]
   /** How many times the storage domain was opened — one per successful mount. */
@@ -289,6 +378,13 @@ export async function mount(
   options: {
     tools?: string[]
     spill?: boolean
+    /**
+     * Mount with an EMPTY agent registry: no owner in `live` when `apply` runs, so the cold-resume
+     * sweep has nothing to install into. This is how a case proves the semantics this fixture exists
+     * for — no agent ⇒ no mission tool registered anywhere (the old global registration would have
+     * put all nine in the global layer).
+     */
+    noAgents?: boolean
     /**
      * Names the runtime REFUSES to restrict, as `tools.restrict()` does for a tool
      * the child cannot inherit (an agent-plane registration). Modelling it is what
@@ -389,6 +485,13 @@ export async function mount(
     seedListedSessions?: readonly { header: Record<string, unknown>; live: boolean }[]
   } = {},
 ): Promise<Mounted> {
+  // A new mount is a new registry lifecycle: the shared scoped registry forgets the previous mount's
+  // announcement set and idempotency ledger, so an agent id it installed (every owner is 'owner') is
+  // installable again here.
+  scopes.startMount()
+  // …and every seeded deployment tool from an earlier mount goes with it, before this mount seeds its
+  // own: a mount that declares `tools: []` must not still see a global `send_message`.
+  for (const dispose of liveHarnessDisposers.splice(0)) dispose()
   const records: Records = new Map()
   const dispatched: Dispatched[] = []
   /**
@@ -400,7 +503,6 @@ export async function mount(
    */
   const executorOf = new Map<string, { sessionId: string; prompt: string }>()
   const interrupts: string[] = []
-  const restrictions: Mounted['restrictions'] = []
   const sent: Mounted['sent'] = []
   /** Starts held open by `deferStart`, released by the returned `releaseStarts`. */
   const pendingStarts: (() => void)[] = []
@@ -443,41 +545,57 @@ export async function mount(
   const spillFiles: string[] = []
 
   const owner = agent('owner')
-  // An agent-scoped tool face: `restrict()` is only legal on a scoped context, and this
-  // records what the host asked for.
-  owner.ctx = {
-    get: (name: string) => name === 'tools'
-      ? {
-        restrict: (filter: { deny?: readonly string[]; allow?: readonly string[] }) => {
-          restrictions.push({ agentId: owner.id, filter })
-          return () => undefined
-        },
-      }
-      : undefined,
-  }
-  live.set(owner.id, owner)
+  // The agents THIS mount knows about. The scoped registry is shared across mounts (an agent object
+  // is the scope key), so every per-mount view filters by membership in this set rather than by id.
+  const mountAgents = new Set<StubAgent>([owner])
+  // Unless a case asks for a registry with NO agents at all, the owner is live before the plugin
+  // mounts: `apply`'s cold-resume sweep (`ctx.agents.list()`) is what installs its face, exactly as
+  // after a restart. `noAgents` is how a case proves "no agent ⇒ no mission tool registered".
+  if (options.noAgents !== true) live.set(owner.id, owner)
 
-  const toolNames = new Set(options.tools ?? ['send_message', 'subagent', 'subagent_fork', 'create_goal', 'get_goal', 'update_goal'])
   const toolsService = {
-    register: (definition: { name: string; execute: (args: unknown, exec: unknown) => Promise<unknown> }) => {
+    register: (definition: ToolDefinition) => {
       registered.push(definition)
       // Withdraw by IDENTITY: the compatibility gate registers a throwaway `__dshCompatProbe` and
       // immediately disposes it, so a disposer that ignored its argument would leave a tenth tool in
       // `registered` and make every "exactly nine tools" assertion fail for the wrong reason.
+      const dispose = scopes.global.register(definition)
       return () => {
         const index = registered.indexOf(definition)
         if (index >= 0) registered.splice(index, 1)
+        dispose()
       }
     },
-    // Visibility per agent, as the real registry answers it: the deployment's own tools
-    // PLUS whatever this plugin has registered by now (a face list is filtered through
-    // this before `restrict()` is called, because an unknown name throws).
-    get: (toolName: string) => (
-      toolNames.has(toolName) || registered.some((entry) => entry.name === toolName)
-        ? { name: toolName }
-        : undefined
-    ),
+    // Visibility per agent, as the real registry answers it: the deployment's own tools PLUS whatever
+    // has been registered by now (globally, or in the scope the caller named). Omitted scope = the
+    // GLOBAL view, which is the read `restrict()` and the compat check judge by. The deployment's own
+    // names (`options.tools`, the harness's `send_message` / `subagent` / goal tools) are seeded into
+    // the global layer so `deniableFor` finds them exactly where a real composition puts them.
+    get: (toolName: string, scope?: unknown) => scopes.get(toolName, scope),
   }
+  // The deployment's own global tools. They are seeded into the SHARED registry, so each mount keeps
+  // its own disposers and releases them when the NEXT mount starts: without that, a previous mount's
+  // `send_message` would still be a global name in a mount that declares `tools: []`.
+  const harnessTools = options.tools === undefined
+    ? ['send_message', 'subagent', 'subagent_fork', 'create_goal', 'get_goal', 'update_goal']
+    : options.tools
+  for (const harnessTool of harnessTools) {
+    liveHarnessDisposers.push(
+      scopes.global.register({ name: harnessTool, execute: () => Promise.resolve(undefined) }),
+    )
+  }
+  // `registered` is the harness's UNION ledger — every definition that exists in ANY scope, so
+  // `callTool` can name a worker tool without knowing which scope holds it. It is NOT the global
+  // layer: `toolsService.get(name)` above still resolves only global registrations.
+  scopes.setRegisterSink({
+    registered: (definition) => {
+      if (!registered.some((entry) => entry.name === definition.name)) registered.push(definition)
+    },
+    withdrawn: (definition) => {
+      const index = registered.indexOf(definition)
+      if (index >= 0) registered.splice(index, 1)
+    },
+  })
 
   let open = false
   let domainOpens = 0
@@ -548,7 +666,31 @@ export async function mount(
 
   const ctx = new Context()
   ctx.provide('tools', toolsService)
-  ctx.provide('agents', { get: (id: string) => live.get(id) })
+  ctx.provide('agents', {
+    get: (id: string) => live.get(id),
+    // The cold-resume sweep `apply` runs: agents that exist before the plugin mounts get their face
+    // here, since they never pass `agent/created` again (the real registry's `list()`).
+    list: () => [...live.values()],
+  })
+
+  /**
+   * Announce one agent the way the real registry does (`AgentRegistry.announce` → `agent/created`):
+   * it must be LIVE first, and its scoped context must exist before the plugin's listener runs — the
+   * listener registers the face INTO that scope. Used by `makeLive` / `makeOwner` and by tests that
+   * drive the event themselves. Idempotent per agent id (the registry's own rule).
+   */
+  const announce = (subject: StubAgent): void => {
+
+    assignScoped(subject)
+    mountAgents.add(subject)
+    live.set(subject.id, subject)
+    if (scopes.isAnnounced(subject)) return
+    // Record the announcement (a second `announce` is refused, and `bindInstaller` replays what was
+    // announced before the plugin mounted), then emit the event: the plugin's OWN listener installs
+    // the face, exactly as it does in a live host.
+    scopes.markAnnounced(subject)
+    ctx.emit('agent/created', { agent: subject, source: 'startup' } as never)
+  }
   ctx.provide('subagents', {
     // Steering one running worker: the correction path.
     sendMessage: (
@@ -762,6 +904,22 @@ export async function mount(
     })
   }
 
+  // The test face seam: `apply` reads this optional service and hands over its OWN face installer, so
+  // an agent this fixture announces (rather than one the harness registry announces) still takes the
+  // plugin's installation path — including the `missionFaceOf` decision. `install` is therefore bound
+  // before `apply` runs, and the shared scopes replay every pre-mount announcement into it.
+  let installFromPlugin: ((agent: unknown) => void) | undefined
+  ctx.provide(TEST_FACE_SEAM, {
+    install: (installer: (agent: unknown) => void, installed: Map<string, (() => void)[]>) => {
+      installFromPlugin = installer
+      // `apply` calls this BEFORE its cold-resume sweep, so clearing here is what makes a NEW mount
+      // start installable even though the fixture's registry outlives one `mount()`: an agent id the
+      // previous mount installed (its owner is 'owner' every time) must not look installed to this one.
+      installed.clear()
+      scopes.bindInstalled(installed)
+    },
+  })
+
   await ctx.plugin({ name, inject, apply: applyPlugin }, {
     // A test must NEVER read (or delete from) the developer's real projection cache, and an
     // unspecified root would default to `<DSH_HOME>/storages/session_projcache/sessions`. Point it
@@ -769,6 +927,10 @@ export async function mount(
     projectionCacheRoot: join(tmpdir(), 'avantf-mission-projcache-absent'),
     ...options.pluginConfig,
   })
+  if (installFromPlugin === undefined) throw new Error('the plugin did not hand over its face installer')
+  // A stub announced before the plugin mounted (the fixture builds the owner first) is replayed here,
+  // which also rebuilds the plugin's ledger after `bindInstaller` cleared the previous mount's.
+  scopes.bindInstaller(installFromPlugin)
   const host = ctx.get('avantfMission') as unknown as AvantfMissionHost
   // Most tests want a fully opened engine. `awaitReady: false` is for the DEGRADED-mount case: it
   // reproduces the real fire-and-forget shape, where `apply` kicks `start()` off and NOTHING awaits
@@ -784,6 +946,39 @@ export async function mount(
     payload: unknown,
     next: () => Promise<unknown>,
   ) => Promise<{ kind: string; messages?: Message[] }>
+
+  /**
+   * Materialize ONE worker session, idempotently by session id: a worker has exactly one agent
+   * object, and `executorFor` hands back that exact object — the scope key the plugin's face was
+   * installed under.
+   *
+   * Announcing it is what a live dispatcher does (the child exists before it can call anything), and
+   * it is also what installs the face.
+   */
+  const makeLive = (sessionId: string, header?: StubAgent['header']): StubAgent => {
+    const existing = live.get(sessionId)
+    if (existing !== undefined) return existing
+    const live_agent = agent(sessionId, header ?? { origin: 'subagent', delegationDepth: 1 })
+    announce(live_agent)
+    return live_agent
+  }
+
+
+  /**
+   * Install the face of a session the spec materialized inline (`agent('mission-…')`,
+   * `executorFor(...)`) rather than through an announcement. A live session's face arrives with
+   * `agent/created`; this is what a stub that never passed that event still needs before it can call
+   * a mission tool. Guarded by the plugin's own ledger, so a second call is a no-op.
+   */
+  const faceAsked = new WeakSet<StubAgent>()
+  const ensureFace = (subject: StubAgent | undefined): void => {
+    if (subject === undefined || faceAsked.has(subject) || installFromPlugin === undefined) return
+    // Calling a tool through this stub is proof that the session belongs to this mount; record it, so
+    // the per-mount views below (and this very call) treat it as one of ours.
+    mountAgents.add(subject)
+    faceAsked.add(subject)
+    installFromPlugin(subject)
+  }
 
   const preStep = async (payload: {
     agent: StubAgent
@@ -811,7 +1006,9 @@ export async function mount(
     dispatched,
     interrupts,
     registered,
-    restrictions,
+    restrictions: () => scopes.restrictions()
+      .filter((entry) => mountAgents.has(entry.agent as StubAgent))
+      .map(({ agentId, filter }) => ({ agentId, filter })),
     sent,
     listedSessions,
     workerSessions,
@@ -855,15 +1052,11 @@ export async function mount(
       // A SECOND top-level session: the harness's `makeLive` stamps the 'owner' descriptor on
       // whatever it is given, which models a worker, not another owner. Cross-owner surfaces
       // (tree visibility, wake scope) need a real second owner, so this builds one and gives it
-      // the scoped tool face a root session has.
+      // the scoped tool face a root session has — and announces it, since a second top-level
+      // session really does pass `agent/created` in a live profile.
       const second = agent(sessionId)
-      second.ctx = {
-        get: (name: string) => name === 'tools'
-          ? { restrict: () => () => undefined }
-          : undefined,
-      }
-      live.set(sessionId, second)
       owners.add(sessionId)
+      announce(second)
       return second
     },
     dropOwner: () => {
@@ -888,10 +1081,43 @@ export async function mount(
       })
     },
     flush: () => host.pump().then(() => undefined),
-    makeLive: (sessionId: string) => {
-      const live_agent = agent(sessionId)
-      live.set(sessionId, live_agent)
-      return live_agent
+    makeLive,
+    ensureFace,
+    /**
+     * One DISPATCHED worker session: its descriptor carries the subagent header a delegated session
+     * really has (`origin: 'subagent'`, depth 1), which is what makes `canCreateTree` false for it and
+     * `isWorkerClaim` the deciding predicate. `makeLive` stays the neutral "materialize this session"
+     * helper existing cases use for owner-shaped stubs.
+     */
+    workerFor: (sessionId: string) => {
+      const existing = live.get(sessionId)
+      if (existing !== undefined) return existing
+      const worker = agent(sessionId, { origin: 'subagent', delegationDepth: 1 })
+      announce(worker)
+      return worker
+    },
+    scopedTools: (subject: StubAgent) => {
+      const scoped = subject.ctx as ScopedTools | undefined
+      if (scoped === undefined) throw new Error(`agent ${subject.id} has no scoped context`)
+      return scoped
+    },
+    /** The mission tools currently registered in ONE agent's own scope, sorted. */
+    scopedNamesOf: (subject: StubAgent) => scopes.ownNamesOf(subject),
+    /**
+     * The faces THIS mount installed, in registration order. Filtered by AGENT IDENTITY because the
+     * registry is shared: a second `mount()` in the same file must not see the first one's ledger.
+     * The plugin's `ctx.effect` disposers remove their entries when the plugin unloads, so this is
+     * also the observation "the plugin's unload cleaned up after itself".
+     */
+    installedFaces: () => scopes.registrations()
+      .filter((entry) => mountAgents.has(entry.agent as StubAgent))
+      .map(({ agentId, name }) => ({ agentId, name })),
+    emitCreated: (subject: StubAgent) => { announce(subject) },
+    emitDisposed: (subject: StubAgent) => {
+      // The registry removes the entry, so the id may be re-announced later (a released worker
+      // restarted under the same claim id) — that second announcement installs its face again.
+      scopes.forgetAnnouncement(subject)
+      ctx.emit('agent/disposed', { agent: subject } as never)
     },
     releaseStarts: () => {
       for (const release of pendingStarts.splice(0)) release()
@@ -926,6 +1152,7 @@ export async function callTool(
   caller: StubAgent,
   options: { concludeTurn?: () => void } = {},
 ): Promise<{ ok: boolean; summary: string; data?: Record<string, unknown> }> {
+  if (toolName.includes('_mission')) mounted.ensureFace(caller)
   const tool = mounted.registered.find((definition) => definition.name === toolName)
   if (tool === undefined) throw new Error(`tool ${toolName} is not registered`)
   return (await tool.execute(args, { agent: caller, concludeTurn: options.concludeTurn ?? (() => undefined) })) as {
@@ -951,6 +1178,7 @@ export async function callToolChecked(
   caller: StubAgent,
   options: { concludeTurn?: () => void } = {},
 ): Promise<{ ok: boolean; summary: string; data?: Record<string, unknown> }> {
+  if (toolName.includes('_mission')) mounted.ensureFace(caller)
   const tool = mounted.registered.find((definition) => definition.name === toolName)
   if (tool === undefined) throw new Error(`tool ${toolName} is not registered`)
   const violations = validateJsonSchemaValue(tool.parameters as JsonSchemaNode, args)

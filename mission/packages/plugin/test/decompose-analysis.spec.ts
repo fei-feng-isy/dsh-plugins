@@ -55,6 +55,9 @@ describe('note_mission', () => {
 
   it('is declared with node_id and analysis both required', async () => {
     const mounted = await mount()
+    // The executor half is installed into a WORKER's scope, so one has to exist for its definition to
+    // be in the harness's union ledger (`faces.spec.ts`).
+    mounted.workerFor('mission-00000001')
     const tool = mounted.registered.find((entry) => entry.name === 'note_mission')
     expect(tool?.parameters).toMatchObject({
       required: ['node_id', 'analysis'],

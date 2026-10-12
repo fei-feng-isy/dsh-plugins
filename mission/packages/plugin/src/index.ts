@@ -41,7 +41,8 @@ import {
   promptDir,
   promptFileSpecs,
 } from './prompt.js'
-import { hiddenMissionTools, visibleTo } from './faces.js'
+import { faceTools, hiddenMissionTools, missionFaceOf, visibleTo } from './faces.js'
+import type { MissionFace } from './faces.js'
 import {
   archiveWorkers,
   bytes,
@@ -68,10 +69,20 @@ import {
   loadCompat,
   provision,
   registerCompatMegaphone,
-  verifyRegisteredFaces,
+  type CompatRuntime,
 } from './envinit.js'
 
 export const name = 'avantf-mission'
+
+/**
+ * The optional service a TEST HARNESS may publish so it can drive the plugin's own face installer.
+ *
+ * It exists because the mount fixture builds agent stubs itself (`agent('mission-…')`) and has to
+ * install the same face the harness registry installs through `agent/created`; without the seam the
+ * fixture would have to re-implement the role judgement, and the two would drift. No real
+ * composition provides this name, so `ctx.get` below resolves `undefined` and nothing changes.
+ */
+export const TEST_FACE_SEAM = 'avantfMissionTestFaceSeam'
 
 // A title is one line by convention (the mission chain renders one per ancestor), so a pasted paragraph must not become one.
 const TITLE_MAX = 80
@@ -330,61 +341,113 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     void host.stop()
   }, 'avantf-mission.lifecycle')
 
-  // ── model surface ───────────────────────────────────────────────────────
+  // ── model surface: the two faces, installed PER AGENT SCOPE ──────────────
+  // The 9 tools are no longer registered globally. `agent.ctx.tools.register` puts a definition in
+  // exactly ONE scope's layer: a child session neither inherits it nor can `get()` it, so a session
+  // that is neither an owner nor one of our workers carries no mission tool at all — not merely a
+  // hidden one. The judgement is one function (`faces.ts`'s `missionFaceOf`), shared with the
+  // assembly waterfall below, so what is REGISTERED and what the model is shown cannot disagree.
+  //
+  // The installation is idempotent by agent id, unwound on `agent/disposed`, and swept by
+  // `ctx.effect` when the plugin unloads. A runtime whose scoped registry is not reachable
+  // (`agent.ctx.get('tools')` absent in some dsh composition) skips silently: the waterfall still
+  // decides what that session's model sees.
   const tools = defineWorkTools(host)
-  for (const tool of tools) {
-    ctx.tools.register(tool)
-  }
-  log.info(`registered ${String(tools.length)} tools: ${tools.map((tool) => tool.name).join(', ')}`)
+  const installedFaces = new Map<string, (() => void)[]>()
+  const ownerFaceRestrictions = new Map<string, () => void>()
 
-  // The gate's second phase: warn-only, since the plugin is mounted and a silently dropped schema or
-  // tool is exactly what nothing else would report.
-  if (compat !== undefined) {
-    verifyRegisteredFaces({ ctx, toolNames: tools.map((tool) => tool.name), log, compat })
-  }
+  const installFace = makeFaceInstaller({
+    host,
+    tools,
+    compat,
+    ctx,
+    log,
+    installed: installedFaces,
+  })
 
-  // ── the two tool faces ──────────────────────────────────────────────────
-  // An executor's face rides the dispatch request; the OWNER side has no creation window to hook, so
-  // it is applied when the agent appears, with the assembly waterfall as a backstop. Both are
-  // usability, not authorization: the refusals in the tool bodies stay the boundary.
-  const ownerFaces = new Map<string, () => void>()
+  /**
+   * The fixture seam: a test harness may publish this optional service so it can drive the SAME
+   * installation path the harness registry drives through `agent/created` — the fixture builds its
+   * own agent stubs, and hand-rolling the face decision there is how "what is installed" and "what
+   * the model is shown" drift apart. Absent in every real composition (nothing provides the name), so
+   * the guarded reads below cost one `ctx.get` and change nothing.
+   *
+   * `installed` hands over the installer's idempotency ledger, because the fixture outlives one
+   * `mount()`: a fresh mount is a fresh registry state, so the harness clears the ledger when it
+   * rebinds (a released worker's id is installable again after a restart).
+   */
+  const seam = ctx.get(TEST_FACE_SEAM) as {
+    install?: (installer: (agent: unknown) => void, installed: Map<string, (() => void)[]>) => void
+  } | undefined
+
+  seam?.install?.(installFace, installedFaces)
+
+  /**
+   * The live restriction of the owner face, for a deployment that still has the executor half in the
+   * GLOBAL layer: a name registered per scope cannot be named by `restrict()` (it throws on anything
+   * not in the global layer), so this is a no-op in the scoped world and only fires for globals.
+   */
   const applyOwnerFace = (agent: Agent): void => {
-    if (ownerFaces.has(agent.id) || !host.canCreateTree(agent)) return
-    const scoped = agent.ctx.get('tools')
-    if (scoped === undefined) return
+    if (ownerFaceRestrictions.has(agent.id) || !host.canCreateTree(agent)) return
+    const scoped = agent.ctx.get('tools') as ScopedToolsService | undefined
+    if (scoped?.restrict === undefined) return
     const hidden = host.ownerFaceFor(agent)
     if (hidden.length === 0) return
     try {
-      ownerFaces.set(agent.id, scoped.restrict({ deny: [...hidden] }))
+      ownerFaceRestrictions.set(agent.id, scoped.restrict({ deny: [...hidden] }))
     } catch (error: unknown) {
       // `restrict()` refuses a name it cannot see; the assembly filter still keeps it out of the schema.
       log.warn(`cannot restrict the owner face for ${agent.id}: ${String(error)}`)
-      ownerFaces.set(agent.id, () => undefined)
+      ownerFaceRestrictions.set(agent.id, () => undefined)
     }
+  }
+
+  // Cold resume: agents that exist BEFORE this plugin mounted never pass `agent/created` again, so the
+  // registry is swept once here — the same shape Agent Teams uses (`for (const a of ctx.agents.list())`).
+  // Guarded: a composition whose `agents` service is an older/leaner shape (or absent entirely) has no
+  // `list`, and a face sweep must never be the reason a plugin row fails — the waterfall still decides
+  // what such a session's model sees.
+  try {
+    const listed = (ctx.get('agents') as { list?: () => readonly unknown[] } | undefined)?.list?.()
+    if (Array.isArray(listed)) for (const agent of listed) installFace(agent)
+  } catch (error: unknown) {
+    log.warn(`cold-resume face sweep failed: ${error instanceof Error ? error.message : String(error)}`)
   }
 
   // The explicit `return undefined` is the dsh listener contract: waterfall listeners are typed
   // `undefined | Promise<undefined>`, so a `void` body is a TS2345 at the registration site.
-  ctx.on('agent/created', ({ agent }) => { applyOwnerFace(agent); return undefined })
+  ctx.on('agent/created', ({ agent }) => { installFace(agent); return undefined })
   ctx.on('agent/disposed', ({ agent }) => {
-    ownerFaces.get(agent.id)?.()
-    ownerFaces.delete(agent.id)
+    for (const dispose of installedFaces.get(agent.id) ?? []) dispose()
+    installedFaces.delete(agent.id)
+    ownerFaceRestrictions.get(agent.id)?.()
+    ownerFaceRestrictions.delete(agent.id)
   })
   ctx.effect(() => () => {
-    for (const dispose of ownerFaces.values()) dispose()
-    ownerFaces.clear()
+    for (const disposers of installedFaces.values()) {
+      for (const dispose of disposers) dispose()
+    }
+    installedFaces.clear()
+    for (const dispose of ownerFaceRestrictions.values()) dispose()
+    ownerFaceRestrictions.clear()
   }, 'avantf-mission.tool-faces')
+
+  log.info(
+    `per-agent tool faces: ${String(tools.length)} tools installed by role `
+    + `(owner ${String(faceTools('owner').length)}: ${faceTools('owner').join(', ')}; `
+    + `worker ${String(faceTools('worker').length)}: ${faceTools('worker').join(', ')})`,
+  )
 
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
     const agent = context.agent
     if (agent === undefined) return assembled
-    // ONE judgement drives both halves of the face: a session that may root a tree is an owner, one of
-    // our claim ids is a worker, and anything else (a teammate subagent, another plugin's child) is
-    // neither. The owner face is still applied on the agent as well — that is the live restriction —
-    // while this waterfall is the stateless filter every role gets. Hiding is usability only: the
-    // refusals inside the tool bodies (`no-authority`, `not-owner`) stay the boundary.
-    const role = host.canCreateTree(agent) ? 'owner' : host.isWorkerClaim(agent.id) ? 'worker' : 'other'
+    // ONE judgement drives both halves of the face — the same `missionFaceOf` the registration above
+    // used: a session that may root a tree is an owner, one of our claim ids is a worker, and anything
+    // else (a teammate subagent, another plugin's child) is neither. This waterfall is the STATELESS
+    // half, and it stays necessary after the scoped registration: it also runs for an agent this
+    // plugin never saw created, and for a runtime where the scoped registry is unavailable.
+    const role = missionFaceOf(host, agent) ?? 'other'
     if (role === 'owner') applyOwnerFace(agent)
     return { ...assembled, tools: visibleTo(assembled.tools, hiddenMissionTools(role)) }
   })
@@ -1370,3 +1433,90 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
 export { defineWorkTools } from './tools.js'
 export { AvantfMissionHost } from './host.js'
+/**
+ * One scope's own tools registry, as `agent.ctx.get('tools')` hands it over: only `register` is used
+ * by the installer below, and an optional `restrict` serves the legacy global-layer owner face.
+ */
+interface ScopedToolsService {
+  readonly register?: (definition: ReturnType<typeof defineWorkTools>[number]) => () => void
+  readonly restrict?: (filter: { deny: readonly string[]; allow?: readonly string[] }) => () => void
+}
+
+/**
+ * Install one role's mission tools into that agent's OWN scope — the whole scoped half of the tool
+ * face, as a standalone unit.
+ *
+ * It is exported because the mount fixture builds its own agents (`agent('mission-…')`) and needs the
+ * SAME installation path the real host drives through `agent/created` — hand-rolling the face
+ * decision in the fixture is exactly how "what is installed" and "what the model is shown" drift
+ * apart. The face itself is decided by `faces.ts`'s `missionFaceOf`, one function for every caller.
+ * Safe to call more than once per agent id (the installed map is the guard), and safe when the
+ * runtime has no scoped registry (`agent.ctx.get('tools')` absent) — that deployment keeps the
+ * assembly waterfall as its only face, which is why a skip is not an error.
+ *
+ * @returns the installer, plus the ledger of what it has installed (so the caller can unwind it on
+ * `agent/disposed` and on plugin unload).
+ */
+export function makeFaceInstaller(deps: {
+  host: { canCreateTree(agent: never): boolean; isWorkerClaim(sessionId: string): boolean }
+  tools: readonly ReturnType<typeof defineWorkTools>[number][]
+  compat: CompatRuntime | undefined
+  ctx: Context
+  log: { info(message: string): void; warn(message: string): void; error(message: string): void }
+  installed?: Map<string, (() => void)[]>
+}): (agent: unknown) => void {
+  const installed = deps.installed ?? new Map<string, (() => void)[]>()
+
+  /**
+   * The post-registration check, per SCOPE. The base's `verifyRegisteredFaces` takes an opaque
+   * `scope` (interface v4) and hands it to `tools.get(name, scope)`; without it the check reads the
+   * GLOBAL registry, where a scoped registration is legitimately invisible and every name would be
+   * reported missing. Warn-only either way: the plugin is mounted, and a silently dropped schema or
+   * tool is exactly what nothing else would report.
+   */
+  const verifyFaceAt = (agent: unknown, names: readonly string[]): void => {
+    if (deps.compat === undefined || names.length === 0) return
+    try {
+      // `scope` is the interface-v4 field the loaded base declares; an older base simply ignores the
+      // extra property (its `get` is called with one argument), so the call is valid on both.
+      deps.compat.module.verifyRegisteredFaces({
+        ctx: deps.ctx,
+        packageId: deps.compat.spec.packageId,
+        schemaNames: deps.compat.schemaNames,
+        toolNames: names,
+        log: deps.log,
+        scope: agent,
+      })
+    } catch (error: unknown) {
+      deps.log.warn(`${deps.compat.prefix} WARNING — the post-registration check itself failed (${String(error)})`)
+    }
+  }
+
+  return (agent: unknown): void => {
+    const subject = agent as Agent
+
+    if (installed.has(subject.id)) return
+    // A runtime whose scoped registry is not reachable (or a caller that handed over a session-shaped
+    // object rather than an Agent) skips: the assembly waterfall is still the face there.
+    const ctxOfAgent = (subject as { ctx?: { get?: (name: string) => unknown } }).ctx
+    if (ctxOfAgent?.get === undefined) return
+    const scoped = ctxOfAgent.get('tools') as ScopedToolsService | undefined
+    if (scoped?.register === undefined) return
+    const face: MissionFace | undefined = missionFaceOf(deps.host, subject)
+    if (face === undefined) return
+    const names = faceTools(face)
+    const disposers: (() => void)[] = []
+    try {
+      for (const tool of deps.tools) {
+        if (names.includes(tool.name)) disposers.push(scoped.register(tool))
+      }
+    } catch (error: unknown) {
+      for (const dispose of [...disposers].reverse()) dispose()
+      deps.log.warn(`cannot install the ${face} tool face for ${subject.id}: ${String(error)}`)
+      return
+    }
+    installed.set(subject.id, disposers)
+
+    verifyFaceAt(subject, names)
+  }
+}

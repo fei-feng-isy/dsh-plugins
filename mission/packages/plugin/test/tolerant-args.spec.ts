@@ -100,6 +100,9 @@ describe('create_mission.analysis accepts the array, its JSON text, and one line
 
   it('declares both shapes, so the harness admits the text form', async () => {
     const mounted = await mount()
+    // The nine tools live in two agent scopes; make the WORKER's exist too so the union ledger below
+    // can find a mission-tool definition (see `faces.spec.ts`).
+    mounted.workerFor('mission-00000001')
     const tool = mounted.registered.find((entry) => entry.name === 'create_mission')
     expect(tool?.parameters).toMatchObject({
       properties: {
@@ -168,6 +171,7 @@ describe('decompose_mission.children accepts the array and its JSON text', () =>
 
   it('declares both shapes on children', async () => {
     const mounted = await mount()
+    mounted.workerFor('mission-00000001')
     const tool = mounted.registered.find((entry) => entry.name === 'decompose_mission')
     expect(tool?.parameters).toMatchObject({
       properties: {

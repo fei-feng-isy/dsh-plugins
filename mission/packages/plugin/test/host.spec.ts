@@ -105,37 +105,26 @@ describe('tool-level argument and caller refusals', () => {
 })
 
 describe('worker tool face', () => {
-  it('denies exactly the tools this deployment offers', async () => {
-    // A name no tool provides makes `tools.restrict()` throw, which would fail
-    // every dispatch and burn the whole tree's attempts. So the request carries the
-    // deployment's names PLUS this plugin's own (the owner face, always registered).
+  it('denies exactly the GLOBAL tools this deployment offers', async () => {
+    // A name no tool provides makes `tools.restrict()` throw, which would fail every dispatch and burn
+    // the whole tree's attempts — and a name registered in some agent's OWN scope is exactly such a
+    // name: `restrict()` only accepts GLOBAL registrations, and a child does not inherit the parent's
+    // own layer. So the filter carries the deployment's global names and never the mission tools
+    // (which are scope-registered; the worker simply never has the owner half, see `faces.spec.ts`).
     // `subagent` is offered here and deliberately NOT denied: a node may fan out internally.
     const mounted = await mount({ tools: ['send_message', 'subagent'] })
     await createTree(mounted)
-    expect(mounted.dispatched[0]?.toolFilter?.deny).toEqual([
-      'send_message',
-      'create_mission',
-      'adjust_mission',
-      'mission_result',
-      'list_missions',
-      'finish_mission',
-      'cancel_mission',
-    ])
+    // Of the worker's deny list, only `send_message` is a global name HERE; the goal tools are simply
+    // not part of this deployment, and `subagent` is deliberately not denied at all.
+    expect(mounted.dispatched[0]?.toolFilter?.deny).toEqual(['send_message'])
   })
 
-  it('still denies the owner face in a deployment with no harness delegation tools', async () => {
-    // The face does not depend on what the harness offers: the owner's six tools are
-    // this plugin's own registrations, so they are exactly what is left to deny.
+  it('denies nothing when the deployment offers no global tool at all', async () => {
+    // With `tools: []` there is no global name left to deny, so the request carries no filter (an
+    // empty deny list is omitted rather than materialized — see `startChild`).
     const mounted = await mount({ tools: [] })
     await createTree(mounted)
-    expect(mounted.dispatched[0]?.toolFilter?.deny).toEqual([
-      'create_mission',
-      'adjust_mission',
-      'mission_result',
-      'list_missions',
-      'finish_mission',
-      'cancel_mission',
-    ])
+    expect(mounted.dispatched[0]?.toolFilter?.deny ?? []).toEqual([])
   })
 
   it('warns, naming the face and the names, when it drops a name the deployment lacks', async () => {
@@ -149,16 +138,20 @@ describe('worker tool face', () => {
       lines.push(args.map(String).join(' '))
     })
     try {
-      const mounted = await mount({ tools: [] })
+      // `send_message` is offered; the three goal tools are not. The face drops what has no tool and
+      // keeps what it has, which is the divergence this case is about.
+      const mounted = await mount({ tools: ['send_message'] })
       await createTree(mounted)
     } finally {
       spy.mockRestore()
     }
-    const warnings = lines.filter((line) => line.includes('tool face'))
+    // The DIVERGENCE line, not the mount's `per-agent tool faces:` inventory (which also contains the
+    // phrase "tool face").
+    const warnings = lines.filter((line) => line.includes('tool face: dropped'))
     expect(warnings).toHaveLength(1)
     // Which face, and every name it could not place.
     expect(warnings[0]).toContain('worker')
-    for (const name of ['send_message', 'create_goal', 'get_goal', 'update_goal']) {
+    for (const name of ['create_goal', 'get_goal', 'update_goal']) {
       expect(warnings[0], `the dropped name ${name} must be reported`).toContain(name)
     }
     // Only the divergence is reported: the names this deployment DOES provide stay quiet.
@@ -170,21 +163,13 @@ describe('worker tool face', () => {
     // inherited by the child, so `tools.restrict()` refuses the whole filter. The
     // tree must still run: that one tool stays visible, the rest stay denied.
     // (`subagent` is offered here too, but it is no longer on the worker's deny list at all.)
-    const mounted = await mount({
-      tools: ['send_message', 'subagent', 'subagent_fork'],
-      unrestrictable: ['subagent_fork'],
-    })
+    const mounted = await mount({ tools: ['send_message'], unrestrictable: ['send_message'] })
     const rootId = await createTree(mounted)
     const second = mounted.dispatched.at(-1)
-    expect(second?.toolFilter?.deny).toEqual([
-      'send_message',
-      'create_mission',
-      'adjust_mission',
-      'mission_result',
-      'list_missions',
-      'finish_mission',
-      'cancel_mission',
-    ])
+    // `send_message` IS a global name here, so `deniableFor` keeps it and the FIRST dispatch carries
+    // it; the runtime then refuses that whole filter, which is exactly the retry this case exercises —
+    // so the dispatched entry has no filter at all.
+    expect(second?.toolFilter).toBeUndefined()
     // The node is running on the retried dispatch, not left to burn its attempts.
     const shown = await callTool(mounted, 'list_missions', {}, mounted.owner)
     expect(shown.summary).toContain(`[${rootId}]`)
