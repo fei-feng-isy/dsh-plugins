@@ -350,6 +350,9 @@ assertProviderConformance(report)
   **更新**是 `ok` + 一句话的 `warning`（新世代不拿走有消费者的成员），相等是 `ok`。
 - `readInterfaceRequirement(url)`：读调用方产物里烘着的那条记录 `{ baseVersion, interfaceVersion }`；
   缺失或畸形返回 `undefined`（"没烘"），不抛。
+- `verifyRegisteredFaces({ ctx, packageId, schemaNames?, toolNames, log, scope? })`：挂载之后复查每条声明的
+  schema 与工具是否真的可见，返回没看到的那些名字（warn-only）。`scope` 是可选的**不透明**值（本包不认识
+  作用域的类型），会原样传给 `tools.get(name, scope)`；不传就按全局视图 `tools.get(name)` 读。
 - 拿到 `incompatible` 时的建议动作是**降级**（不使用本包的共享能力）而不是拒绝挂载；拿到 `ok` + `warning`
   时照常使用、只把那条警告记下来 —— 本包只把裁决与一句话的 `reason` / `warning` 交出去，怎么处理由
   调用方决定。
@@ -365,9 +368,11 @@ assertProviderConformance(report)
 
 - 接口面是 `.` 上的导出（值 + 类型）加上 `./preset` / `./conformance` / `./bootstrap` 三个子路径；`./internal`
   是内部件，从不承诺稳定。
-- **当前这一代（v3）把 `.` 收成了一个稳定子集**：`.` 只列"插件真取用、或插件作者被期望调用"的成员，
-  其余进 `./internal`。这是为了把"内部件的改动"与"接口"解耦，不是"这个集合永远不变"：新能力从明确
-  标注为不稳定的入口引入，既有成员按弃用周期退出。
+- **当前这一代（v4）沿用 v3 的名字面**：`.` 只列"插件真取用、或插件作者被期望调用"的成员，其余进
+  `./internal`。这是为了把"内部件的改动"与"接口"解耦，不是"这个集合永远不变"：新能力从明确标注为
+  不稳定的入口引入，既有成员按弃用周期退出。v4 一个名字都没动 —— 它加宽的是**既有成员接受的入参**：
+  `verifyRegisteredFaces({ …, scope? })` 多了个可选、不透明的 `scope`，原样透传给 `tools.get(name,
+  scope)`，好让按作用域注册的工具面能被复查到；不传时行为与 v3 逐字相同。
 - **v3 是第一次破坏性换代**：v2 的成员如果有消费者，v3 一个不少；但 v3 不再对 v2 做结构超集。旧调用方
   遇到更新的 base 仍判 `ok` + `warning`，遇到更旧的 base 才降级。
 - **接口与包版本是两条轴**：接口换代只升 `INTERFACE_VERSION` 并新增快照；包版本是普通 semver，只表达

@@ -16,6 +16,9 @@
   4. `UPDATE_INTERFACE_SNAPSHOT=1 pnpm -C base/plugin-base test public-surface` 重落快照。不带这个环境
      变量时 `public-surface` 只做比对：快照缺失、名称多一个少一个、`INTERFACE_VERSION` 与档名不一致都失败
      ——它**从不自己发明一个世代**，换代是一次显式动作（新快照 + 版本决定）。
+     换代**不只有增删名字这一种**：v4 就是"名字面一个不动、只加宽既有成员接受的入参"（`verifyRegisteredFaces`
+     多一个可选 `scope`）——那种情况同样要升 `INTERFACE_VERSION` + 新增快照，并让门禁断言新老名单逐字相等
+     （见 `plugin-base/docs/INTERFACE.md` §10）。
 - **kit 成员归置**：`.` 是**显式列举的稳定子集**，只有真实的运行期消费者才放上去；**零运行期消费者的成员
   放在 `./internal`**，`./internal` 不承诺兼容。成员的移出与清退是完整动作：`. ` 上没有、`./internal` 上必须
   有（`createPluginLogger` 随接口 v3 移出 `.`、进了 `./internal`，每棵插件树因此各自持有自己的 logger）。

@@ -15,7 +15,7 @@
  * `EXTENSION_POINTS` with a one-line reason. A `.` member that is neither consumed nor registered is a
  * red gate, not a hidden promise.
  *
- * The same surface is stated as a type + two name lists in `./interface.js`; `api/interface-v3.json`
+ * The same surface is stated as a type + two name lists in `./interface.js`; `api/interface-v4.json`
  * is its snapshot, and `test/public-surface.spec.ts` keeps the three in step. Do not add a member
  * here without a generation decision.
  *
@@ -85,19 +85,22 @@ export { wellFormedDeep, wellFormedText } from './kit/wellformed.js'
 // build time and compare against the value the base they loaded at runtime reports — it is the one
 // value here whose job is the RUNTIME interface gate rather than a caller's API, so it belongs on `.`.
 //
-// v1/v2 stay exported as their generations' type records: a caller compiled against them keeps a
-// name. v3 is the first generation that is NOT `extends` its predecessor — it PRUNES the zero-consumer
-// members to `./internal` (INTERFACE.md §9); the proof that this lost nothing is
-// `VALUE_NAMES_V3 ∪ PRUNED_VALUE_NAMES === VALUE_NAMES_V2` plus the cross-tree zero-consumer check in
-// `test/public-surface.spec.ts`.
+// v1/v2/v3 stay exported as their generations' type records: a caller compiled against them keeps a
+// name. v3 is the generation that PRUNES the zero-consumer members to `./internal` (INTERFACE.md §9);
+// the proof that this lost nothing is `VALUE_NAMES_V3 ∪ PRUNED_VALUE_NAMES === VALUE_NAMES_V2` plus
+// the cross-tree zero-consumer check in `test/public-surface.spec.ts`. v4 changes no name: it is the
+// generation in which `verifyRegisteredFaces` takes an optional opaque `scope` (INTERFACE.md §10), so
+// its lists are the v3 lists and `public-surface.spec.ts` asserts that instead of assuming it.
 export { INTERFACE_VERSION } from './interface.js'
 export type {
   BaseRuntimeV1,
   BaseRuntimeV2,
   BaseRuntimeV3,
+  BaseRuntimeV4,
   BaseTypeSurfaceV1,
   BaseTypeSurfaceV2,
   BaseTypeSurfaceV3,
+  BaseTypeSurfaceV4,
 } from './interface.js'
 
 // The runtime interface gate: the verdict function the plugins call with the generation they baked,

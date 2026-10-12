@@ -92,13 +92,16 @@ describe('checkInterface decides in both directions', () => {
 })
 
 describe('the `loaded > required` = ok rule rests on a MECHANICAL safety proof', () => {
-  // `checkInterface` is generic over integers, so it cannot itself know that v3 carries every member an
-  // older build consumes — that fact lives in the generation declarations and
-  // `public-surface.spec.ts`. Through v2 the proof was a raw superset (`v2 ⊇ v1`); v3 is the first
-  // PRUNING generation, so the proof is now:
+  // `checkInterface` is generic over integers, so it cannot itself know that v4 carries every member an
+  // older build consumes — that fact lives in the generation declarations and `public-surface.spec.ts`.
+  // Through v2 the proof was a raw superset (`v2 ⊇ v1`); v3 is the PRUNING generation, so its proof is:
   //
   //   `VALUE_NAMES_V2 = VALUE_NAMES_V3 ⊎ PRUNED_VALUE_NAMES`, and every pruned name has zero consumers
   //   in every discovered plugin tree (proven in `public-surface.spec.ts`).
+  //
+  // v4 changes no name at all (`VALUE_NAMES_V4 = VALUE_NAMES_V3`), so the same prune proof still carries
+  // the admission rule; the new generation is the optional `scope` field of `verifyRegisteredFaces`
+  // (INTERFACE.md §10), which only WIDENS an input.
   //
   // These assertions tie the gate's admission rule to that proof: if a future generation drops a name
   // that is not on the frozen prune list, this block fails — the signal that the newer-is-ok branch
@@ -117,10 +120,11 @@ describe('the `loaded > required` = ok rule rests on a MECHANICAL safety proof',
     expect(missing).toEqual([])
   })
 
-  it('a v1 build meeting the REAL v3 module gets `ok` + a WARNING, not a degradation', () => {
+  it('a v1 build meeting the REAL v4 module gets `ok` + a WARNING, not a degradation', () => {
     // End to end on the real module: the case R1 turns into reality — an old plugin, an updated host
-    // base — judged usable, with the additive rule named in the warning. Admissible for v3 because the
-    // only members it shed are the frozen, zero-consumer prune list.
+    // base — judged usable, with the additive rule named in the warning. Admissible for v4 because v4
+    // adds and drops no NAME (it only widens an optional input), and v3's shed names are the frozen,
+    // zero-consumer prune list.
     const verdict = checkInterface(1, api)
     expect(verdict.status).toBe('ok')
     expect(verdict.warning).toContain('pure additions')

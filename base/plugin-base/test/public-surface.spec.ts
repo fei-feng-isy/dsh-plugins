@@ -1,19 +1,20 @@
 /**
  * The public surface: the `.` entry carries exactly the documented contract — the stable subset the
  * installed plugins consume plus the extension points a plugin author calls — while the framework's
- * own seams AND the composition pieces shedding from `.` in v3 live on `./internal` and are explicitly
+ * own seams AND the composition pieces shed from `.` in v3 live on `./internal` and are explicitly
  * **not** covered by the compatibility promise.
  *
  * The surface is stated ONCE, by the interface type itself (`src/interface.ts`):
  *
- *   - `VALUE_NAMES_V3` / `TYPE_NAMES_V3` are the only lists for the CURRENT generation (they partition
- *     `keyof BaseRuntimeV3` / `BaseTypeSurfaceV3`), and the frozen `VALUE_NAMES_V2` / `VALUE_NAMES_V1`
- *     (and type lists) are kept beside them so this file can prove the v3 transition lost nothing,
- *   - the real module is assigned to a `BaseRuntimeV3`-typed binding, so a missing member is a TYPE
+ *   - `VALUE_NAMES_V4` / `TYPE_NAMES_V4` are the only lists for the CURRENT generation (they partition
+ *     `keyof BaseRuntimeV4` / `BaseTypeSurfaceV4`), and the frozen `VALUE_NAMES_V3` / `VALUE_NAMES_V2` /
+ *     `VALUE_NAMES_V1` (and type lists) are kept beside them so this file can prove the transitions
+ *     lost nothing,
+ *   - the real module is assigned to a `BaseRuntimeV4`-typed binding, so a missing member is a TYPE
  *     error (a type-only test would be erased, so the assignment is also exercised at runtime),
- *   - `api/interface-v3.json` records the current names + counts, `api/interface-v2.json` and
- *     `api/interface-v1.json` stay as the superseded generations' records, and this file is the gate
- *     that keeps the snapshot, the lists and the module's actual exports equal.
+ *   - `api/interface-v4.json` records the current names + counts, `api/interface-v3.json` /
+ *     `api/interface-v2.json` / `api/interface-v1.json` stay as the superseded generations' records,
+ *     and this file is the gate that keeps the snapshot, the lists and the module's actual exports equal.
  *
  * **v3 is the first PRUNING generation** (INTERFACE.md §9): it does NOT `extends` v2. What replaces the
  * raw `v3 ⊇ v2` superset assertion is a two-part proof, both mechanical and both asserted below:
@@ -27,13 +28,17 @@
  *      `mem`, `mission` and `identity` today; the base's suite is the only tree allowed to read all of
  *      them.
  *
- * The SAME scan runs in the other direction, and that half is new: every `VALUE_NAMES_V3` entry must
+ * **v4 changes no NAME** (INTERFACE.md §10): an EXISTING member (`verifyRegisteredFaces`) accepts one
+ * more OPTIONAL input field (`scope`), so `VALUE_NAMES_V4` / `TYPE_NAMES_V4` must equal the v3 lists —
+ * asserted below, set AND order, rather than assumed from the spread.
+ *
+ * The SAME scan runs in the other direction, and that half is new: every `VALUE_NAMES_V4` entry must
  * either have a consumer in those trees or be registered in `EXTENSION_POINTS` with a one-line reason.
  * That turns "the `.` face is what the plugins consume plus the extension points an author calls" from
  * a claim in a comment into a gate — some names that older prose called "consumed by the plugins" have
  * no reader in the tree at all and are promises to plugin AUTHORS, not consumers.
  *
- * Together those keep `checkInterface`'s `loaded > required ⇒ ok` branch admissible for v3 — see
+ * Together those keep `checkInterface`'s `loaded > required ⇒ ok` branch admissible for v4 — see
  * `test/interface_gate.spec.ts`.
  *
  * There is deliberately NO hand-written equality whitelist here any more: a second copy of the surface
@@ -59,18 +64,20 @@ import {
   TYPE_NAMES_V1,
   TYPE_NAMES_V2,
   TYPE_NAMES_V3,
+  TYPE_NAMES_V4,
   VALUE_NAMES_V1,
   VALUE_NAMES_V2,
   VALUE_NAMES_V3,
-  type BaseRuntimeV3,
-  type BaseTypeSurfaceV3,
+  VALUE_NAMES_V4,
+  type BaseRuntimeV4,
+  type BaseTypeSurfaceV4,
 } from '../src/interface.js'
 
 /**
  * The module as the interface type says it is. If any member of `api` were missing or had the wrong
  * shape, THIS assignment would not compile — the same check a plugin gets on its side of the tree.
  */
-const runtime: BaseRuntimeV3 = api
+const runtime: BaseRuntimeV4 = api
 
 /** The snapshot for the generation this module declares. The file name's N is `INTERFACE_VERSION`. */
 const SNAPSHOT_URL = new URL(`../api/interface-v${String(INTERFACE_VERSION)}.json`, import.meta.url)
@@ -108,13 +115,13 @@ describe('the interface type is the single carrier of the public surface', () =>
   it('each name list is exactly the `keyof` its interface declares', () => {
     // Compile-time completeness: an interface member that appears in NEITHER list, or a list entry
     // that is not a member, is a type error here before any runtime assertion runs.
-    const strayValues: Stray<(typeof VALUE_NAMES_V3)[number], keyof BaseRuntimeV3>[] = []
-    const missingValues: Stray<keyof BaseRuntimeV3, (typeof VALUE_NAMES_V3)[number]>[] = []
-    const strayTypes: Stray<(typeof TYPE_NAMES_V3)[number], keyof BaseTypeSurfaceV3>[] = []
-    const missingTypes: Stray<keyof BaseTypeSurfaceV3, (typeof TYPE_NAMES_V3)[number]>[] = []
+    const strayValues: Stray<(typeof VALUE_NAMES_V4)[number], keyof BaseRuntimeV4>[] = []
+    const missingValues: Stray<keyof BaseRuntimeV4, (typeof VALUE_NAMES_V4)[number]>[] = []
+    const strayTypes: Stray<(typeof TYPE_NAMES_V4)[number], keyof BaseTypeSurfaceV4>[] = []
+    const missingTypes: Stray<keyof BaseTypeSurfaceV4, (typeof TYPE_NAMES_V4)[number]>[] = []
     expect([...strayValues, ...missingValues, ...strayTypes, ...missingTypes]).toEqual([])
     // …and no name belongs to both halves.
-    const both = VALUE_NAMES_V3.filter((name) => (TYPE_NAMES_V3 as readonly string[]).includes(name))
+    const both = VALUE_NAMES_V4.filter((name) => (TYPE_NAMES_V4 as readonly string[]).includes(name))
     expect(both).toEqual([])
   })
 
@@ -153,16 +160,37 @@ describe('the interface type is the single carrier of the public surface', () =>
     expect(sortedUnique(TYPE_NAMES_V3)).toEqual(expectedTypes)
   })
 
+  it('v4 changes no NAME: the current surface is the frozen v3 lists verbatim, set and order', () => {
+    // v4 is the generation in which `verifyRegisteredFaces` accepts an extra OPTIONAL `scope`
+    // (INTERFACE.md §10) — a change to what an existing member ACCEPTS, not to which names `.` carries.
+    // Asserting the equality here is what makes the `[...V3]` spreads in `src/interface.ts` a checked
+    // claim: a name added to v4 (or dropped from it) without a generation decision is red here, and so
+    // is a reordering that would silently change the reading order of a snapshot meant to preserve it.
+    expect(VALUE_NAMES_V4).toEqual(VALUE_NAMES_V3)
+    expect(TYPE_NAMES_V4).toEqual(TYPE_NAMES_V3)
+    // …and the semantic half of the transition is real: the member that produced the generation takes
+    // the field. Structural typing (the `BaseRuntimeV4` assignment above) cannot see an OPTIONAL field,
+    // so the declaration is read back through the module's own type.
+    const widened: Parameters<typeof runtime.verifyRegisteredFaces>[0] = {
+      ctx: { get: () => undefined },
+      packageId: 'p',
+      toolNames: [],
+      log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+      scope: { opaque: true },
+    }
+    expect(widened.scope).toEqual({ opaque: true })
+  })
+
   it('the module really exports every VALUE name, and exactly those', () => {
     // Runtime equality in both directions: a name the code exports but the interface does not declare
     // is a silent widening; a name the interface declares but the code dropped is a broken promise.
-    expect(actualValueNames().sort()).toEqual(sortedUnique(VALUE_NAMES_V3))
+    expect(actualValueNames().sort()).toEqual(sortedUnique(VALUE_NAMES_V4))
   })
 
   it('every VALUE name is really a member of the typed module', () => {
     // The type says so; this is the runtime half, so a name that resolves to `undefined` (a typo in
     // the list, a lost re-export) cannot hide behind types.
-    const missing = VALUE_NAMES_V3.filter((name) => (runtime as unknown as Record<string, unknown>)[name] === undefined)
+    const missing = VALUE_NAMES_V4.filter((name) => (runtime as unknown as Record<string, unknown>)[name] === undefined)
     expect(missing).toEqual([])
   })
 
@@ -185,13 +213,13 @@ describe('the snapshot is the frozen name surface (api/interface-vN.json)', () =
     // the interface lists members in a reading order that carries meaning.
     expect([...snapshot.exportedValueNames].sort()).toEqual(actualValueNames().sort())
     expect(snapshot.exportedValueCount).toBe(actualValueNames().length)
-    expect(snapshot.exportedValueCount).toBe(VALUE_NAMES_V3.length)
-    expect(snapshot.exportedValueNames).toEqual(sortedUnique(VALUE_NAMES_V3))
+    expect(snapshot.exportedValueCount).toBe(VALUE_NAMES_V4.length)
+    expect(snapshot.exportedValueNames).toEqual(sortedUnique(VALUE_NAMES_V4))
   })
 
   it('records the interface type\'s declared type names and their count', () => {
-    expect(snapshot.exportedTypeNames).toEqual(sortedUnique(TYPE_NAMES_V3))
-    expect(snapshot.exportedTypeCount).toBe(TYPE_NAMES_V3.length)
+    expect(snapshot.exportedTypeNames).toEqual(sortedUnique(TYPE_NAMES_V4))
+    expect(snapshot.exportedTypeCount).toBe(TYPE_NAMES_V4.length)
   })
 
   it('keeps the superseded v1 and v2 snapshots as those generations\' frozen records', () => {
@@ -216,10 +244,10 @@ describe('the snapshot is the frozen name surface (api/interface-vN.json)', () =
     if (process.env['UPDATE_INTERFACE_SNAPSHOT'] !== '1') return
     const next: InterfaceSnapshot = {
       interfaceVersion: INTERFACE_VERSION,
-      exportedValueNames: sortedUnique(VALUE_NAMES_V3),
-      exportedValueCount: VALUE_NAMES_V3.length,
-      exportedTypeNames: sortedUnique(TYPE_NAMES_V3),
-      exportedTypeCount: TYPE_NAMES_V3.length,
+      exportedValueNames: sortedUnique(VALUE_NAMES_V4),
+      exportedValueCount: VALUE_NAMES_V4.length,
+      exportedTypeNames: sortedUnique(TYPE_NAMES_V4),
+      exportedTypeCount: TYPE_NAMES_V4.length,
     }
     writeFileSync(SNAPSHOT_URL, `${JSON.stringify(next, null, 2)}\n`)
     console.warn(`public-surface: rewrote ${SNAPSHOT_URL.pathname} from the current exports`)
@@ -400,7 +428,7 @@ describe('the v3 prune list has zero consumers in every consumer tree', () => {
  * Removing such a name from `.` would be an interface change (a new generation, INTERFACE.md §9), not a
  * cleanup — which is exactly why this file registers them instead of the names being deleted.
  */
-const EXTENSION_POINTS: Readonly<Partial<Record<(typeof VALUE_NAMES_V3)[number], string>>> = {
+const EXTENSION_POINTS: Readonly<Partial<Record<(typeof VALUE_NAMES_V4)[number], string>>> = {
   INTERFACE_VERSION:
     'the generation integer a plugin AUTHOR branches on; the shipped plugins let readInterfaceRequirement/checkInterface compare it for them',
   verdictOf:
@@ -422,14 +450,14 @@ describe('every `.` member is consumed by a tree or registered as an extension p
     // Keys outside the surface would be a typo'd registry (the annotation above makes that a compile
     // error too — this is its runtime half); an empty reason would make the list a second, silent
     // prune list rather than the documented promise this file claims it is.
-    const outsideSurface = Object.keys(EXTENSION_POINTS).filter(name => !(VALUE_NAMES_V3 as readonly string[]).includes(name))
+    const outsideSurface = Object.keys(EXTENSION_POINTS).filter(name => !(VALUE_NAMES_V4 as readonly string[]).includes(name))
     expect(outsideSurface).toEqual([])
     const withoutReason = Object.entries(EXTENSION_POINTS).filter(([, reason]) => (reason ?? '').trim().length === 0)
     expect(withoutReason).toEqual([])
   })
 
   it('no `.` member is neither consumed in the discovered trees nor registered', () => {
-    const orphans = VALUE_NAMES_V3.filter(name => consumersOf(name).length === 0 && EXTENSION_POINTS[name] === undefined)
+    const orphans = VALUE_NAMES_V4.filter(name => consumersOf(name).length === 0 && EXTENSION_POINTS[name] === undefined)
     expect(orphans).toEqual([])
   })
 })

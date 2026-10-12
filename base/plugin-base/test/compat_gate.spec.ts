@@ -15,6 +15,7 @@ import {
   registerMegaphone,
   toolProbeDeclaration,
   verifyRegisteredFaces,
+  type CompatContext,
   type CompatLogger,
   type CompatSpec,
   type CompatVerdict,
@@ -199,6 +200,81 @@ describe('the post-registration check', () => {
     const { lines, log } = recorder()
     verifyRegisteredFaces({ ctx, packageId: PACKAGE, toolNames: [], log })
     expect(lines).toEqual([])
+  })
+
+  it('falls back to the GLOBAL tools view when `scope` is omitted — the v3 reading, exactly', () => {
+    // The scoped `get` below answers ONLY for the scope it was handed. With no `scope` in the input,
+    // `verifyRegisteredFaces` must call `tools.get(name)` — the one-argument, global reading every
+    // generation through v3 performed — and therefore see the scoped tool as missing. This is the
+    // regression half of the v4 widening (INTERFACE.md §10): an old caller passes no `scope` and must
+    // not silently change verdict.
+    const calls: unknown[][] = []
+    const scopedOnly = { token: 'agent-7' }
+    const ctx = { get: (name: string) => (name === 'tools'
+      ? {
+          get: (...args: unknown[]) => {
+            calls.push(args)
+            return args[1] === scopedOnly ? { name: 'create_job' } : undefined
+          },
+        }
+      : undefined) }
+    const { log } = recorder()
+    const omitted = verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['create_job'], log })
+    expect(omitted.missing).toEqual(['create_job'])
+    // `input.scope` is `undefined` here, so the second argument reaching `get` is `undefined` — exactly
+    // what a one-parameter v3-registry observed before (it ignores it, and `args.length` is not part of
+    // any registry contract). What matters is the VALUE: no scope was named, so the global view applies.
+    expect(calls).toEqual([['create_job', undefined]])
+  })
+
+  it('judges through the CALLER\'s scope when one is given (interface generation v4)', () => {
+    // The widening this generation exists for: a registry whose `get` is scope-addressed answers only
+    // for the scope it is asked about, so the same names that are reported as missing without a scope
+    // are all found once the caller names the scope it registered them in. Base does NOT interpret the
+    // value — every lookup sees the very object the caller passed, which the identity assertion pins.
+    const scopedOnly = { token: 'agent-7' }
+    const seen: unknown[] = []
+    const tools = {
+      get: (toolName: string, scope?: unknown) => {
+        seen.push(scope)
+        return scope === scopedOnly ? { name: toolName } : undefined
+      },
+    }
+    const ctx = { get: (name: string) => (name === 'tools' ? tools : undefined) }
+    const { log } = recorder()
+
+    // Without the scope: the same registry reports both names missing (the false-missing shape v4 fixes).
+    const global = verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['create_job', 'adjust_job'], log })
+    expect(global.missing).toEqual(['create_job', 'adjust_job'])
+
+    // With it: both are visible, and `get` saw the exact object every time.
+    seen.length = 0
+    const scoped = verifyRegisteredFaces({
+      ctx: ctx as unknown as CompatContext,
+      packageId: PACKAGE,
+      toolNames: ['create_job', 'adjust_job'],
+      log,
+      scope: scopedOnly,
+    })
+    expect(scoped.missing).toEqual([])
+    expect(seen).toEqual([scopedOnly, scopedOnly])
+  })
+
+  it('accepts any opaque scope value, and forwards it unchanged', () => {
+    // Base has no DSH dependency and therefore no scope TYPE: the field is `unknown` and forwarded
+    // as-is. A primitive scope, an object scope and `undefined` must all be legal inputs, and an
+    // omitted scope must reach `get` exactly the way `undefined` does — a registry cannot tell "no
+    // scope named" from "the undefined scope", and the widening must not invent a distinction.
+    const calls: unknown[][] = []
+    const ctx = { get: (name: string) => (name === 'tools'
+      ? { get: (...args: unknown[]) => { calls.push(args); return undefined } }
+      : undefined) }
+    const { log } = recorder()
+    verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log, scope: 'session:1' })
+    verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log, scope: { nested: true } })
+    verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log, scope: undefined })
+    verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log })
+    expect(calls).toEqual([['a', 'session:1'], ['a', { nested: true }], ['a', undefined], ['a', undefined]])
   })
 })
 

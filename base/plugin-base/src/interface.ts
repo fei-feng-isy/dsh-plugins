@@ -13,10 +13,10 @@
  *
  * The surface has TWO halves and they are named separately because they are checked differently:
  *
- *  - {@link BaseRuntimeV2} — the VALUE members of the CURRENT generation. A real module can be
+ *  - {@link BaseRuntimeV4} — the VALUE members of the CURRENT generation. A real module can be
  *    structurally assigned to it, so a missing or reshaped value member is a compile error, and
  *    `keyof` matches the runtime exports.
- *  - {@link BaseTypeSurfaceV2} — the TYPES a caller names when using those members (types are erased,
+ *  - {@link BaseTypeSurfaceV4} — the TYPES a caller names when using those members (types are erased,
  *    so no runtime value can carry them). `keyof` is the type-name list.
  *
  * GENERATIONS WERE ADDITIVE through v2, and that is what made `loaded > required ⇒ ok` sound:
@@ -29,9 +29,18 @@
  * pruned name has zero consumers across the DISCOVERED consumer trees' non-test source and scripts. A
  * generation that drops a name with a consumer would fail that second half.
  *
- * `VALUE_NAMES_V1` / `TYPE_NAMES_V1` are the frozen v1 lists and `VALUE_NAMES_V2` / `TYPE_NAMES_V2`
- * the frozen v2 lists; `VALUE_NAMES_V3` / `TYPE_NAMES_V3` are the current ones. The v1/v2 interfaces
- * stay exported unchanged as their generations' records.
+ * **v4 changes no NAME** (INTERFACE.md §10): it is the generation in which the EXISTING member
+ * `verifyRegisteredFaces` accepts one more OPTIONAL input field (`scope?: unknown`), so a host whose
+ * tools registry is addressed per scope can be read back through it. The name surface is therefore
+ * identical to v3 in both halves — `VALUE_NAMES_V4` / `TYPE_NAMES_V4` are exactly the v3 lists — which
+ * `test/public-surface.spec.ts` asserts rather than assumes. Adding an optional, named field is how a
+ * signature grows without taking anything away; it is still an interface change (the meaning of what
+ * the member accepts), so the generation moved.
+ *
+ * `VALUE_NAMES_V1` / `TYPE_NAMES_V1` are the frozen v1 lists, `VALUE_NAMES_V2` / `TYPE_NAMES_V2` the
+ * frozen v2 lists, and `VALUE_NAMES_V3` / `TYPE_NAMES_V3` the frozen v3 lists;
+ * `VALUE_NAMES_V4` / `TYPE_NAMES_V4` are the current ones. The v1/v2/v3 interfaces stay exported
+ * unchanged as their generations' records.
  *
  * The name lists are the same surface as data, because the snapshot gate needs to compare string sets.
  * The gate asserts they are exactly the two `keyof`s, so a member can never be added to the interface
@@ -104,19 +113,22 @@ import type {
 /**
  * The integer interface generation this module implements.
  *
- * `3` is the CURRENT generation: the v2 surface MINUS the 18 zero-consumer members that moved to
- * `./internal` (INTERFACE.md §9) and PLUS the one newly-named compat type (`ServiceContract`). The
+ * `4` is the CURRENT generation: the v3 NAME surface UNCHANGED, with one member's accepted input
+ * widened — `verifyRegisteredFaces` now takes an optional, opaque `scope` and hands it to
+ * `tools.get(name, scope)` (INTERFACE.md §10). Nothing was added to or removed from `.`; what moved is
+ * what an existing member accepts, which is an interface change all the same (INTERFACE.md §1). The
  * file name's `N` and this constant are the SAME fact — `test/public-surface.spec.ts` asserts that the
  * snapshot for this constant exists and that its `interfaceVersion` field equals it, so "the JSON says
- * v4, the constant says 3" cannot happen. Bump it (and add `api/interface-vN.json`) only for an
+ * v5, the constant says 4" cannot happen. Bump it (and add `api/interface-vN.json`) only for an
  * interface change (INTERFACE.md §1); a behaviour change or a fix does NOT touch it. The plugins bake
  * this number into their artifacts and compare it, at startup, with the number the base they loaded
  * reports — a difference is a warning and a capability-level degradation, never a refused mount.
  *
- * `2` and `1` are the earlier frozen generations (`api/interface-v2.json`, `api/interface-v1.json`).
- * They stay in the tree as those generations' records and as the types the plugins still import.
+ * `3`, `2` and `1` are the earlier frozen generations (`api/interface-v3.json`,
+ * `api/interface-v2.json`, `api/interface-v1.json`). They stay in the tree as those generations'
+ * records and as the types callers compiled against still import.
  */
-export const INTERFACE_VERSION = 3
+export const INTERFACE_VERSION = 4
 
 /**
  * The VALUE half of the v1 `.` surface: every member that exists at runtime.
@@ -253,7 +265,7 @@ export interface BaseRuntimeV1 {
 }
 
 /**
- * The VALUE half of the FROZEN v2 `.` surface: v1 plus the well-formed-text kit. It stays exported as that generation's record; the CURRENT generation is {@link BaseRuntimeV3}.
+ * The VALUE half of the FROZEN v2 `.` surface: v1 plus the well-formed-text kit. It stays exported as that generation's record; the CURRENT generation is {@link BaseRuntimeV4}.
  *
  * Additive by construction — it `extends` {@link BaseRuntimeV1}, so a v2 that dropped or reshaped a v1
  * member is a compile error, and `keyof BaseRuntimeV2` is exactly v1's members plus the two below. The
@@ -279,7 +291,7 @@ export interface BaseRuntimeV2 extends BaseRuntimeV1 {
 }
 
 /**
- * The VALUE half of the CURRENT (v3) `.` surface: the STABLE SUBSET the installed plugins consume.
+ * The VALUE half of the FROZEN v3 `.` surface: the STABLE SUBSET the installed plugins consume.
  *
  * v3 does NOT `extends` {@link BaseRuntimeV2} — it is the first pruning generation (INTERFACE.md §9).
  * The 18 members with zero consumers across the discovered consumer trees moved to `./internal`
@@ -294,6 +306,9 @@ export interface BaseRuntimeV2 extends BaseRuntimeV1 {
  * package (`./internal` and the `./compat` subpath) and, in practice, plugins never named them — but
  * that is a consumer-level fact proven in `test/public-surface.spec.ts`, not a structural one, which
  * is exactly why the generation number moved.
+ *
+ * v3 stays exported as that generation's record; the CURRENT generation is {@link BaseRuntimeV4}, whose
+ * NAME surface is exactly this one (v4 only widened `verifyRegisteredFaces`'s input, INTERFACE.md §10).
  */
 export interface BaseRuntimeV3 {
   // ── generation / identity constants ──────────────────────────────────────────────────────────
@@ -352,6 +367,101 @@ export interface BaseRuntimeV3 {
   /** Repair lone surrogates in ONE string (U+FFFD), engine-independent and total. */
   readonly wellFormedText: typeof import('./kit/wellformed.js').wellFormedText
   /** {@link BaseRuntimeV3.wellFormedText} over a JSON-shaped value. */
+  readonly wellFormedDeep: typeof import('./kit/wellformed.js').wellFormedDeep
+
+  // ── the provisioner (startup resources: declare → probe → fetch → verify → report) ────────────
+  /** Build a provisioner over a family root. */
+  readonly createProvisioner: typeof import('./provisioner.js').createProvisioner
+  /** The error a failed provision throws, with its machine-readable `code`. */
+  readonly ProvisionError: typeof import('./errors.js').ProvisionError
+  /** The machine-readable code of a provision failure. */
+  readonly reasonOf: typeof import('./errors.js').reasonOf
+  /** The binary-archive provider factory. */
+  readonly binaryArchiveProvider: typeof import('./providers/archive.js').binaryArchiveProvider
+  /** The binary-archive item kind. */
+  readonly BINARY_ARCHIVE_KIND: typeof import('./providers/archive.js').BINARY_ARCHIVE_KIND
+  /** The model-cache provider factory. */
+  readonly modelCacheProvider: typeof import('./providers/model.js').modelCacheProvider
+  /** The model-cache item kind. */
+  readonly MODEL_CACHE_KIND: typeof import('./providers/model.js').MODEL_CACHE_KIND
+}
+
+/**
+ * The VALUE half of the CURRENT (v4) `.` surface.
+ *
+ * **v4 adds no name**: it is the v3 list, member for member ({@link VALUE_NAMES_V4} is asserted to be
+ * exactly {@link VALUE_NAMES_V3}). The generation moved because an EXISTING member's accepted input
+ * changed: `verifyRegisteredFaces` now takes an optional `scope` and passes it through to
+ * `tools.get(name, scope)` (INTERFACE.md §10). Members are declared here rather than inherited so this
+ * interface is the CURRENT generation's own name carrier — `test/public-surface.spec.ts` assigns a real
+ * module to it and derives the snapshot from it, which is what makes the v3 record above historical
+ * rather than "the same thing under two names".
+ *
+ * The one signature to read closely is {@link BaseRuntimeV4.verifyRegisteredFaces}: base has no DSH
+ * dependency and does not know what a scope is, so the field is typed `unknown` and passed through
+ * opaquely. It is optional, so a caller that omits it keeps the older one-argument reading exactly.
+ */
+export interface BaseRuntimeV4 {
+  // ── generation / identity constants ──────────────────────────────────────────────────────────
+  /** The interface generation; see {@link INTERFACE_VERSION}. */
+  readonly INTERFACE_VERSION: typeof INTERFACE_VERSION
+  /** The compat log token (`compat:`) every line the gate emits begins with. */
+  readonly COMPAT_PREFIX: typeof import('./compat.js').COMPAT_PREFIX
+  /** The baked build-record file name (`dsh-build.json`) read beside a plugin's entry. */
+  readonly BUILD_VERSIONS_FILE: typeof import('./compat.js').BUILD_VERSIONS_FILE
+  /** The item schema generation this build understands. */
+  readonly ITEM_SCHEMA_VERSION: typeof import('./provisioner.js').ITEM_SCHEMA_VERSION
+
+  // ── the runtime interface gate ───────────────────────────────────────────────────────────────
+  /** Decide whether a loaded module implements the interface generation a caller requires. */
+  readonly checkInterface: typeof import('./interface_gate.js').checkInterface
+  /** Read the `{ baseVersion, interfaceVersion }` record a plugin artifact was baked with. */
+  readonly readInterfaceRequirement: typeof import('./interface_gate.js').readInterfaceRequirement
+
+  // ── the compatibility gate (composition layer only) ─────────────────────────────────────────
+  /** Run the gate against a live context: register nothing, decide `load`, log the diagnosis. */
+  readonly provision: typeof import('./compat.js').provision
+  /** Build the refusal report from a verdict plus the CALLER's wording. */
+  readonly compatReport: typeof import('./compat.js').compatReport
+  /** Keep one user-visible command that reports a refusal (the only channel on that path). */
+  readonly registerMegaphone: typeof import('./compat.js').registerMegaphone
+  /** The wire schema names a contribution declares (the post-registration check's input). */
+  readonly schemaNamesFrom: typeof import('./compat.js').schemaNamesFrom
+  /**
+   * Confirm, after mounting, that every declared schema and tool is really registered. Takes an
+   * optional opaque `scope` (the v4 widening) and reads each tool back with it — `tools.get(name,
+   * scope)` — so a per-scope registration is not reported as a false "missing".
+   */
+  readonly verifyRegisteredFaces: typeof import('./compat.js').verifyRegisteredFaces
+  /** The peer-range FLOORS of the packages that identify the host (the `declared` fallback). */
+  readonly readDeclaredVersions: typeof import('./compat.js').readDeclaredVersions
+  /** The versions this BUILD was compiled against, baked next to the entry. */
+  readonly readBuildVersions: typeof import('./compat.js').readBuildVersions
+  /** The versions THIS build's links resolve to at startup. */
+  readonly readRuntimeVersions: typeof import('./compat.js').readRuntimeVersions
+  /** Build the probe tool declaration from the caller's own `defineTool`. */
+  readonly toolProbeDeclaration: typeof import('./compat.js').toolProbeDeclaration
+  /** The rules as a pure function of evidence (no host, no I/O). */
+  readonly verdictOf: typeof import('./compat.js').verdictOf
+  /** Gather the plain evidence {@link BaseRuntimeV4.verdictOf} consumes from a live context. */
+  readonly gatherEvidence: typeof import('./compat.js').gatherEvidence
+
+  // ── the shared kit (taken off the loaded module at runtime, never inlined) ────────────────────
+  /** Ensure + read the family's user-editable prompt files. */
+  readonly PromptFiles: typeof import('./kit/prompt_files.js').PromptFiles
+  /** The family root: `$AVANTF_HOME`, else `~/.avantf/env`. */
+  readonly familyHome: typeof import('./kit/family.js').familyHome
+  /** `<family root>/tools`. */
+  readonly familyToolsDir: typeof import('./kit/family.js').familyToolsDir
+  /** `<family root>/models`. */
+  readonly familyModelsDir: typeof import('./kit/family.js').familyModelsDir
+  /** The DATA root, by the family's layer order: ⑤ explicit → ④ `$AVANTF_HOME` → ② configured → `~/.avantf`. */
+  readonly resolveDataHome: typeof import('./kit/family.js').resolveDataHome
+  /** `~/x` → `<home>/x`, `~` → `<home>`; anything else unchanged. */
+  readonly expandHome: typeof import('./kit/family.js').expandHome
+  /** Repair lone surrogates in ONE string (U+FFFD), engine-independent and total. */
+  readonly wellFormedText: typeof import('./kit/wellformed.js').wellFormedText
+  /** {@link BaseRuntimeV4.wellFormedText} over a JSON-shaped value. */
   readonly wellFormedDeep: typeof import('./kit/wellformed.js').wellFormedDeep
 
   // ── the provisioner (startup resources: declare → probe → fetch → verify → report) ────────────
@@ -449,7 +559,7 @@ export interface BaseTypeSurfaceV1 {
 }
 
 /**
- * The TYPE half of the FROZEN v2 `.` surface. It stays exported as that generation's record; the CURRENT generation is {@link BaseTypeSurfaceV3}.
+ * The TYPE half of the FROZEN v2 `.` surface. It stays exported as that generation's record; the CURRENT generation is {@link BaseTypeSurfaceV4}.
  *
  * v2 is additive at runtime only: the well-formed-text helpers take and return `string` / a generic
  * `T`, so they introduce no named type. This interface therefore adds nothing to
@@ -459,7 +569,8 @@ export interface BaseTypeSurfaceV1 {
 export interface BaseTypeSurfaceV2 extends BaseTypeSurfaceV1 {}
 
 /**
- * The TYPE half of the CURRENT (v3) `.` surface.
+ * The TYPE half of the FROZEN v3 `.` surface. It stays exported as that generation's record; the
+ * CURRENT generation is {@link BaseTypeSurfaceV4}, whose name list is exactly this one.
  *
  * v3 does NOT `extends` {@link BaseTypeSurfaceV2}: it is the pruning generation. It drops the four
  * types that existed only for the shed values (`StrictCodec`, `PluginLogger`, `PluginLoggerHost`,
@@ -469,6 +580,90 @@ export interface BaseTypeSurfaceV2 extends BaseTypeSurfaceV1 {}
  * {@link ADDED_TYPE_NAMES}.
  */
 export interface BaseTypeSurfaceV3 {
+  // provisioner / provider types
+  ArchivePack: ArchivePack
+  BinaryArchiveSpec: BinaryArchiveSpec
+  ModelCacheLayout: ModelCacheLayout
+  ModelCacheSpec: ModelCacheSpec
+  ProvisionCode: ProvisionCode
+  // item / manifest / plan model
+  AtStartup: AtStartup
+  AtUse: AtUse
+  BuiltinKind: BuiltinKind
+  Disposable: Disposable
+  EnsureOptions: EnsureOptions
+  InstallContext: InstallContext
+  InstallManifest: InstallManifest
+  ItemPolicy: ItemPolicy
+  Kind: Kind
+  Manifest: Manifest
+  MirrorPolicy: MirrorPolicy
+  OnMissing: OnMissing
+  Plan: Plan
+  PlanAction: PlanAction
+  PlanEntry: PlanEntry
+  PlanOptions: PlanOptions
+  ProbeResult: ProbeResult
+  ProgressEvent: ProgressEvent
+  Provider: Provider
+  ProviderContext: ProviderContext
+  ProviderPlan: ProviderPlan
+  ProvisionEvent: ProvisionEvent
+  ProvisionFs: ProvisionFs
+  ProvisionItem: ProvisionItem
+  ProvisionLock: ProvisionLock
+  ProvisionLogger: ProvisionLogger
+  ProvisionPolicy: ProvisionPolicy
+  ProvisionReport: ProvisionReport
+  ProvisionReportEntry: ProvisionReportEntry
+  ProvisionStatus: ProvisionStatus
+  Provisioner: Provisioner
+  ProvisionerExperimental: ProvisionerExperimental
+  ProvisionerOptions: ProvisionerOptions
+  PrunePolicy: PrunePolicy
+  PruneReport: PruneReport
+  PublishMeta: PublishMeta
+  ReportAction: ReportAction
+  Resolved: Resolved
+  ResourceHandle: ResourceHandle
+  ResourceIdentity: ResourceIdentity
+  ResourceSource: ResourceSource
+  ResourceState: ResourceState
+  Startup: Startup
+  // compatibility gate
+  CompatContext: CompatContext
+  CompatEvidence: CompatEvidence
+  CompatLine: CompatLine
+  CompatLogger: CompatLogger
+  CompatReportWords: CompatReportWords
+  CompatSpec: CompatSpec
+  CompatVerdict: CompatVerdict
+  ProbeOutcome: ProbeOutcome
+  ServiceContract: ServiceContract
+  ServiceProbe: ServiceProbe
+  // shared kit
+  DataHomeInput: DataHomeInput
+  LoadedPromptText: LoadedPromptText
+  PromptFileSpec: PromptFileSpec
+  PromptFilesIo: PromptFilesIo
+  PromptFilesLogger: PromptFilesLogger
+  PromptFilesOptions: PromptFilesOptions
+  // runtime interface gate
+  InterfaceRequirement: InterfaceRequirement
+  InterfaceVerdict: InterfaceVerdict
+}
+
+/**
+ * The TYPE half of the CURRENT (v4) `.` surface.
+ *
+ * **v4 names no new type and sheds none**: it is the v3 list, entry for entry ({@link TYPE_NAMES_V4}
+ * is exactly {@link TYPE_NAMES_V3}). It exists because the generation's type half must have a carrier
+ * of its own — the snapshot's type list is derived from THIS interface, and `checkInterface`'s
+ * newer-is-ok rule is stated per generation — while the widening that produced v4
+ * (`verifyRegisteredFaces`'s optional `scope`, INTERFACE.md §10) introduces no named type at all: the
+ * field is `unknown` on purpose, because base does not know what a scope is.
+ */
+export interface BaseTypeSurfaceV4 {
   // provisioner / provider types
   ArchivePack: ArchivePack
   BinaryArchiveSpec: BinaryArchiveSpec
@@ -720,11 +915,12 @@ export const PRUNED_VALUE_NAMES = [
 ] as const satisfies readonly (keyof BaseRuntimeV2)[]
 
 /**
- * Every VALUE name of the CURRENT (v3) `.` surface, in {@link BaseRuntimeV3} declaration order.
+ * Every VALUE name of the FROZEN v3 `.` surface, in {@link BaseRuntimeV3} declaration order.
  *
  * NOT a spread of v2: v3 prunes, so it is stated as itself. The `satisfies` clause ties it to
  * {@link BaseRuntimeV3}, and the gate asserts the whole `keyof`, so a member added to the interface
- * and not to this list is a compile error.
+ * and not to this list is a compile error. v3 stays frozen as that generation's record;
+ * {@link VALUE_NAMES_V4} is the current list, exactly this one.
  */
 export const VALUE_NAMES_V3 = [
   'INTERFACE_VERSION',
@@ -762,6 +958,17 @@ export const VALUE_NAMES_V3 = [
 ] as const satisfies readonly (keyof BaseRuntimeV3)[]
 
 /**
+ * Every VALUE name of the CURRENT (v4) `.` surface, in {@link BaseRuntimeV4} declaration order.
+ *
+ * The spread is the whole point of this generation: v4 adds no name, so the list is stated as "the v3
+ * list verbatim" and `test/public-surface.spec.ts` asserts equality with {@link VALUE_NAMES_V3} — both
+ * the set and the order, so neither half of that claim can drift silently. The `satisfies` clause
+ * still checks the whole v4 `keyof`, so a member added to {@link BaseRuntimeV4} and not here is a
+ * compile error.
+ */
+export const VALUE_NAMES_V4 = [...VALUE_NAMES_V3] as const satisfies readonly (keyof BaseRuntimeV4)[]
+
+/**
  * The TYPE names v3 NAMES for the first time — they were reachable through `export *` in v2 but were
  * never declared in {@link BaseTypeSurfaceV2}, so they had no entry and no promise. v3's explicit
  * `.` states them; `ServiceContract` is the load-bearing one (mem's compat spec imports it by name).
@@ -794,10 +1001,11 @@ export const PRUNED_TYPE_NAMES = [
 ] as const satisfies readonly (keyof BaseTypeSurfaceV2)[]
 
 /**
- * Every TYPE name of the CURRENT (v3) `.` surface, in {@link BaseTypeSurfaceV3} declaration order.
+ * Every TYPE name of the FROZEN v3 `.` surface, in {@link BaseTypeSurfaceV3} declaration order.
  *
  * v3 is a pruning generation, so this is stated explicitly rather than spread. The gate asserts it
- * partitions v2 together with {@link PRUNED_TYPE_NAMES} and {@link ADDED_TYPE_NAMES}.
+ * partitions v2 together with {@link PRUNED_TYPE_NAMES} and {@link ADDED_TYPE_NAMES}. v3 stays frozen
+ * as that generation's record; {@link TYPE_NAMES_V4} is the current list, exactly this one.
  */
 export const TYPE_NAMES_V3 = [
   'ArchivePack',
@@ -867,3 +1075,12 @@ export const TYPE_NAMES_V3 = [
   'InterfaceRequirement',
   'InterfaceVerdict',
 ] as const satisfies readonly (keyof BaseTypeSurfaceV3)[]
+
+/**
+ * Every TYPE name of the CURRENT (v4) `.` surface, in {@link BaseTypeSurfaceV4} declaration order.
+ *
+ * Like {@link VALUE_NAMES_V4}, the spread states the fact this generation is about: v4 names no new type
+ * and sheds none, so the list is the v3 list verbatim. `test/public-surface.spec.ts` asserts equality
+ * with {@link TYPE_NAMES_V3}, and the `satisfies` clause ties it to the whole v4 `keyof`.
+ */
+export const TYPE_NAMES_V4 = [...TYPE_NAMES_V3] as const satisfies readonly (keyof BaseTypeSurfaceV4)[]

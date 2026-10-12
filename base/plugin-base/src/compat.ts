@@ -903,7 +903,16 @@ export function declaredSchemaKeys(packageId: string, names: readonly string[]):
  * Known limit: invocation ENDPOINTS are not observable through the documented query surface
  * (`list`/`listPackages` expose schemas and the package model only), so the four descriptors are
  * covered through the schema keys they use, not counted themselves.
- * @param input - the live context, the real tool names, and the logger.
+ *
+ * `scope` is the OPTIONAL second argument the tools half hands to `tools.get`. A host whose registry
+ * is addressed per scope (a sub-session's `agent.ctx.tools.register`, for instance) answers `undefined`
+ * for a name that was really registered in some other scope, so a caller reading a scoped registration
+ * back has to name that scope or the check reports a false "missing". This module has NO DSH
+ * dependency and does not know what a scope IS: the value is passed through opaquely, exactly as the
+ * caller's own registry expects it. Omitting it keeps the older reading — the second argument is then
+ * `undefined`, which any registry that ignores it (every one that existed through v3) treats exactly as
+ * it treated the single-argument call.
+ * @param input - the live context, the real tool names, the logger, and the caller's optional scope.
  * @returns the registrations that did not show up (empty on success).
  */
 export function verifyRegisteredFaces(input: {
@@ -913,6 +922,12 @@ export function verifyRegisteredFaces(input: {
   readonly schemaNames?: readonly string[]
   readonly toolNames: readonly string[]
   readonly log: CompatLogger
+  /**
+   * Opaque pass-through scope for the tools lookup (interface generation v4). Base does not interpret
+   * it — it is whatever the live `tools.get(name, scope)` accepts — and omitting it keeps the global
+   * one-argument reading.
+   */
+  readonly scope?: unknown
 }): { readonly missing: readonly string[] } {
   const expectedKeys = declaredSchemaKeys(input.packageId, input.schemaNames ?? [])
   const missing: string[] = []
@@ -936,7 +951,11 @@ export function verifyRegisteredFaces(input: {
   if (isRecord(tools) && typeof tools['get'] === 'function') {
     for (const name of input.toolNames) {
       try {
-        if ((tools['get'] as (name: string) => unknown)(name) === undefined) missing.push(name)
+        // The property is read once and called with the caller's scope; a `get` that only accepts one
+        // parameter (every registry v3 and earlier knew) simply ignores the second argument, so the
+        // omitted-scope reading is unchanged.
+        const get = tools['get'] as (name: string, scope?: unknown) => unknown
+        if (get(name, input.scope) === undefined) missing.push(name)
       } catch {
         missing.push(name)
       }

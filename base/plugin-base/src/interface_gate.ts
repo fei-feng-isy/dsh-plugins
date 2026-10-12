@@ -33,7 +33,11 @@
  *    (`v1 → v2`, INTERFACE.md §5);
  *  - a PRUNING generation (`v2 → v3`, INTERFACE.md §9) instead proves `Vn-1 = Vn ⊎ PRUNED` plus that
  *    every `PRUNED` name has zero consumers across every discovered plugin tree
- *    (`test/public-surface.spec.ts`), and `test/interface_gate.spec.ts` pins it against the real module.
+ *    (`test/public-surface.spec.ts`), and `test/interface_gate.spec.ts` pins it against the real module;
+ *  - a generation that changes NO NAME (`v3 → v4`, INTERFACE.md §10) inherits the previous generation's
+ *    proof as-is — it only WIDENS what an existing member accepts (an optional input field), so the v3
+ *    prune proof still carries the rule and the name lists are asserted equal in
+ *    `test/public-surface.spec.ts`.
  *
  * The `loaded > required` branch below is admissible ONLY while one of those proofs holds. A generation
  * that drops a name WITH a consumer would fail the pruning proof, and that is the signal it must not be
@@ -61,7 +65,8 @@ export interface InterfaceRequirement {
  *
  * `ok` — both sides were readable and the loaded base can serve this build: either the generations are
  * equal, or the loaded base is NEWER and the newer generation provably keeps every member a consumer
- * uses (the additive superset for v1 → v2; the pruning proof for v2 → v3).
+ * uses (the additive superset for v1 → v2; the pruning proof for v2 → v3, inherited unchanged by the
+ * name-preserving v3 → v4).
  * Use the base normally; if {@link InterfaceVerdict.warning} is set, log it as one WARNING first.
  * `incompatible` — both sides were readable and the loaded base is OLDER than the build, so the members
  * this build requires may be missing; a caller must NOT use the base's shared capabilities. The family
