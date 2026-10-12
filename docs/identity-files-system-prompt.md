@@ -180,7 +180,9 @@ function isMainAgent(context: AssembleContext): boolean {
 - **插值** `interpolate`（默认 `false`）：文件里出现 `{{...}}` 默认按字面量保留；设为 `true` 时按上游
   严格插值语义（未注册变量会让装配抛错）——README 必须写清这条失败语义。
 - **渲染**：按 `IDENTITY.md` → `SOUL.md` → `RULES.md` 顺序拼接非空正文，段间一个空行；
-  **不加标题、不加 frontmatter**（"文件全文就是提示词"，与家族 `PromptFiles` 同口径）。
+  **不加 frontmatter**（"文件全文就是提示词"，与家族 `PromptFiles` 同口径）；**只有 `RULES.md` 那一段
+  带一条标题**（`**规则**` / `**Rules**`，见 §11 第 10 条）——`IDENTITY` / `SOUL` 不带头，它们之间是
+  "侧重"差别而不是"种类"差别。
 
 ### 3.6 会话内冻结（KV 缓存）
 
@@ -667,6 +669,18 @@ child  : （与 native 逐字相同）
    **英文标签仍是 `Soul`**（与 `Identity` / `Rules` 一样取文件名），中文是"这个文件是干什么的"的翻译，
    不是概念改名。落地位置只有一处真源：`packages/plugin/src/client/index.ts` 的 `zh.fileSoul`，
    由 `test/client.spec.ts` 的"shows the SOUL file as 性格 in Chinese"一条钉住。
+10. **规则那一段在提示词里带一条标题（2026-10-12 追加）**：渲染时**只给 `RULES.md` 的正文**前置一行
+    `**规则**`（正文是拉丁文时用 `**Rules**`），另两段不带头。理由：`RULES` 是唯一**种类**不同的内容
+   （硬约束 vs 描述性人格），也是一条长提示词里最需要能一眼找回来的部分；而不给另两段带头，是因为
+   `IDENTITY` 与 `SOUL` 的区别是"侧重"——加了标题等于把一套分类法写进每份用户提示词，而用户本来就能在
+   自己文件里写标题（"文件全文就是提示词"）。
+   **几条边界**：① 该段为空 ⇒ 连标题一起省（不留悬空标题）；② 标题文字的语言跟随**正文本身**（按是否含
+   CJK 判定），不跟随界面语言——渲染器没有 locale 服务，跟界面会让**同一个会话**的提示词文本取决于一个
+   可实时改动的设置，那正是 §3.6 要冻结的东西；③ 字节预算仍然作用于**含标题的整段文本**（标题在预算内，
+   不会被切掉后留下列表性文字而失去说明）；④ 标题不可能被误当成文件内容的一部分：它就是渲染出来的
+   提示词文本，`**规则**` 是给读者（模型）看的。真源：`packages/plugin/src/documents.ts` 的
+   `rulesHeading()`，由 `test/render.spec.ts` 与 `test/mechanism.spec.ts` 钉住（后者断言**装配结果**里
+   第一段 section 的文本就含这条标题）。
 
 剩余待确认的只有一个**实现细节**，不影响开工：`settings.section` 页在导航里的 `order`
 （暂定 25，落在 `account` 之后）与页标题文案。

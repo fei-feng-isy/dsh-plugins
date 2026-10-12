@@ -26,7 +26,10 @@ import { apply, DEFAULT_DROP, inject, name, OWN_SECTION } from '../src/index.js'
 
 const NATIVE_PERSONA = 'You are a coding agent powered by the {{model}} model.'
 const SUFFIX = 'Your working directory is {{cwd}}.'
-const IDENTITY_TEXT = '你是「小助手」。\n\n语气温和。\n\n禁止编造。'
+// The rendered identity text: IDENTITY → SOUL → RULES, and the RULES part carries its heading (the
+// render adds exactly one, in the language of that part's own text — see `documents.ts`). The fixture's
+// rules body is Chinese, so the heading is `**规则**`.
+const IDENTITY_TEXT = '你是「小助手」。\n\n语气温和。\n\n**规则**\n\n禁止编造。'
 const PROFILE = 'default'
 
 /** Stand-ins for "the other packages" (names/orders mirror the real `SECTION_ORDERS`). */

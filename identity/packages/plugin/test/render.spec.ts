@@ -28,13 +28,35 @@ describe('IdentityDocuments', () => {
     writeFileSync(join(dir, 'IDENTITY.md'), 'identity\n')
     writeFileSync(join(dir, 'SOUL.md'), 'soul\n')
     writeFileSync(join(dir, 'RULES.md'), 'rules\n')
-    expect(documents().render()).toBe('identity\n\nsoul\n\nrules')
+    // The RULES part carries the one heading the render adds; this fixture's body is Latin, so the
+    // heading is its English spelling.
+    expect(documents().render()).toBe('identity\n\nsoul\n\n**Rules**\n\nrules')
   })
 
-  it('uses the files that exist and skips the empty ones', () => {
+  it('labels ONLY the rules part, and the label speaks the body\'s language', () => {
+    // The two halves of the decision, in one place: IDENTITY and SOUL get no heading (their difference
+    // is emphasis, not kind, and a heading would freeze a taxonomy the user may not share), and the
+    // Chinese rules body gets `**规则**` — the word the settings page uses for the same file.
+    writeFileSync(join(dir, 'IDENTITY.md'), '你是「小助手」。\n')
+    writeFileSync(join(dir, 'SOUL.md'), '语气温和。\n')
+    writeFileSync(join(dir, 'RULES.md'), '禁止编造。\n')
+    expect(documents().render()).toBe('你是「小助手」。\n\n语气温和。\n\n**规则**\n\n禁止编造。')
+  })
+
+  it('adds no heading when the rules part is empty — the heading never dangles', () => {
     writeFileSync(join(dir, 'SOUL.md'), 'only the soul\n')
     writeFileSync(join(dir, 'RULES.md'), '   \n')
     expect(documents().render()).toBe('only the soul')
+  })
+
+  it('keeps the heading when the render is truncated (the heading is inside the budget)', () => {
+    // The byte budget applies to the WHOLE rendered text, heading included: a heading that got cut away
+    // by the budget would be worse than no heading, because the reader would see an unexplained list of
+    // constraints with nothing saying what it is.
+    writeFileSync(join(dir, 'RULES.md'), '禁'.repeat(400))
+    const rendered = documents(60).render()
+    expect(rendered.startsWith('**规则**\n\n')).toBe(true)
+    expect(rendered).toContain('truncated at 60 bytes')
   })
 
   it('renders an empty string when every file is absent', () => {
@@ -89,7 +111,7 @@ describe('IdentityDocuments', () => {
     const reader = documents()
     expect(reader.render()).toBe('')
     writeFileSync(join(dir, 'RULES.md'), 'external edit with a different size\n')
-    expect(reader.render()).toBe('external edit with a different size')
+    expect(reader.render()).toBe('**Rules**\n\nexternal edit with a different size')
   })
 
   it('renders an empty string when the directory does not exist at all (environment failure degrades)', () => {

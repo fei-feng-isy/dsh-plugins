@@ -48,6 +48,24 @@ export function fileNameOf(name: string): string {
   return `${name}.md`
 }
 
+/**
+ * The heading the rendered prompt puts above the rules part, in the language of the rules text.
+ *
+ * `RULES.md` is the one part the render adds a heading to (see {@link IdentityDocuments.render} for why
+ * the other two are left alone). Two things about it are deliberate:
+ *
+ *  - **The language follows the body, not the UI.** The renderer has no locale service (it runs inside
+ *    prompt assembly, where the client's language is neither knowable nor stable), and following the
+ *    client would make the SAME session's prompt text depend on a live setting — the one thing §3.6
+ *    freezes. Reading it off the text is deterministic: the same file always renders the same bytes.
+ *  - **`规则`, the same word the settings page shows.** A heading the user cannot find in the UI is a
+ *    second vocabulary to learn; `硬约束` (what the built-in presets call it in their own first line)
+ *    would be a third.
+ */
+function rulesHeading(body: string): string {
+  return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u.test(body) ? '**规则**' : '**Rules**'
+}
+
 /** The rendered text of one identity directory, plus its per-file provenance. */
 export class IdentityDocuments {
   private readonly cache = new Map<IdentityFileName, CacheEntry>()
@@ -111,13 +129,23 @@ export class IdentityDocuments {
   }
 
   /**
-   * The prompt text: the non-empty bodies joined by one blank line, truncated to `maxBytes` (when it
-   * is positive) with a visible notice appended and a warning naming the files that overflowed.
+   * The prompt text: the non-empty bodies joined by one blank line, the rules part under its own
+   * heading (see {@link RULES_HEADING}), truncated to `maxBytes` (when it is positive) with a visible
+   * notice appended and a warning naming the files that overflowed.
    */
   render(): string {
-    const bodies = IDENTITY_FILES.map((name) => this.read(name).trim()).filter((body) => body !== '')
-    if (bodies.length === 0) return ''
-    const text = bodies.join('\n\n')
+    const parts = IDENTITY_FILES
+      .map((name) => ({ name, body: this.read(name).trim() }))
+      .filter((part) => part.body !== '')
+    if (parts.length === 0) return ''
+    // ONE heading, on the rules part only, and only when it has a body. The other two are not labelled
+    // on purpose: their difference is a matter of emphasis, not of kind, and a heading would freeze a
+    // taxonomy the user may not share (write your own heading in the file — the file IS the prompt).
+    // The rules are the one part whose TYPE differs (hard constraints vs descriptive identity), and
+    // they are the part a reader most needs to be able to find again in a long prompt.
+    const text = parts
+      .map((part) => (part.name === 'RULES' ? `${rulesHeading(part.body)}\n\n${part.body}` : part.body))
+      .join('\n\n')
     const maxBytes = this.options.maxBytes()
     if (!Number.isFinite(maxBytes) || maxBytes <= 0) return text
     if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text
