@@ -30,7 +30,6 @@ const mocks = vi.hoisted(() => ({
   loadCompat: vi.fn(),
   provision: vi.fn(),
   registerCompatMegaphone: vi.fn(),
-  verifyRegisteredFaces: vi.fn(),
 }))
 
 /** How many hosts were built; the one thing the two guards exist to prevent. */
@@ -111,15 +110,15 @@ describe('apply: environment exits', () => {
     expect(mocks.registerCompatMegaphone.mock.calls[0]?.[1]).toBe(REFUSAL)
 
     // The point of the branch: no host, no tools, no listeners, no prompt sections, no lifecycle
-    // effect, no post-registration check. These assertions are reached — and would fail — if the
-    // refusal ever stopped returning early.
+    // effect. These assertions are reached — and would fail — if the refusal ever stopped returning
+    // early. There is no post-registration check to look for any more: the tools are registered per
+    // agent scope, and the refusal path never reaches that installer.
     expect(hosts.constructed).toBe(0)
     expect(registered).toEqual([])
     expect(commands).toEqual([])
     expect(handlers).toEqual([])
     expect(sections).toEqual([])
     expect(ctx.effect).not.toHaveBeenCalled()
-    expect(mocks.verifyRegisteredFaces).not.toHaveBeenCalled()
     expect(stderr.join('\n')).toContain('plugin not loaded')
   })
 

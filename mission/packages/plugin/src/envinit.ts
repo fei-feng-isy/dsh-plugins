@@ -379,24 +379,11 @@ export function registerCompatMegaphone(ctx: CompatContext, verdict: CompatVerdi
   }
 }
 
-/** Second phase: every real registration must be visible afterwards; warn-only, since the plugin is
- * mounted by now and no clean "do not load" is left. */
-export function verifyRegisteredFaces(input: {
-  readonly ctx: CompatContext
-  readonly toolNames: readonly string[]
-  readonly log: CompatLogger
-  readonly compat: CompatRuntime
-}): { readonly missing: readonly string[] } {
-  try {
-    return input.compat.module.verifyRegisteredFaces({
-      ctx: input.ctx,
-      packageId: input.compat.spec.packageId,
-      schemaNames: input.compat.schemaNames,
-      toolNames: input.toolNames,
-      log: input.log,
-    })
-  } catch (error) {
-    input.log.warn(`${input.compat.prefix} WARNING — the post-registration check itself failed (${reasonOf(error)})`)
-    return { missing: [] }
-  }
-}
+// The second phase of the check — "every real registration must be visible afterwards" — is NOT here
+// any more. It used to be a global one-shot at mount (`verifyRegisteredFaces` over all nine names);
+// since the tools are registered PER AGENT SCOPE, the check has to name the scope it is reading back,
+// and the only place that knows the scope (the agent) is the installation itself:
+// `index.ts`'s `makeFaceInstaller` calls the module's `verifyRegisteredFaces` with `scope: agent`
+// right after each face lands. Keeping a global wrapper here would invite calling it again, which in
+// the scoped world reports every name as missing. That call site is where the `scope` field of the
+// mirrored `CompatModule` above is consumed.

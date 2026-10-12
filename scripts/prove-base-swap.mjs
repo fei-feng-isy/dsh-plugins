@@ -332,8 +332,9 @@ try {
 
     // The runtime INTERFACE GATE is the family's main contract now, and it too is SERVED BY THE
     // SWAPPED BASE. What is proven here is the ASYMMETRY (`base/plugin-base/src/interface_gate.ts`):
-    // a NEWER generation is `ok` + a warning and KEEPS the base (generations are pure additions, so an
-    // older build's members are all still there), while an OLDER one is `incompatible` and makes the
+    // a NEWER generation is `ok` + a warning and KEEPS the base (admitted on the per-generation proof
+    // that the newer surface keeps every member an older build requires — NOT because "generations are
+    // additions": v3 PRUNED 18 members), while an OLDER one is `incompatible` and makes the
     // plugin's OWN BUILT loader withhold the base and warn — never refusing the mount (the family
     // invariant: only a proven host break refuses). The control run below shows the same loader
     // ACCEPTS a matching generation, so "degrade" is not "always undefined".

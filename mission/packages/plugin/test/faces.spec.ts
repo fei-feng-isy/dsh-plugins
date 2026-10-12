@@ -23,6 +23,7 @@ import {
   visibleTo,
 } from '../src/faces.js'
 import { agent, callTool, mount, type Mounted, type StubAgent } from './mount.js'
+import { makeFaceInstaller } from '../src/index.js'
 
 /** Every name in one scope's OWN layer: the registration this whole file is about. */
 function scopedNames(mounted: Mounted, subject: StubAgent): string[] {
@@ -191,6 +192,52 @@ describe('the scoped installation', () => {
     expect(mounted.installedFaces()).toEqual([])
     expect(globalMissionNames(mounted)).toEqual([])
     expect(scopedNames(mounted, mounted.owner)).toEqual([])
+  })
+
+  it('NAMES the skip when a session has no scoped registry, and stays silent for a session with no face', async () => {
+    // The installer's own skip path, driven directly because the mount fixture always has a registry:
+    // a session that cannot be reached gets NO tool at all — the assembly waterfall can only filter a
+    // list it is handed, so it cannot restore this. Silent in that case would look exactly like "the
+    // plugin has no tools", which is the failure shape this warning exists to make visible.
+    const mounted = await mount()
+    try {
+      const noRegistry = agent('no-registry-session')
+      delete noRegistry.ctx
+      const lines: string[] = []
+      const log = {
+        info: () => undefined,
+        warn: (message: string) => { lines.push(message) },
+        error: () => undefined,
+      }
+      // The SAME installer the live `agent/created` listener and the fixture's seam both drive, bound
+      // to this mount's real host so the role judgement is the production one.
+      const install = makeFaceInstaller({
+        host: mounted.host,
+        tools: [],
+        compat: undefined,
+        ctx: mounted.ctx,
+        log,
+        installed: new Map(),
+      })
+
+      install(noRegistry)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toContain('no scoped tools registry')
+      expect(lines[0]).toContain(noRegistry.id)
+      expect(lines[0]).toContain('no mission tool')
+
+      // A session that was never going to get a face is not a degradation: a teammate subagent, whose
+      // absence of mission tools is the DESIGN, must not produce a line here.
+      lines.length = 0
+      const teammate = agent('f4f3163b-1111-2222-3333-444455556666', { origin: 'subagent' })
+      delete teammate.ctx
+      install(teammate)
+      expect(lines).toEqual([])
+    } finally {
+      // `tools: []` means this installer registered nothing, but the mount itself still holds the
+      // owner's face; dispose so the next case starts from a clean registry.
+      await mounted.ctx.fiber.dispose()
+    }
   })
 })
 

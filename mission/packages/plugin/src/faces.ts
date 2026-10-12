@@ -78,9 +78,10 @@ export function faceTools(face: MissionFace): readonly string[] {
  * The assembly waterfall's half of the judgement: an owner loses the executor half, one of our
  * workers loses the owner half, and a session that is neither loses both. It stays even though the
  * registration above already decides what a live scope holds — the waterfall also runs for an agent
- * this plugin never saw created (a restored/harness-owned session) and for runtimes whose scoped
- * registry is unavailable, where hiding is the only thing left. Visibility only: the refusals inside
- * the tool bodies stay the boundary.
+ * this plugin never saw created (a restored/harness-owned session). It is a FILTER, not a fallback:
+ * it can only drop names the registry already offered, so a session whose scope registration was
+ * skipped has no mission tool here to hide either — that case is named by `index.ts`'s installer
+ * rather than papered over. Visibility only: the refusals inside the tool bodies stay the boundary.
  */
 export function hiddenMissionTools(role: MissionSessionRole): readonly string[] {
   switch (role) {

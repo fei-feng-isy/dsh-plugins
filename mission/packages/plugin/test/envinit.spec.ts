@@ -204,23 +204,6 @@ describe('envinit loader', () => {
     expect(calls.megaphone[0].ctx).toBe(ctx)
   })
 
-  it('passes the real tool names into the post-registration check and returns its finding', async () => {
-    const env = await freshEnvinit()
-    const calls = emptyCalls()
-    const base = fakeBase(calls)
-    const gate = fakeCompat(calls, OK_VERDICT)
-    const runtime = await env.loadCompat({ framework: base as never, compatModule: gate as never })
-    expect(runtime).toBeDefined()
-    if (runtime === undefined) return
-
-    const { log } = recordingLogger()
-    const missing = env.verifyRegisteredFaces({ ctx: { get: () => undefined }, toolNames: ['create_mission', 'list_missions'], log, compat: runtime })
-    expect(missing.missing).toEqual(['missing-key'])
-    expect(calls.verify[0].toolNames).toEqual(['create_mission', 'list_missions'])
-    expect(calls.verify[0].packageId).toBe('@avantf/dsh-mission')
-    expect(calls.verify[0].schemaNames).toEqual(['snapshotargs', 'detailargs'])
-  })
-
   it('never throws when the loaded module misbehaves — it degrades and warns', async () => {
     const env = await freshEnvinit()
     const { log, lines } = recordingLogger()

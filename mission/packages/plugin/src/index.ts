@@ -350,8 +350,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   //
   // The installation is idempotent by agent id, unwound on `agent/disposed`, and swept by
   // `ctx.effect` when the plugin unloads. A runtime whose scoped registry is not reachable
-  // (`agent.ctx.get('tools')` absent in some dsh composition) skips silently: the waterfall still
-  // decides what that session's model sees.
+  // (`agent.ctx.get('tools')` absent in some dsh composition) installs NOTHING and says so: the
+  // assembly waterfall can only FILTER the list it is handed, so it cannot restore a registration
+  // that never happened — without this line that deployment would lose every mission tool silently.
   const tools = defineWorkTools(host)
   const installedFaces = new Map<string, (() => void)[]>()
   const ownerFaceRestrictions = new Map<string, () => void>()
@@ -1450,9 +1451,11 @@ interface ScopedToolsService {
  * SAME installation path the real host drives through `agent/created` — hand-rolling the face
  * decision in the fixture is exactly how "what is installed" and "what the model is shown" drift
  * apart. The face itself is decided by `faces.ts`'s `missionFaceOf`, one function for every caller.
- * Safe to call more than once per agent id (the installed map is the guard), and safe when the
- * runtime has no scoped registry (`agent.ctx.get('tools')` absent) — that deployment keeps the
- * assembly waterfall as its only face, which is why a skip is not an error.
+ * Safe to call more than once per agent id (the installed map is the guard). When the scoped
+ * registry is not reachable (`agent.ctx.get('tools')` absent, or a session-shaped stub handed over
+ * instead of an Agent) it installs NOTHING and warns once per agent: the assembly waterfall can only
+ * filter the list it is handed, so a skipped installation means that session simply has no mission
+ * tool — a degradation to name, never to swallow.
  *
  * @returns the installer, plus the ledger of what it has installed (so the caller can unwind it on
  * `agent/disposed` and on plugin unload).
@@ -1477,8 +1480,13 @@ export function makeFaceInstaller(deps: {
   const verifyFaceAt = (agent: unknown, names: readonly string[]): void => {
     if (deps.compat === undefined || names.length === 0) return
     try {
-      // `scope` is the interface-v4 field the loaded base declares; an older base simply ignores the
-      // extra property (its `get` is called with one argument), so the call is valid on both.
+      // `scope` is the interface-v4 field: the loaded base hands it straight to `tools.get(name,
+      // scope)`, which is the only way a registration made in ONE scope can be read back. This build
+      // is baked for generation 4, so an older base never reaches here — the interface gate withholds
+      // the whole `compat` runtime first (`interface_gate.ts`), and the plugin mounts with the check
+      // skipped. An older base's own `verifyRegisteredFaces` calls `get(name)` with ONE argument, so
+      // the extra property would be ignored anyway; the two readings only ever diverge on a base that
+      // declares v4 and ignores it, which the gate's generation comparison excludes.
       deps.compat.module.verifyRegisteredFaces({
         ctx: deps.ctx,
         packageId: deps.compat.spec.packageId,
@@ -1497,13 +1505,21 @@ export function makeFaceInstaller(deps: {
 
     if (installed.has(subject.id)) return
     // A runtime whose scoped registry is not reachable (or a caller that handed over a session-shaped
-    // object rather than an Agent) skips: the assembly waterfall is still the face there.
-    const ctxOfAgent = (subject as { ctx?: { get?: (name: string) => unknown } }).ctx
-    if (ctxOfAgent?.get === undefined) return
-    const scoped = ctxOfAgent.get('tools') as ScopedToolsService | undefined
-    if (scoped?.register === undefined) return
+    // object rather than an Agent) installs NOTHING here — so it is reported rather than skipped
+    // quietly: the waterfall below can only FILTER what the registry already offers, and this session
+    // will offer no mission tool at all. The face is decided first, so a session that was never going
+    // to get one (a teammate, another plugin's child) is not a degradation and stays silent.
     const face: MissionFace | undefined = missionFaceOf(deps.host, subject)
     if (face === undefined) return
+    const ctxOfAgent = (subject as { ctx?: { get?: (name: string) => unknown } }).ctx
+    const scoped = ctxOfAgent?.get?.('tools') as ScopedToolsService | undefined
+    if (scoped?.register === undefined) {
+      deps.log.warn(
+        `compat: WARNING — no scoped tools registry on ${subject.id}: its ${face} tool face `
+        + `(${String(faceTools(face).length)} tools) was NOT registered, so this session has no mission tool`,
+      )
+      return
+    }
     const names = faceTools(face)
     const disposers: (() => void)[] = []
     try {
