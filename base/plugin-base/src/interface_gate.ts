@@ -138,14 +138,18 @@ export function checkInterface(
   }
   if (loadedVersion === required) return { status: 'ok', required, loaded: loadedVersion }
   if (loadedVersion > required) {
-    // The SAFE direction, admitted only on the mechanical superset proof (see the module header):
-    // every member this older build requires still exists, so the base is used normally — the newer
-    // generation's OWN members simply go unused by this build.
+    // The SAFE direction, admitted only on the mechanical proof (see the module header): every member
+    // this older build requires still exists, so the base is used normally — the newer generation's
+    // OWN members simply go unused by this build. The sentence below deliberately does NOT say
+    // "generations are pure additions": that was never true in general (v3 PRUNED 18 members), and a
+    // maintainer reading it that way could treat a pruning generation as admissible. What is true —
+    // and what the proof establishes per generation — is the weaker, checkable claim: the members
+    // THIS build requires were not taken away.
     return {
       status: 'ok',
       required,
       loaded: loadedVersion,
-      warning: `the loaded base reports interface generation ${String(loadedVersion)}, newer than the ${String(required)} this build was written for (host base is newer); WARNING — generations are pure additions, so every member this build requires is present and the base is judged usable`,
+      warning: `the loaded base reports interface generation ${String(loadedVersion)}, newer than the ${String(required)} this build was written for (host base is newer); WARNING — the newer generation keeps every member this build requires (that is the proof it is admitted on: an additive superset, or a pruning whose shed names are frozen and have zero consumers), so the base is judged usable`,
     }
   }
   return {

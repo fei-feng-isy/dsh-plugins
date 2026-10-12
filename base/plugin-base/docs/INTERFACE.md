@@ -35,7 +35,7 @@
 
 | 变更 | 接口版本（主契约） | 包版本 | 插件是否必须同批改 |
 | --- | --- | --- | --- |
-| **接口**：`.` 的导出集合、类型形状、顺序敏感参数的 slot 含义、语义契约 | `INTERFACE_VERSION` +1，新增 `api/interface-vN.json` | 由包自身决定（普通 semver；**不再**是"接口变 ⇒ major"） | **否** —— 宽 peer 收得下；旧插件遇新世代 base 判 `ok` + `WARNING`（纯增量，不降级），只有 base 更旧才 `incompatible` 走降级路径挂载（§3） |
+| **接口**：`.` 的导出集合、类型形状、顺序敏感参数的 slot 含义、语义契约 | `INTERFACE_VERSION` +1，新增 `api/interface-vN.json` | 由包自身决定（普通 semver；**不再**是"接口变 ⇒ major"） | **否** —— 宽 peer 收得下；旧插件遇新世代 base 判 `ok` + `WARNING`（**前提是 §5 的换代证明成立**：新世代没拿走它要用的成员），只有 base 更旧才 `incompatible` 走降级路径挂载（§3） |
 | **业务流程 / 可观察行为**（插件测试断言的那些） | 不变 | minor | 否 |
 | **纯修复**，无可观察变化 | 不变 | patch | 否 |
 
@@ -105,7 +105,7 @@ v1 期间确实**就地**加过一面（运行期门禁的 `checkInterface` / `r
   | `required` vs `loaded` | verdict | 依据 |
   | --- | --- | --- |
   | 相等 | `ok`，无 `warning` | 同一世代，照常使用。 |
-  | `loaded > required`（宿主 base **更新**） | **`ok` + `warning`** | 接口世代是**纯增量**的：新世代是旧世代的超集，旧插件要用的成员**一个不少**，它只是用不到新成员。`warning` 文案写明"宿主 base 比插件更新（世代 N > M）：按纯增量规则判定为可用"。 |
+  | `loaded > required`（宿主 base **更新**） | **`ok` + `warning`** | 新世代**没有拿走这个构建要用的成员**：只要换代方式满足 §5 的三种证明之一（增量超集 / 剪枝的冻结名单 + 零消费者 / 同名），旧插件要用的成员**一个不少**，它只是用不到新成员。`warning` 文案写的是这条**被证明过的**断言（"the newer generation keeps every member this build requires"），**不是**"世代是纯增量"——v3 剪掉过 18 个名字，后者是假命题，照着它读会把一次剪枝当成安全。 |
   | `loaded < required`（宿主 base **更旧**） | `incompatible` | 插件要用的成员可能**不存在** —— 这才是真正不安全的方向。 |
 
   **`loaded > required` 只在"新世代不会拿走旧插件要用的成员"被机械证明时才判 `ok`**，这不是注释里的一句
@@ -305,6 +305,12 @@ v1 期间确实**就地**加过一面（运行期门禁的 `checkInterface` / `r
    `ok` + `warning`（`incompatible` 不再覆盖这个方向）。放行依据是 §5 里已经就位的机械超集断言，并在
    `test/interface_gate.spec.ts` 里直接钉在真实 module 上。`INTERFACE_VERSION` **不动**（仍 2）—— 这是
    对既有"纯增量"契约的校正，不是新世代；包版本从 `0.3.2` 走到 `0.4.0` 记的是可观察行为变化（§1）。
+
+   **术语校正（v4，2026-10-12）**：上面几处"宿主更新那一边是纯增量"是**v1/v2 时期**的说法，那时它确实成立。
+   v3 是第一次**剪枝**换代（§9），所以"纯增量"作为**一般命题**在那时就已经不成立；v4 只是把运行时那句
+   `warning` 文案也改成**被证明过的那条断言**（"the newer generation keeps every member this build
+   requires"）。判 `ok` 的**判据**没变，变的只是文案不再宣称一件假事：`loaded > required ⇒ ok` 仍然只在
+   §5 的换代证明成立时可用，这一点 §3 的表格与 `test/interface_gate.spec.ts` 一直钉着。
 8. ✅ **收面：v3（第五轮复审 §1.4/§7.9 裁决"现在就收"，§9）** —— `. ` 从 50 个值名剪到 32，18 个零消费者
    进 `./internal`，`export *` 改显式列举；剪枝的替代证明 `v2 = v3 ⊎ PRUNED` + 跨树零消费者；同批把
    `PromptFiles({ namespace })` 的前缀校验并进来（§9.3）。这是第一次**破坏性**换代：v3 不 `extends` v2，

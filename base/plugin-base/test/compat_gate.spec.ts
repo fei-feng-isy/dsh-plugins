@@ -262,19 +262,27 @@ describe('the post-registration check', () => {
 
   it('accepts any opaque scope value, and forwards it unchanged', () => {
     // Base has no DSH dependency and therefore no scope TYPE: the field is `unknown` and forwarded
-    // as-is. A primitive scope, an object scope and `undefined` must all be legal inputs, and an
-    // omitted scope must reach `get` exactly the way `undefined` does — a registry cannot tell "no
-    // scope named" from "the undefined scope", and the widening must not invent a distinction.
+    // as-is. An OBJECT scope (what a dsh `ScopeKey` is — an opaque, identity-compared object, never a
+    // string), an arbitrary object, and `undefined` must all be legal inputs, and an omitted scope must
+    // reach `get` exactly the way `undefined` does — the real registry cannot tell "no scope named"
+    // from "the undefined scope" (`scopeChainOf(undefined)` is the empty chain either way), and the
+    // widening must not invent a distinction.
+    //
+    // The samples are object-shaped ON PURPOSE: base cannot enforce "an object" from here, so a consumer
+    // passing anything else compiles, gets forwarded, resolves no scope and reads the GLOBAL view —
+    // reporting every scoped registration as missing. A test demonstrating the field with a string would
+    // teach precisely that mistake, so none of the values below is one.
     const calls: unknown[][] = []
     const ctx = { get: (name: string) => (name === 'tools'
       ? { get: (...args: unknown[]) => { calls.push(args); return undefined } }
       : undefined) }
     const { log } = recorder()
-    verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log, scope: 'session:1' })
+    const scopeOfAgent = { opaque: 'agent-7' }
+    verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log, scope: scopeOfAgent })
     verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log, scope: { nested: true } })
     verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log, scope: undefined })
     verifyRegisteredFaces({ ctx: ctx as unknown as CompatContext, packageId: PACKAGE, toolNames: ['a'], log })
-    expect(calls).toEqual([['a', 'session:1'], ['a', { nested: true }], ['a', undefined], ['a', undefined]])
+    expect(calls).toEqual([['a', scopeOfAgent], ['a', { nested: true }], ['a', undefined], ['a', undefined]])
   })
 })
 

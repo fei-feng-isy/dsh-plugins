@@ -48,17 +48,19 @@ describe('checkInterface decides in both directions', () => {
     expect(verdict.warning).toBeUndefined()
   })
 
-  it('is `ok` + a WARNING when the loaded base is NEWER than the build (pure addition)', () => {
-    // The family's safe case: generations are additive, so every member this build requires is still
-    // there. "In range but another generation" is exactly the case `supportedRange` cannot see, so the
-    // gate must see it — and must NOT degrade the old build over an ADDED surface.
+  it('is `ok` + a WARNING when the loaded base is NEWER than the build (admitted on the member proof)', () => {
+    // The family's safe case: the newer generation keeps every member this build requires, so the gate
+    // must NOT degrade the old build over an ADDED surface. The sentence names that proof instead of
+    // "generations are additions" — v3 PRUNED 18 members, so the general claim is false and a
+    // maintainer reading it that way could admit a pruning generation on a false premise.
     const verdict = checkInterface(1, { INTERFACE_VERSION: 2 })
     expect(verdict.status).toBe('ok')
     expect(verdict.required).toBe(1)
     expect(verdict.loaded).toBe(2)
     expect(verdict.warning).toContain('newer')
     expect(verdict.warning).toContain('generation 2')
-    expect(verdict.warning).toContain('pure additions')
+    expect(verdict.warning).toContain('keeps every member this build requires')
+    expect(verdict.warning).not.toContain('pure addition')
     // `reason` stays reserved for a non-`ok` verdict, so a caller that logs it only then stays correct.
     expect(verdict.reason).toBeUndefined()
   })
@@ -122,12 +124,13 @@ describe('the `loaded > required` = ok rule rests on a MECHANICAL safety proof',
 
   it('a v1 build meeting the REAL v4 module gets `ok` + a WARNING, not a degradation', () => {
     // End to end on the real module: the case R1 turns into reality — an old plugin, an updated host
-    // base — judged usable, with the additive rule named in the warning. Admissible for v4 because v4
+    // base — judged usable, with the member proof named in the warning. Admissible for v4 because v4
     // adds and drops no NAME (it only widens an optional input), and v3's shed names are the frozen,
-    // zero-consumer prune list.
+    // zero-consumer prune list — which is exactly what the sentence now claims, instead of the false
+    // general claim that every generation is additive.
     const verdict = checkInterface(1, api)
     expect(verdict.status).toBe('ok')
-    expect(verdict.warning).toContain('pure additions')
+    expect(verdict.warning).toContain('keeps every member this build requires')
   })
 })
 
