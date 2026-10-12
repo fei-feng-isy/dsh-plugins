@@ -4,6 +4,8 @@ All notable changes to `@avantf/dsh-mission` are documented here.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-12
+
 ### Changed（模型工具面）
 - **执行者可以派生 subagent**：worker 的工具面不再拒绝 `subagent` / `subagent_fork` —— 起子 agent 是节点**内部**的
   实现手段，树只认节点与结果，收敛不受影响。`send_message` 与 goal / mission 控制类工具对 worker 仍然不可见

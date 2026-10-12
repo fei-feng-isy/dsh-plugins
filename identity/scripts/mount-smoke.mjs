@@ -118,7 +118,11 @@ const plugin = await import(pathToFileURL(pluginEntry).href)
 // ── the profile's identity files (written BEFORE the mount: the section reads the disk) ─────────
 const profileDir = join(dataHome, 'identity', 'profiles', PROFILE)
 mkdirSync(profileDir, { recursive: true })
-const IDENTITY_TEXT = '你是「小身份」。\n\n' + '语气温和，先说结论。\n\n' + '禁止编造事实。'
+// The profile's three bodies as the assembly renders them: IDENTITY → SOUL → RULES, and the render puts
+// its one heading above the rules part only, in that part's own language (see `src/documents.ts` and
+// `test/mechanism.spec.ts`, which pins the same literal for its own fixture). The fixture's rules body is
+// Chinese, so the heading is `**规则**`.
+const IDENTITY_TEXT = '你是「小身份」。\n\n' + '语气温和，先说结论。\n\n' + '**规则**\n\n' + '禁止编造事实。'
 writeFileSync(join(profileDir, 'IDENTITY.md'), '你是「小身份」。\n', 'utf8')
 writeFileSync(join(profileDir, 'SOUL.md'), '语气温和，先说结论。\n', 'utf8')
 writeFileSync(join(profileDir, 'RULES.md'), '禁止编造事实。\n', 'utf8')

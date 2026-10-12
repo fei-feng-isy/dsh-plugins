@@ -4,6 +4,17 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-12
+
+### Fixed（日志措辞）
+- **兼容门禁不可用时不再一律说成"底座缺席"**：那条降级 WARNING 现在同时覆盖两种成因——底座取不到，
+  **或者**底座在、但属于另一个接口世代而被门禁扣留（后一种情况下真正的原因在门禁自己那条
+  "shared capabilities are NOT used" 里）。此前两种情形共用一句"base unavailable"，在底座其实装着的宿主上
+  读起来是错的。判定逻辑与降级行为都没变，只有文案。
+- **host face 的注册日志不再写死数量**：原来是字面量 `(5 tools + 5 UI-only)`，容易被读成"模型工具只有 5 个"
+  （实际是 8 个模型工具，那 5 个指 5 个 tool-backed 的 Remote 方法）；现在两个数字都从 face 自己的
+  descriptor 数出来，方法增减会跟着这条日志走。
+
 ## [0.6.3] - 2026-10-10
 
 ### Fixed（安装面）
