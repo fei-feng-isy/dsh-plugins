@@ -79,15 +79,65 @@ node scripts/prepublish-assert.mjs
 #   打包之后还可以断言"真实产物字节"里没有发布工具链、README 是这一包的：
 node scripts/prepublish-assert.mjs --tarball dist/avantf-dsh-mem-<x.y.z>.tgz
 
-# 4) 从本仓发布，严格按 base → 插件的顺序
+# 4) 从本仓发布，严格按 base → 插件的顺序。
+#    base 没有 `workspace:` 依赖，可以直接按目录发（它的 prepack/prepublishOnly 会跑）：
 pnpm -C base/plugin-base publish --access public
-pnpm -C mem/packages/plugin publish --access public
-pnpm -C mission/packages/plugin publish --access public
-pnpm -C identity/packages/plugin publish --access public
+
+#    三个插件**必须先 pack:plugin 再发 tarball**（原因见下一节；直接 publish 目录会失败）：
+#    registry 显式给：本机 ~/.npmrc 的默认 registry 常是只读镜像 npmmirror，
+#    不带 --registry 的发布命令在那台机器上会打在镜像上。（各包手册 §2 的四条发布前提同此。）
+pnpm -C mem      pack:plugin     # → mem/dist/avantf-dsh-mem-<x.y.z>.tgz
+pnpm -C mission  pack:plugin     # → mission/release/avantf-dsh-mission-<x.y.z>.tgz
+pnpm -C identity pack:plugin     # → identity/release/avantf-dsh-identity-<x.y.z>.tgz
+npm publish "$PWD/mem/dist/avantf-dsh-mem-<x.y.z>.tgz" \
+  --access public --registry https://registry.npmjs.org/
+npm publish "$PWD/mission/release/avantf-dsh-mission-<x.y.z>.tgz" \
+  --access public --registry https://registry.npmjs.org/
+npm publish "$PWD/identity/release/avantf-dsh-identity-<x.y.z>.tgz" \
+  --access public --registry https://registry.npmjs.org/
 ```
 
+`npm publish <tarball>` 用**绝对路径**（相对路径会被当成包名，报 `EALLOWGIT`）。各包手册是这套配方的
+出处与细节处：`mem/docs/RELEASING.md` §2（registry / token 绕 2FA / scope / 链路四条前提）、
+`mission/docs/RELEASING.md` §3。
+
 mem 发版前还要把 `mem/CHANGELOG.md` 的版本段切好（mem 自己的严格门禁会检查，
-`[Unreleased]` 必须为空）。每个包 publish 时都会触发它的 `prepublishOnly`。
+`[Unreleased]` 必须为空）。发 tarball 时 pnpm 不会跑那个包的 `prepublishOnly`——`pack:plugin` 已经把
+同一批断言（含 `scripts/prepublish-assert.mjs` 的字节断言）跑完了，这正是改走 tarball 不会削弱门禁的原因。
+
+### 为什么插件不能 `pnpm -C <dir> publish`
+
+**实测（pnpm 12.4.1）**：`pnpm -C mem/packages/plugin publish --access public` 必失败，报
+
+```
+ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL
+Cannot resolve workspace protocol of dependency "@avantf/mem" because this dependency is not installed.
+```
+
+**根因**：pnpm 自己的 `pack`（`publish` 内部会调用它）要把 `workspace:*` 落成真实版本号，而本仓的引擎包
+（`@avantf/mem*` / `@avantf/mission-core`）是 `private: true` 且**按约定不带 `version`**——没有版本号可落，
+pnpm 就报"未安装"。`pnpm pack:plugin` 能跑是因为它用 `scripts/lib/versions.mjs` 的 `withWorkspaceVersions()`
+在打包期间**临时**给这些私有包补上版本号、`finally` 里逐字还原（那份版本号永不入库，`version:check` 会拦
+残留）；而 `publish` 内部那一次 pack 没有这层包装。
+
+最小复现（与 dsh 无关）：一个 `private` 且无 `version` 的 workspace 包 + 一个用 `workspace:*` 引用它的包，
+`pnpm install` 之后 `pnpm pack` 就报同一个错；给那个包补一行 `version` 立即通过。**所以这是 pnpm 12 的行为，
+不是本仓配置的问题**——上面那条 tarball 流程就是为此存在的，`mem/docs/RELEASING.md` §2 与
+`mission/docs/RELEASING.md` §3 记的是同一件事（更早踩到的版本）。
+
+### 发布后必须确认版本真的上线（staged publish）
+
+npm 现在会把新版本先**暂存**（staged publish）而不是直接上线：`publish` 会打印
+`✅ Published package …` 且 **exit 0**，但版本处于"待批准"状态，**还没进 registry**——此时
+`npm view <包>@<版本>` 是 404、`dist-tags.latest` 仍指旧版本，对同一个版本再发一次会得到
+`409 Conflict: Cannot publish over previously staged version "<版本>"`（这正是"暂存还在"的确认信号）。
+批准只能在 npmjs.com 上做（包页的 staged-publish 处；npm CLI 12 没有对应子命令）。**发完必查**：
+
+```bash
+curl -sS https://registry.npmjs.org/@avantf%2Fdsh-mem | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s)['dist-tags']))"
+```
+
+`dist-tags.latest` 指到新版本，才算这一单真的发出去。
 
 ## 发布前断言（替代 RC 的三处差异）
 

@@ -316,11 +316,24 @@ pnpm release:check                                  # 本包严格门禁（含 p
 另外 5 个包（引擎 / `mem-cli` / `mem-mcp`）在 manifest 里都是 `private: true`：它们只作为本仓库的
 源码依赖存在，`pnpm -r publish` 碰不到它们，`release:check` 的 preflight 也会断言"可发布的只有 plugin"。
 
-发布本身（npm registry）是独立动作：
+发布本身（npm registry）是独立动作。**先打包、再发 tarball**——直接 `pnpm -C packages/plugin publish`
+（或 `pnpm --filter @avantf/dsh-mem publish`）在 pnpm 12 下必失败：`publish` 内部那次 pack 要把 `workspace:*`
+落成版本号，而引擎包按约定 `private` 且无 `version`，于是报
+`ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL`（`pack:plugin` 用 `withWorkspaceVersions()` 在打包期间临时补版本，
+`publish` 那一次没有这层包装；根 `docs/RELEASING.md` 有最小复现）：
 
 ```bash
-pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks   # 只这一个
+pnpm -C mem pack:plugin                                      # → mem/dist/avantf-dsh-mem-<v>.tgz
+npm publish "$PWD/mem/dist/avantf-dsh-mem-<v>.tgz" --access public \
+  --registry https://registry.npmjs.org/                     # 只这一个包
 ```
+
+`npm publish <tarball>` 不跑生命周期脚本（断言已由 `pack:plugin` 跑完），也不做 workspace 解析，
+所以它不受上面那条 pnpm 限制。细节见 `mem/docs/RELEASING.md` §2 的四条前提。
+
+npm 现在默认走 **staged publish**：`publish` 打印 `✅ Published package …` 且 exit 0，但版本只是**暂存**、
+要你在 npmjs.com 上批准才上线（批准前 `npm view <包>@<版本>` 是 404、`latest` 仍指旧版，再发同版本报 409）。
+发完用 `dist-tags.latest` 确认，别信那句 "Published"。
 
 ## 快速开始（开发）
 
@@ -382,7 +395,7 @@ node packages/cli/lib/index.js query "张伟" --kind all
 | `pnpm prepublish:assert`（**仓库根**） | 发布前断言：可发布集合恰好三个 / 每组版本只记一处 / 每包随自己的 README / 没有包装进或指向发布工具链 | 只读；真 `publish` 时各包的 `prepublishOnly` 也会跑它 |
 | `pnpm version:set mem X.Y.Z`（**仓库根**） | 切版本：**只改一个文件** `packages/plugin/package.json`（组内其余 manifest 不带版本） | `pnpm version:check` 会拦"私有包又长出版本号"，`pnpm release:check` 也会 |
 | `pnpm prepublish:assert --tarball mem/dist/avantf-dsh-mem-<v>.tgz`（**仓库根**） | 追加"真实产物字节"断言（不带发布工具链、README 首行是包名） | 在 `pnpm pack:plugin` 之后 |
-| `pnpm --filter @avantf/dsh-mem publish --access public --no-git-checks` | 真正发布（**只这一个包**） | 其余 5 个是 `private: true`，`pnpm -r publish` 碰不到 |
+| `npm publish "$PWD/mem/dist/avantf-dsh-mem-<v>.tgz" --access public --registry https://registry.npmjs.org/`（**仓库根**） | 真正发布（**只这一个包**，发的是刚打出的 tarball） | 其余 5 个是 `private: true`，`pnpm -r publish` 碰不到；**不要**改回 `pnpm --filter @avantf/dsh-mem publish`（pnpm 12 必失败，见上文发布一节） |
 
 #### 四、基准与辅助
 
