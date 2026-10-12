@@ -14,7 +14,8 @@
 ## 1. 需求（用户口径）
 
 1. 身份由配置目录里的三个文件承载：`IDENTITY.md`（**身份**——你是谁、叫什么、扮演什么角色）、
-   `SOUL.md`（**灵魂**——语气、价值观、行事风格、判断取舍的原则）、`RULES.md`（**规则**——硬约束、
+   `SOUL.md`（**性格**——语气、价值观、行事风格、判断取舍的原则；**文件名是磁盘契约、不改**，"性格"
+   是界面上给用户看的文案，见 §11「已拍板」）、`RULES.md`（**规则**——硬约束、
    必须做与禁止做）。三者合起来**取代**现有 system prompt 里的身份部分。
 2. **不覆盖其它包注册的 section**：工具指引、Agent Teams、plan mode、goal、subagent、jobs、web、
    workflow、MCP 等的能力指引**一条不少、一字不改**。
@@ -250,7 +251,7 @@ function isMainAgent(context: AssembleContext): boolean {
    `reconcileProfilePatches`、`sanitizeProfile` 都会读写它——用户内容放进去会跟宿主的重写搅在一起。
 2. **拿不到、也不该硬编码。** 家族 API（`resolveDataHome`）只认数据根；profile 目录名要靠
    `profileContext`，路径还要考虑 `DSH_HOME` 重定位。硬编码 `~/.dsh` 等于把插件绑死在宿主的一个目录约定上。
-3. **职责与所有权。** 身份/灵魂/规则是**用户自己的内容**——和 `memory/`、`knowledge/`、`configs/`、`prompts/`
+3. **职责与所有权。** 身份/性格/规则是**用户自己的内容**——和 `memory/`、`knowledge/`、`configs/`、`prompts/`
    同类，该住数据根。备份、迁移、`AVANTF_HOME` 沙箱重定向才会把它们一起带走。
 4. 你直觉里对的那一点我们**保留**了：目录名里的 `<profile>` 让"这套身份属于哪个 profile"一眼可见——
    只是它挂在数据根下，而不是宿主的 composition 目录里。
@@ -659,6 +660,13 @@ child  : （与 native 逐字相同）
 8. **会话内冻结（2026-10-10 追加）**：身份文本与开关**按会话冻结**——一个会话用它开始时磁盘上的身份，
    中途改文件 / 应用预设 / 动开关都不影响它；新会话读新内容。理由：提示词不该在读者眼皮底下换人，
    且中途变化会作废该会话的 KV / 前缀缓存（§3.6）。UI 文案随之从下一轮生效改为新会话生效。
+9. **第三个文件的显示文案叫"性格"（2026-10-12 追加）**：**文件名仍是 `SOUL.md`**（磁盘契约、
+   目录布局、渲染顺序、预设文件全部不动），设置页里给用户看的中文标签由"灵魂"改为"**性格**"。
+   理由：这个文件装的是语气、价值观、行事风格与判断取舍的原则——"灵魂"在中文里比它承载的东西更玄，
+   容易被读成"意识/宗教信仰"那一类。同一批改动：`identity/README.md` 的说明与本节。
+   **英文标签仍是 `Soul`**（与 `Identity` / `Rules` 一样取文件名），中文是"这个文件是干什么的"的翻译，
+   不是概念改名。落地位置只有一处真源：`packages/plugin/src/client/index.ts` 的 `zh.fileSoul`，
+   由 `test/client.spec.ts` 的"shows the SOUL file as 性格 in Chinese"一条钉住。
 
 剩余待确认的只有一个**实现细节**，不影响开工：`settings.section` 页在导航里的 `order`
 （暂定 25，落在 `account` 之后）与页标题文案。

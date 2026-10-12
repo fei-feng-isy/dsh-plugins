@@ -2,9 +2,9 @@
 
 DSH（DeepSeek Harness）的**身份文件**插件：`@avantf/dsh-identity`。
 
-它把系统提示词里的**身份部分**换成用户自己的三个文件——`IDENTITY.md`（身份）、`SOUL.md`（灵魂）、
-`RULES.md`（规则），**不动任何其它 section**。权威规格：根目录
-[`docs/identity-files-system-prompt.md`](../docs/identity-files-system-prompt.md)（v2）。
+它把系统提示词里的**身份部分**换成用户自己的三个文件——`IDENTITY.md`（身份）、`SOUL.md`（**性格**——
+界面上的显示文案；文件名仍是 `SOUL.md`，不改磁盘契约）、`RULES.md`（规则），**不动任何其它 section**。
+权威规格：根目录 [`docs/identity-files-system-prompt.md`](../docs/identity-files-system-prompt.md)（v2）。
 
 ## 机制（一句话）
 

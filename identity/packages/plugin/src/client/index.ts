@@ -39,7 +39,9 @@ const zh = {
   title: '身份',
   switch: '启用身份',
   fileIdentity: '身份（IDENTITY.md）',
-  fileSoul: '灵魂（SOUL.md）',
+  // 文件名是 `SOUL.md`（磁盘契约，不改），**显示**说的是"性格"：这个文件装的是语气、价值观、行事风格
+  // 与判断取舍的原则，"灵魂"在中文里比它承载的东西更玄、更容易被读成"宗教信仰/意识"那一类。
+  fileSoul: '性格（SOUL.md）',
   fileRules: '规则（RULES.md）',
   save: '保存',
   saved: '已保存，新会话生效',
@@ -65,6 +67,8 @@ const en = {
   title: 'Identity',
   switch: 'Use the identity',
   fileIdentity: 'Identity (IDENTITY.md)',
+  // `Soul` on purpose, NOT "Personality": the English label stays the FILE's name, as the other two do
+  // (Identity / Rules). Only the Chinese display text says 性格 — a translation choice, not a rename.
   fileSoul: 'Soul (SOUL.md)',
   fileRules: 'Rules (RULES.md)',
   save: 'Save',

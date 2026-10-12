@@ -93,17 +93,27 @@ function controller(enabled: boolean): ConfigFormLike & { subscribed: boolean } 
   return form
 }
 
+/**
+ * The dictionaries the half hands to `locale.register`, kept per mount so a case can assert on the
+ * DISPLAY TEXT (not just on the keys the page asks for). Cleared by every `mount()`.
+ */
+let registeredDictionaries: Record<'zh' | 'en', Record<string, string>> | undefined
+
 /** Mount the browser half against a fake client context and hand back the registered page. */
 function mount(configForms: unknown, rawRemote?: unknown): Harness {
   hooks.values.length = 0
   hooks.calls.length = 0
   hooks.cursor = 0
+  registeredDictionaries = undefined
   const registered = new Map<string, { options: Harness['options']; component: (props: { close: () => void }) => { props: Record<string, unknown> } }>()
   const ctx = {
     effect: (callback: () => unknown) => callback(),
     logger: { error: () => undefined },
     locale: {
-      register: () => () => undefined,
+      register: (_namespace: string, dictionaries: Record<'zh' | 'en', Record<string, string>>) => {
+        registeredDictionaries = dictionaries
+        return () => undefined
+      },
       bind: () => (key: string, params?: unknown) => {
         hooks.calls.push(params === undefined ? key : [key, params])
         return key
@@ -262,6 +272,28 @@ describe('the pane renders whatever the wire delivered', () => {
     // Neither does the per-file byte count that used to sit next to each file name ("0 bytes" here).
     expect(drawn.join('|')).not.toContain('bytes')
     expect(drawn).not.toContain('missingFields')
+  })
+
+  it('shows the SOUL file as 性格 in Chinese, without renaming the file (the display convention)', () => {
+    // The disk contract is `SOUL.md`, and the KEY stays `fileSoul`; only what the user READS changes.
+    // Pinned because it is a deliberate naming decision (the file carries tone, values and judgement —
+    // 灵魂 reads as something more metaphysical) and nothing else in the suite would notice a revert.
+    // `texts()` cannot help here: the fake `locale.bind` returns the KEY, not the text, so the
+    // dictionary the half registers is the only place this decision is observable.
+    hooks.queue = slots(undefined, true)
+    renderPane({ get: () => controller(false) })
+    const dictionaries = registeredDictionaries
+    expect(dictionaries, 'the half must register its dictionaries').toBeDefined()
+    if (dictionaries === undefined) return
+    expect(dictionaries.zh['fileSoul']).toContain('性格')
+    expect(dictionaries.zh['fileSoul']).toContain('SOUL.md')
+    expect(dictionaries.zh['fileSoul']).not.toContain('灵魂')
+    // The other two labels are the file names, and stay that way.
+    expect(dictionaries.zh['fileIdentity']).toContain('IDENTITY.md')
+    expect(dictionaries.zh['fileRules']).toContain('RULES.md')
+    // English keeps the FILE's name on purpose (`Soul`, like `Identity` / `Rules`): the Chinese text is
+    // a translation of what the file is FOR, not a rename of the concept.
+    expect(dictionaries.en['fileSoul']).toContain('SOUL.md')
   })
 
   it('hides both cards while the switch is off', () => {
