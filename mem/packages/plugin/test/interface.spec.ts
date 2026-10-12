@@ -9,7 +9,7 @@
  *
  * What is pinned here:
  *
- *  - the linked module is structurally the base's declared interface (`BaseRuntimeV3`), and the
+ *  - the linked module is structurally the base's declared interface (`BaseRuntimeV4`), and the
  *    version it reports is the one this artifact was baked against;
  *  - path resolution: this plugin's layer order and the engine's agree, with the shared
  *    `AVANTF_HOME`/configured precedence;
@@ -30,7 +30,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import * as base from '@avantf/dsh-plugin-base'
-import type { BaseRuntimeV3 } from '@avantf/dsh-plugin-base'
+import type { BaseRuntimeV4 } from '@avantf/dsh-plugin-base'
 // The provider members moved OFF `.` in interface generation v3 (they are composition pieces of
 // `createProvisioner`, with zero non-test consumers across both plugin trees). They are still
 // exercised here — the provisioner contract is worth pinning — but taken from `./internal`, which is
@@ -40,7 +40,7 @@ import { resolveDataHome as coreResolveDataHome } from '@avantf/mem'
 import { baseIsUsable, interfaceVerdict } from '../src/interface_gate.js'
 
 /** The module AS the CURRENT interface declares it: a missing or reshaped member fails to compile here. */
-const runtime: BaseRuntimeV3 = base
+const runtime: BaseRuntimeV4 = base
 
 /** The record `scripts/link-envinit.mjs` bakes beside the built entry. */
 const BAKED_URL = new URL('../lib/interface-version.json', import.meta.url)
