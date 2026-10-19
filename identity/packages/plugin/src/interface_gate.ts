@@ -13,19 +13,19 @@
  * the legacy path — but the plugin ALWAYS mounts (tools, service, Remote and UI stay registered).
  * "Cannot tell" is never "incompatible": it warns and uses the base normally.
  *
- * **This file is a SHARED SHIM and must stay byte-identical in BOTH plugins** — only the `@module`
- * line below differs. Everything here is the consumption contract and the ONE verdict→decision
+ * **This file is a SHARED SHIM and must stay byte-identical in ALL THREE plugin trees** — only the
+ * `@module` line below differs. Everything here is the consumption contract and the ONE verdict→decision
  * mapping; nothing in it is plugin-specific by construction. What IS plugin-specific (which text the
  * prompt layer falls back to, which resources take the legacy path) belongs in that plugin's own
- * `envinit.ts`, never here. `base/plugin-base/test/interface_consumers.spec.ts` pins the two copies
- * against each other, so a divergence is a red test instead of two shims that drifted.
+ * `envinit.ts`, never here. `base/plugin-base/test/interface_consumers.spec.ts` pins the three
+ * copies against each other, so a divergence is a red test instead of three shims that drifted.
  *
- * The loader SKELETON the two startups share lives here too: the once-per-process cache
+ * The loader SKELETON every startup shares lives here too: the once-per-process cache
  * ({@link createLoadCache}), the guard that turns any throw into one warning
  * ({@link loadGuarded}), and the gate→decision step ({@link gateOrDegrade}). Those sentences are
- * observably NOT the same in the two plugins, so every shared function takes them as
- * {@link DegradeWords}: the shim owns the mechanism, the caller owns the wording, and the two trees'
- * `envinit.spec.ts` pin each plugin's own text verbatim.
+ * observably NOT the same in each tree, so every shared function takes them as
+ * {@link DegradeWords}: the shim owns the mechanism, the caller owns the wording, and each tree's
+ * `envinit.spec.ts` pins its own text verbatim.
  *
  * @module @avantf/dsh-identity/interface_gate
  */
@@ -262,7 +262,7 @@ export function createLoadCache<O, T>(guarded: (options: O) => Promise<T | undef
  * inside that window and half-register a plugin (the Remote face cannot be rolled back). A fiberless
  * stub counts as active: an unknown shape is "cannot tell", never "disposed".
  *
- * Generic Cordis liveness rather than interface-gate knowledge — but the two plugins' startup paths
+ * Generic Cordis liveness rather than interface-gate knowledge — but every plugin's startup path
  * share it byte-for-byte, so it lives with their one shared shim, where the two readings of "is my
  * context alive" cannot drift.
  */
