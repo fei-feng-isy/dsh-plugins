@@ -80,7 +80,13 @@ const SERVICE_CONTRACTS: readonly ServiceContract[] = [
   { name: 'tools', required: true, methods: ['register'] },
   { name: 'systemPrompt', required: true, methods: ['section', 'context', 'getSectionOrder'] },
   { name: 'storageDomain', required: true, methods: ['open'] },
-  { name: 'subagents', required: true, methods: ['startContinuable', 'sendMessage', 'interrupt'] },
+  // `sendMessage` / `interrupt` are byte-identical in dsh 0.2.0-rc.2 and 0.2.1-rc.2, so a break there
+  // is a proven incompatibility for both. The two START methods are deliberately NOT listed: dsh merged
+  // `startContinuable` into `startActivation` inside the 0.2 minor line, and this contract cannot
+  // express "either" (every listed method is required). `host.ts` detects the shape at mount through
+  // `subagentStart.ts` and degrades the DISPATCH path (with a loud line) instead of refusing the whole
+  // plugin — the tree, panel, commands and prompt guidance do not need a start method.
+  { name: 'subagents', required: true, methods: ['sendMessage', 'interrupt'] },
   { name: 'agents', required: false, methods: ['get'] },
   { name: 'commands', required: false, methods: ['register'] },
   { name: 'typert', required: false, methods: ['register', 'get'] },

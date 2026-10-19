@@ -70,6 +70,7 @@ import {
 } from './projection.js'
 import { NAMESPACE, SNAPSHOT_WIRE_VERSION } from './wire.js'
 import { OWN_WAKE_SOURCE_KIND } from './source.js'
+import { createStartAdapter, type StartAdapter } from './subagentStart.js'
 import { createTreeStore, type TreesTable } from './store.js'
 
 const WORKER_PROVIDER = 'spawn'
@@ -354,7 +355,26 @@ export class AvantfMissionHost extends TypertRemoteService {
     this.roundMs = options.roundMs
     this.wellFormed = wellFormed
     this.log = log ?? createLogger(ctx.logger)
+    // Which `subagents` start shape this host speaks, decided ONCE at mount (see `subagentStart.ts`):
+    // dsh merged `startContinuable` into `startActivation` inside one minor line, and the published
+    // dsh is the older one, so both must work. Detection here rather than per dispatch keeps one
+    // answer for every worker and one log line when the host offers neither.
+    this.startAdapter = createStartAdapter(ctx.subagents)
+    if (this.startAdapter.shape === 'none') {
+      this.log.error(
+        'the subagents service exposes neither startActivation nor startContinuable — this host cannot start workers; '
+        + 'the tree, panel and commands still mount, and every dispatch will report that reason',
+      )
+    } else if (!this.startAdapter.carriesToolFilter) {
+      this.log.warn(
+        'the host\'s subagents start shape no longer carries toolFilter — workers will see the tools their preset '
+        + 'grants instead of this plugin\'s deny list; visibility is a usability layer, refusals are unchanged',
+      )
+    }
   }
+
+  /** The start seam: one adapter for whichever `subagents` shape the host mounted. */
+  private readonly startAdapter: StartAdapter
 
   /** The repair pair every model-visible boundary of this host uses; see the constructor. */
   readonly wellFormed: WellFormedSource
@@ -1977,23 +1997,25 @@ export class AvantfMissionHost extends TypertRemoteService {
     signal: AbortSignal,
   ): Promise<void> {
     const start = (names: readonly string[]): Promise<unknown> =>
-      this.ctx.subagents.startContinuable({
+      // One seam for both host shapes (see `subagentStart.ts`): 0.2.0-rc.2's `startContinuable` and
+      // 0.2.1-rc.2's `startActivation({ delivery: 'parent' })`. The adapter omits `toolFilter` on a
+      // shape that does not carry it, so `names` is ignored there rather than silently pretended.
+      this.startAdapter.start({
         provider: WORKER_PROVIDER,
         label: `mission ${nodeId}`,
-        childId: SessionId(claimId),
-        request: {
-          prompt: [{ type: 'text', text: prompt }],
-          parent,
-          // An empty deny list would be a materialized-empty mistake: omit it.
-          ...names.length === 0 ? {} : { toolFilter: { deny: [...names] } },
-        },
+        childId: claimId,
+        prompt: [{ type: 'text', text: prompt }],
+        parent,
+        deny: names,
         signal,
       })
 
     try {
       await start(deny)
     } catch (error) {
-      const refused = refusedToolNames(error, deny)
+      // Only a host that carries `toolFilter` can refuse a name; the retry is about THAT shape. On the
+      // newer shape the field is never sent, so this branch cannot fire and the original error stands.
+      const refused = this.startAdapter.carriesToolFilter ? refusedToolNames(error, deny) : []
       if (refused.length === 0) throw error
       const kept = deny.filter((name) => !refused.includes(name))
       this.log.warn(

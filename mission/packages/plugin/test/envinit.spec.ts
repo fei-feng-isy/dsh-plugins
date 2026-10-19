@@ -165,7 +165,7 @@ describe('envinit loader', () => {
     // The required services are this plugin's real call surface, and the interval requirement is
     // declared because `host.ts` arms the sweep inside `start()`.
     expect(spec.services).toContainEqual({ name: 'tools', required: true, methods: ['register'] })
-    expect(spec.services).toContainEqual({ name: 'subagents', required: true, methods: ['startContinuable', 'sendMessage', 'interrupt'] })
+    expect(spec.services).toContainEqual({ name: 'subagents', required: true, methods: ['sendMessage', 'interrupt'] })
     expect(spec.events).toContain('agent/pre-step')
     expect(spec.needsInterval).toBe(true)
     // The probe IS the real host face, so a host whose codec contract moved is caught before mount.

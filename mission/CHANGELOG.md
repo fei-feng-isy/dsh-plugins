@@ -4,6 +4,26 @@ All notable changes to `@avantf/dsh-mission` are documented here.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-19
+
+### Fixed（向上兼容：新宿主不再拒载）
+- **dsh 在 0.2 条线内把 `subagents.startContinuable` 并进了 `startActivation`**（后者要求
+  `delivery: 'parent' | 'caller'`）。旧契约把 `startContinuable` 声明为必供方法，所以在那个宿主上插件
+  整棵**拒载**（`INCOMPATIBLE — required service "subagents" is mounted but exposes no
+  startContinuable`），任务标签、命令、提示词段全部不工作。现在启动方法改为**挂载时探测**：
+  有 `startActivation` 就用它（带 `delivery: 'parent'`，语义等同原来的 continuable 子会话），
+  只有 `startContinuable` 就用它；`sendMessage` / `interrupt` 仍是必检方法（两版签名一致）。
+  两个宿主上插件都正常挂载，派活路径各自可用。
+- **宿主连启动方法都没有时不再整棵拒载**：插件照常挂载（树、面板、命令、提示词段都在），并在启动日志里
+  报一条 ERROR；每次派活会明确说明"这个宿主无法启动 worker"，而不是静默卡住。这与其他环境故障的降级口径
+  一致——只有被证实的不兼容才拒载，且拒载的粒度收窄到真正用不了的那条路径。
+
+### Changed（新宿主上的 worker 可见性）
+- **新宿主的启动契约不再接受 `toolFilter`**（已改用 Agent Preset 表达），所以在那上面 worker 看到的工具
+  由它的 preset 决定，不再由本插件的 deny 列表收窄；启动日志会有一条 WARN 说明这一点。**边界没有放松**：
+  越权调用仍由工具自身的授权判定拒绝，任务树的收敛不依赖"看不见"。在仍带 `toolFilter` 的宿主
+  （含当前已发布的 dsh 0.2.0-rc.2）上行为与之前**完全一致**。
+
 ## [0.4.3] - 2026-10-12
 
 ### Changed（模型工具面）
