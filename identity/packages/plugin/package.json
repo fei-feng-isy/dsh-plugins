@@ -1,6 +1,6 @@
 {
   "name": "@avantf/dsh-identity",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH native Cordis plugin: the harness identity section of the system prompt is replaced by three editable profile files (IDENTITY / SOUL / RULES), with multi-lingual built-in presets and a settings page",
   "type": "module",
   "main": "lib/index.js",

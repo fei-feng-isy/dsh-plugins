@@ -28,34 +28,31 @@ describe('IdentityDocuments', () => {
     writeFileSync(join(dir, 'IDENTITY.md'), 'identity\n')
     writeFileSync(join(dir, 'SOUL.md'), 'soul\n')
     writeFileSync(join(dir, 'RULES.md'), 'rules\n')
-    // The RULES part carries the one heading the render adds; this fixture's body is Latin, so the
-    // heading is its English spelling.
-    expect(documents().render()).toBe('identity\n\nsoul\n\n**Rules**\n\nrules')
+    // No heading is added — the three files render exactly as written, in order.
+    expect(documents().render()).toBe('identity\n\nsoul\n\nrules')
   })
 
-  it('labels ONLY the rules part, and the label speaks the body\'s language', () => {
-    // The two halves of the decision, in one place: IDENTITY and SOUL get no heading (their difference
-    // is emphasis, not kind, and a heading would freeze a taxonomy the user may not share), and the
-    // Chinese rules body gets `**规则**` — the word the settings page uses for the same file.
+  it('adds no heading to any part, whatever the body\'s language', () => {
+    // The render INVENTS nothing: a label it added would be a piece of the prompt the user cannot find
+    // in any file, edit, or delete. A user who wants a heading writes it in the file itself.
     writeFileSync(join(dir, 'IDENTITY.md'), '你是「小助手」。\n')
     writeFileSync(join(dir, 'SOUL.md'), '语气温和。\n')
     writeFileSync(join(dir, 'RULES.md'), '禁止编造。\n')
-    expect(documents().render()).toBe('你是「小助手」。\n\n语气温和。\n\n**规则**\n\n禁止编造。')
+    expect(documents().render()).toBe('你是「小助手」。\n\n语气温和。\n\n禁止编造。')
   })
 
-  it('adds no heading when the rules part is empty — the heading never dangles', () => {
+  it('skips a blank part entirely — no separator is left dangling', () => {
     writeFileSync(join(dir, 'SOUL.md'), 'only the soul\n')
     writeFileSync(join(dir, 'RULES.md'), '   \n')
     expect(documents().render()).toBe('only the soul')
   })
 
-  it('keeps the heading when the render is truncated (the heading is inside the budget)', () => {
-    // The byte budget applies to the WHOLE rendered text, heading included: a heading that got cut away
-    // by the budget would be worse than no heading, because the reader would see an unexplained list of
-    // constraints with nothing saying what it is.
+  it('truncates by bytes and says so, with the file text starting the render', () => {
+    // The byte budget applies to the WHOLE rendered text. With no invented heading, the render starts
+    // exactly where the file does — that is the property this case pins now.
     writeFileSync(join(dir, 'RULES.md'), '禁'.repeat(400))
     const rendered = documents(60).render()
-    expect(rendered.startsWith('**规则**\n\n')).toBe(true)
+    expect(rendered.startsWith('禁')).toBe(true)
     expect(rendered).toContain('truncated at 60 bytes')
   })
 
@@ -111,7 +108,7 @@ describe('IdentityDocuments', () => {
     const reader = documents()
     expect(reader.render()).toBe('')
     writeFileSync(join(dir, 'RULES.md'), 'external edit with a different size\n')
-    expect(reader.render()).toBe('**Rules**\n\nexternal edit with a different size')
+    expect(reader.render()).toBe('external edit with a different size')
   })
 
   it('renders an empty string when the directory does not exist at all (environment failure degrades)', () => {
