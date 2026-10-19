@@ -35,7 +35,7 @@
  * fails. The machine is restored (relink + rebuild against the installed dsh) even then, so a failed
  * run never leaves a package compiled against the floor.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -206,6 +206,125 @@ function versionFrom(dir, name) {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')).version : undefined
 }
 
+// ── the PUBLISHED bytes, mounted on the FLOOR ───────────────────────────────────────────────────
+
+/**
+ * What each plugin tree needs to mount its own PACKED artifact as a host would: where `pack:plugin`
+ * puts the tarball, the tree's own mount smoke, and the directory name the package gets inside a
+ * profile's `node_modules/@avantf`.
+ *
+ * WHY THIS EXISTS. Every other step of this gate runs SOURCE REBUILT at the floor. The artifact a user
+ * actually installs is the one built against the INSTALLED dsh — same code, but a `lib/dsh-build.json`
+ * naming the newer host (and, for the client half, bundles built against its typings). Nothing above
+ * proves those exact bytes load on the floor, and the compatibility gate's whole design is "refuse only
+ * a PROVEN break": a version table naming a newer host must stay a WARNING there, not a refusal. This
+ * mounts the tarball with the floor's peers to answer exactly that.
+ */
+const PUBLISHED = {
+  mem: {
+    tree: 'mem',
+    package: 'mem/packages/plugin',
+    outDir: 'mem/dist',
+    tarballPrefix: 'avantf-dsh-mem',
+    smoke: 'mem/scripts/mount-smoke.mjs',
+    // mem's own `pack:plugin` passes no smoke flag; the packed-artifact hooks decide the mode.
+    smokeArgs: [],
+    packageDirName: 'dsh-mem',
+  },
+  mission: {
+    tree: 'mission',
+    package: 'mission/packages/plugin',
+    outDir: 'mission/release',
+    tarballPrefix: 'avantf-dsh-mission',
+    smoke: 'mission/scripts/mount-smoke.mjs',
+    smokeArgs: ['--runtime'],
+    packageDirName: 'dsh-mission',
+  },
+  identity: {
+    tree: 'identity',
+    package: 'identity/packages/plugin',
+    outDir: 'identity/release',
+    tarballPrefix: 'avantf-dsh-identity',
+    smoke: 'identity/scripts/mount-smoke.mjs',
+    smokeArgs: ['--runtime'],
+    packageDirName: 'dsh-identity',
+  },
+}
+
+/**
+ * Extract one packed tarball into a scratch profile and mount it with the FLOOR's peers.
+ *
+ * The peers come from the floor closure, never from the tree: by the time this runs the tree is
+ * linked back to the INSTALLED dsh (the restore phase), and keeping that split is the point — the
+ * bytes keep the bake of the host they were built against while their links resolve the floor.
+ *
+ * @param input.groupName - the group, for the scratch prefix.
+ * @param input.target - one {@link PUBLISHED} entry.
+ * @param input.setDir - the floor closure root (`<cache>/set`).
+ * @returns whether the packed artifact mounted.
+ */
+function mountPublished({ groupName, target, setDir }) {
+  const version = readManifest(target.package).version
+  const tarball = join(workspace, target.outDir, `${target.tarballPrefix}-${version}.tgz`)
+  if (!existsSync(tarball)) {
+    console.log(`  FAIL no packed tarball at ${tarball} (pack:plugin should have written it)`)
+    return false
+  }
+  const floorPeers = join(setDir, 'node_modules', '@deepseek-ai')
+  if (!existsSync(floorPeers)) {
+    console.log(`  FAIL the floor closure has no @deepseek-ai peers at ${floorPeers}`)
+    return false
+  }
+  const scratch = mkdtempSync(join(tmpdir(), `avf-floor-published-${groupName}-`))
+  try {
+    const scope = join(scratch, 'node_modules', '@avantf')
+    mkdirSync(scope, { recursive: true })
+    console.log(`\n▶ extract the packed artifact and link the FLOOR's peers\n  ${tarball}\n  → ${scratch}`)
+    if (spawnToolSync('tar', ['-xzf', tarball, '-C', scope], { stdio: 'inherit' }).status !== 0) {
+      console.log('  FAIL cannot extract the tarball')
+      return false
+    }
+    const packageDir = join(scope, target.packageDirName)
+    renameSync(join(scope, 'package'), packageDir)
+    // The REAL npm dependencies the tarball declares (mem: `yaml`, the native accelerators, …). A
+    // profile's installer would put them beside the package, so the mount needs them too — taken from
+    // this tree's install, which is the same resolution the packer asserted. `@avantf/*` stays
+    // unlinked on purpose (the engine is inlined; a leaked import must fail) and `@deepseek-ai/*` is
+    // the FLOOR's business (below), never the tree's.
+    const runtimeDeps = Object.keys(JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')).dependencies ?? {})
+      .filter((name) => !name.startsWith('@avantf/') && !name.startsWith('@deepseek-ai/'))
+    for (const name of runtimeDeps) {
+      const from = join(workspace, target.package, 'node_modules', name)
+      if (!existsSync(from)) {
+        console.log(`  note: runtime dependency ${name} is not installed in this tree — the mount may degrade`)
+        continue
+      }
+      mkdirSync(dirname(join(scratch, 'node_modules', name)), { recursive: true })
+      symlinkSync(from, join(scratch, 'node_modules', name), 'dir')
+    }
+    const peerScope = join(scratch, 'node_modules', '@deepseek-ai')
+    mkdirSync(peerScope, { recursive: true })
+    for (const name of readdirSync(floorPeers)) symlinkSync(join(floorPeers, name), join(peerScope, name), 'dir')
+    // `zod` is host-provided, so prefer the FLOOR closure's copy (what a floor profile hands the
+    // plugin) and fall back to the workspace's only when the closure has none.
+    const floorZod = join(setDir, 'node_modules', 'zod')
+    const zod = existsSync(floorZod) ? floorZod : join(workspace, target.package, 'node_modules', 'zod')
+    if (existsSync(zod)) symlinkSync(zod, join(scratch, 'node_modules', 'zod'), 'dir')
+    const base = join(workspace, target.package, 'node_modules', '@avantf', 'dsh-plugin-base')
+    if (existsSync(base)) {
+      mkdirSync(join(scratch, 'node_modules', '@avantf'), { recursive: true })
+      symlinkSync(base, join(scratch, 'node_modules', '@avantf', 'dsh-plugin-base'), 'dir')
+    }
+    const status = spawnToolSync(process.execPath, [join(workspace, target.smoke), ...target.smokeArgs], {
+      stdio: 'inherit',
+      env: { ...process.env, AVANTF_PLUGIN_DIR: packageDir, AVANTF_MOUNT_SCRATCH: scratch },
+    }).status
+    return status === 0
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
+}
+
 // ── executable ──────────────────────────────────────────────────────────────────────────────────
 
 function main(argv = process.argv.slice(2)) {
@@ -314,6 +433,18 @@ function main(argv = process.argv.slice(2)) {
   let restored = true
   for (const [label, command, args, cwd] of group.restore) {
     if (!run(label, command, args, cwd)) restored = false
+  }
+
+  // LAST, and deliberately after the restore: `pack:plugin` asserts the bake against the tree's OWN
+  // links, so it has to run where the restore put them (the installed dsh) — that build is the artifact
+  // a user installs. The mount then creates nothing but a scratch profile, so the machine still ends
+  // exactly where the restore left it.
+  const published = PUBLISHED[groupName]
+  if (published !== undefined) {
+    const packed = run('pack the installable tarball (installed dsh)', pnpm, ['run', 'pack:plugin'], published.tree)
+    results.push(['pack the installable tarball (installed dsh)', packed])
+    const mounted = packed && mountPublished({ groupName, target: published, setDir })
+    results.push([`mount the PUBLISHED tarball with the floor's peers (${floor})`, mounted])
   }
 
   console.log(`\n──────── old-dsh gate summary (${groupName}) ────────`)
