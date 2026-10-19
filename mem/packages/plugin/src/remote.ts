@@ -341,8 +341,15 @@ function declared(name: string, schema: z.ZodType): DeclaredSchema {
  * the one inside the installed harness build), so no imported field type can be both correct and
  * stable; and the registry's field type is generation-specific (`TypertSchema['schema']` in 0.1.5,
  * `TypertSchemaFactory['create']`'s return in 0.1.6+, the name gone in 0.1.7), so naming it is what
- * broke this file's compilation on 0.1.7. The two copies are structurally identical, which is why the
- * declared entries stay assignable to whichever entry type the installed host declares.
+ * broke this file's compilation on 0.1.7.
+ *
+ * The two copies are structurally identical but NOT type-identical, and the host's own copy is not one
+ * version: 0.1.5 declares `zod: ^4.4.3` (a caret, so the install resolves the newest 4.x — 4.6.7) while
+ * 0.2.1-rc.2 pins `zod: "4.4.3"` exactly. `_zod.version.minor` is a literal type, so whichever minor we
+ * compile with, the other host's `TypertSchema['schema']` disagrees with it. That is why the `schemas`
+ * ASSIGNMENT below carries one explicit cast: the values are interchangeable at runtime (a schema
+ * carries its own methods, and the registry only calls them), while the type cannot be. Same trade the
+ * mem engine documents in DESIGN §20.11.
  */
 export const hostContribution: TypertContribution = {
   package: PACKAGE,
@@ -356,7 +363,7 @@ export const hostContribution: TypertContribution = {
       `${descriptor.method}Result`,
       codecSchema((descriptor.result as Extract<TypertCodec, { mode: 'strict' }>)),
     ),
-  ]),
+  ]) as unknown as TypertContribution['schemas'],
   model: {
     services: [
       {

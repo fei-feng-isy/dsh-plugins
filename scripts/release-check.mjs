@@ -21,7 +21,9 @@
  *      `@avantf/dsh-plugin-base` version inside the dependency range each plugin declares — and both
  *      plugins must declare the SAME range, or the installer resolves two physical copies instead of
  *      one (measured on pnpm isolated / pnpm hoisted / npm flat).
- *   3. **The one-zod rule.** `catalog.zod` is `4.6.7` (the version the installed dsh ships), the
+ *   3. **The one-zod rule.** `catalog.zod` is `4.4.3` — the version the installed dsh's own type
+ *      declarations resolve to (dsh 0.2.1-rc.2 pins `zod: "4.4.3"` exactly in the packages that use
+ *      it, so the nested copy — not the dsh root's 4.6.7 — is what our sources compile against), the
  *      base's own `zod` peer stays the wide `>=4.4.3 <5`, and `@avantf/dsh-mem` — the plugin that uses
  *      zod at runtime — takes it as a REQUIRED peer. So ONE copy of zod serves the workspace's engine
  *      packages and the host. Two copies — even of one major — have incompatible type identities (mem
@@ -184,10 +186,10 @@ if (workspaceText === undefined) {
   const zod = /^\s+zod:\s*(\S+)\s*$/mu.exec(workspaceText)
   if (zod === null) {
     fail('pnpm-workspace.yaml has no `catalog.zod` entry — the one-zod rule lives there')
-  } else if (zod[1] !== '4.6.7') {
-    fail(`catalog.zod is ${zod[1]}, expected the installed dsh's 4.6.7 (bump the catalog line, never a package.json)`)
+  } else if (zod[1] !== '4.4.3') {
+    fail(`catalog.zod is ${zod[1]}, expected the installed dsh's 4.4.3 (bump the catalog line, never a package.json)`)
   } else {
-    note('catalog.zod = 4.6.7 (one copy for the workspace and the installed dsh)')
+    note('catalog.zod = 4.4.3 (one copy for the workspace and the installed dsh)')
   }
   if (!/^linkWorkspacePackages:\s*true\s*$/mu.test(workspaceText)) {
     fail(
@@ -310,7 +312,7 @@ if (baseManifest !== undefined) {
   } else if (!satisfies(zodPeer, '4.4.3') || !satisfies(zodPeer, '4.6.7') || satisfies(zodPeer, '5.0.0')) {
     fail(`${BASE}'s zod peer ">=4.4.3 <5" does not behave as advertised (4.4.3 and 4.6.7 in, 5.0.0 out)`)
   } else {
-    note(`${BASE} peer zod = ">=4.4.3 <5" (4.4.3 and the dsh's 4.6.7 both accepted)`)
+    note(`${BASE} peer zod = ">=4.4.3 <5" (4.4.3 and the host's 4.6.7 both accepted)`)
   }
 }
 

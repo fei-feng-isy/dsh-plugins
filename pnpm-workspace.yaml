@@ -45,17 +45,26 @@ linkWorkspacePackages: true
 # used to live in `mem/pnpm-workspace.yaml` and `mission/pnpm-workspace.yaml`; a version can no longer
 # differ between two packages that must agree.
 #
-# `zod` is pinned EXACTLY and tracks the version the INSTALLED dsh itself ships (4.6.7). It is the one
-# entry the merge had to reconcile: `mem` was on 4.4.3 and `mission` on 4.6.5, and the host's
-# `@deepseek-ai/dsh-storage-domain` types its record schemas with its own zod. Two copies — even of
-# the same major — have incompatible type identities, which is what forced the `TypertSchema['schema']`
-# cast (mem DESIGN §20.11). `pnpm why zod` must keep resolving ONE copy for `@avantf/mem-contract`,
-# `@avantf/dsh-mem` and `@avantf/dsh-mission`. Bump this line, never a package.json.
+# `zod` is pinned EXACTLY and must equal the version the INSTALLED dsh's own type declarations resolve
+# to — today 4.4.3, because dsh 0.2.1-rc.2 pins `"zod": "4.4.3"` (exact) in every package that uses it,
+# while the dsh root still carries 4.6.7 at its top level. So the installed tree holds BOTH copies, and
+# every `@deepseek-ai/*` `.d.ts` we compile against resolves the NESTED 4.4.3. It is the catalog entry the
+# merge had to reconcile: `mem` was on 4.4.3 and `mission` on 4.6.5, and the host's
+# `@deepseek-ai/dsh-storage-domain` types its record schemas with its own zod. Two copies — even of the
+# same major — have incompatible type identities (`_zod.version.minor` is a literal type), which is what
+# forced the `TypertSchema['schema']` cast (mem DESIGN §20.11). `pnpm why zod` must keep resolving ONE
+# copy for `@avantf/mem-contract`, `@avantf/dsh-mem` and `@avantf/dsh-mission`. Bump this line, never a
+# package.json.
 #
-# The number is a FLOOR-following constant, not a choice: when the installed dsh moving its own zod
-# made this line stale (4.6.5 → 4.6.7, 2026-10-19), `tsc` failed on every tree with "types of property
-# 'toJSONSchema' are incompatible" — the two copies had incompatible type identities exactly as this
-# comment warns. `scripts/release-check.mjs` asserts the equality; bump both together.
+# The number is a HOST-FOLLOWING constant, not a choice. Two measured bumps say the same thing:
+#   4.6.5 → 4.6.7 (2026-10-19, dsh still declared `^4.4.3`, so npm hoisted the newest 4.x into the host's
+#   top level) — `tsc` failed on every tree with "types of property 'toJSONSchema' are incompatible";
+#   4.6.7 → 4.4.3 (2026-10-19, dsh 0.2.1-rc.2 switched that declaration to an exact `4.4.3`, so the
+#   nested copy became the one the declarations resolve) — the same failure, reported as
+#   `_zod.version.minor: '6' is not assignable to '4'` in `mission/packages/plugin/src/domain.ts`.
+# Read the installed host when in doubt:
+#   node -e "console.log(require(require.resolve('zod/package.json', { paths: ['<installed-dsh>/node_modules/@deepseek-ai/dsh-subagent'] })).version)"
+# `scripts/release-check.mjs` asserts the equality; bump both together.
 #
 # Not in this catalog on purpose: `@avantf/dsh-plugin-base`. The plugins declare it as a runtime
 # dependency (`>=0.3.0 <1.0.0`, identical in BOTH plugins — that sameness is what keeps the install at
@@ -64,7 +73,7 @@ linkWorkspacePackages: true
 # manifest has to be installable by a host's package manager). So this one pair lives in the two
 # manifests, and `scripts/release-check.mjs` asserts it.
 catalog:
-  zod: 4.6.7
+  zod: 4.4.3
 
   # Toolchain. These were already identical across the packages of both workspaces; the catalog makes
   # that a property of the merged workspace instead of a convention, so `tsc` cannot check one package
