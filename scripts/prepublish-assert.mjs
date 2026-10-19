@@ -66,7 +66,12 @@ export const PUBLISHABLE = new Map([
  * `scripts/release-check.mjs` (which asserts the same equality as part of the full release gate);
  * this file's copy exists so a publish can assert the surface without running the whole gate.
  */
-const WORKSPACE_PATTERNS = ['base/*', 'mem/packages/*', 'mission/packages/*', 'identity/packages/*']
+/**
+ * `mem` (the umbrella directory itself) is declared in `pnpm-workspace.yaml` so a pnpm command whose
+ * `cwd` is inside `mem/` resolves THIS workspace instead of falling back to `mem/`-as-root (see the
+ * comment there). It is `private: true` with no version, i.e. internal; the scan below still walks it.
+ */
+const WORKSPACE_PATTERNS = ['base/*', 'mem', 'mem/packages/*', 'mission/packages/*', 'identity/packages/*']
 
 /**
  * The files that made up the retired projection. They are named here so a future copy that rides a

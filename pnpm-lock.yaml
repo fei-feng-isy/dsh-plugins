@@ -216,8 +216,8 @@ catalogs:
       specifier: ^2.5.0
       version: 2.9.1
     zod:
-      specifier: 4.6.5
-      version: 4.6.5
+      specifier: 4.6.7
+      version: 4.6.7
 
 importers:
 
@@ -236,7 +236,7 @@ importers:
         version: 2.1.9(@types/node@22.20.4)(lightningcss@1.33.0)
       zod:
         specifier: 'catalog:'
-        version: 4.6.5
+        version: 4.6.7
 
   identity/packages/plugin:
     dependencies:
@@ -270,7 +270,13 @@ importers:
         version: 2.1.9(@types/node@22.20.4)(lightningcss@1.33.0)
       zod:
         specifier: 'catalog:'
-        version: 4.6.5
+        version: 4.6.7
+
+  mem:
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
 
   mem/packages/cli:
     dependencies:
@@ -295,7 +301,7 @@ importers:
     dependencies:
       zod:
         specifier: 'catalog:'
-        version: 4.6.5
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -433,7 +439,7 @@ importers:
         version: 2.1.9(@types/node@22.20.4)(lightningcss@1.33.0)
       zod:
         specifier: 'catalog:'
-        version: 4.6.5
+        version: 4.6.7
     optionalDependencies:
       '@huggingface/transformers':
         specifier: 'catalog:'
@@ -527,7 +533,7 @@ importers:
         version: 2.1.9(@types/node@22.20.4)(lightningcss@1.33.0)
       zod:
         specifier: 'catalog:'
-        version: 4.6.5
+        version: 4.6.7
 
 packages:
 
@@ -2719,6 +2725,9 @@ packages:
   zod@4.6.5:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
 snapshots:
 
   '@babel/generator@8.0.0-rc.6':
@@ -4789,3 +4798,5 @@ snapshots:
       zod: 4.6.5
 
   zod@4.6.5: {}
+
+  zod@4.6.7: {}

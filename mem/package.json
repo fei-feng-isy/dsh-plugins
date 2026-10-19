@@ -27,5 +27,8 @@
     "cleanup:dsh": "bash scripts/cleanup.sh",
     "audit:flows": "node scripts/audit-flow-duplication.mjs"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
 }

@@ -21,7 +21,7 @@
  *      `@avantf/dsh-plugin-base` version inside the dependency range each plugin declares — and both
  *      plugins must declare the SAME range, or the installer resolves two physical copies instead of
  *      one (measured on pnpm isolated / pnpm hoisted / npm flat).
- *   3. **The one-zod rule.** `catalog.zod` is `4.6.5` (the version the installed dsh ships), the
+ *   3. **The one-zod rule.** `catalog.zod` is `4.6.7` (the version the installed dsh ships), the
  *      base's own `zod` peer stays the wide `>=4.4.3 <5`, and `@avantf/dsh-mem` — the plugin that uses
  *      zod at runtime — takes it as a REQUIRED peer. So ONE copy of zod serves the workspace's engine
  *      packages and the host. Two copies — even of one major — have incompatible type identities (mem
@@ -99,8 +99,15 @@ const PUBLISHABLE = new Map([
   ['mission/packages/plugin', '@avantf/dsh-mission'],
   ['identity/packages/plugin', '@avantf/dsh-identity'],
 ])
-/** The workspace globs the publishable packages live under; anywhere else is build output, never shipped. */
-const WORKSPACE_PATTERNS = ['base/*', 'mem/packages/*', 'mission/packages/*', 'identity/packages/*']
+/**
+ * The workspace globs the publishable packages live under; anywhere else is build output, never shipped.
+ *
+ * `mem` (the umbrella directory itself) is listed because `pnpm-workspace.yaml` must declare it: a pnpm
+ * command whose `cwd` is inside `mem/` otherwise treats `mem/` as its own workspace root — losing this
+ * repo's `catalog:` and double-counting the vendored preset's stub as `@avantf/dsh-mem`. It carries
+ * `private: true` and no version, so this scan sees it and passes it through as internal.
+ */
+const WORKSPACE_PATTERNS = ['base/*', 'mem', 'mem/packages/*', 'mission/packages/*', 'identity/packages/*']
 
 const BASE_DIR = 'base/plugin-base'
 const BASE = '@avantf/dsh-plugin-base'
@@ -177,10 +184,10 @@ if (workspaceText === undefined) {
   const zod = /^\s+zod:\s*(\S+)\s*$/mu.exec(workspaceText)
   if (zod === null) {
     fail('pnpm-workspace.yaml has no `catalog.zod` entry — the one-zod rule lives there')
-  } else if (zod[1] !== '4.6.5') {
-    fail(`catalog.zod is ${zod[1]}, expected the installed dsh's 4.6.5 (bump the catalog line, never a package.json)`)
+  } else if (zod[1] !== '4.6.7') {
+    fail(`catalog.zod is ${zod[1]}, expected the installed dsh's 4.6.7 (bump the catalog line, never a package.json)`)
   } else {
-    note('catalog.zod = 4.6.5 (one copy for the workspace and the installed dsh)')
+    note('catalog.zod = 4.6.7 (one copy for the workspace and the installed dsh)')
   }
   if (!/^linkWorkspacePackages:\s*true\s*$/mu.test(workspaceText)) {
     fail(
@@ -300,10 +307,10 @@ if (baseManifest !== undefined) {
   const zodPeer = baseManifest.peerDependencies?.zod
   if (zodPeer !== '>=4.4.3 <5') {
     fail(`${BASE}'s zod peer is ${String(zodPeer)}, expected the wide ">=4.4.3 <5" that serves both this workspace and the installed dsh`)
-  } else if (!satisfies(zodPeer, '4.4.3') || !satisfies(zodPeer, '4.6.5') || satisfies(zodPeer, '5.0.0')) {
-    fail(`${BASE}'s zod peer ">=4.4.3 <5" does not behave as advertised (4.4.3 and 4.6.5 in, 5.0.0 out)`)
+  } else if (!satisfies(zodPeer, '4.4.3') || !satisfies(zodPeer, '4.6.7') || satisfies(zodPeer, '5.0.0')) {
+    fail(`${BASE}'s zod peer ">=4.4.3 <5" does not behave as advertised (4.4.3 and 4.6.7 in, 5.0.0 out)`)
   } else {
-    note(`${BASE} peer zod = ">=4.4.3 <5" (4.4.3 and the dsh's 4.6.5 both accepted)`)
+    note(`${BASE} peer zod = ">=4.4.3 <5" (4.4.3 and the dsh's 4.6.7 both accepted)`)
   }
 }
 

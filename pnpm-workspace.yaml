@@ -2,6 +2,22 @@ packages:
   # The family base: the provisioned compatibility gate, the environment-initialisation framework,
   # and the private kit both plugins share.
   - "base/*"
+  # The `mem/` UMBRELLA itself — private, versionless, no dependencies: it exists so pnpm resolves the
+  # ROOT workspace when a command runs with `cwd` inside `mem/` (measured 2026-10-19; it is what makes
+  # `pnpm -C mem <script>` work at all). Without this entry pnpm keeps the pre-merge assumption that
+  # `mem/` IS a workspace root: it then falls back to "workspace = cwd", discovers every nested
+  # `package.json` under it — including the vendored client preset's stub
+  # (`mem/packages/plugin/vendor/dsh-client-preset/packages/client/avantf-dsh-mem/package.json`, a
+  # symlink to the plugin manifest), so `@avantf/dsh-mem` exists twice and every script runs twice —
+  # and it loses this file's `catalog:`, so any `catalog:` spec fails
+  # (`ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_SPEC: No catalog entry 'exceljs' was found`). `mission/`
+  # needs no such entry: its umbrella scripts either take `-C` paths or delegate to node scripts.
+  #
+  # Being a project makes `pnpm install --frozen-lockfile` demand `importers.mem` in the root lockfile,
+  # and pnpm writes that entry only for a project that declares at least one dependency — hence the
+  # `typescript` devDependency in `mem/package.json`. Do not remove it as "unused": it is what keeps
+  # the frozen install (CI's) working, and it names the toolchain the umbrella's scripts drive.
+  - "mem"
   # The memory engine workspace (kept in its original shape).
   - "mem/packages/*"
   # The mission-tree engine workspace (kept in its original shape).
@@ -29,12 +45,17 @@ linkWorkspacePackages: true
 # used to live in `mem/pnpm-workspace.yaml` and `mission/pnpm-workspace.yaml`; a version can no longer
 # differ between two packages that must agree.
 #
-# `zod` is pinned EXACTLY and tracks the version the INSTALLED dsh itself ships (4.6.5). It is the one
+# `zod` is pinned EXACTLY and tracks the version the INSTALLED dsh itself ships (4.6.7). It is the one
 # entry the merge had to reconcile: `mem` was on 4.4.3 and `mission` on 4.6.5, and the host's
 # `@deepseek-ai/dsh-storage-domain` types its record schemas with its own zod. Two copies — even of
 # the same major — have incompatible type identities, which is what forced the `TypertSchema['schema']`
 # cast (mem DESIGN §20.11). `pnpm why zod` must keep resolving ONE copy for `@avantf/mem-contract`,
 # `@avantf/dsh-mem` and `@avantf/dsh-mission`. Bump this line, never a package.json.
+#
+# The number is a FLOOR-following constant, not a choice: when the installed dsh moving its own zod
+# made this line stale (4.6.5 → 4.6.7, 2026-10-19), `tsc` failed on every tree with "types of property
+# 'toJSONSchema' are incompatible" — the two copies had incompatible type identities exactly as this
+# comment warns. `scripts/release-check.mjs` asserts the equality; bump both together.
 #
 # Not in this catalog on purpose: `@avantf/dsh-plugin-base`. The plugins declare it as a runtime
 # dependency (`>=0.3.0 <1.0.0`, identical in BOTH plugins — that sameness is what keeps the install at
@@ -43,7 +64,7 @@ linkWorkspacePackages: true
 # manifest has to be installable by a host's package manager). So this one pair lives in the two
 # manifests, and `scripts/release-check.mjs` asserts it.
 catalog:
-  zod: 4.6.5
+  zod: 4.6.7
 
   # Toolchain. These were already identical across the packages of both workspaces; the catalog makes
   # that a property of the merged workspace instead of a convention, so `tsc` cannot check one package
