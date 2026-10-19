@@ -34,6 +34,7 @@ import {
   provisionMarker,
   type IdentityFileName,
 } from './paths.js'
+import { reasonOf } from './reason.js'
 
 /** One preset, as the settings page lists it. */
 export interface PresetSummary {
@@ -522,8 +523,4 @@ export function saveProfileAsPreset(options: {
   const files = identityFilesIn(profileDir(options.root, options.profile))
   const { written } = writeIdentityFiles(dir, files)
   return { written }
-}
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

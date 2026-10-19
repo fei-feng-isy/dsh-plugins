@@ -19,6 +19,7 @@ import { FALLBACK_LOCALE } from './paths.js'
 import { isValidLocale } from './presets.js'
 import { NAMESPACE } from './wire.js'
 import type { IdentitySettings, IdentityState, IdentityStatusView } from './state.js'
+import { reasonOf } from './reason.js'
 
 /** The profile entry id this plugin's Config lives under (the settings namespace a write targets). */
 export const ENTRY_ID = 'avantf-identity'
@@ -225,8 +226,4 @@ export class IdentityGateway extends TypertRemoteService {
     }
     return undefined
   }
-}
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

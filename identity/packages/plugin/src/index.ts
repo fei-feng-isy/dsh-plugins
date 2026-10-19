@@ -32,6 +32,7 @@ import { SessionFreeze } from './session-freeze.js'
 import { IdentityState, type IdentitySettings } from './state.js'
 import { volatileValue } from './volatile.js'
 import { hostContribution } from './wire.js'
+import { reasonOf } from './reason.js'
 
 /** Cordis plugin name; matches the row id in the profile and the settings namespace. */
 export const name = 'avantf-identity'
@@ -140,10 +141,6 @@ function packageVersion(): string {
     }
   }
   return 'unknown'
-}
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**

@@ -43,6 +43,7 @@ import {
   type PresetSummary,
   type ProfileSeed,
 } from './presets.js'
+import { reasonOf } from './reason.js'
 
 /** One live snapshot of the plugin's Config, read at the moment of use. */
 export interface IdentitySettings {
@@ -392,8 +393,4 @@ export class IdentityState {
 function identityNameOfLoose(name: string): IdentityFileName | undefined {
   const upper = name.trim().toUpperCase().replace(/\.MD$/u, '')
   return (IDENTITY_FILES as readonly string[]).includes(upper) ? upper as IdentityFileName : undefined
-}
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
