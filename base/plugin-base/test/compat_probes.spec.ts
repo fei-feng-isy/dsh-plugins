@@ -6,9 +6,9 @@
  * (`@deepseek-ai/dsh-tools`'s `ToolRuntime`, `@deepseek-ai/dsh-typert-registry`'s `TypertRegistry`)
  * rather than at stubs, and the withdrawal is checked on those real registries too.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -278,6 +278,21 @@ describe('the version helpers', () => {
     expect(readRuntimeVersions(['@deepseek-ai/dsh-tools'], import.meta.url)['@deepseek-ai/dsh-tools'])
       .toMatch(/^\d+\.\d+\.\d+/)
     expect(resolveRuntimeVersion('@deepseek-ai/dsh-tools', 'file:///nonexistent/index.js')).toBeUndefined()
+  })
+
+  it('ignores NODE_PATH and Module.globalPaths — only the caller\'s own node_modules count', () => {
+    // THE REGRESSION THIS PINS. Node's `require.resolve` falls back to `Module.globalPaths`, which is
+    // seeded from `NODE_PATH` AT PROCESS START — pnpm sets that for every `pnpm run` process, so
+    // deleting the variable at runtime does not remove it. That fallback made a base with no links
+    // answer with whatever the WORKSPACE had installed: this spec passed under bare `vitest` and
+    // failed under `pnpm test` (measured 2026-10-19, `dsh-tools@0.2.1-rc.2`). A temp base that has no
+    // links is the deterministic form of the same condition, so it holds in any runner.
+    const root = mkdtempSync(join(tmpdir(), 'dsh-compat-no-links-'))
+    const entry = join(root, 'dist', 'index.js')
+    mkdirSync(dirname(entry), { recursive: true })
+    writeFileSync(entry, '')
+    expect(resolveRuntimeVersion('@deepseek-ai/dsh-tools', entry)).toBeUndefined()
+    rmSync(root, { recursive: true, force: true })
   })
 
   it('never throws on an unreadable manifest', () => {

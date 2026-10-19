@@ -33,8 +33,8 @@
  *
  * @module @avantf/dsh-plugin-base
  */
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { readFileSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -308,14 +308,35 @@ export function readBuildVersions(
  * @param name - the peer package.
  * @param base - module URL to resolve from (defaults to this package).
  * @returns the version string, or `undefined`.
+ *
+ * WHY THIS DOES NOT USE `require.resolve`. Node falls back to `Module.globalPaths` when a package is
+ * not found under the base's own `node_modules`, and `Module.globalPaths` is seeded from `NODE_PATH`
+ * AT PROCESS START (pnpm sets it for every `pnpm run` process, so it survives deleting the variable at
+ * runtime). With that fallback, a base with no links of its own silently resolved whatever the
+ * WORKSPACE happened to install — but the one question this function answers is "what do THIS caller's
+ * links point at". Found by the suite: `compat_probes.spec.ts`'s "answers undefined for one without
+ * links" passed under bare `vitest` and failed under `pnpm test`, where the base resolved the
+ * workspace's local-build `dsh-tools@0.2.1-rc.2` (measured 2026-10-19). The walk below therefore
+ * visits ONLY the base directory's ancestors and never consults the process-wide path list.
  */
 export function resolveRuntimeVersion(name: string, base: string | URL = import.meta.url): string | undefined {
   try {
-    const require = createRequire(base)
-    // Built at runtime so a bundler cannot constant-fold it and resolve at build time.
-    const manifest = require.resolve(`${name}/package.json`)
-    const parsed = JSON.parse(readFileSync(manifest, 'utf8')) as { version?: unknown }
-    return typeof parsed.version === 'string' && parsed.version !== '' ? parsed.version : undefined
+    const start = typeof base === 'string' && isAbsolute(base)
+      ? dirname(base)
+      : dirname(fileURLToPath(base))
+    for (let dir = resolve(start); ; dir = dirname(dir)) {
+      const manifest = join(dir, 'node_modules', name, 'package.json')
+      try {
+        // A directory hit can still be a dangling link; the stat keeps "unknown" honest.
+        if (statSync(manifest).isFile()) {
+          const parsed = JSON.parse(readFileSync(manifest, 'utf8')) as { version?: unknown }
+          return typeof parsed.version === 'string' && parsed.version !== '' ? parsed.version : undefined
+        }
+      } catch {
+        // Not here; keep walking.
+      }
+      if (dirname(dir) === dir) return undefined
+    }
   } catch {
     return undefined
   }
