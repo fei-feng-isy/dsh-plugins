@@ -247,7 +247,10 @@ describe('the worker face at dispatch', () => {
     // `restrict()` throw for the whole dispatch (`startChild` then retries without that name). The
     // mission tools are agent-scoped now, so this face carries the harness names — the owner half is
     // already absent from a worker, because it was never registered into the worker's scope.
-    const mounted = await mount()
+    //
+    // The face is a `toolFilter`, so this only exists on the OLD start shape: `startActivation`
+    // (dsh 0.2.1+) carries no filter at all and the worker's visibility is its Agent Preset.
+    const mounted = await mount({ startShape: 'startContinuable' })
     await callTool(mounted, 'create_mission', { title: 'T', description: 'd', analysis: [] }, mounted.owner)
     await mounted.flush()
 

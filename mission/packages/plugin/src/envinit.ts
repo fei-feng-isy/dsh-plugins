@@ -87,8 +87,16 @@ const SERVICE_CONTRACTS: readonly ServiceContract[] = [
   // `subagentStart.ts` and degrades the DISPATCH path (with a loud line) instead of refusing the whole
   // plugin — the tree, panel, commands and prompt guidance do not need a start method.
   { name: 'subagents', required: true, methods: ['sendMessage', 'interrupt'] },
-  { name: 'agents', required: false, methods: ['get'] },
-  { name: 'commands', required: false, methods: ['register'] },
+  // `agents` and `commands` are REQUIRED, and that is not a preference: both sit in this plugin's cordis
+  // `inject` list (see `index.ts`), where cordis makes EVERY entry required — a host without either
+  // never loads the plugin at all (`_refresh` parks the fiber in PENDING). "Optional" here would describe
+  // a degradation that cannot happen; the loud verdict is the honest one.
+  { name: 'agents', required: true, methods: ['get'] },
+  { name: 'commands', required: true, methods: ['register'] },
+  // `typert` IS optional, and now for a real reason: it is NOT in the cordis `inject` list (the host face
+  // waits for it with `ctx.inject(['typert'], …)`), so a composition without a registry still mounts the
+  // engine, the tools and the panel — only the browser half's Remote namespace is missing, and the
+  // 任务 view reports that instead of showing an empty tree.
   { name: 'typert', required: false, methods: ['register', 'get'] },
 ]
 

@@ -119,6 +119,13 @@ function dshHome(): string {
 
 // Every service this plugin needs, gating `apply`: subagents (mission units), storageDomain (the tree),
 // systemPrompt (guidance), tools (model surface), agents (liveness), commands (`/mission`).
+//
+// NOT here: `typert`. cordis makes every entry of this array REQUIRED — `_refresh` parks the fiber in
+// PENDING while any injected impl is missing — so listing the registry here would mean "no registry, no
+// plugin", silently, on any composition that does not ship one (`dsh-base` always does, but a host that
+// composes its own tree need not). The host face waits for it with `ctx.inject(['typert'], …)` in
+// `apply` instead, which keeps the degradation the code and the client both describe: the engine, the
+// tools and the panel mount; only the browser half's Remote namespace is missing, and the 任务 view says so.
 export const inject = [
   'tools',
   'agents',
@@ -127,8 +134,6 @@ export const inject = [
   'storageDomain',
   'commands',
   'timer',
-  // The host face of the browser half's Remote namespace; absent in a headless deployment.
-  'typert',
 ]
 
 export interface Config {
@@ -295,40 +300,51 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const host = new AvantfMissionHost(ctx, config, log, wellFormed)
 
   // The host face of this plugin's Remote namespace: registered rather than shipped as a generated
-  // `./typert` export, because the Typert generator only runs inside the harness workspace. Guarded,
-  // since a composition without the registry must still mount the mission engine.
-  const typert = ctx.get('typert')
-  if (typert === undefined) {
-    log.warn('no typert registry mounted; the 任务 view will report it instead of reading the tree')
-  } else {
-    // Contained on purpose: a rejected `apply` does not roll back the whole config tree, but an
-    // uncaught failure here can travel up to the startup audit (or the config hot-reload transaction)
-    // and take down neighbouring plugins. A registry that surprises us on registration is not a
-    // PROVEN host incompatibility (the gate already ruled that out), so warn loudly and mount the rest.
-    try {
-      typert.register(hostContribution)
-      log.info(
-        `typert host face registered (namespace avantfMission, ${
-          String((hostContribution as unknown as { invocations?: readonly unknown[] }).invocations?.length ?? 0)
-        } invocations: snapshot, status, detail, result, delete, cleanFinished, resolveExecutorSession, watch)`,
-      )
-      // One line that settles "which half is stale?" without a debugger: the two halves of this plugin
-      // update on different schedules (the browser bundle per page load, this face only when `dsh web`
-      // starts), and a client that asks for a method this process never published gets an HTTP 404 that
-      // reads like a missing mission. Log the revision, the METHOD SET actually published, and the
-      // module the host loaded — so a mismatch is answered by the terminal, not by a bisect.
-      log.info(
-        `typert host face: wire ${String(SNAPSHOT_WIRE_VERSION)}, `
-        + `${String(descriptors.length)} methods (${descriptors.map(descriptor => descriptor.method).join(', ')}); `
-        + `module ${import.meta.url}`,
-      )
-    } catch (error: unknown) {
-      log.error(
-        'typert host face FAILED to register: the 任务 view will report it instead of reading the tree; '
-        + `the mission engine and its tools mount anyway — ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
-      )
-    }
-  }
+  // `./typert` export, because the Typert generator only runs inside the harness workspace.
+  //
+  // `ctx.inject` is a WAIT, not a one-shot read. Two reasons, one measured and one structural:
+  //  - a `ctx.get('typert')` here is a load-order race (identity measured exactly that on 2026-10-19:
+  //    its row is mounted ahead of the registry's, so the read found nothing on every start);
+  //  - waiting is also why `typert` must stay OUT of the top-level `inject` array below, where cordis
+  //    makes EVERY entry required (`_refresh` goes INACTIVE on one missing impl) — a composition with
+  //    no registry would then never load this plugin at all, silently, instead of mounting the engine,
+  //    the tools and the panel and letting the 任务 view report the missing half.
+  // A host that never mounts a registry simply never calls this back.
+  ctx.inject(['typert'], (child: Context) => {
+    child.effect(() => {
+      const typert = child.get('typert')
+      if (typert === undefined) return () => undefined
+      // Contained on purpose: a rejected `apply` does not roll back the whole config tree, but an
+      // uncaught failure here can travel up to the startup audit (or the config hot-reload transaction)
+      // and take down neighbouring plugins. A registry that surprises us on registration is not a
+      // PROVEN host incompatibility (the gate already ruled that out), so warn loudly and mount the rest.
+      try {
+        const dispose = typert.register(hostContribution)
+        log.info(
+          `typert host face registered (namespace avantfMission, ${
+            String((hostContribution as unknown as { invocations?: readonly unknown[] }).invocations?.length ?? 0)
+          } invocations: snapshot, status, detail, result, delete, cleanFinished, resolveExecutorSession, watch)`,
+        )
+        // One line that settles "which half is stale?" without a debugger: the two halves of this plugin
+        // update on different schedules (the browser bundle per page load, this face only when `dsh web`
+        // starts), and a client that asks for a method this process never published gets an HTTP 404 that
+        // reads like a missing mission. Log the revision, the METHOD SET actually published, and the
+        // module the host loaded — so a mismatch is answered by the terminal, not by a bisect.
+        log.info(
+          `typert host face: wire ${String(SNAPSHOT_WIRE_VERSION)}, `
+          + `${String(descriptors.length)} methods (${descriptors.map(descriptor => descriptor.method).join(', ')}); `
+          + `module ${import.meta.url}`,
+        )
+        return typeof dispose === 'function' ? dispose : () => undefined
+      } catch (error: unknown) {
+        log.error(
+          'typert host face FAILED to register: the 任务 view will report it instead of reading the tree; '
+          + `the mission engine and its tools mount anyway — ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
+        )
+        return () => undefined
+      }
+    }, 'avantf-mission:typert-face')
+  })
 
   // Start-up is asynchronous and awaited by the first caller that needs it. `host.start()` NEVER
   // rejects (see its own doc): a storage failure is absorbed there into a DEGRADED mount — one loud

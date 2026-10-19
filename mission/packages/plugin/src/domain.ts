@@ -164,6 +164,19 @@ export const workDomain = defineDomain({
   // No `compatibleVersions`: it applies only to `per-record`; readability here comes from the
   // optional-with-default fields instead.
   tables: {
-    [TREES_TABLE]: domainTable<string, TreeDocument>(treeDocumentSchema),
+    // The cast bridges two zod TYPE IDENTITIES, not two schema shapes. `domainTable` is typed against
+    // the host's own zod, and the host does not have exactly one: dsh 0.2.1-rc.2 pins `zod: "4.4.3"`
+    // exactly (so every `@deepseek-ai/*` `.d.ts` resolves that nested 4.4.3), while the 0.1.5-rc.2
+    // floor declares `^4.4.3`, whose caret resolves the newest 4.x (4.6.7) — two resolves one workspace
+    // catalog cannot both satisfy. `_zod.version.minor` is a literal type, which is what turns the
+    // difference into an assignability error here.
+    //
+    // RUNTIME is unaffected: a zod schema carries its own methods, and the host only calls
+    // `parse`/`safeParse` through the object it was handed, so the value works under either copy. Same
+    // situation mem documents for `TypertSchema['schema']` (mem DESIGN §20.11): one cast at the
+    // boundary, naming why, instead of a catalog that can only follow one host per release.
+    [TREES_TABLE]: domainTable<string, TreeDocument>(
+      treeDocumentSchema as unknown as Parameters<typeof domainTable<string, TreeDocument>>[0],
+    ),
   },
 })

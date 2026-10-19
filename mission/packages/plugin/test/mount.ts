@@ -186,7 +186,10 @@ export interface Dispatched {
   label: string
   childId: string
   prompt: string
+  /** Present only on the OLD start shape (`startContinuable`); 0.2.1's `startActivation` accepts none. */
   toolFilter?: { deny?: readonly string[] }
+  /** Present only on the new start shape: what the activation delivery policy was asked for. */
+  delivery?: 'parent' | 'caller'
   parentId: string
 }
 
@@ -388,9 +391,17 @@ export async function mount(
     /**
      * Names the runtime REFUSES to restrict, as `tools.restrict()` does for a tool
      * the child cannot inherit (an agent-plane registration). Modelling it is what
-     * makes the dispatch fallback testable.
+     * makes the dispatch fallback testable — and it can only bite on the OLD start shape
+     * (`startContinuable`), because `startActivation` carries no `toolFilter` at all.
      */
     unrestrictable?: string[]
+    /**
+     * Which `subagents` start shape the fixture EXPOSES. Default `startActivation` — the shape dsh
+     * 0.2.1-rc.2 mounts, which is what the installed host and therefore every dispatch test runs
+     * against. Pass `startContinuable` for the (still supported) older host: the plugin's adapter
+     * detects the shape from the service, and the `toolFilter` path only exists there.
+     */
+    startShape?: 'startActivation' | 'startContinuable'
     /**
      * Keep every worker start pending until the test releases it.
      *
@@ -691,6 +702,86 @@ export async function mount(
     scopes.markAnnounced(subject)
     ctx.emit('agent/created', { agent: subject, source: 'startup' } as never)
   }
+  /**
+   * One dispatch, normalized from whichever `subagents` start shape this fixture pretends to be.
+   *
+   * The production host has TWO shapes (`startContinuable` up to 0.2.0, `startActivation` from 0.2.1,
+   * which also drops `toolFilter`), and the plugin detects the shape from the live service — so the
+   * double has to be able to be either, and the two thin adapters below only translate the spec.
+   * Everything the tests assert (dispatch record, fail/defer/abort behaviour) lives here once.
+   *
+   * @param input - the dispatch, already reduced to the fields this plugin's adapter fills.
+   * @returns the started child's identities, or a rejection shaped like the runtime's.
+   */
+  const beginStart = (input: {
+    provider: string
+    label: string
+    childId: string
+    prompt: { text: string }[]
+    parent: StubAgent
+    /** Only the old shape carries a per-child tool filter. */
+    toolFilter?: { deny?: readonly string[] }
+    delivery?: 'parent' | 'caller'
+    /**
+     * Caller cancellation. The real service rejects once this aborts before the child accepted its
+     * prompt (`subagent/src/control.ts` wraps the abort reason as the rejection's `cause`), which is
+     * the shape the host's unload classification has to walk — a double that ignored the signal
+     * would never exercise that path.
+     */
+    signal?: AbortSignal
+  }): Promise<{ childId: string; messageId: string }> => {
+    // An outage: nothing can be materialized. Rejected before the dispatch is recorded, because
+    // no worker ever started — which is exactly what `spawnFailures` counts.
+    if (options.failStart === true) {
+      return Promise.reject(new Error('stubbed: no worker could be started'))
+    }
+    const refused = (input.toolFilter?.deny ?? []).filter((name) =>
+      (options.unrestrictable ?? []).includes(name),
+    )
+    if (refused.length > 0) {
+      // The shape of the real failure, so the host's recovery path is exercised.
+      return Promise.reject(
+        new Error(
+          `tools.restrict() names unknown global tool${refused.length > 1 ? 's' : ''} `
+          + `${refused.map((name) => `"${name}"`).join(', ')}; known global tools: (stubbed)`,
+        ),
+      )
+    }
+    const prompt = input.prompt.map((block) => block.text).join('')
+    const nodeId = nodeIdOfPrompt(prompt)
+    if (nodeId !== undefined) executorOf.set(nodeId, { sessionId: input.childId, prompt })
+    dispatched.push({
+      provider: input.provider,
+      label: input.label,
+      childId: input.childId,
+      prompt,
+      ...input.toolFilter === undefined ? {} : { toolFilter: input.toolFilter },
+      ...input.delivery === undefined ? {} : { delivery: input.delivery },
+      parentId: input.parent.id,
+    })
+    const started = { childId: input.childId, messageId: 'm1' }
+    if (options.deferStart !== true) return Promise.resolve(started)
+    // Held open until the test releases it: the child has been bound but has not
+    // accepted its prompt, which is the window the host must read as "starting".
+    return new Promise<typeof started>((resolve, reject) => {
+      const onAbort = (): void => {
+        // The runtime's own cancellation shape: the abort reason rides the `cause` chain, so a
+        // consumer that only compared the top-level error would miss it.
+        reject(new Error('stubbed: subagent prompt was cancelled', { cause: input.signal?.reason }))
+      }
+      if (input.signal?.aborted === true) {
+        onAbort()
+        return
+      }
+      input.signal?.addEventListener('abort', onAbort, { once: true })
+      pendingStarts.push(() => {
+        input.signal?.removeEventListener('abort', onAbort)
+        resolve(started)
+      })
+    })
+  }
+  /** The shape this fixture exposes; `startActivation` (today's host) unless a test asks for the old one. */
+  const startShape = options.startShape ?? 'startActivation'
   ctx.provide('subagents', {
     // Steering one running worker: the correction path.
     sendMessage: (
@@ -713,68 +804,47 @@ export async function mount(
       }
       return Promise.resolve('m1')
     },
-    startContinuable: (spec: {
-      provider: string
-      label: string
-      childId: string
-      request: { prompt: { text: string }[]; parent: StubAgent; toolFilter?: { deny?: readonly string[] } }
-      /**
-       * Caller cancellation. The real service rejects once this aborts before the child accepted its
-       * prompt (`subagent/src/control.ts` wraps the abort reason as the rejection's `cause`), which is
-       * the shape the host's unload classification has to walk — a double that ignored the signal
-       * would never exercise that path.
-       */
-      signal?: AbortSignal
-    }) => {
-      // An outage: nothing can be materialized. Rejected before the dispatch is recorded, because
-      // no worker ever started — which is exactly what `spawnFailures` counts.
-      if (options.failStart === true) {
-        return Promise.reject(new Error('stubbed: no worker could be started'))
-      }
-      const refused = (spec.request.toolFilter?.deny ?? []).filter((name) =>
-        (options.unrestrictable ?? []).includes(name),
-      )
-      if (refused.length > 0) {
-        // The shape of the real failure, so the host's recovery path is exercised.
-        return Promise.reject(
-          new Error(
-            `tools.restrict() names unknown global tool${refused.length > 1 ? 's' : ''} `
-            + `${refused.map((name) => `"${name}"`).join(', ')}; known global tools: (stubbed)`,
-          ),
-        )
-      }
-      const prompt = spec.request.prompt.map((block) => block.text).join('')
-      const nodeId = nodeIdOfPrompt(prompt)
-      if (nodeId !== undefined) executorOf.set(nodeId, { sessionId: spec.childId, prompt })
-      dispatched.push({
-        provider: spec.provider,
-        label: spec.label,
-        childId: spec.childId,
-        prompt,
-        ...spec.request.toolFilter === undefined ? {} : { toolFilter: spec.request.toolFilter },
-        parentId: spec.request.parent.id,
-      })
-      const started = { childId: spec.childId, messageId: 'm1' }
-      if (options.deferStart !== true) return Promise.resolve(started)
-      // Held open until the test releases it: the child has been bound but has not
-      // accepted its prompt, which is the window the host must read as "starting".
-      return new Promise<typeof started>((resolve, reject) => {
-        const onAbort = (): void => {
-          // The runtime's own cancellation shape: the abort reason rides the `cause` chain, so a
-          // consumer that only compared the top-level error would miss it.
-          reject(new Error('stubbed: subagent prompt was cancelled', { cause: spec.signal?.reason }))
+    // ── the start seam ────────────────────────────────────────────────────────────────────────────
+    // ONE of the two shapes is attached, chosen by `startShape` (see the option's doc): the plugin's
+    // adapter DETECTS the shape from the live service, so this double must be able to be either. A host
+    // that exposes both does not exist; a host whose method is missing is exactly what production sees.
+    ...(startShape === 'startContinuable'
+      ? {
+          startContinuable: (spec: {
+            provider: string
+            label: string
+            childId: string
+            request: { prompt: { text: string }[], parent: StubAgent, toolFilter?: { deny?: readonly string[] } }
+            signal?: AbortSignal
+          }): Promise<{ childId: string, messageId: string }> => beginStart({
+            provider: spec.provider,
+            label: spec.label,
+            childId: spec.childId,
+            prompt: spec.request.prompt,
+            parent: spec.request.parent,
+            toolFilter: spec.request.toolFilter,
+            signal: spec.signal,
+          }),
         }
-        if (spec.signal?.aborted === true) {
-          onAbort()
-          return
+      : {
+          startActivation: (spec: {
+            provider: string
+            label: string
+            childId: string
+            request: { prompt: { text: string }[], parent: StubAgent }
+            delivery: 'parent' | 'caller'
+            signal?: AbortSignal
+          }): Promise<{ childId: string, messageId: string }> => beginStart({
+            provider: spec.provider,
+            label: spec.label,
+            childId: spec.childId,
+            prompt: spec.request.prompt,
+            parent: spec.request.parent,
+            delivery: spec.delivery,
+            signal: spec.signal,
+          }),
         }
-        spec.signal?.addEventListener('abort', onAbort, { once: true })
-        pendingStarts.push(() => {
-          spec.signal?.removeEventListener('abort', onAbort)
-          resolve(started)
-        })
-      })
-    },
+      ),
     interrupt: (sessionId: string) => {
       interrupts.push(sessionId)
     },
