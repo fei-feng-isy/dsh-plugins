@@ -261,19 +261,28 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   // ── ③ the host face of the Remote namespace ───────────────────────────────────────────────────
   // Publishing the service is unconditional: the mount smoke (and any headless probe) reads it, and a
-  // composition with no typert registry must still mount. Only the registry call is guarded.
+  // composition with no typert registry must still mount.
   new IdentityGateway(ctx, state, settings, log)
-  const typert = ctx.get('typert') as { register?: (contribution: unknown) => unknown } | undefined
-  if (typert === undefined || typeof typert.register !== 'function') {
-    log.warn('no typert registry mounted; the settings page will report it instead of reading the identity files')
-  } else {
-    try {
-      typert.register(hostContribution)
-      log.info(`typert host face registered (namespace avantfIdentity, ${String((hostContribution as unknown as { invocations?: readonly unknown[] }).invocations?.length ?? 0)} invocations)`)
-    } catch (error) {
-      log.error(`typert host face FAILED to register: the settings page will report it; the prompt mechanism mounts anyway — ${reasonOf(error)}`)
-    }
-  }
+  // WAIT for the registry instead of reading it once. The profile's `insert:` patch mounts this plugin
+  // ahead of the base bundle's `typert` row (measured 2026-10-19: "no typert registry mounted" on every
+  // start, while mission — which DECLARES `typert` in its `inject` — mounted fine in the same log). A
+  // one-shot `ctx.get()` here is a load-order race, not a capability check; `ctx.inject` is cordis's
+  // optional-service wait, so the face registers whenever the registry appears and the plugin still
+  // mounts without one (a headless composition simply never calls this back).
+  ctx.inject(['typert'], (child: Context) => {
+    child.effect(() => {
+      const typert = child.get('typert') as { register?: (contribution: unknown) => unknown } | undefined
+      if (typert === undefined || typeof typert.register !== 'function') return () => undefined
+      try {
+        const dispose = typert.register(hostContribution)
+        log.info(`typert host face registered (namespace avantfIdentity, ${String((hostContribution as unknown as { invocations?: readonly unknown[] }).invocations?.length ?? 0)} invocations)`)
+        return typeof dispose === 'function' ? (dispose as () => void) : () => undefined
+      } catch (error) {
+        log.error(`typert host face FAILED to register: the settings page will report it; the prompt mechanism mounts anyway — ${reasonOf(error)}`)
+        return () => undefined
+      }
+    }, 'avantf-identity:typert-face')
+  })
 
   // ── ④ the whole page is ours: turn the host's auto-generated form off ─────────────────────────
   // The volatile fields are still readable/writable through `configForms`; what is suppressed is the

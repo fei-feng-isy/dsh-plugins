@@ -1,6 +1,6 @@
 {
   "name": "@avantf/dsh-identity",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH native Cordis plugin: the harness identity section of the system prompt is replaced by three editable profile files (IDENTITY / SOUL / RULES), with multi-lingual built-in presets and a settings page",
   "type": "module",
   "main": "lib/index.js",
@@ -47,12 +47,24 @@
     "zod": ">=4.4.3 <5"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": { "optional": true },
-    "@deepseek-ai/dsh-scope": { "optional": true },
-    "@deepseek-ai/dsh-system-prompt": { "optional": true },
-    "@deepseek-ai/dsh-tools": { "optional": true },
-    "@deepseek-ai/dsh-typert-protocol": { "optional": true },
-    "@deepseek-ai/schemastery": { "optional": true }
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-scope": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-system-prompt": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@avantf/dsh-plugin-base": ">=0.3.0 <1.0.0"
