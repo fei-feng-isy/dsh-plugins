@@ -1,0 +1,115 @@
+{
+  "format": "avantf-mem-facts",
+  "version": 1,
+  "exported_at": "2026-10-20T08:01:49.000Z",
+  "source": {
+    "data_home": "/home/user/.avantf",
+    "db": "/home/user/.avantf/memory/memory.db",
+    "counts": {
+      "active": 2,
+      "archived": 2
+    }
+  },
+  "facts": [
+    {
+      "source_id": 1,
+      "content": "张伟管理李娜，平台组负责统一网关",
+      "category": "project",
+      "status": "active",
+      "created_at": "2026-09-01 01:00:00",
+      "updated_at": "2026-09-02 02:00:00",
+      "ttl_days": 30,
+      "pinned": false,
+      "pinned_at": null,
+      "trust_score": 0.82,
+      "assert_count": 3,
+      "helpful_count": 1,
+      "last_reinforced_at": "2026-09-04 00:00:00",
+      "sources": [
+        {
+          "kind": "manual",
+          "ref": "session:s-1"
+        },
+        {
+          "kind": "tool",
+          "ref": "avantf-mem"
+        }
+      ],
+      "valid_from": "2026-09-01",
+      "valid_to": null,
+      "supersedes_source_id": null,
+      "archive": null
+    },
+    {
+      "source_id": 2,
+      "content": "旧版：项目使用 MySQL",
+      "category": "project",
+      "status": "archived",
+      "created_at": "2026-08-01 01:00:00",
+      "updated_at": "2026-08-10 02:00:00",
+      "ttl_days": 0,
+      "pinned": false,
+      "pinned_at": null,
+      "trust_score": 0.31,
+      "assert_count": 1,
+      "helpful_count": 0,
+      "last_reinforced_at": null,
+      "sources": [],
+      "valid_from": null,
+      "valid_to": "2026-08-10",
+      "supersedes_source_id": null,
+      "archive": {
+        "at": "2026-08-10 02:00:00",
+        "reason": "superseded"
+      }
+    },
+    {
+      "source_id": 3,
+      "content": "新版：项目使用 PostgreSQL",
+      "category": "project",
+      "status": "active",
+      "created_at": "2026-08-10 02:00:00",
+      "updated_at": "2026-08-10 02:00:00",
+      "ttl_days": 0,
+      "pinned": true,
+      "pinned_at": "2026-08-11 00:00:00",
+      "trust_score": 1,
+      "assert_count": 1,
+      "helpful_count": 0,
+      "last_reinforced_at": null,
+      "sources": [
+        {
+          "kind": "manual",
+          "ref": "import:memory-20261020-160149.json.br"
+        }
+      ],
+      "valid_from": null,
+      "valid_to": null,
+      "supersedes_source_id": 2,
+      "archive": null
+    },
+    {
+      "source_id": 4,
+      "content": "已经遗忘的低信任事实",
+      "category": "general",
+      "status": "archived",
+      "created_at": "2026-07-01 01:00:00",
+      "updated_at": "2026-07-01 01:00:00",
+      "ttl_days": 0,
+      "pinned": false,
+      "pinned_at": null,
+      "trust_score": 0.05,
+      "assert_count": 1,
+      "helpful_count": 0,
+      "last_reinforced_at": null,
+      "sources": [],
+      "valid_from": null,
+      "valid_to": null,
+      "supersedes_source_id": null,
+      "archive": {
+        "at": "2026-09-01 00:00:00",
+        "reason": "forgot"
+      }
+    }
+  ]
+}

@@ -26,7 +26,7 @@ import {
   RememberUnion,
   validationError,
 } from '@avantf/mem-contract'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 
 /** A contract union, seen only through the `safeParse` this file calls. */
@@ -172,7 +172,9 @@ const RECALL_TEXT_CMDS: Record<string, { field: 'query' | 'entity'; category: bo
  *   - `kb-write`    — only the three writing subcommands (`ingest` / `import` / `reindex`);
  *   - `write-unless-dry-run` — the command writes through the store (and so indexes) unless
  *                     `--dry-run` makes it a plan-only read; today `merge` and `import`;
- *   - absent        — pure DB/graph commands, so `list`/`show`/`stats`/`related`/`export` pay no download.
+ *   - absent        — pure DB/graph commands, so `list`/`show`/`stats`/`related`/`export`/`restore` pay no
+ *                     download. (`restore` writes rows and rebuilds entities, but it encodes no query and
+ *                     stores no vector, so neither semantics of the command touches the embedding model.)
  *                     They load nothing either: the CLI builds the runtime with `deferWarm: true`, so
  *                     the adapters' constructor warm cannot fire behind this table's back.
  */
@@ -237,6 +239,22 @@ function exportCodecFlag(rest: string[]): FactsExportCodec | undefined {
   if (rest.includes('--plain')) chosen.push('none')
   if (chosen.length > 1) throw new Error('--brotli / --gzip / --plain 只能给一个')
   return chosen[0]
+}
+
+/**
+ * Is this argv token an existing regular file?
+ *
+ * The one disambiguation `restore` needs: `restore 42` is the per-fact unarchive while
+ * `restore ~/backup.json.br` is a snapshot rebuild. Asking the filesystem first is what keeps a
+ * stale/typo'd path from being read as a fact id — and the rebuild's empty-table refusal means even
+ * a WRONG branch cannot overwrite a library.
+ */
+function isFile(token: string): boolean {
+  try {
+    return statSync(token).isFile()
+  } catch {
+    return false
+  }
 }
 
 async function main(): Promise<void> {
@@ -336,8 +354,27 @@ async function main(): Promise<void> {
         break
       }
       case 'restore': {
-        const fid = Number(posTokens(rest)[0])
-        console.log(JSON.stringify(rt.admin(validated(AdminUnion, { action: 'restore', fact_id: fid }))))
+        // TWO meanings, one command, and the ARGUMENT decides: a path naming an existing FILE is a
+        // snapshot rebuild (`restore <file>`), a bare integer is the historical per-fact unarchive
+        // (`restore <fact_id>`). The rule is safe in both directions because the rebuild REFUSES a
+        // non-empty facts table: a file misread as an id restores nothing, and an id misread as a
+        // path fails before writing — neither can silently replace a library.
+        const target = posTokens(rest)[0]
+        if (target === undefined) {
+          throw new Error('usage: avantf-mem restore <snapshot-file> [--dry-run]   |   avantf-mem restore <fact_id>')
+        }
+        if (/^\d+$/.test(target) && !isFile(target)) {
+          console.log(JSON.stringify(rt.admin(validated(AdminUnion, { action: 'restore', fact_id: Number(target) }))))
+          break
+        }
+        const file = resolve(target)
+        if (!isFile(file)) throw new Error('快照文件不存在或不是普通文件: ' + file)
+        // BYTES, not text: `decodeFactsExport` sniffs gzip magic → plain JSON → brotli by CONTENT, so
+        // a renamed .json.br still restores. The rebuild itself (empty-table rule, insert order,
+        // report) lives in the engine; this case only spends argv and file IO.
+        const decoded = decodeFactsExport(readFileSync(file))
+        const report = await rt.memory.restoreFacts(decoded.doc, { dryRun: rest.includes('--dry-run') })
+        console.log(JSON.stringify({ file, codec: decoded.codec, ...report }, null, 2))
         break
       }
       case 'helpful': {

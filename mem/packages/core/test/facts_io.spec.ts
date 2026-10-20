@@ -151,8 +151,42 @@ describe('facts export serialization', () => {
   it('never masks a wrong format / version behind the brotli fallback', () => {
     const wrongFormat = Buffer.from(JSON.stringify({ format: 'something-else', version: 1, facts: [] }))
     expect(() => decodeFactsExport(wrongFormat)).toThrow(/format/)
-    const wrongVersion = Buffer.from(JSON.stringify({ format: 'avantf-mem-facts', version: 2, facts: [] }))
+    // 3 is BEYOND what this build reads: a newer version must be refused, never guessed at. (2 is
+    // the version `export` writes now, and 1 is every document already on disk — both are accepted;
+    // see the "parses BOTH read versions" case below.)
+    const wrongVersion = Buffer.from(JSON.stringify({ format: 'avantf-mem-facts', version: 3, facts: [] }))
     expect(() => decodeFactsExport(wrongVersion)).toThrow(/不支持的导出格式版本/)
+  })
+
+  it('parses BOTH read versions, and the v2 document carries the columns v1 lacked', () => {
+    const v1 = sampleDoc()
+    expect(parseFactsExport(serializeFactsExport(v1)).version).toBe(1)
+
+    const v2: FactsExportDocument = {
+      ...sampleDoc(),
+      version: 2,
+      facts: [{
+        ...sampleDoc().facts[0]!,
+        settle_clock: 12,
+        bonus_count: 2,
+        bonus_window_at: '2026-10-20T00:00:00.000Z',
+        retrieval_count: 7,
+        last_retrieved_at: '2026-10-20T05:00:00.000Z',
+        mirror_source: 'laptop',
+        mirror_target: 'desktop',
+        entities_version: 3,
+        conflict_checked: 1,
+      }],
+    }
+    expect(parseFactsExport(serializeFactsExport(v2))).toEqual(v2)
+    // The two versions are the SAME shape: v2 is v1 plus optional keys, which is why one parser
+    // (and one import loop) serves both.
+    const v1Keys = Object.keys(v1.facts[0]!).sort()
+    const v2Keys = Object.keys(v2.facts[0]!).sort()
+    expect(v2Keys.filter((key) => !v1Keys.includes(key))).toEqual([
+      'bonus_count', 'bonus_window_at', 'conflict_checked', 'entities_version',
+      'last_retrieved_at', 'mirror_source', 'mirror_target', 'retrieval_count', 'settle_clock',
+    ])
   })
 
   it('resolves a file codec: flag → extension → plain', () => {

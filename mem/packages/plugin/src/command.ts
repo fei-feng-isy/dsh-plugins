@@ -324,7 +324,7 @@ function statusText(rt: AvantfRuntime): string {
     '',
     '用法：',
     '  ' + USAGE.export,
-    '      导出全部事实（active + archived）为 avantf-mem-facts v1 快照；不带 path 时写到',
+    '      导出全部事实（active + archived）为 avantf-mem-facts v2 快照；不带 path 时写到',
     '      ' + defaultPath,
     '      实际默认文件名为 memory-YYYYMMDD-HHMMSS.json.br（brotli，最小；本地时间，可按名称排序）。',
     '      显式路径按扩展名选编码（.br / .gz），或加 --brotli / --gzip / --plain。',
@@ -376,7 +376,7 @@ async function commandExport(rt: AvantfRuntime, parsed: ParsedInput): Promise<Me
         '  plain_bytes: ' + String(plainBytes),
         '  压缩比: ' + String(ratio) + '%',
         '  文件：' + path,
-        '  这是本机快照（与机器无关的 avantf-mem-facts v1 文档）；在另一台机器上用 /mem import 按内容并集导入。',
+        '  这是本机快照（与机器无关的 avantf-mem-facts v2 文档）；在另一台机器上用 /mem import 按内容并集导入。',
       ].join('\n'),
     }
   } catch (error) {
@@ -412,7 +412,7 @@ async function commandImport(rt: AvantfRuntime, parsed: ParsedInput): Promise<Me
     return {
       kind: 'error',
       text: '导入失败（' + path + '）：' + messageOf(error) + '\n'
-        + '文件必须是 /mem export 或 avantf-mem export 生成的 avantf-mem-facts v1 文档：'
+        + '文件必须是 /mem export 或 avantf-mem export 生成的 avantf-mem-facts v1/v2 文档：'
         + '明文 .json、gzip .json.gz 或 brotli .json.br（按内容识别，不看扩展名）；格式 / 版本不对时不会写入任何事实。',
     }
   }

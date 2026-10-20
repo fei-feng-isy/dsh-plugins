@@ -10,7 +10,24 @@ All notable changes to `avantf-mem` are documented here.
   300.0 KiB → gzip 92.3 KiB → brotli 70.6 KiB），`--gzip` 得到 `.json.gz`，`--plain` 得到明文
   minified JSON。不带 `--out` 的 stdout 仍是明文 minified JSON，可直接管道给 `import -`。
   导入按**内容**自动识别明文 / gzip / brotli 三种形式（不看扩展名），旧的 pretty JSON 快照仍可直接
-  导入；导出文档结构与 `version` 不变。
+  导入。
+
+### Added（导出格式 v2 + 从快照重建）
+- **导出文档升到 `version: 2`，v1 文件仍可直接读**：v2 只**新增可选字段**，把 v1 没写的那些 `facts`
+  列带上——`settle_clock`、`bonus_count`、`bonus_window_at`、`retrieval_count`、
+  `last_retrieved_at`、`mirror_source`、`mirror_target`、`entities_version`、
+  `conflict_checked`（缺省为 null）。`export` 写 2；`import` / `merge` 接受 1 与 2，且**语义不变**
+  （按内容并集、只导 ACTIVE、不消费新字段）；其它版本仍直接拒绝、零写入。手上已有的 v1 备份不需要
+  任何转换就能继续导入。体积代价很小：同一份 233 条事实的文档实测 minified 350.4 KiB / brotli
+  71.1 KiB，比 v1 多约 3%。
+- **`avantf-mem restore <file>`：把一份快照重建回一个空记忆库**。与 `import` 的并集语义不同，它是
+  **恢复**：保留原 `fact_id`、归档状态、时间戳、`trust_score`/`settle_clock`、assert/helpful 计数、
+  pin、`bonus_*`、检索计数、TTL、有效期、`mirror_*`、supersedes 链与**每一条**来源。只允许恢复到
+  **空 facts 表**（非空直接非 0 退出、零写入，并提示先把现有库移走或改用 `import`/`merge`），
+  单事务直接写行（任何一行失败整事务回滚），FTS 由触发器维护，实体/三元组/HRR 在恢复后按
+  `maintenance` 的分批循环重建，向量不随快照传输（`avantf-mem vectors --fix` 或重启宿主重算）。
+  v1 文件也能恢复：`settle_clock` 用**当前活跃日时钟**作"尚未衰减"基线，缺哪些字段逐项记在报告的
+  `metadata_missing` 里。`--dry-run` 只报将恢复的 active/archived 条数与目标库现有条数、零写入。
 
 ### Added（斜杠命令）
 - **`/mem` 斜杠命令**：在 DSH 会话里直接管理记忆事实，不必切到终端——`/mem` 无参显示活跃/归档计数、

@@ -364,7 +364,7 @@ cd <HARNESS> && pnpm dsh web
 
 | 命令 | 作用 |
 |---|---|
-| `/mem export [path] [--brotli|--gzip|--plain]` | 把**全部**事实（active + archived）导出为 `avantf-mem-facts` v1 快照。不带 `path` 时写到 `<数据根>/backups/memory-YYYYMMDD-HHMMSS.json.br`（本地时间、可按文件名排序，默认 **brotli** 压缩；`--gzip` → `.json.gz`，`--plain` → 明文 `.json`）。显式 `path` 按扩展名选编码（`.br` / `.gz`，否则明文 minified JSON），flag 可覆盖。导出前递归创建目录，写入是 **tmp + rename 原子替换**，覆盖已有文件也不会留下半截文件；结果报告 codec、文件字节、未压缩字节与压缩比。 |
+| `/mem export [path] [--brotli|--gzip|--plain]` | 把**全部**事实（active + archived）导出为 `avantf-mem-facts` v2 快照。不带 `path` 时写到 `<数据根>/backups/memory-YYYYMMDD-HHMMSS.json.br`（本地时间、可按文件名排序，默认 **brotli** 压缩；`--gzip` → `.json.gz`，`--plain` → 明文 `.json`）。显式 `path` 按扩展名选编码（`.br` / `.gz`，否则明文 minified JSON），flag 可覆盖。导出前递归创建目录，写入是 **tmp + rename 原子替换**，覆盖已有文件也不会留下半截文件；结果报告 codec、文件字节、未压缩字节与压缩比。 |
 | `/mem import <file> [--dry-run] [--source-ref <text>]` | 读快照（明文 / gzip / brotli 按**内容**自动识别，不看扩展名）→ 校验 format/version → 按**内容**并集导入（目标已有的内容，含归档行，一律跳过）。`--dry-run` 只报告 `would_import`，零写入。 |
 | `/mem merge <db-path> [--dry-run] [--source-ref <text>]` | 合并另一台主机的 `memory.db`：源库只读，按内容求并集；`--dry-run` 只报告 `would_add`，零写入。 |
 
@@ -440,7 +440,8 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
 
 #### 导出 / 导入（跨主机同步与备份）
 
-`export` 把本机记忆库写成一份与机器无关的 `avantf-mem-facts` v1 文档（默认 **brotli** 压缩）；
+`export` 把本机记忆库写成一份与机器无关的 `avantf-mem-facts` **v2** 文档（默认 **brotli** 压缩；
+手上已有的 v1 文件仍可导入/恢复）；
 `import` 在另一台机器上按**内容**求并集导入。`merge <other.db>` 是同一件事的「数据库文件」变体
 （见下一小节），与 `import` 共用同一条导入路径。
 
@@ -465,12 +466,13 @@ cat facts-active.json | avantf-mem import -
 > 再导入，下次启动时随库一起加载。要在对话里补数据、又不想重启，请用 [§6.1 的 `/mem`](#61-斜杠命令mem)
 > （它就在宿主进程内写，导入后立即可检索）。
 
-格式（单文件；默认 brotli，也可 gzip / 明文 minified；只依赖运行时自带的 `node:zlib`）：
+格式（单文件；默认 brotli，也可 gzip / 明文 minified；只依赖运行时自带的 `node:zlib`）。当前写
+**version 2**：
 
 ```json
 {
   "format": "avantf-mem-facts",
-  "version": 1,
+  "version": 2,
   "exported_at": "2026-10-20T06:45:00.000Z",
   "source": { "data_home": "...", "db": "...", "counts": { "active": 164, "archived": 69 } },
   "facts": [{
@@ -480,10 +482,26 @@ cat facts-active.json | avantf-mem import -
     "assert_count": 1, "helpful_count": 0, "last_reinforced_at": null,
     "sources": [{ "kind": "manual", "ref": "..." }],
     "valid_from": null, "valid_to": null, "supersedes_source_id": null,
-    "archive": null
+    "archive": null,
+    "settle_clock": 12, "bonus_count": 0, "bonus_window_at": null,
+    "retrieval_count": 7, "last_retrieved_at": "...",
+    "mirror_source": null, "mirror_target": null,
+    "entities_version": 6, "conflict_checked": 1
   }]
 }
 ```
+
+v2 相对 v1 只**新增可选字段**（字段名与 `facts` 表一致，缺省为 `null`）：
+`settle_clock` / `bonus_count` / `bonus_window_at` / `retrieval_count` / `last_retrieved_at` /
+`mirror_source` / `mirror_target` / `entities_version` / `conflict_checked`。
+
+兼容边界：
+
+- **只能读、不能猜**：`export` 写 2；`import` / `merge` / `restore` 接受 1 与 2，其它版本直接非 0
+  退出、零写入。
+- **v1 文件照常可用**：v2 只是多了几个可选键，所以 v1 文档就是"少了这些键"的同一形状。`import` /
+  `merge` 的并集语义**不消费**这些新字段（行为与 v1 完全一致）；`restore` 会逐个字段报告"文档没有
+  携带"（见下文 `metadata_missing`）。
 
 实测体积（2026-10-20，真实库 233 条事实；同一份导出文档，编码只换容器）：
 
@@ -494,20 +512,25 @@ cat facts-active.json | avantf-mem import -
 | gzip（`.json.gz`，level 9） | 92.3 KiB | 27% |
 | brotli（`.json.br`，quality 11） | 70.6 KiB | 21% |
 
-压缩是主要收益（约 1/5）；字段瘦身（去 null / 默认值）在压缩后只剩约 2%，因此**不做**——
-导出文档结构与 `version` 都不变。
+压缩是主要收益（约 1/5）；字段瘦身（去 null / 默认值）在压缩后只剩约 2%，因此**不做**。
 
-`source.counts` 是**源库整库**的 active/archived 计数，不随 `--status` 变化。向量、实体行、检索计数
-不导出（可重算或机器本地）。`source_id` 只用于报告/排错，**不是身份**。
+> 上表是 **v1** 文档的实测；v2 多出的字段让同一份 233 条事实的文档约 **+3%**（实测 minified
+> 350.4 KiB / brotli 71.1 KiB）。
 
-v1 导入语义（严格按此）：
+`source.counts` 是**源库整库**的 active/archived 计数，不随 `--status` 变化。向量（`semantic_vector`）、
+实体/三元组行、矛盾日志、`tags` 不导出（可重算、机器本地、或不属于快照语义）；`retrieval_count` /
+`last_retrieved_at` 作为 v2 字段随行（它们是计数，不是向量）。`source_id` 在 `import` 里只用于报告/
+排错（身份是内容），在 `restore` 里就是**要保留的 `fact_id`**。
+
+导入语义（严格按此；v1 与 v2 文档走同一条并集路径）：
 
 - **容器按内容识别，不看扩展名**：文件按字节读入——gzip magic（`1f 8b`）→ gunzip；否则先按 UTF-8
   JSON 解析（**旧版 pretty JSON 快照走的就是这条路**）；JSON 解析失败才尝试 brotli；三者都不成立 →
   非 0 退出并列出接受的三种形式（`.json` / `.json.gz` / `.json.br`），零写入。
 - **身份 = `content` 做 NFC 规范化后精确相等**（与 `add`/`findByContent` 的同一条 `normalizeWrite`
   规则），**与 `source_id` 无关**。两个库可以为不同事实分配同一个 id；导入不覆盖、不串行。
-- **只导入 `status='active'` 的事实**；归档事实一律跳过并计入 `skipped_archived`（v1 不恢复归档态）。
+- **只导入 `status='active'` 的事实**；归档事实一律跳过并计入 `skipped_archived`（并集语义不恢复
+  归档态——那是 `restore` 的事）。
 - 目标库已有同内容（**含归档行**，否则 `add` 会复活它）→ `skipped_existing`，绝不重复 `add`；
   因此命令可重复执行，且不会抬高 `assert_count`。
 - 写入走正常 `add` 路径（向量 / 实体 / FTS / 来源照常生成）。单条失败进入 `failed`，其余继续。
@@ -532,11 +555,79 @@ stdout 都是单个 JSON：
   assert_count,helpful_count,pinned,supersedes}}`。`--dry-run` 时 `imported=0`、有 `would_import`、
   `new_ids=[]`。
 
-非目标（v1 不做）：admin/MCP 工具面、GUI、字段瘦身（压缩后收益约 2%）、归档态恢复与
-时间戳/信任度保真恢复（Phase 2 另开任务）。
+`import` 的非目标：admin/MCP 工具面、GUI、字段瘦身（压缩后收益约 2%）。**归档态与时间戳/信任度的
+保真恢复不在 import 里**，那是 `restore` 的职责（下一小节）——两者是不同语义，不共用一个开关。
 
 > 跨主机同步的最小用法就是把 `export --out` 的文件提交到 git，另一台机器 `import` 它；`memory.db`
 > 本身仍按上一小节的 WAL 纪律备份。
+
+#### 从快照重建（restore）
+
+`export` 的快照可以用 `restore` **重建**一份记忆库：保留原 `fact_id`、归档状态、时间戳、信任度、
+pin、计数、有效期、来源与 supersedes 链。它**不是** `import` 的加强版，而是另一种语义：
+
+| | `import` / `merge` | `restore` |
+|---|---|---|
+| 语义 | 按内容求**并集** | 按快照**重建** |
+| 目标库 | 任意（可与现有事实共存） | **必须是空 facts 表** |
+| `fact_id` | 重新分配 | **保留** |
+| 归档事实 | 跳过（`skipped_archived`） | **恢复为归档** |
+| 元数据 | 只带 category / ttl / 来源 / 有效期 | 时间戳、trust、`settle_clock`、计数、pin、mirror、supersedes 全带 |
+| 写入路径 | 逐条走 `add`（生成向量） | 单事务直接写 `facts`（向量不传，事后重算） |
+| 可重复 | 可重复（幂等） | **只能对空库执行一次** |
+
+```bash
+# 1) 先把现有库移走（restore 拒绝非空库，绝不并入现有事实）
+mv ~/.avantf/memory ~/.avantf/memory.before-restore
+
+# 2) 预览：只报告将恢复多少条（active / archived）与目标库现有条数，零写入
+avantf-mem restore ~/backups/memory-20261020-160149.json.br --dry-run
+
+# 3) 执行（三种容器都按内容识别，不看扩展名）
+avantf-mem restore ~/backups/memory-20261020-160149.json.br
+
+# 也可以恢复到一个全新的数据根，完全不动当前数据根
+avantf-mem restore ~/backups/memory-20261020-160149.json.br --data-home /tmp/restored-home
+```
+
+语义（严格按此）：
+
+- **只恢复到空库**：`SELECT count(*) FROM facts = 0` 是硬前提；非空直接非 0 退出、**零写入**，并提示
+  把现有库移走/备份、或改用 `import` / `merge`。已经恢复过一份的库再 restore 同样被拒。
+- **单个事务直接写 `facts`**：按 `source_id` 升序插入（保证 supersedes 指向的行已存在），保留
+  `fact_id`、`status`、`archived_at`/`archive_reason`、`created_at`/`updated_at`、
+  `trust_score`、`settle_clock`、`assert_count`、`helpful_count`、`pinned`/`pinned_at`、
+  `last_reinforced_at`、`bonus_*`、`retrieval_count`、`last_retrieved_at`、`ttl_days`、
+  `valid_from`/`valid_to`、`supersedes_id`、`mirror_*`。任何一行插入失败 → **整事务回滚**、
+  非 0 退出。
+- **`fact_sources` 全量恢复**（一条事实可能有多条来源，不会压成一个 `ref` 字符串）。
+- **FTS 不用手写**：`facts_fts` 是 external-content + 触发器，插 `facts` 就会建索引；报告里的
+  `fts_rows` 应等于 `restored`。
+- **v1 文件**：`settle_clock` 用**当前活跃日时钟**作为"尚未衰减"基线（文档里的 `trust_score` 原样
+  保留）——用 0 会让每条旧事实在下一次结算里被一次性扣掉整个时钟。文档没携带的字段逐项计入
+  `metadata_missing`（每项是"有多少条事实缺这个字段"），不凭空编造、也不假装恢复。
+- **`entities` / `triples` / HRR 在恢复后重建**：`restore` 把 `entities_version` 置 0 并跑分批实体
+  清扫（与 `maintenance` 同一条循环），所以 ACTIVE 行会重新提取实体（`entities.rebuilt`）；归档行
+  不进检索面，实体图为空。`conflict_checked` 置 1，**不做全库冲突重扫**（矛盾日志不在快照里，
+  没有需要作废的旧裁决）。
+- **向量不导出、不恢复**：`semantic_vector` 留 NULL（它只对产生它的模型版本有效）。恢复后跑
+  `avantf-mem vectors --fix` 重算，或重启 dsh 让宿主按当前嵌入空间自动重算；在那之前检索仍可用
+  FTS + 实体腿（会报 `degraded`）。
+- **不恢复**：矛盾日志、检索统计元表、`tags`、向量；`archived_clock` 也不恢复（快照只有墙钟
+  `archived_at`，换算成活跃日会造假数据）——归档行因此走 `purge` 的**日历分支**，按恢复回来的
+  `archived_at` 计算清理窗口，恢复不会把清理倒计时重置到 0。
+- **`/mem` 本轮没有 restore**：宿主进程内直接插行还得重载内存向量索引，那是另一件事；需要重建请
+  用 CLI，并在恢复后重启宿主。
+
+stdout 是单个 JSON：
+`{file, codec, version, restored, active, archived, metadata_missing:{…}, fts_rows, entities:{rebuilt,deferred,skipped}, vectors:{restored:0,hint}}`。
+`--dry-run` 时是
+`{file, codec, version, dry_run:true, would_restore:{total,active,archived}, target_facts, restored:0, active:0, archived:0, metadata_missing, fts_rows, entities:{rebuilt:0,deferred:0,skipped:false}, vectors}`。
+
+> **`restore` 有两种含义，参数自己说明是哪一种**：`restore <file>` 是上面的快照重建；
+> `restore <fact_id>`（纯整数、且当前目录没有同名文件）仍是"取消归档一条事实"。两条路都不会误伤：
+> 把文件路径误当 id 会找不到该 fact 并报错；把 id 误当文件会在文件不存在时报错；而重建只接受空库，
+> 所以任何一种误读都写不进一份已经存在的记忆库。
 
 #### 跨主机合并（两台机器的 `memory.db` 已经分叉）
 

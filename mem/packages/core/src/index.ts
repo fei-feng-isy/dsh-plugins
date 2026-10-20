@@ -30,6 +30,11 @@ export { normalizeWrite } from './store/common.js'
 // behind `avantf-mem import` and `avantf-mem merge`. It lives here, not in the CLI, because the
 // plugin's `/mem` command must reach the same path without importing another tree's CLI (guard).
 export * from './facts_io.js'
+// The full-fidelity REBUILD path behind `avantf-mem restore` — the counterpart of the import loop
+// above. Exported for the same reason: the CLI may spend argv and file IO, but the transaction, the
+// empty-table rule and the report belong to the engine (and a later in-host surface must reach the
+// SAME transaction, not a second copy of it).
+export * from './store/facts_restore.js'
 // The shared vector-space repair flow both stores run, and the driver the plugin mounts. Exported for
 // the same reason as the retrieval orchestration below: it is the pluggability point for a THIRD
 // store (write an adapter, do not copy the loop), and the plugin has to drive both stores through the

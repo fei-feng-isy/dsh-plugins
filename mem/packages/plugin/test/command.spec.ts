@@ -113,7 +113,7 @@ describe('/mem export and import', () => {
       source: { counts: { active: number; archived: number } }
     }
     expect(doc.format).toBe('avantf-mem-facts')
-    expect(doc.version).toBe(1)
+    expect(doc.version).toBe(2) // /mem export writes the same v2 document as the CLI
     expect(doc.source.counts).toEqual({ active: 2, archived: 1 })
     expect(doc.facts).toHaveLength(3)
 

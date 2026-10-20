@@ -149,7 +149,8 @@ describe('CLI export / import', () => {
     const report = run(['import', out], B)
     expect(report).toMatchObject({
       file: out,
-      version: 1,
+      // The export now WRITES v2; the report echoes the document's version as-is.
+      version: 2,
       total: 3,
       imported: 2,
       skipped_existing: 0,
@@ -277,7 +278,7 @@ describe('CLI export / import', () => {
     const before = countFacts(memoryDbOf(B))
     const cases: { name: string; content: unknown; message: string }[] = [
       { name: 'bad-format.json', content: { format: 'something-else', version: 1, facts: [] }, message: 'format' },
-      { name: 'bad-version.json', content: { format: 'avantf-mem-facts', version: 2, facts: [] }, message: '版本' },
+      { name: 'bad-version.json', content: { format: 'avantf-mem-facts', version: 3, facts: [] }, message: '版本' },
       { name: 'bad-facts.json', content: { format: 'avantf-mem-facts', version: 1, facts: {} }, message: 'facts' },
       { name: 'bad-json.json', content: 'not json at all', message: 'JSON' },
     ]

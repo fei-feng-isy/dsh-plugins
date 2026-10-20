@@ -35,6 +35,8 @@ import {
 } from './hybrid.js'
 import { ftsLeg, makeLegRunner, semanticLeg } from './legs.js'
 import { ENTITY_SWEEP_BATCH, sweepVersionedEntities, type EntitySweepReport, type EntitySweepTarget } from './entity_sweep.js'
+import { restoreFactsDocument, type RestoreOptions, type RestoreReport } from './facts_restore.js'
+import type { FactsExportDocument } from '../facts_io.js'
 import { evictVectors as evictVectorsOf, normalizeWrite, vectorSpaceOf, type StaleVectorCounts } from './common.js'
 import {
   DEFAULT_VECTOR_MIGRATION_BATCH,
@@ -1254,6 +1256,27 @@ export class MemoryStore {
       },
     }
     return await sweepVersionedEntities(target, this.entitySweepGuard, { budget })
+  }
+
+  /**
+   * Rebuild this library from an export document — the engine half of `avantf-mem restore <file>`.
+   *
+   * A THIN adapter on purpose: the empty-table rule, the insert order, the SQL and the report all
+   * live in `store/facts_restore.ts`, because this class is a hub and a rebuild of the whole facts
+   * table must not become another reason to grow it. What it contributes is the two things only the
+   * store has: the ONE write connection (so the restored rows are immediately visible to every
+   * reader here) and the derived-state entity sweep that runs after the commit.
+   *
+   * Not reachable from `/mem` in this phase: a restore inside a running host would also have to
+   * repopulate the in-memory vector index, which is a separate concern (and the CLI is the surface
+   * that owns "rebuild this library").
+   */
+  async restoreFacts(doc: FactsExportDocument, options: RestoreOptions = {}): Promise<RestoreReport> {
+    return await restoreFactsDocument(
+      { db: this.db, reindexEntities: async (budget) => await this.reindexEntities(budget) },
+      doc,
+      options,
+    )
   }
 
   /**

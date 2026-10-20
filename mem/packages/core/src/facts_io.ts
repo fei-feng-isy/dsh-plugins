@@ -14,8 +14,9 @@
  * shared and 78 held DIFFERENT facts. Any id-based restore would silently overwrite one machine's
  * memories with the other's. This module identifies a fact by `normalizeWrite(content).trim()`, which
  * is exactly what `MemoryStore.add` persists and what `FactsDao.findByContent` compares
- * (`WHERE content = ?`); it does not define a second normalization. `source_id` is carried for the
- * report and for debugging only.
+ * (`WHERE content = ?`); it does not define a second normalization. Under IMPORT `source_id` is
+ * carried for the report and for debugging only; under RESTORE it is the id to KEEP
+ * (see `store/facts_restore.ts`), which is why it travels in the document either way.
  *
  * READ-ONLY READS. The export source, the merge source and the import TARGET are all opened through a
  * separate `readOnly` connection. Export never writes; merge never migrates, checkpoints or touches the
@@ -25,16 +26,28 @@
  * entities, triples, FTS rows and provenance are generated exactly as for a normal add; nothing here
  * inserts SQL rows.
  *
- * PHASE 1 BOUNDARY. The exported document is lossless over every column in the format table (so a
- * Phase-2 full-fidelity restore can consume it), but v1 import deliberately consumes only a subset:
- * category, ttl_days, embedded source ref, valid_from → event_date and valid_to → valid_until. It
- * does NOT restore created_at/updated_at/trust_score/assert_count/helpful_count/pinned, archived
- * status or the supersedes chain — `metadata_dropped` counts each loss instead of pretending. The
- * vector, entity and retrieval-count tables are not exported at all (they are recomputable or
- * machine-local).
+ * TWO CONSUMERS, TWO SEMANTICS. `import`/`merge` remain a CONTENT-IDENTITY UNION and consume only
+ * a subset: category, ttl_days, embedded source ref, valid_from → event_date and valid_to →
+ * valid_until. They do NOT restore created_at/updated_at/trust_score/assert_count/helpful_count/
+ * pinned, archived status or the supersedes chain — `metadata_dropped` counts each value they
+ * knowingly drop instead of pretending. `restore` is the REBUILD (see `store/facts_restore.ts`):
+ * only into an EMPTY facts table, keeping fact_id, status, timestamps, trust, pin, counters, every
+ * provenance row and the supersedes chain, then re-deriving entities. The union path never revives
+ * an archived row; restore is the only path that brings archived rows back. The vector, entity,
+ * contradiction and retrieval-stat tables are still not exported at all (recomputable or
+ * machine-local), which is why a restore ends with "recompute the vectors" rather than a copy.
  *
- * ENCODING IS A CONTAINER, NOT A FORMAT CHANGE. `version` stays 1 and the document shape is
- * untouched; only the bytes written to disk differ. `serializeFactsExport` is minified by default
+ * FORMAT VERSION 2, AND V1 IS STILL READ. The document is lossless over every facts column a
+ * snapshot needs, so v2 adds the columns v1 was missing — `settle_clock`, `bonus_count`, `bonus_window_at`,
+ * `retrieval_count`, `last_retrieved_at`, `mirror_source`, `mirror_target` and the derived-state
+ * stamps `entities_version`/`conflict_checked`. They are OPTIONAL and null-defaulted, so a v1
+ * document parses into the same type with those keys ABSENT, which is exactly "unknown" — and
+ * restore counts every such absence per field instead of inventing a value. `parseFactsExport`
+ * accepts 1 and 2 and refuses anything else (a newer version must be refused, never guessed at).
+ *
+ * ENCODING IS A CONTAINER, NOT A FORMAT CHANGE. Compression changes only the bytes written to
+ * disk, never the document; `version` tracks the FIELD SET (1 → 2 added the columns above).
+ * `serializeFactsExport` is minified by default
  * (pretty is debug-only), and `encodeFactsExport` compresses that same JSON with node:zlib (gzip,
  * or brotli — the smallest). Compression is what pays: measured on a real 233-fact library
  * (2026-10-20) pretty 340.7 KiB → minified 300.0 KiB → gzip 92.3 KiB → brotli 70.6 KiB. Field
@@ -59,8 +72,18 @@ import { normalizeWrite } from './store/common.js'
 
 /** The document's discriminator. A file without it is not an export of this tool. */
 export const FACTS_EXPORT_FORMAT = 'avantf-mem-facts'
-/** v1: the shape below. A newer version must be refused, never guessed at. */
-export const FACTS_EXPORT_VERSION = 1
+/**
+ * The version THIS build writes: 2 (v1 + the facts columns v1 did not carry).
+ *
+ * Versions are additive by design: v2 adds OPTIONAL fields, so a v1 document is still the same
+ * shape minus the new keys. A version outside {@link FACTS_EXPORT_VERSIONS} must be refused, never
+ * guessed at.
+ */
+export const FACTS_EXPORT_VERSION = 2
+/** A version this build can READ. v1 documents are what users already have on disk. */
+export const FACTS_EXPORT_VERSIONS = [1, 2] as const
+/** The version literal, so a parsed document can say which field set it came from. */
+export type FactsExportVersion = (typeof FACTS_EXPORT_VERSIONS)[number]
 /** `--status` values accepted by `export` (the whole DB, or one status). */
 export const EXPORT_STATUSES = ['active', 'archived', 'all'] as const
 export type ExportStatus = (typeof EXPORT_STATUSES)[number]
@@ -98,12 +121,35 @@ export interface ExportedFact {
   supersedes_source_id: number | null
   /** `null` for an active row; the archive bookkeeping for an archived one. */
   archive: { at: string | null; reason: string | null } | null
+  // ─── v2 additions, all OPTIONAL and null-defaulted ────────────────────────
+  // Absent (a v1 document) means "unknown", not "zero": restore reports the absence per field in
+  // `metadata_missing` and substitutes the documented fallback (see store/facts_restore.ts).
+  /** Active-day clock at the last trust settle — the decay baseline. v1 had no such column. */
+  settle_clock?: number | null
+  /** Reinforcement events inside the current 24h window. */
+  bonus_count?: number | null
+  /** Calendar start of that window. */
+  bonus_window_at?: string | null
+  /** How many times this fact was RETURNED by a retrieval leg (local usage stat, still stored). */
+  retrieval_count?: number | null
+  last_retrieved_at?: string | null
+  /** Mirror bookkeeping (a fact copied between libraries); informational, restored verbatim. */
+  mirror_source?: string | null
+  mirror_target?: string | null
+  /**
+   * The DERIVED-STATE stamps. Exported for completeness/diagnostics, but restore deliberately does
+   * not trust them: it stamps `entities_version = 0` (so the entity sweep rebuilds) and
+   * `conflict_checked = 1` (no corpus-wide conflict re-scan after a rebuild).
+   */
+  entities_version?: number | null
+  conflict_checked?: number | null
 }
 
-/** The single JSON document `export` writes (and `import` reads). */
+/** The single JSON document `export` writes (and `import`/`restore` read). */
 export interface FactsExportDocument {
   format: typeof FACTS_EXPORT_FORMAT
-  version: typeof FACTS_EXPORT_VERSION
+  /** The version the document was WRITTEN as (1 or 2); this build writes 2. */
+  version: FactsExportVersion
   exported_at: string
   source: {
     data_home: string
@@ -228,6 +274,10 @@ const FACT_COLUMNS = [
   'fact_id', 'content', 'category', 'status', 'created_at', 'updated_at', 'ttl_days',
   'pinned', 'pinned_at', 'trust_score', 'assert_count', 'helpful_count', 'last_reinforced_at',
   'valid_from', 'valid_to', 'supersedes_id', 'archived_at', 'archive_reason',
+  // v2: the columns v1 could not carry. A source older than one of them simply lacks the key,
+  // and `numberOrNull`/`textOrNull` read that absence as "unknown".
+  'settle_clock', 'bonus_count', 'bonus_window_at', 'retrieval_count', 'last_retrieved_at',
+  'mirror_source', 'mirror_target', 'entities_version', 'conflict_checked',
 ] as const
 
 function cell(row: Record<string, unknown>, name: string): unknown {
@@ -240,6 +290,13 @@ function textOf(value: unknown): string {
 
 function textOrNull(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value)
+}
+
+/** A nullable numeric column: absent (an older source) and NULL both mean "unknown". */
+function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  const coerced = Number(value)
+  return Number.isFinite(coerced) ? coerced : null
 }
 
 function numberOf(value: unknown, fallback: number): number {
@@ -349,6 +406,17 @@ function readFactsDocument(
         archive: status === 'archived'
           ? { at: textOrNull(cell(row, 'archived_at')), reason: textOrNull(cell(row, 'archive_reason')) }
           : null,
+        // v2. Written for every row, including `null`: "the document says unknown" and "the
+        // document predates this field" both read as null, which is the same thing to a restore.
+        settle_clock: numberOrNull(cell(row, 'settle_clock')),
+        bonus_count: numberOrNull(cell(row, 'bonus_count')),
+        bonus_window_at: textOrNull(cell(row, 'bonus_window_at')),
+        retrieval_count: numberOrNull(cell(row, 'retrieval_count')),
+        last_retrieved_at: textOrNull(cell(row, 'last_retrieved_at')),
+        mirror_source: textOrNull(cell(row, 'mirror_source')),
+        mirror_target: textOrNull(cell(row, 'mirror_target')),
+        entities_version: numberOrNull(cell(row, 'entities_version')),
+        conflict_checked: numberOrNull(cell(row, 'conflict_checked')),
       }
     })
     return {
@@ -492,7 +560,8 @@ function jsonValueOf(text: string): { ok: true; value: unknown } | { ok: false; 
 /**
  * Parse and validate an export document TEXT (the stdin entry point). Top-level format errors are
  * FATAL (the caller must write nothing); a malformed individual fact is NOT — {@link importFacts}
- * collects it in `failed` and keeps going.
+ * collects it in `failed` and keeps going. Restore is STRICTER by construction: it validates every
+ * row before opening its transaction, because skipping a row would produce a different history.
  */
 export function parseFactsExport(text: string): FactsExportDocument {
   const parsed = jsonValueOf(text)
@@ -509,8 +578,12 @@ function documentOf(value: unknown): FactsExportDocument {
   if (doc['format'] !== FACTS_EXPORT_FORMAT) {
     throw new Error(`导入文件的 format 不是 ${FACTS_EXPORT_FORMAT}（读到 ${JSON.stringify(doc['format'])}）`)
   }
-  if (doc['version'] !== FACTS_EXPORT_VERSION) {
-    throw new Error(`不支持的导出格式版本：${String(doc['version'])}（只支持 ${FACTS_EXPORT_VERSION}）`)
+  // Accepting v1 is not leniency: v2 only ADDED optional fields, so a v1 document is the same
+  // shape minus them. Anything else is refused — a newer version must never be guessed at.
+  if (!(FACTS_EXPORT_VERSIONS as readonly unknown[]).includes(doc['version'])) {
+    throw new Error(
+      `不支持的导出格式版本：${String(doc['version'])}（支持 ${FACTS_EXPORT_VERSIONS.join(' / ')}）`,
+    )
   }
   if (!Array.isArray(doc['facts'])) throw new Error('导入文件的 facts 不是数组')
   return value as FactsExportDocument
