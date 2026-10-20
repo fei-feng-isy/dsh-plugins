@@ -126,6 +126,14 @@ export function modelFacingToolResult(toolKey: string, action: unknown, value: u
   return isFactView ? withoutRetentionDiagnostics(value) : value
 }
 
+/**
+ * The statuses an export may narrow to. Declared here (next to the tool schema that exposes it) so
+ * the core export path, the CLI flag validation and the admin action read ONE set: a value added
+ * here moves the contract, the CLI and the engine together.
+ */
+export const EXPORT_STATUSES = ['active', 'archived', 'all'] as const
+export type ExportStatus = (typeof EXPORT_STATUSES)[number]
+
 export const REMEMBER_ACTIONS = ['add', 'update', 'remove', 'helpful', 'unhelpful'] as const
 
 export const RememberUnion = z.discriminatedUnion(
@@ -166,6 +174,34 @@ export const RememberUnion = z.discriminatedUnion(
   ],
 )
 export type RememberRequest = z.infer<typeof RememberUnion>
+
+/**
+ * The subset of a discriminated union the MODEL may call, filtered by the discriminator literal.
+ *
+ * The full union stays the ONE declaration of every action (the runtime, the Remote gateway and the
+ * CLI validate against it); a model-facing tool spec instead carries the filtered view, so a new
+ * branch is model-visible only once its action is added to the matching MODEL_*_ACTIONS list. This
+ * reads zod's public shape (`.options`, `.shape`, a literal's `.value`) rather than `_def`
+ * internals; the schema tests assert the derived action enums, so a wrong read fails loudly instead
+ * of silently widening the model face.
+ */
+function modelSubset(union: z.ZodDiscriminatedUnion, actions: readonly string[]): z.ZodDiscriminatedUnion {
+  const options = union.options.filter((option) => {
+    const literal = (option as z.ZodObject).shape['action'] as z.ZodLiteral | undefined
+    if (literal === undefined) throw new Error('modelSubset: a union option has no action literal')
+    return actions.includes(String(literal.value))
+  })
+  if (options.length === 0) throw new Error('modelSubset: no action selected')
+  return z.discriminatedUnion('action', options as unknown as [z.ZodObject, ...z.ZodObject[]])
+}
+
+/**
+ * The writes the model may make. `helpful` / `unhelpful` are operator feedback: the model cannot
+ * observe the retention clocks they move, and a model that could would be able to "refresh" a fact by
+ * voting on it — the exact behaviour the retention policy exists to prevent.
+ */
+export const MODEL_REMEMBER_ACTIONS = ['add', 'update', 'remove'] as const
+export const ModelRememberUnion = modelSubset(RememberUnion, MODEL_REMEMBER_ACTIONS)
 
 export const RECALL_ACTIONS = ['search', 'ask', 'chain', 'probe', 'reason', 'related', 'contradict'] as const
 
@@ -221,7 +257,27 @@ export const RecallUnion = z.discriminatedUnion('action', [
 ])
 export type RecallRequest = z.infer<typeof RecallUnion>
 
-export const ADMIN_ACTIONS = ['stats', 'list', 'detail', 'archive', 'restore', 'pin', 'unpin', 'trust_diagnose', 'vectors_diagnose', 'vectors_fix', 'contradict_check', 'contradict_resolve', 'maintenance'] as const
+/**
+ * The retrieval actions the model may call. `chain` and `related` are operator graph views
+ * (the settings page and the CLI use them); the model reaches the same facts through
+ * `search`/`probe`/`ask`/`reason`, so the two graph shapes are not part of its tool.
+ */
+export const MODEL_RECALL_ACTIONS = ['search', 'ask', 'probe', 'reason', 'contradict'] as const
+export const ModelRecallUnion = modelSubset(RecallUnion, MODEL_RECALL_ACTIONS)
+
+/**
+ * The path rule shared by every maintenance action that reads or writes a FILE.
+ *
+ * The mem tools run inside the HOST process, whose filesystem access is not bounded by the agent
+ * sandbox. A free-form path parameter would therefore turn `mem_admin` into a generic file API that
+ * bypasses that sandbox. Every path is consequently confined to the data root of this run — relative
+ * paths resolve against it, and anything escaping it (absolute paths outside, `..`, symlink
+ * escapes) is refused. The CLI remains the operator's entry point for paths outside the root.
+ */
+const MAINTENANCE_PATH_DESCRIPTION =
+  '路径必须位于本次运行的数据根内（相对路径按数据根解析）；数据根之外的路径（绝对路径逃逸、`..`、符号链接逃逸）一律拒绝。'
+
+export const ADMIN_ACTIONS = ['stats', 'list', 'detail', 'archive', 'restore', 'pin', 'unpin', 'trust_diagnose', 'vectors_diagnose', 'vectors_fix', 'contradict_check', 'contradict_resolve', 'maintenance', 'export', 'import', 'merge', 'restore_snapshot'] as const
 
 export const AdminUnion = z.discriminatedUnion('action', [
   z.object({ action: z.literal('stats') }),
@@ -269,8 +325,58 @@ export const AdminUnion = z.discriminatedUnion('action', [
     loser_fact_id: z.number().int().positive().optional().describe('判错的一方（必须是该配对里的两条之一）；给定时会被归档。仅 true_positive 可带。'),
   }),
   z.object({ action: z.literal('maintenance') }),
+  z.object({
+    action: z.literal('export'),
+    status: z.enum(EXPORT_STATUSES).optional().describe('导出哪些状态的事实；可选，默认 all。'),
+    file: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        '导出文件路径；可选，缺省为 `<数据根>/backups/memory-YYYYMMDD-HHMMSS.json.br`（brotli）。'
+        + MAINTENANCE_PATH_DESCRIPTION,
+      ),
+  }),
+  z.object({
+    action: z.literal('import'),
+    file: z
+      .string()
+      .min(1)
+      .describe('要导入的导出文件（.json / .json.gz / .json.br，按内容识别）。' + MAINTENANCE_PATH_DESCRIPTION),
+    dry_run: z.boolean().optional().describe('true=只计划、不写入；可选，默认 false。'),
+  }),
+  z.object({
+    action: z.literal('merge'),
+    file: z
+      .string()
+      .min(1)
+      .describe('另一个 memory.db 的路径（只读打开）。' + MAINTENANCE_PATH_DESCRIPTION),
+    dry_run: z.boolean().optional().describe('true=只计划、不写入；可选，默认 false。'),
+  }),
+  z.object({
+    action: z.literal('restore_snapshot'),
+    file: z
+      .string()
+      .min(1)
+      .describe('要恢复的快照文件。' + MAINTENANCE_PATH_DESCRIPTION),
+    confirm: z.literal(true).describe('必须显式为 true（confirm=true）：把快照重建进一个空 facts 表，绝不并入现有事实。'),
+    dry_run: z.boolean().optional().describe('true=只计划、不写入；可选，默认 false。'),
+  }),
 ])
 export type AdminRequest = z.infer<typeof AdminUnion>
+
+/**
+ * The admin actions the model may call: a fact page plus the backup/restore family.
+ *
+ * Everything else is OPERATOR machinery: diagnostics and repairs (the model cannot see trust values
+ * and must not rerun the embedding strategy), curation (pin/archive/contradiction verdicts), and
+ * duplicates of what is already model-facing (`detail` is a single-fact view of the same page;
+ * `contradict_check` is the write-side half of `mem_recall.contradict`; `merge` is what `import`
+ * now does automatically for a SQLite file). The full union stays for the runtime, the Remote
+ * gateway (the settings page drives every action) and the CLI.
+ */
+export const MODEL_ADMIN_ACTIONS = ['list', 'export', 'import', 'restore_snapshot'] as const
+export const ModelAdminUnion = modelSubset(AdminUnion, MODEL_ADMIN_ACTIONS)
 
 /** The `source` a write gets when it omits one; a document's identity is `(domain, source, title)`. */
 export const DEFAULT_KB_SOURCE = 'default'
@@ -350,33 +456,31 @@ export const REMEMBER_TOOL: ToolSpec = {
   key: 'remember',
   name: 'mem_remember',
   description:
-    '写入/更新/删除长期记忆事实，或反馈某条事实是否有帮助。'
-    + 'add=新增一条简洁的独立陈述；update=改写已有事实；remove=删除；helpful/unhelpful=反馈是否有用。'
+    '写入/更新/删除长期记忆事实。'
+    + 'add=新增一条简洁的独立陈述；update=改写已有事实；remove=删除。'
     + '写入没有改变任何状态时是静默 no-op（add 命中完全重复的内容、update 重存同一内容）。'
     + 'category/ttl_days 规则：显式给定的值一定生效，未给则保留该事实原有的值——update 未给时继承被改写事实的 category 与 ttl_days，只有 add 的全新行才用默认值 general/0。',
-  input: RememberUnion,
+  input: ModelRememberUnion,
 }
 export const RECALL_TOOL: ToolSpec = {
   key: 'recall',
   name: 'mem_recall',
   description:
     '检索长期记忆中的事实。search=语义+全文+实体的混合检索；ask=按 SPO 三元组或自然语言提问；'
-    + 'chain=沿 subj→pred→second_pred 做链式推理；probe=看某实体的相关事实；reason=围绕多个实体联合推理；'
-    + 'related=列出与该实体共同出现的其他实体及共现次数（是实体清单，不是事实本身；要事实用 search/probe）；contradict=找出互相矛盾的事实。'
+    + 'probe=看某实体的相关事实；reason=围绕多个实体联合推理；contradict=找出互相矛盾的事实。'
     + '只检索、不生成答案。',
-  input: RecallUnion,
+  input: ModelRecallUnion,
 }
 export const ADMIN_TOOL: ToolSpec = {
   key: 'admin',
   name: 'mem_admin',
   description:
-    '记忆库运维与诊断。stats=计数；list=列举事实；detail=查看单条事实详情（实体/三元组/检索次数/修订链）；'
-    + 'archive/restore=归档或恢复；pin/unpin=将事实标记为长期保留 / 取消该标记；trust_diagnose=记忆保留诊断；'
-    + 'vectors_diagnose/vectors_fix=向量索引诊断与修复；'
-    + 'contradict_check=补扫积压的矛盾候选；'
-    + 'contradict_resolve=裁决一条已记录的矛盾；'
-    + 'maintenance=跑一次完整的记忆维护。',
-  input: AdminUnion,
+    '记忆库的列表与备份恢复。list=列举事实（可按 category/status/source 过滤，limit/offset 分页）；'
+    + 'export=把事实快照写到数据根内的备份文件（不回传文档正文）；'
+    + 'import=按内容并集导入数据根内的文件：文件头是 SQLite 时按另一份 memory.db 合并（源库只读），其余按 JSON 导出文件导入；'
+    + 'restore_snapshot=把快照重建进一个空 facts 表（confirm=true，非空 facts 表拒绝）。'
+    + 'export / import / restore_snapshot 的文件路径只允许数据根内，数据根之外的路径用 CLI。',
+  input: ModelAdminUnion,
 }
 export const KB_TOOL: ToolSpec = {
   key: 'kb',
@@ -406,7 +510,7 @@ export const QUERY_TOOL: ToolSpec = {
 // ─── The knowledge tools the MODEL sees ─────────────────────────────────────────────────────────
 //
 // `kb_manage` used to expose all seven actions of `KbUnion` as ONE tool. The model-facing surface
-// is now five tools, because the two operations it actually has to get right are different jobs:
+// is now four tools, because the two operations it actually has to get right are different jobs:
 //
 //  - ADD is a write with a name collision risk, so it is its own tool and it REFUSES a triple that
 //    already exists (silently replacing a document was how "update the KB" turned into a second
@@ -416,7 +520,8 @@ export const QUERY_TOOL: ToolSpec = {
 //    → per-file fingerprint → sync), so `sync` is deliberately NOT model-facing.
 //
 // `KbUnion`/`KB_TOOL` stay: they are the internal engine API the UI's remote face and the CLI
-// dispatch through. Only the model-facing specs changed.
+// dispatch through. `KB_REINDEX_TOOL` is the same kind of operator-only spec: reindexing is a repair,
+// so it is exported but NOT listed in `TOOL_SPECS`.
 
 const KbDomainField = z.string().min(1).describe('知识域；取值来自配置 knowledge.domains。')
 const KbSourceField = z.string().optional().default(DEFAULT_KB_SOURCE).describe('来源名；可选，缺省 default。')
@@ -499,7 +604,6 @@ export const TOOL_SPECS: ToolSpec[] = [
   KB_ADD_TOOL,
   KB_LIST_TOOL,
   KB_REMOVE_TOOL,
-  KB_REINDEX_TOOL,
   QUERY_TOOL,
 ]
 

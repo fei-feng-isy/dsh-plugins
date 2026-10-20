@@ -97,6 +97,7 @@ describe('CLI merge', () => {
     const report = run(['merge', memoryDbOf(source)], target)
 
     expect(report).toMatchObject({
+      mode: 'db',
       source: memoryDbOf(source),
       source_active: 2,
       added: 2,

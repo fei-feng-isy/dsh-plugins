@@ -30,6 +30,9 @@ export { normalizeWrite } from './store/common.js'
 // behind `avantf-mem import` and `avantf-mem merge`. It lives here, not in the CLI, because the
 // plugin's `/mem` command must reach the same path without importing another tree's CLI (guard).
 export * from './facts_io.js'
+// The path boundary and atomic writer shared by the agent-callable maintenance actions. A tool
+// parameter may only address the data root; this module is the ONE implementation of that rule.
+export * from './maintenance_paths.js'
 // The full-fidelity REBUILD path behind `avantf-mem restore` — the counterpart of the import loop
 // above. Exported for the same reason: the CLI may spend argv and file IO, but the transaction, the
 // empty-table rule and the report belong to the engine (and a later in-host surface must reach the

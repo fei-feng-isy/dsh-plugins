@@ -3,7 +3,7 @@
  * DSH real-Cordis mount smoke for @avantf/dsh-mem (DSH-standard plugin form).
  *
  * Loads the host plugin in an actual `@deepseek-ai/cordis` Context and asserts it
- * provides the `avantfMemory` service, registers the 8 model tools via the `tools`
+ * provides the `avantfMemory` service, registers the 7 model tools via the `tools`
  * service (`ctx.tools.register`), and exposes the `avantfMem` Typert Remote gateway.
  *
  * The plugin's `@deepseek-ai/*` peers come from the INSTALLED global dsh (`npm root -g`), whose
@@ -549,7 +549,7 @@ const degradedAdmin = degradedTools.find((t) => t.name === 'mem_admin')
 const degradedEnvelope = degradedAdmin === undefined ? undefined : await degradedAdmin.execute({ action: 'list' })
 const degradedOk =
   degradedMounted &&
-  degradedTools.length === 8 &&
+  degradedTools.length === 7 &&
   degradedCtx.get('avantfMemory') === undefined &&
   degradedEnvelope?.ok === false &&
   String(degradedEnvelope?.error ?? '').includes('memory unavailable')
@@ -742,9 +742,10 @@ const ok =
   provisionOk &&
   typertFace?.face === 'host' &&
   typertFace?.invocations.every((d) => d.namespace === 'avantfMem' && d.service === 'avantfMem') &&
-  ['mem_remember', 'mem_recall', 'mem_admin', 'kb_add', 'kb_list', 'kb_remove', 'kb_reindex', 'kb_query'].every((t) => registeredTools.includes(t)) &&
-  // `kb_manage` and `sync` are deliberately NOT model-facing any more (the UI keeps them).
+  ['mem_remember', 'mem_recall', 'mem_admin', 'kb_add', 'kb_list', 'kb_remove', 'kb_query'].every((t) => registeredTools.includes(t)) &&
+  // `kb_manage`, `kb_reindex` and `sync` are deliberately NOT model-facing (the UI/CLI keep them).
   !registeredTools.includes('kb_manage') &&
+  !registeredTools.includes('kb_reindex') &&
   plugin.inject.includes('systemPrompt') &&
   promptSections.length === 3 &&
   promptSections[0]?.name === 'avantf:memory-usage' &&

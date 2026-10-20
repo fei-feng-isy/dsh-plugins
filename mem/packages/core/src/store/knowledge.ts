@@ -376,7 +376,7 @@ export class KnowledgeStore {
       vstore: this.vstore,
       rows: this.chunks.vectorRows(),
       space: this.vectorSpace(),
-      manualEntry: '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`; `kb_reindex` re-runs FTS/entities too)',
+      manualEntry: '`avantf-mem vectors --fix` (GUI 设置页「向量索引」；`kb_reindex` re-runs FTS/entities too)',
     })
   }
 
@@ -984,7 +984,7 @@ export class KnowledgeStore {
   vectorRepairTarget(): VectorRepairTarget {
     return {
       store: 'knowledge',
-      manualEntry: '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`; `kb_reindex` re-runs FTS/entities too)',
+      manualEntry: '`avantf-mem vectors --fix` (GUI 设置页「向量索引」；`kb_reindex` re-runs FTS/entities too)',
       vectorSpace: () => this.vectorSpace(),
       semanticAvailable: () => this.semantic.isAvailable(),
       autoMigrate: () => this.config.semantic.auto_migrate,

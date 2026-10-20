@@ -25,6 +25,11 @@
 
 其余参数见 §7：**默认值已确认采用**（`enabled: true`、`recall_delta 0.03`、`recall_marginal_decay 1.0`、`recall_ceiling 0.85`、`feedback_daily_cap 0`、`heartbeat_minutes 60`、`tick_max_facts 5000`）——实现时不再调整。
 
+> **模型面边界（2026-10-20，审计收窄）**：`helpful` / `unhelpful`（feedback）与矛盾裁决
+> （`contradict_check` / `contradict_resolve`）是**操作者动作**，只从 GUI 的设置页、CLI 与 runtime 发起；
+> 模型工具面不再包含它们（`mem_remember` 只有 add/update/remove，读矛盾用只读的 `mem_recall.contradict`）。
+> 本文描述的 feedback 与裁决语义**不变**。
+
 ## 1. 目标与非目标
 
 **目标**

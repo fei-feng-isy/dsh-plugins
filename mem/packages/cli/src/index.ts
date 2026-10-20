@@ -11,6 +11,7 @@ import {
   parseFactsExport,
   serializeFactsExport,
   warmModels,
+  writeFileAtomic,
   type FactsExportCodec,
 } from '@avantf/mem'
 import {
@@ -26,7 +27,7 @@ import {
   RememberUnion,
   validationError,
 } from '@avantf/mem-contract'
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 
 /** A contract union, seen only through the `safeParse` this file calls. */
@@ -450,7 +451,7 @@ async function main(): Promise<void> {
         const codec = codecForExportPath(outPath, explicitCodec)
         const bytes = encodeFactsExport(doc, { codec })
         const plainBytes = encodeFactsExport(doc, { codec: 'none' }).length
-        writeFileSync(outPath, bytes)
+        writeFileAtomic(outPath, bytes)
         console.log(JSON.stringify({
           out: outPath,
           codec,

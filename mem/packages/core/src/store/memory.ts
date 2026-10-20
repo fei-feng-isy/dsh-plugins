@@ -421,7 +421,7 @@ export class MemoryStore {
         embedding_model: r.embedding_model,
       })),
       space: this.vectorSpace(),
-      manualEntry: '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`)',
+      manualEntry: '`avantf-mem vectors --fix` (GUI 设置页「向量索引」)',
     })
   }
 
@@ -1060,7 +1060,7 @@ export class MemoryStore {
   vectorRepairTarget(): VectorRepairTarget {
     return {
       store: 'memory',
-      manualEntry: '`avantf-mem vectors --fix` (MCP/plugin: `mem_admin vectors_fix`)',
+      manualEntry: '`avantf-mem vectors --fix` (GUI 设置页「向量索引」)',
       vectorSpace: () => this.vectorSpace(),
       semanticAvailable: () => this.semantic.isAvailable(),
       autoMigrate: () => this.config.semantic.auto_migrate,
@@ -1267,16 +1267,33 @@ export class MemoryStore {
    * store has: the ONE write connection (so the restored rows are immediately visible to every
    * reader here) and the derived-state entity sweep that runs after the commit.
    *
-   * Not reachable from `/mem` in this phase: a restore inside a running host would also have to
-   * repopulate the in-memory vector index, which is a separate concern (and the CLI is the surface
-   * that owns "rebuild this library").
+   * Reachable from `mem_admin restore_snapshot` (and from the CLI): after a real restore this
+   * method refreshes the live vector index and resets the conflict-drain cursor, so a host that
+   * rebuilt its library from a tool call answers from the NEW rows without a restart.
    */
   async restoreFacts(doc: FactsExportDocument, options: RestoreOptions = {}): Promise<RestoreReport> {
-    return await restoreFactsDocument(
+    const report = await restoreFactsDocument(
       { db: this.db, reindexEntities: async (budget) => await this.reindexEntities(budget) },
       doc,
       options,
     )
+    // A REAL restore replaced every row in the facts table, so every in-memory read model derived
+    // from the OLD rows has to follow IN THIS PROCESS — otherwise a host that restores from a tool
+    // call would keep answering from a deleted library until it restarts:
+    //
+    //   - the live vector index is rebuilt from the restored rows (their `semantic_vector` is NULL,
+    //     so the old entries are dropped); FTS is already correct because the schema triggers wrote
+    //     it inside the restore transaction;
+    //   - the conflict-drain cursor points at ids from the previous library and must restart at 0.
+    //
+    // A dry run changed nothing, so it touches nothing. The CLI goes through this same method, which
+    // is why the refresh lives here rather than in the admin branch (the CLI's process exits anyway;
+    // the cost is one empty index rebuild).
+    if (options.dryRun !== true) {
+      this.conflictDrainCursor = 0
+      this.reloadIndex()
+    }
+    return report
   }
 
   /**

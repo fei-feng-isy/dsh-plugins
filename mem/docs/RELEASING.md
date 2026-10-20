@@ -253,7 +253,7 @@ available.`，而 `npm stage list` 会说没有 staged 版本。②只能等（2
 1. `pnpm release:check` → 全 PASS，且 preflight 没有告警；把输出留档。
 2. 在一份**上一版的实盘库副本**上真跑一次升级：`upgrade → admin maintenance → contradict_check → search/kb_query`，
    确认 `trust_diagnose` / `vectors_diagnose` 的落后量在下降（§3）。
-3. 在 DSH profile 里重启一次 `dsh web`：确认 8 个工具在（`mount-smoke` 会打印）、两页能打开、3 段 prompt 与 2 个条件 context 出现、日志无 error；
+3. 在 DSH profile 里重启一次 `dsh web`：确认 7 个模型工具在（`mount-smoke` 会打印）、两页能打开、3 段 prompt 与 2 个条件 context 出现、日志无 error；
    **并确认一次"坏 dataHome"下的降级挂载**（工具返回 `memory unavailable: …` 而宿主照常起来）。
 4. CHANGELOG 已改名并带日期；`[Unreleased]` 为空；版本与本检出里所有包一致（开发树 8 个）。
 5. release notes 复制了 §4 的限制。

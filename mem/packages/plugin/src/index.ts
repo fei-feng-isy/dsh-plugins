@@ -48,6 +48,9 @@ import {
   KB_TOOL,
   QUERY_TOOL,
   TOOL_SPECS,
+  RememberUnion,
+  RecallUnion,
+  AdminUnion,
   adoptWellFormed,
   createConsoleLogger,
   describeError,
@@ -151,6 +154,18 @@ function present(spec: ToolSpec, args: Record<string, unknown>): GenericCallView
 
 type WireArgs = Record<string, unknown>
 
+/**
+ * The Remote gateway validates the FULL unions, not the model-facing specs.
+ *
+ * The contract's `*_TOOL.input` is the MODEL face (a narrowed action set). The settings page and the
+ * CLI drive every action through the same runtime, so this gateway — one of the operator surfaces —
+ * keeps the complete union. They are built here from the tool spec plus the full union so the
+ * envelope/name still comes from the one tool table, and only the accepted action set widens.
+ */
+const REMEMBER_GATEWAY_TOOL: ToolSpec = { ...REMEMBER_TOOL, input: RememberUnion }
+const RECALL_GATEWAY_TOOL: ToolSpec = { ...RECALL_TOOL, input: RecallUnion }
+const ADMIN_GATEWAY_TOOL: ToolSpec = { ...ADMIN_TOOL, input: AdminUnion }
+
 /** Drop wire keys explicitly set to undefined so they cannot clobber defaults. */
 function defined(args: WireArgs): WireArgs {
   return Object.fromEntries(Object.entries(args ?? {}).filter(([, value]) => value !== undefined))
@@ -206,19 +221,19 @@ export class AvantfMemGateway extends TypertRemoteService {
   @Remote('remember')
   remember(args: WireArgs): Promise<RemoteEnvelope<StoreResult<MemoryStore, 'add'>>> {
     const payload = defined(args)
-    return this.call('remember', REMEMBER_TOOL, { action: 'add', ...payload })
+    return this.call('remember', REMEMBER_GATEWAY_TOOL, { action: 'add', ...payload })
   }
 
   @Remote('recall')
   recall(args: WireArgs): Promise<RemoteEnvelope<StoreResult<MemoryStore, 'search'>>> {
     const payload = defined(args)
-    return this.call('recall', RECALL_TOOL, { action: 'search', ...payload })
+    return this.call('recall', RECALL_GATEWAY_TOOL, { action: 'search', ...payload })
   }
 
   @Remote('admin')
   admin(args: WireArgs): Promise<RemoteEnvelope<StoreResult<MemoryStore, 'list'>>> {
     const payload = defined(args)
-    return this.call('admin', ADMIN_TOOL, { action: 'list', ...payload })
+    return this.call('admin', ADMIN_GATEWAY_TOOL, { action: 'list', ...payload })
   }
 
   /**
@@ -543,7 +558,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // is environmental — a corrupt or locked database, an unwritable data home, or a database
     // written by a NEWER version (`SchemaDowngradeError`) — and the loader treats a throwing `apply`
     // as a failed row, which is enough to fail the whole `dsh web` boot (observed). Degrade instead:
-    // the eight tools stay registered and each answers with the REASON, so the model and the operator
+    // the seven model tools stay registered and each answers with the REASON, so the model and the operator
     // get a diagnosis instead of a missing tool and a silent absence.
     const reason = describeError(error)
     logger.error(`runtime unavailable — mounting DEGRADED (tools answer with the reason): ${reason}`)
@@ -823,7 +838,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // The host face's composition is COUNTED, never typed. The old line was "(5 tools + 5 UI-only)";
   // the 5 is right — it is the five TOOL-BACKED Remote methods (one per `call(...)` above), the same
   // five `client/index.ts` means by "mirrors the five tools" — but writing it as a literal is what let
-  // a reviewer read it as the model-tool count (8) and "find" a defect that is not there. Both
+  // a reviewer read it as the model-tool count (7) and "find" a defect that is not there. Both
   // numbers now come from `descriptors` (the face itself): a method added or removed moves the line.
   const toolBackedMethods = descriptors.filter(
     descriptor => toolSpecs.some(spec => spec.key === descriptor.method),

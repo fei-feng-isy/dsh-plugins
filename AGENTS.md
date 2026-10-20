@@ -5,7 +5,7 @@
 | 目录 | 包 | 是什么 |
 | --- | --- | --- |
 | `base/plugin-base` | `@avantf/dsh-plugin-base` | DSH 插件的底座：启动期资源预装（声明式 provisioner）+ 宿主兼容门禁 + 共享 kit，运行期零依赖 |
-| `mem/packages/plugin` | `@avantf/dsh-mem` | DSH 的记忆/知识插件：可长期检索的记忆 + 文档知识库（8 个模型工具、两个主窗口标签页） |
+| `mem/packages/plugin` | `@avantf/dsh-mem` | DSH 的记忆/知识插件：可长期检索的记忆 + 文档知识库（7 个模型工具、两个主窗口标签页） |
 | `mission/packages/plugin` | `@avantf/dsh-mission` | DSH 的任务树插件：把一件能连验收标准一起交出去的事交给引擎，由它后台逐级派给一次性执行者 |
 | `identity/packages/plugin` | `@avantf/dsh-identity` | DSH 的身份插件：`IDENTITY.md`/`SOUL.md`/`RULES.md` 三个文件替换 system prompt 里的身份部分，其余 section 一字不改；设置页一个页面 + 多语言内置预设 |
 
@@ -254,7 +254,7 @@ pnpm build:dsh base       # 只构建 base（tsc）
 - `base/README.md` —— 接口世代与 `api/interface-vN.json` 快照流程、kit 成员归置、`base/**` 枢纽"最后动"、
   base 自身的门禁与契约。
 - `mem/README.md` —— 契约唯一真源、检索编排不许分叉、融合定序与证据要求、嵌入空间迁移与表示指纹、
-  `eval_zh` 冻结数字、类型检查顺序、工具面 8 个、`mem/CHANGELOG.md` 段落规则、mem 枢纽清单。
+  `eval_zh` 冻结数字、类型检查顺序、模型工具面 7 个、`mem/CHANGELOG.md` 段落规则、mem 枢纽清单。
 - `mission/README.md` —— 调度语义 v1、worker 清理四步与 `keepWorkers` 保留、mission 枢纽清单。
 - `identity/README.md` —— 三个身份文件与预设的磁盘布局、只补缺失/永不覆盖的释放语义、数据根兜底镜像的
   钉法、设置页 slot 与两条 wire 坑、发布面登记点。

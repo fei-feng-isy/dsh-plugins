@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
+import { z } from 'zod'
 import {
   ConfigSchema,
   MemoryConfigSchema,
   KnowledgeConfigSchema,
   REMEMBER_ACTIONS,
   RECALL_ACTIONS,
+  MODEL_REMEMBER_ACTIONS,
+  MODEL_RECALL_ACTIONS,
+  MODEL_ADMIN_ACTIONS,
   REMEMBER_TOOL,
   RECALL_TOOL,
   ADMIN_TOOL,
@@ -29,6 +33,12 @@ import {
   MAX_QUERY_CHARS,
   QueryUnion,
   FLOOR_PROFILES,
+  ADMIN_ACTIONS,
+  AdminUnion,
+  ModelRememberUnion,
+  ModelRecallUnion,
+  ModelAdminUnion,
+  RememberUnion,
 } from '../src/index.js'
 
 /**
@@ -311,7 +321,7 @@ describe('toolInputJsonSchema (MCP inputSchema derivation)', () => {
     expect(schema.type).toBe('object')
     expect(schema.additionalProperties).toBe(false)
     expect(schema.required).toEqual(['action'])
-    expect(schema.properties.action.enum).toEqual(expect.arrayContaining(REMEMBER_ACTIONS as unknown as string[]))
+    expect(schema.properties.action.enum).toEqual([...MODEL_REMEMBER_ACTIONS])
     expect(schema.properties.content?.type).toBe('string')
     expect(schema.properties.content?.description).toContain('add')
     expect(schema.properties.fact_id?.type).toBe('integer')
@@ -352,7 +362,8 @@ describe('toolInputJsonSchema (MCP inputSchema derivation)', () => {
     expect([...recall.get('probe')!.required].sort()).toEqual(['action', 'entity'])
     expect([...recall.get('ask')!.required]).toEqual(['action'])
     const admin = byAction(ADMIN_TOOL)
-    expect(admin.get('archive')!.required).toContain('fact_id')
+    expect(admin.get('import')!.required).toContain('file')
+    expect([...admin.get('restore_snapshot')!.required].sort()).toEqual(['action', 'confirm', 'file'])
     expect(admin.get('list')!.required).toEqual(['action'])
   })
 
@@ -379,10 +390,11 @@ describe('toolInputJsonSchema (MCP inputSchema derivation)', () => {
 
   it('merged field descriptions name every action that requires the field', () => {
     const schema = toolInputJsonSchema(REMEMBER_TOOL) as unknown as { properties: Record<string, { description?: string }> }
-    // was "action=update 时必填" only, although remove/helpful/unhelpful require it too
-    for (const action of ['update', 'remove', 'helpful', 'unhelpful']) {
+    // was "action=update 时必填" only, although remove requires it too
+    for (const action of ['update', 'remove']) {
       expect(schema.properties.fact_id?.description).toContain(action)
     }
+    expect(schema.properties.fact_id?.description).not.toContain('helpful')
     expect(schema.properties.content?.description).toContain('add')
     expect(schema.properties.content?.description).toContain('update')
   })
@@ -502,6 +514,117 @@ describe('model-facing tool text: what to do, never why or what comes back', () 
     expect(remember.properties.ttl_days?.description).toContain('不设有效期')
     const query = toolInputJsonSchema(QUERY_TOOL) as unknown as { properties: Record<string, { description?: string; enum?: string[] }> }
     expect(query.properties.kind?.enum).toEqual(['all', 'fact', 'doc_chunk'])
+  })
+
+  it('never names an action that is hidden from the model', () => {
+    // The operator surface keeps these; the model-facing text must not teach a call it cannot make.
+    // Boundaries matter: `restore` is a prefix of the VISIBLE `restore_snapshot`, and `pin` is
+    // inside `unpin` — a naive substring check would either fail or pass vacuously.
+    const hidden = [
+      'helpful', 'unhelpful', 'merge', 'stats', 'detail', 'archive', 'restore', 'pin', 'unpin',
+      'trust_diagnose', 'vectors_diagnose', 'vectors_fix', 'contradict_check', 'contradict_resolve',
+      'maintenance', 'related', 'chain', 'reindex', 'kb_reindex',
+    ] as const
+    const pattern = new RegExp('(?<![A-Za-z0-9_])(' + hidden.join('|') + ')(?![A-Za-z0-9_])')
+    for (const spec of TOOL_SPECS) {
+      for (const { where, text } of authoredTexts(spec)) {
+        expect(text, where + ' must not name a hidden action').not.toMatch(pattern)
+      }
+    }
+  })
+})
+
+describe('the model-facing action sets', () => {
+  const actionsOf = (spec: typeof REMEMBER_TOOL): string[] => {
+    const schema = toolInputJsonSchema(spec) as unknown as { properties: { action?: { enum?: string[] } } }
+    return schema.properties.action?.enum ?? []
+  }
+
+  it('exposes the narrowed remember/recall/admin sets, and no kb_reindex tool', () => {
+    expect(actionsOf(REMEMBER_TOOL)).toEqual([...MODEL_REMEMBER_ACTIONS])
+    expect(actionsOf(RECALL_TOOL)).toEqual([...MODEL_RECALL_ACTIONS])
+    expect(actionsOf(ADMIN_TOOL)).toEqual([...MODEL_ADMIN_ACTIONS])
+    // Three memory tools + four knowledge tools. `kb_reindex` is an OPERATOR repair action.
+    expect(TOOL_SPECS.map((spec) => spec.name)).toEqual([
+      'mem_remember', 'mem_recall', 'mem_admin', 'kb_add', 'kb_list', 'kb_remove', 'kb_query',
+    ])
+  })
+
+  it('rejects every hidden action at the model boundary', () => {
+    for (const args of [
+      { action: 'helpful', fact_id: 1 },
+      { action: 'unhelpful', fact_id: 1 },
+    ]) expect(REMEMBER_TOOL.input.safeParse(args).success, JSON.stringify(args)).toBe(false)
+    for (const args of [
+      { action: 'related', entity: 'x' },
+      { action: 'chain', subj: 'x' },
+    ]) expect(RECALL_TOOL.input.safeParse(args).success, JSON.stringify(args)).toBe(false)
+    for (const action of [
+      'stats', 'detail', 'archive', 'restore', 'pin', 'unpin', 'trust_diagnose',
+      'vectors_diagnose', 'vectors_fix', 'contradict_check', 'contradict_resolve', 'maintenance', 'merge',
+    ]) {
+      const args = action === 'merge'
+        ? { action, file: 'incoming/other.db' }
+        : ['detail', 'archive', 'restore', 'pin', 'unpin'].includes(action)
+          ? { action, fact_id: 1 }
+          : { action }
+      expect(ADMIN_TOOL.input.safeParse(args).success, action).toBe(false)
+    }
+    // The kept actions still validate with their own required fields.
+    expect(ADMIN_TOOL.input.safeParse({ action: 'list' }).success).toBe(true)
+    expect(ADMIN_TOOL.input.safeParse({ action: 'export' }).success).toBe(true)
+    expect(ADMIN_TOOL.input.safeParse({ action: 'import', file: 'backups/x.json.br' }).success).toBe(true)
+    expect(ADMIN_TOOL.input.safeParse({ action: 'restore_snapshot', file: 'x.json.br', confirm: true }).success).toBe(true)
+  })
+
+  it('keeps the full unions for the runtime, the CLI and the settings page', () => {
+    expect(RememberUnion.safeParse({ action: 'helpful', fact_id: 1 }).success).toBe(true)
+    expect(RememberUnion.safeParse({ action: 'unhelpful', fact_id: 1 }).success).toBe(true)
+    expect(RecallUnion.safeParse({ action: 'related', entity: 'x' }).success).toBe(true)
+    expect(RecallUnion.safeParse({ action: 'chain', subj: 'x' }).success).toBe(true)
+    expect(AdminUnion.safeParse({ action: 'merge', file: 'incoming/other.db' }).success).toBe(true)
+    expect(AdminUnion.safeParse({ action: 'maintenance' }).success).toBe(true)
+    // The filtered unions are derived from the full ones, not retyped: each model schema has one
+    // branch per model action.
+    for (const [model, actions] of [
+      [ModelRememberUnion, MODEL_REMEMBER_ACTIONS],
+      [ModelRecallUnion, MODEL_RECALL_ACTIONS],
+      [ModelAdminUnion, MODEL_ADMIN_ACTIONS],
+    ] as const) {
+      const schema = z.toJSONSchema(model, { io: 'input' }) as { oneOf?: { properties?: { action?: { const?: string } } }[] }
+      expect(schema.oneOf?.map((branch) => branch.properties?.action?.const)).toEqual([...actions])
+    }
+  })
+})
+
+describe('maintenance admin actions', () => {
+  it('adds export/import/merge/restore_snapshot without disturbing the old restore', () => {
+    expect(ADMIN_ACTIONS).toEqual(expect.arrayContaining(['export', 'import', 'merge', 'restore_snapshot']))
+    expect(ADMIN_ACTIONS).toContain('restore') // the per-fact unarchive keeps its name
+    expect(AdminUnion.safeParse({ action: 'export' }).success).toBe(true)
+    expect(AdminUnion.safeParse({ action: 'export', status: 'active' }).success).toBe(true)
+    expect(AdminUnion.safeParse({ action: 'export', status: 'everything' }).success).toBe(false)
+    expect(AdminUnion.safeParse({ action: 'import', file: 'backups/x.json.br' }).success).toBe(true)
+    expect(AdminUnion.safeParse({ action: 'merge', file: 'incoming/other.db', dry_run: true }).success).toBe(true)
+    expect(AdminUnion.safeParse({ action: 'restore', fact_id: 7 }).success).toBe(true)
+    // The old restore never grew a file field, and restore_snapshot is its own action.
+    expect(AdminUnion.safeParse({ action: 'restore', file: 'x.json.br' }).success).toBe(false)
+    expect(AdminUnion.safeParse({ action: 'restore_snapshot', file: 'x.json.br' }).success).toBe(false)
+    expect(AdminUnion.safeParse({ action: 'restore_snapshot', file: 'x.json.br', confirm: 'yes' }).success).toBe(false)
+    expect(AdminUnion.safeParse({ action: 'restore_snapshot', file: 'x.json.br', confirm: true }).success).toBe(true)
+  })
+
+  it('derives the branch requirements and the path/confirm wording into both model surfaces', () => {
+    const schema = toolInputJsonSchema(ADMIN_TOOL) as unknown as {
+      properties: Record<string, { description?: string; type?: string }>
+      oneOf: { properties: Record<string, { const?: unknown; enum?: string[] }>; required: string[] }[]
+    }
+    const branch = schema.oneOf.find((entry) => entry.properties.action?.enum?.[0] === 'restore_snapshot')
+    expect(branch?.required.sort()).toEqual(['action', 'confirm', 'file'])
+    expect(branch?.properties.confirm?.const).toBe(true)
+    expect(schema.properties.file?.description).toContain('数据根')
+    expect(schema.properties.confirm?.description).toContain('confirm')
+    expect(schema.properties.file?.description).toContain('restore_snapshot')
   })
 })
 

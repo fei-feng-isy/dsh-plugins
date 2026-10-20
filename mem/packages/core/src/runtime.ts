@@ -1,4 +1,5 @@
-import { statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
+import { basename } from 'node:path'
 import type {
   AdminRequest,
   FloorProfile,
@@ -40,6 +41,25 @@ import { MemoryStore, type FactWriteOptions } from './store/memory.js'
 import { KnowledgeStore } from './store/knowledge.js'
 import { vectorsFix } from './store/vector_repair.js'
 import { crossQuery } from './router.js'
+import {
+  codecForExportPath,
+  decodeFactsExport,
+  encodeFactsExport,
+  exportFacts,
+  importFacts,
+  isSqliteDatabaseFile,
+  mergeDb,
+  type FactsExportCodec,
+  type FactsIoRuntime,
+  type ImportReport,
+  type MergeReport,
+} from './facts_io.js'
+import {
+  resolveMaintenanceExportTarget,
+  resolveMaintenanceInputFile,
+  writeFileAtomic,
+} from './maintenance_paths.js'
+import type { RestoreReport } from './store/facts_restore.js'
 
 /**
  * WAL sidecar health for the memory database (P-06), from ONE `statSync`.
@@ -162,6 +182,24 @@ export type DispatchError = { error: string }
 export type AdminStatsResult = StatsSummary
 
 /**
+ * `admin export`: the file THIS call wrote and its container. Deliberately carries NO document body
+ * — the model gets a receipt, not the library (the file is the artifact; whoever needs the facts
+ * reads it with the CLI or imports it back).
+ */
+export interface AdminExportReport {
+  file: string
+  codec: FactsExportCodec
+  bytes: number
+  plain_bytes: number
+  counts: { active: number; archived: number }
+  /** True when an existing file was replaced (the atomic write is the same either way). */
+  overwritten: boolean
+}
+
+/** `admin restore_snapshot`: the engine's restore report plus the container it came from. */
+export type AdminRestoreSnapshotReport = RestoreReport & { file: string; codec: FactsExportCodec }
+
+/**
  * The payload of the four hits-returning recall actions, which one overload groups because a
  * caller may hold them as a union (`action: 'chain' | 'reason'`).
  *
@@ -202,9 +240,10 @@ export type RecallDispatch = {
 }
 
 /**
- * `admin` is the widest dispatcher: counts, a fact page, a detail, flags, and five diagnostic
- * reports. `ReturnType<…>` keeps each member tied to the store method that actually produces it,
- * so a change there propagates instead of leaving callers with a cast they invented.
+ * `admin` is the widest dispatcher: counts, a fact page, a detail, flags, five diagnostic
+ * reports, and the four data-root maintenance actions (export / import / merge / restore_snapshot).
+ * `ReturnType<…>` keeps each member tied to the store method that actually produces it, so a change
+ * there propagates instead of leaving callers with a cast they invented.
  */
 export type AdminDispatch = {
   (req: Extract<AdminRequest, { action: 'stats' }>): AdminStatsResult
@@ -220,6 +259,11 @@ export type AdminDispatch = {
   (req: Extract<AdminRequest, { action: 'contradict_check' }>): StoreResult<MemoryStore, 'checkContradictions'>
   (req: Extract<AdminRequest, { action: 'contradict_resolve' }>): StoreResult<MemoryStore, 'resolveContradiction'>
   (req: Extract<AdminRequest, { action: 'maintenance' }>): StoreResult<MemoryStore, 'maintenance'>
+  (req: Extract<AdminRequest, { action: 'export' }>): AdminExportReport
+  /** Content-detected: a SQLite source answers with the db report, an export document with the JSON one. */
+  (req: Extract<AdminRequest, { action: 'import' }>): Promise<ImportReport | MergeReport>
+  (req: Extract<AdminRequest, { action: 'merge' }>): Promise<MergeReport>
+  (req: Extract<AdminRequest, { action: 'restore_snapshot' }>): Promise<AdminRestoreSnapshotReport>
   (req: AdminRequest): unknown
 }
 
@@ -274,6 +318,63 @@ export interface AvantfRuntime {
    */
   readonly closed: boolean
   shutdown(): void
+}
+
+/**
+ * `admin import`: resolve the input inside the data root, then pick the flow by CONTENT.
+ *
+ * A SQLite header means the file is another host's `memory.db` — the read-only db union (`mergeDb`).
+ * Anything else is an export document (plain / gzip / brotli, all decoded by `decodeFactsExport`).
+ * One action, one path rule; the MODEL no longer needs a second action to say which file type it has,
+ * while the CLI keeps `import` and `merge` as two explicit commands. Async so a path refusal arrives
+ * as a rejected promise, matching the action's declared return type.
+ */
+async function importFromDataRoot(
+  rt: FactsIoRuntime,
+  req: Extract<AdminRequest, { action: 'import' }>,
+): Promise<ImportReport | MergeReport> {
+  const file = resolveMaintenanceInputFile(rt.config.home, req.file)
+  if (isSqliteDatabaseFile(file)) return await mergeDb(rt, file, { dryRun: req.dry_run === true })
+  const decoded = decodeFactsExport(readFileSync(file))
+  return await importFacts(rt, decoded.doc, {
+    dryRun: req.dry_run === true,
+    sourceRef: 'import:' + basename(file),
+  })
+}
+
+/** `admin merge`: resolve the source inside the data root, then run the read-only db union. */
+async function mergeFromDataRoot(
+  rt: FactsIoRuntime,
+  req: Extract<AdminRequest, { action: 'merge' }>,
+): Promise<MergeReport> {
+  const file = resolveMaintenanceInputFile(rt.config.home, req.file)
+  return await mergeDb(rt, file, { dryRun: req.dry_run === true })
+}
+
+/**
+ * `admin restore_snapshot`: resolve the snapshot inside the data root, decode it by CONTENT (plain /
+ * gzip / brotli, never by extension) and run the engine's ONE rebuild path.
+ *
+ * The same-process refresh is the point of exposing this as a TOOL rather than leaving it to the
+ * CLI: `MemoryStore.restoreFacts` reloads the live vector index (and resets its conflict-drain
+ * cursor) after a real restore, so `mem_recall` in this very process sees the rebuilt library
+ * without a host restart. FTS is maintained by the schema triggers during the transaction.
+ *
+ * The `confirm` guard is repeated here even though the contract already requires the literal
+ * `true`: the runtime face is also reached by the Remote gateway and by embedders, and a rebuild
+ * that replaces a whole library must never be one cast away from happening by accident.
+ */
+async function restoreSnapshotInProcess(
+  rt: Pick<AvantfRuntime, 'config' | 'memory'>,
+  req: Extract<AdminRequest, { action: 'restore_snapshot' }>,
+): Promise<AdminRestoreSnapshotReport> {
+  if (req.confirm !== true) {
+    throw new Error('restore_snapshot 需要 confirm: true：它把快照重建进一个空 facts 表，绝不并入现有事实')
+  }
+  const file = resolveMaintenanceInputFile(rt.config.home, req.file)
+  const decoded = decodeFactsExport(readFileSync(file))
+  const report = await rt.memory.restoreFacts(decoded.doc, { dryRun: req.dry_run === true })
+  return { file, codec: decoded.codec, ...report }
 }
 
 /** Build the runtime: load config, open the memory DB, construct the stores. */
@@ -473,6 +574,36 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
         case 'maintenance':
           // Store-owned: runMaintenance + live-index eviction happen in one place.
           return this.memory.maintenance()
+        case 'export': {
+          // The agent-callable half of `avantf-mem export --out`: same document, same encoder, same
+          // atomic writer, but the destination is confined to this run's data root. The REPORT is a
+          // receipt only — the document body never crosses the tool boundary.
+          const target = resolveMaintenanceExportTarget(this.config.home, req.file)
+          const doc = exportFacts(this, { status: req.status ?? 'all' })
+          const codec = codecForExportPath(target.file)
+          const bytes = encodeFactsExport(doc, { codec })
+          const plainBytes = encodeFactsExport(doc, { codec: 'none' }).length
+          writeFileAtomic(target.file, bytes)
+          return {
+            file: target.file,
+            codec,
+            bytes: bytes.length,
+            plain_bytes: plainBytes,
+            counts: doc.source.counts,
+            overwritten: target.existed,
+          } satisfies AdminExportReport
+        }
+        case 'import':
+          // Content-identity union, identical to `avantf-mem import` / `merge`: the file type is
+          // detected by content (SQLite header → read-only db union, otherwise an export document),
+          // and the one per-fact add path collects failures instead of aborting the batch.
+          return importFromDataRoot(this, req)
+        case 'merge':
+          // `mergeDb` opens the source READ ONLY (never migrates or writes it) and shares the same
+          // per-fact add path as import; only the provenance differs (`merge:<path>`).
+          return mergeFromDataRoot(this, req)
+        case 'restore_snapshot':
+          return restoreSnapshotInProcess(this, req)
         case 'vectors_diagnose':
           return this.memory.vectorsDiagnose()
         case 'vectors_fix':

@@ -63,12 +63,24 @@
  * @module @avantf/mem/facts_io
  */
 import { createRequire } from 'node:module'
-import { statSync } from 'node:fs'
+import { closeSync, openSync, readSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants, gunzipSync, gzipSync } from 'node:zlib'
-import type { RememberRequest } from '@avantf/mem-contract'
-import type { AvantfRuntime } from './runtime.js'
+import { EXPORT_STATUSES, type ExportStatus, type RememberRequest } from '@avantf/mem-contract'
 import { normalizeWrite } from './store/common.js'
+
+/**
+ * The runtime slice these flows actually touch.
+ *
+ * Narrow on purpose: export reads two config fields, import/merge also call the store's `add` path.
+ * Keeping the parameter structural (rather than the whole `AvantfRuntime`) is what lets the admin
+ * dispatcher — an object literal whose `closed` getter is attached only at return time — pass
+ * itself in without a cast, and it documents that these flows cannot reach any other store face.
+ */
+export interface FactsIoRuntime {
+  config: { home: string; memory: { db: { path: string } } }
+  remember(req: RememberRequest): Promise<unknown>
+}
 
 /** The document's discriminator. A file without it is not an export of this tool. */
 export const FACTS_EXPORT_FORMAT = 'avantf-mem-facts'
@@ -84,9 +96,13 @@ export const FACTS_EXPORT_VERSION = 2
 export const FACTS_EXPORT_VERSIONS = [1, 2] as const
 /** The version literal, so a parsed document can say which field set it came from. */
 export type FactsExportVersion = (typeof FACTS_EXPORT_VERSIONS)[number]
-/** `--status` values accepted by `export` (the whole DB, or one status). */
-export const EXPORT_STATUSES = ['active', 'archived', 'all'] as const
-export type ExportStatus = (typeof EXPORT_STATUSES)[number]
+/**
+ * `--status` values accepted by `export` (the whole DB, or one status).
+ *
+ * Re-exported from the contract, where the admin action and the CLI flag read the same set. The
+ * engine's public face keeps the name its callers already import.
+ */
+export { EXPORT_STATUSES, type ExportStatus }
 
 /** One `fact_sources` row, copied verbatim. */
 export interface ExportedFactSource {
@@ -204,6 +220,8 @@ export interface MetadataDropped {
 
 /** The single JSON object `import` prints (`file` is added by the CLI, which knows the argument). */
 export interface ImportReport {
+  /** The input form this run detected: an export document. */
+  mode: 'json'
   version: number
   total: number
   imported: number
@@ -218,6 +236,8 @@ export interface ImportReport {
 
 /** The db→db variant's report. Field names kept from the original `merge` output. */
 export interface MergeReport {
+  /** The input form this run detected: a SQLite source database. */
+  mode: 'db'
   source: string
   source_active: number
   added: number
@@ -436,7 +456,7 @@ function readFactsDocument(
  * (and this command needs no embedding model — the rows are already there).
  */
 export function exportFacts(
-  rt: AvantfRuntime,
+  rt: FactsIoRuntime,
   options: { status?: ExportStatus } = {},
 ): FactsExportDocument {
   const status = options.status ?? 'all'
@@ -492,6 +512,39 @@ export function encodeFactsExport(
 export interface DecodedFactsExport {
   doc: FactsExportDocument
   codec: FactsExportCodec
+}
+
+/** A SQLite database starts with this 16-byte string. */
+const SQLITE_HEADER = Buffer.from('SQLite format 3\u0000', 'latin1')
+
+/**
+ * Whether these bytes are a SQLite database, decided by the FILE HEADER.
+ *
+ * `mem_admin import` takes either an export document or another host's `memory.db`, and the only
+ * honest discriminator is the content: the export containers (plain / gzip / brotli) never start with
+ * the SQLite header, and a `.db` file renamed to `.json` still is one. Kept here, beside
+ * {@link decodeFactsExport}, so both content sniffers live together.
+ */
+export function isSqliteDatabase(bytes: Buffer): boolean {
+  return bytes.length >= SQLITE_HEADER.length && bytes.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER)
+}
+
+/**
+ * The same check for a PATH, reading only the 16-byte header.
+ *
+ * A `memory.db` can be hundreds of MiB; deciding which flow to take must not read it into memory
+ * first. The JSON path still reads the whole document (it has to decode it), but the db path hands the
+ * path straight to the read-only opener.
+ */
+export function isSqliteDatabaseFile(path: string): boolean {
+  const fd = openSync(path, 'r')
+  try {
+    const header = Buffer.alloc(SQLITE_HEADER.length)
+    const read = readSync(fd, header, 0, header.length, 0)
+    return read === header.length && header.equals(SQLITE_HEADER)
+  } finally {
+    closeSync(fd)
+  }
 }
 
 /**
@@ -711,7 +764,7 @@ interface PendingImport {
  * store's add path runs. A row the store refuses is collected in `failed` and the loop continues.
  */
 export async function importFacts(
-  rt: AvantfRuntime,
+  rt: FactsIoRuntime,
   doc: FactsExportDocument,
   options: ImportOptions = {},
 ): Promise<ImportReport> {
@@ -770,6 +823,7 @@ export async function importFacts(
   if (dryRun) {
     for (const item of pending) accumulateMetadataDropped(metadataDropped, metadataDroppedOf(item.row))
     return {
+      mode: 'json',
       version: doc.version,
       total: doc.facts.length,
       imported: 0,
@@ -803,6 +857,7 @@ export async function importFacts(
   }
 
   return {
+    mode: 'json',
     version: doc.version,
     total: doc.facts.length,
     imported,
@@ -824,7 +879,7 @@ export async function importFacts(
  * reason {@link ImportOptions.preferEmbeddedSources} can be turned off.
  */
 export async function mergeDb(
-  rt: AvantfRuntime,
+  rt: FactsIoRuntime,
   dbPath: string,
   options: MergeOptions = {},
 ): Promise<MergeReport> {
@@ -847,6 +902,7 @@ export async function mergeDb(
     preferEmbeddedSources: false,
   })
   return {
+    mode: 'db',
     source,
     source_active: doc.source.counts.active,
     added: report.imported,

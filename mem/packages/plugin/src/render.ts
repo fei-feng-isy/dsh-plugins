@@ -1,7 +1,7 @@
 /**
- * The ONE model-facing output boundary of the eight mem tools (`TOOL_SPECS`; `kb_manage` is
- * `KB_TOOL`, the internal engine API the UI/CLI dispatch through, and is not part of the model
- * surface).
+ * The ONE model-facing output boundary of the mem tools (`TOOL_SPECS`; `kb_manage` is `KB_TOOL`
+ * and `kb_reindex` is `KB_REINDEX_TOOL` — internal engine APIs the UI/CLI dispatch through, not
+ * part of the model surface).
  *
  * `output.render` is what the DSH tool runner calls to turn a result value into the text block the
  * model reads, so this is the last code of ours the payload passes through before `JSON.stringify`.

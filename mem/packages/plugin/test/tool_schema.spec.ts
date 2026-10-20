@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
 import {
   ADMIN_ACTIONS,
+  MODEL_ADMIN_ACTIONS,
+  MODEL_RECALL_ACTIONS,
+  MODEL_REMEMBER_ACTIONS,
   REMEMBER_TOOL,
   RECALL_TOOL,
   ADMIN_TOOL,
@@ -28,15 +31,15 @@ describe('union → DSH parameter map', () => {
   const remember = flattenToolSpec(REMEMBER_TOOL)
 
   it('collects one `action` enum from every union branch, in declaration order', () => {
-    expect(remember['action']?.enum).toEqual(['add', 'update', 'remove', 'helpful', 'unhelpful'])
+    expect(remember['action']?.enum).toEqual([...MODEL_REMEMBER_ACTIONS])
     expect(remember['action']?.required).toBe(true)
     expect(remember['action']?.type).toBe('string')
   })
 
   it('merges the branches` fields instead of taking the first branch only', () => {
-    // `fact_id` only exists on update/remove/helpful/unhelpful — a first-branch-only
-    // merge would drop it and the model could never call those actions. `source_ref` / `event_date`
-    // / `valid_until` (batch 1) live on add/update only, so they exercise the same merge path.
+    // `fact_id` only exists on update/remove — a first-branch-only merge would drop it and the
+    // model could never call those actions. `source_ref` / `event_date` / `valid_until` (batch 1)
+    // live on add/update only, so they exercise the same merge path.
     expect(Object.keys(remember).sort()).toEqual([
       'action', 'category', 'content', 'event_date', 'fact_id', 'reason', 'source_ref', 'ttl_days', 'valid_until',
     ])
@@ -94,7 +97,30 @@ describe('union → DSH parameter map', () => {
     const admin = flattenToolSpec(ADMIN_TOOL)
     // Derived from the contract constant, not retyped: a literal list here silently lags every
     // new action (it did for `contradict_resolve`), which is the drift this test exists to catch.
-    expect(admin['action']?.enum).toEqual([...ADMIN_ACTIONS])
+    // The MODEL face is the filtered list; the full `ADMIN_ACTIONS` stays the runtime/CLI set.
+    expect(admin['action']?.enum).toEqual([...MODEL_ADMIN_ACTIONS])
+    expect(MODEL_ADMIN_ACTIONS.length).toBeLessThan(ADMIN_ACTIONS.length)
+  })
+
+  it('exposes the maintenance actions and their confined path / confirm fields', () => {
+    const admin = flattenToolSpec(ADMIN_TOOL)
+    for (const action of ['export', 'import', 'restore_snapshot']) {
+      expect(admin['action']?.enum, action).toContain(action)
+    }
+    // `merge` is no longer a model action: `import` detects a SQLite file by content.
+    expect(admin['action']?.enum).not.toContain('merge')
+    expect(admin['file']?.type).toBe('string')
+    expect(admin['file']?.description).toContain('数据根')
+    expect(admin['confirm']?.type).toBe('boolean')
+    expect(admin['confirm']?.description).toContain('confirm')
+
+    // The MCP/DSH surfaces agree on WHAT is required for this branch; the schema (not the
+    // description alone) is what rejects a confirm-less rebuild.
+    const schema = toolInputJsonSchema(ADMIN_TOOL) as unknown as {
+      oneOf: { properties: Record<string, { enum?: string[] }>; required: string[] }[]
+    }
+    const branch = schema.oneOf.find((entry) => entry.properties.action?.enum?.[0] === 'restore_snapshot')
+    expect(branch?.required.sort()).toEqual(['action', 'confirm', 'file'])
   })
 })
 
@@ -117,6 +143,14 @@ describe('the DSH and MCP surfaces agree', () => {
     }
   })
 
+  it('advertises the same action set on both', () => {
+    for (const spec of TOOL_SPECS) {
+      const dsh = flattenToolSpec(spec)['action']?.enum ?? []
+      const mcp = (toolInputJsonSchema(spec) as { properties?: { action?: { enum?: string[] } } }).properties?.action?.enum ?? []
+      expect(dsh, spec.name).toEqual(mcp)
+    }
+  })
+
   it('marks the same fields required on both', () => {
     for (const spec of TOOL_SPECS) {
       const dsh = Object.entries(flattenToolSpec(spec)).filter(([, param]) => param.required === true).map(([key]) => key)
@@ -128,21 +162,24 @@ describe('the DSH and MCP surfaces agree', () => {
   it('names the actions that require a field, not just the branch that declares it', () => {
     const remember = flattenToolSpec(REMEMBER_TOOL)
     expect(remember['content']?.description).toContain('【add/update 必填】')
-    expect(remember['fact_id']?.description).toContain('【update/remove/helpful/unhelpful 必填】')
+    expect(remember['fact_id']?.description).toContain('【update/remove 必填】')
+    expect(remember['fact_id']?.description).not.toContain('helpful')
     expect(remember['category']?.description).not.toContain('必填】') // optional in every action
 
     const recall = flattenToolSpec(RECALL_TOOL)
+    expect(recall['action']?.enum).toEqual([...MODEL_RECALL_ACTIONS])
     expect(recall['query']?.description).toContain('【search 必填】')
-    // `related` needs an entity too — the first branch that DECLARED the field (`probe`) said
-    // nothing about it, which is the same defect in a second place.
-    expect(recall['entity']?.description).toContain('【probe/related 必填】')
+    expect(recall['entity']?.description).toContain('【probe 必填】')
+    expect(recall['entity']?.description).not.toContain('related')
     expect(recall['entities']?.description).toContain('【reason 必填】')
 
     const admin = flattenToolSpec(ADMIN_TOOL)
-    expect(admin['fact_id']?.description).toContain('【detail/archive/restore/pin/unpin 必填】')
-    expect(admin['contradiction_id']?.description).toContain('【contradict_resolve 必填】')
-    expect(admin['resolution']?.description).toContain('【contradict_resolve 必填】')
-    expect(admin['loser_fact_id']?.description).not.toContain('必填】') // optional even where it exists
+    // The operator-only fact fields are not part of the model schema at all.
+    expect(admin['fact_id']).toBeUndefined()
+    expect(admin['contradiction_id']).toBeUndefined()
+    expect(admin['resolution']).toBeUndefined()
+    expect(admin['file']?.description).toContain('【import/restore_snapshot 必填】')
+    expect(admin['confirm']?.description).toContain('【restore_snapshot 必填】')
 
     const kb = flattenToolSpec(KB_TOOL)
     expect(kb['doc_id']?.description).toContain('【detail/remove 必填】')

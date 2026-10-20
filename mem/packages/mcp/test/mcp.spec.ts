@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime, runToolSpec, supportsToolKey, type AvantfRuntime } from '@avantf/mem'
 import { buildMcpServer, jsonSchema, textResult } from '../src/index.js'
-import { ADMIN_TOOL, KB_LIST_TOOL, QUERY_TOOL, RECALL_TOOL, REMEMBER_TOOL, TOOL_SPECS, type ToolSpec } from '@avantf/mem-contract'
+import { ADMIN_TOOL, AdminUnion, KB_LIST_TOOL, MODEL_ADMIN_ACTIONS, QUERY_TOOL, RECALL_TOOL, REMEMBER_TOOL, TOOL_SPECS, type ToolSpec } from '@avantf/mem-contract'
+
+/**
+ * The operator face of the same dispatcher: the full union. Used only to prove that a fact view
+ * requested by an operator action is still shaped by `modelFacingToolResult` and that a diagnostic
+ * passes through — it is NOT what `TOOL_SPECS` advertises to a model.
+ */
+const ADMIN_RUNTIME_SPEC: ToolSpec = { ...ADMIN_TOOL, input: AdminUnion }
 
 /** Every string reachable from the value must be well-formed (JSON.parse accepts lone surrogates). */
 function expectWellFormedEverywhere(value: unknown, path = '$'): void {
@@ -82,6 +89,17 @@ describe('MCP server', () => {
     const querySchema = jsonSchema(QUERY_TOOL) as { required?: string[]; properties: Record<string, { type?: string }> }
     expect(querySchema.required).toContain('query')
     expect(querySchema.properties.kind?.type).toBe('string')
+    // The admin schema is the contract's, not a second copy: the three maintenance actions (and the
+    // forced confirm literal) must reach MCP clients without this package listing them anywhere.
+    const adminSchema = jsonSchema(ADMIN_TOOL) as {
+      properties: { action?: { enum?: string[] }; confirm?: { const?: unknown } }
+      oneOf: { properties: { action?: { enum?: string[] }; confirm?: { const?: unknown } }; required: string[] }[]
+    }
+    expect(adminSchema.properties.action?.enum).toEqual([...MODEL_ADMIN_ACTIONS])
+    expect(adminSchema.properties.action?.enum).not.toContain('merge')
+    const restore = adminSchema.oneOf.find((branch) => branch.properties.action?.enum?.[0] === 'restore_snapshot')
+    expect(restore?.required).toEqual(expect.arrayContaining(['file', 'confirm']))
+    expect(restore?.properties.confirm?.const).toBe(true)
   })
 
   it('exposes exactly the contract tool set, and dispatches every one of them', async () => {
@@ -90,7 +108,7 @@ describe('MCP server', () => {
     // while its dispatcher still knew only the five older keys, so all four `kb_*` calls answered
     // `unknown tool key`). Asserting the count is not enough — the KEY SET has to reach a handler.
     const names = TOOL_SPECS.map((s) => s.name)
-    expect(names).toEqual(['mem_remember', 'mem_recall', 'mem_admin', 'kb_add', 'kb_list', 'kb_remove', 'kb_reindex', 'kb_query'])
+    expect(names).toEqual(['mem_remember', 'mem_recall', 'mem_admin', 'kb_add', 'kb_list', 'kb_remove', 'kb_query'])
     for (const spec of TOOL_SPECS) {
       expect(supportsToolKey(spec.key), `${spec.name} (key '${spec.key}') must dispatch`).toBe(true)
     }
@@ -107,8 +125,12 @@ describe('MCP server', () => {
     expect(listed.isError).toBeUndefined()
     expect((listed.body.result as { doc_id: number }).doc_id).toBe(docId)
 
-    const reindexed = await callTool('kb_reindex', { dry_run: true })
-    expect(reindexed.isError).toBeUndefined()
+    // `kb_reindex` is an operator repair action: it must NOT be advertised to the model.
+    const listedTools = (server as unknown as {
+      _requestHandlers: Map<string, (req: { method: string; params: Record<string, unknown> }) => Promise<{ tools: { name: string }[] }>>
+    })._requestHandlers.get('tools/list')!
+    const advertised = await listedTools({ method: 'tools/list', params: {} })
+    expect(advertised.tools.map((tool) => tool.name)).not.toContain('kb_reindex')
 
     const removed = await callTool('kb_remove', { doc_id: docId })
     expect(removed.isError).toBeUndefined()
@@ -140,14 +162,20 @@ describe('MCP server', () => {
     expect(page.facts[0]).not.toHaveProperty('remaining_days')
     expect(page.facts[0]).toHaveProperty('fact_id')
 
-    const detailEnvelope = await runToolSpec(rt, ADMIN_TOOL, { action: 'detail', fact_id: created.fact_id })
+    // The MODEL cannot ask for a detail view — that action is operator-only.
+    const hidden = await runToolSpec(rt, ADMIN_TOOL, { action: 'detail', fact_id: created.fact_id })
+    expect(hidden.ok).toBe(false)
+
+    // The runtime/operator face still supports it, and its fact view is shaped for whichever
+    // boundary asked (the Remote gateway bypasses this shaping and keeps the diagnostics).
+    const detailEnvelope = await runToolSpec(rt, ADMIN_RUNTIME_SPEC, { action: 'detail', fact_id: created.fact_id })
     if (!detailEnvelope.ok) throw new Error(`expected an ok envelope, got: ${detailEnvelope.error}`)
     const detail = detailEnvelope.result as Record<string, unknown>
     expect(detail).not.toHaveProperty('trust_score')
     expect(detail).not.toHaveProperty('helpful_count')
     expect(detail).toHaveProperty('entities')
 
-    const diagnoseEnvelope = await runToolSpec(rt, ADMIN_TOOL, { action: 'trust_diagnose' })
+    const diagnoseEnvelope = await runToolSpec(rt, ADMIN_RUNTIME_SPEC, { action: 'trust_diagnose' })
     if (!diagnoseEnvelope.ok) throw new Error(`expected an ok envelope, got: ${diagnoseEnvelope.error}`)
     expect(diagnoseEnvelope.result as Record<string, unknown>).toHaveProperty('forgetting_soon')
 

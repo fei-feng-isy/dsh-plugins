@@ -167,6 +167,11 @@ export const descriptors: readonly InvocationDescriptor[] = [
     offset: count.optional(),
     reason: optionalText.optional(),
     dry_run: bool.optional(),
+    // Maintenance file actions (`export`/`import`/restore_snapshot) and their forced confirm. The
+    // MODEL no longer sees `merge`, but the gateway validates the full union, so every field the
+    // contract accepts must be declared here or the strict codec drops it before validation.
+    file: optionalText.optional(),
+    confirm: bool.optional(),
     // `vectors_fix`: narrow the repair to one library (`memory` / `knowledge`); omitted = both.
     store: optionalText.optional(),
     contradiction_id: count.optional(),

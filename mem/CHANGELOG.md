@@ -4,6 +4,27 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+### Changed（模型工具面精简）
+- **模型只保留核心记忆 / 知识动作，CLI 与 GUI 不变**：`mem_remember` 只剩 add/update/remove，
+  `mem_recall` 只剩 search/ask/probe/reason/contradict，`mem_admin` 只剩
+  list/export/import/restore_snapshot，`kb_reindex` 不再暴露给模型（模型面共 **7 个工具**）。
+  诊断、策展（pin / 归档 / 反馈 / 矛盾裁决）与修复动作仍在 CLI、GUI 与 runtime 里完整可用。
+- **`mem_admin import` 按文件头自动识别两种输入**：SQLite 的 `memory.db` 走只读合并，其余走 JSON
+  导出文档；报告带 `mode: 'db' | 'json'`。模型不再需要单独的 `merge` 动作；CLI 的 `import` 与
+  `merge` 两个命令都保留，行为互不影响。
+
+### Added（mem_admin 维护动作）
+- **agent 可以在宿主进程内备份与重建记忆库了**：`mem_admin` 新增 `export` / `import` /
+  `restore_snapshot` 三个模型动作（模型面共 7 个工具）；`import` 同时接受 SQLite 的 `memory.db`
+  （只读合并，报告 `mode:'db'`）与 JSON 导出文档（`mode:'json'`）。
+  `export` 默认写到 `<数据根>/backups/memory-YYYYMMDD-HHMMSS.json.br`（brotli、原子写），只报告文件、
+  字节数与计数，**不回传文档正文**；`import` 按内容并集、可重复，`dry_run` 零写入；`restore_snapshot`
+  必须显式 `confirm: true`，且只接受**空 facts 表**（非空库拒绝、零写入）。恢复在**同一宿主进程内立即生效**：
+  无需重启，`mem_recall` 马上能检索到恢复的事实。
+- **这三个动作的路径只允许本次运行的数据根内**：相对路径按数据根解析，绝对路径逃逸、`..` 与指向根外的
+  符号链接一律拒绝；输入文件必须是普通文件且不超过 512 MiB。数据根之外的路径仍由 CLI 处理——mem 工具因此
+  不会变成绕过 agent 文件沙箱的通用文件 API。
+
 ### Changed（导出默认压缩）
 - **导出的快照默认压缩，体积约为原来的 1/5**：`/mem export` 与 `avantf-mem export --out` 现在按
   扩展名选编码——默认 brotli（`.json.br`；实测 233 条事实、同一份文档：pretty 340.7 KiB → minified

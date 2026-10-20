@@ -149,6 +149,7 @@ describe('CLI export / import', () => {
     const report = run(['import', out], B)
     expect(report).toMatchObject({
       file: out,
+      mode: 'json',
       // The export now WRITES v2; the report echoes the document's version as-is.
       version: 2,
       total: 3,

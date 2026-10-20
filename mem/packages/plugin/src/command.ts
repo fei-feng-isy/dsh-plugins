@@ -26,16 +26,17 @@
  *
  * @module @avantf/dsh-mem/command
  */
-import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
 import {
   codecForExportPath,
   decodeFactsExport,
+  defaultFactsExportPath as defaultExportPath,
   encodeFactsExport,
   exportFacts,
   importFacts,
   mergeDb,
+  writeFileAtomic,
   type AvantfRuntime,
   type FactsExportCodec,
   type ImportReport,
@@ -96,59 +97,19 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Local `YYYYMMDD-HHMMSS`, sortable by name and rendered in the user's time zone. */
-function timestampName(now = new Date()): string {
-  const pad = (value: number, width = 2): string => String(value).padStart(width, '0')
-  return String(now.getFullYear()) + pad(now.getMonth() + 1) + pad(now.getDate())
-    + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds())
-}
-
-/** The suffix each container writes — the same extension rule `codecForExportPath` reads. */
-const EXPORT_SUFFIX: Readonly<Record<FactsExportCodec, string>> = {
-  brotli: '.json.br',
-  gzip: '.json.gz',
-  none: '.json',
-}
-
-/**
- * `<data home>/backups/memory-YYYYMMDD-HHMMSS.json.br` — never inside `memory/`.
- *
- * Brotli is the default because it is the smallest (measured: 70.6 KiB vs 92.3 gzip vs 300.0 plain
- * for 233 facts). An explicit `--gzip` / `--plain` keeps the file name honest by changing the
- * suffix along with the bytes.
- */
-export function defaultExportPath(home: string, now = new Date(), codec: FactsExportCodec = 'brotli'): string {
-  return join(home, 'backups', 'memory-' + timestampName(now) + EXPORT_SUFFIX[codec])
-}
+/** Kept as this module's public name for the shared default-path rule (the one in the engine). */
+export { defaultExportPath }
 
 /**
  * Resolve a user-typed path the way a shell would: `~` against the user home (the contract's
  * ONE `expandHome`, not a second copy), everything else against `process.cwd()`.
+ *
+ * The slash command is an OPERATOR surface (typed by the human), so it deliberately keeps the
+ * unrestricted shell resolution; only the agent-callable `mem_admin` actions are confined to the
+ * data root (see `maintenance_paths.ts`).
  */
 function userPath(input: string): string {
   return resolve(expandHome(input))
-}
-
-/**
- * Write a file atomically: a sibling temp file, then one `rename` (same directory, so the
- * rename cannot cross a filesystem). An overwrite is therefore either the old bytes or the new
- * bytes, never a truncated export. The temp file is removed when anything fails.
- */
-function writeFileAtomic(path: string, bytes: Buffer | string): void {
-  const dir = dirname(path)
-  mkdirSync(dir, { recursive: true })
-  const tmp = join(dir, '.' + basename(path) + '.tmp-' + String(process.pid) + '-' + randomBytes(4).toString('hex'))
-  try {
-    writeFileSync(tmp, bytes)
-    renameSync(tmp, path)
-  } catch (error) {
-    try {
-      unlinkSync(tmp)
-    } catch {
-      // The temp file may not have been created; the original failure is the one worth reporting.
-    }
-    throw error
-  }
 }
 
 interface ParsedInput {

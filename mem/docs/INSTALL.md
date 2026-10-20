@@ -94,7 +94,7 @@ pnpm build:dsh
 ```bash
 node scripts/mount-smoke.mjs
 # harness 自动发现；不在候选位置时用 DSHHARNESS=<HARNESS> 覆盖
-# 期望：MOUNT SMOKE OK — … 且列出 8 个工具、avantfMemory、avantfMem remote、typert host face
+# 期望：MOUNT SMOKE OK — … 且列出 7 个模型工具、avantfMemory、avantfMem remote、typert host face
 ```
 
 ---
@@ -323,10 +323,10 @@ cd <HARNESS> && pnpm dsh web
 [avantf-mem] INFO model bootstrap: warm start — model=... mirror=... cache=...
 [avantf-mem] INFO semantic: embedding model ready ... (dim=768, ...ms)
 [avantf-mem] INFO command registered: /mem (status, export, import, merge)   # commands 服务缺失时是 WARNING
-[avantf-mem] INFO tool registered: mem_remember / mem_recall / mem_admin / kb_add / kb_list / kb_remove / kb_reindex / kb_query
+[avantf-mem] INFO tool registered: mem_remember / mem_recall / mem_admin / kb_add / kb_list / kb_remove / kb_query
 [avantf-mem] INFO remote registered: avantfMem (client ctx.remote.avantfMem.*)
 [avantf-mem] INFO typert registered: avantfMem host face (5 invocations)
-[avantf-mem] INFO plugin ready: 8 tools + avantfMemory service + avantfMem remote
+[avantf-mem] INFO plugin ready: 7 tools + avantfMemory service + avantfMem remote
 ```
 
 > 每个预装项一行、前缀 `envinit:`，`action` 取值 `present / installed / skipped / failed`；失败还会打一条
@@ -418,9 +418,9 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
 - 启动日志会有一条**响亮 WARNING**：条数 + "属于更旧的嵌入空间" + 原因（另一个模型/表示，或指纹格式换代）+ 手动入口。这不是错误，是"需要一次迁移"。
 - 插件会在**启动预热之后**自动分批重算（每批有界、逐批让出事件循环、不阻塞查询、重启后接着搬、失败下轮心跳重试）。迁移期间查询照常返回，只是那批尚未搬完的事实暂时只能靠词法/实体命中。
 - 状态面可见：「记忆」页的检索健康度、`avantf-mem stats` 与 `avantf-mem vectors` 都会显示 `stale`/`space_stale`（`/mem` 无参只报事实计数与用法）。
-- 手动入口（想在迁移前先看规模，或关掉了自动迁移）：`avantf-mem vectors --dry-run` 预览计数，`avantf-mem vectors --fix` 当场重算（MCP/插件：`mem_admin vectors_fix`）。
+- 手动入口（想在迁移前先看规模，或关掉了自动迁移）：`avantf-mem vectors --dry-run` 预览计数，`avantf-mem vectors --fix` 当场重算（GUI 设置页的「向量索引」、`/mem` 之外的 CLI；模型面不再暴露 `vectors_fix`）。
 - **关闭自动迁移**：在 `~/.avantf/configs/common.yaml` 写 `semantic:\n  auto_migrate: false`（默认 `true`）——之后只剩告警 + 手动入口。
-- 知识库侧（`doc_chunks`）目前**只检测 + 提示**，不会自动重算：按提示跑 `avantf-mem kb reindex`（MCP/插件 `kb_reindex`）。
+- 知识库侧（`doc_chunks`）目前**只检测 + 提示**，不会自动重算：按提示跑 `avantf-mem kb reindex`（GUI 知识页的「重建索引」；`kb_reindex` 不在模型面）。
 - **模型 revision 读不到时只降级**：没有家族旁车（`<模型缓存根>/.envinit/models--<owner>--<name>/record.json`，例如模型由 transformers.js 自己下载）时，指纹**不含 revision**；**权重已在本地**而旁车缺失时，启动日志会有一条 `semantic: no model revision …` 的 WARNING 说明这一盲区："同名仓库换了权重"检测不到。其余旋钮照常覆盖，绝不会因此报错或拒绝打开库；模型还没装好（首次安装进行中）时不报这条——那时还没有可指纹化的东西。
 
 ### 7.0.1 数据根备份纪律（WAL / `-shm`）
@@ -436,7 +436,7 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
   ```
 
   `wal_checkpoint(TRUNCATE)` 把 WAL 内容回写进主库，并把 `-wal` **截断到 0 字节**（文件可能仍在，这是正常状态）。
-- `mem_admin stats` 的 `wal` 字段（面板「检索健康度」块同样显示）就地报告 `-wal` 是否存在、当前多少字节，非 0 时给出上面的提醒。它**只做一次 `statSync`**，不调用 git、不起子进程、离线可用——"这些瞬态文件有没有被版本化"由你按本节规则检查，不由运行期探测。
+- `avantf-mem stats` 的 `wal` 字段（GUI「检索健康度」块与 operation `mem_admin stats` 同样显示）就地报告 `-wal` 是否存在、当前多少字节，非 0 时给出上面的提醒。它**只做一次 `statSync`**，不调用 git、不起子进程、离线可用——"这些瞬态文件有没有被版本化"由你按本节规则检查，不由运行期探测。
 
 #### 导出 / 导入（跨主机同步与备份）
 
@@ -550,7 +550,7 @@ stdout 都是单个 JSON：
 
 - `export --out <file>` → `{out, codec, bytes, plain_bytes, ratio, counts}`（`ratio = bytes / plain_bytes`，
   明文时是 1）；不带 `--out` → 导出文档本身（明文 minified JSON，不压缩；此时给 codec flag 是用法错误）。
-- `import` → `{file, version, total, imported, would_import?, skipped_existing, skipped_archived,
+- `import` → `{file, mode:'json', version, total, imported, would_import?, skipped_existing, skipped_archived,
   failed:[{source_id,error}], new_ids:[{source_id,new_fact_id}], metadata_dropped:{timestamps,trust,
   assert_count,helpful_count,pinned,supersedes}}`。`--dry-run` 时 `imported=0`、有 `would_import`、
   `new_ids=[]`。
@@ -616,8 +616,8 @@ avantf-mem restore ~/backups/memory-20261020-160149.json.br --data-home /tmp/res
 - **不恢复**：矛盾日志、检索统计元表、`tags`、向量；`archived_clock` 也不恢复（快照只有墙钟
   `archived_at`，换算成活跃日会造假数据）——归档行因此走 `purge` 的**日历分支**，按恢复回来的
   `archived_at` 计算清理窗口，恢复不会把清理倒计时重置到 0。
-- **`/mem` 本轮没有 restore**：宿主进程内直接插行还得重载内存向量索引，那是另一件事；需要重建请
-  用 CLI，并在恢复后重启宿主。
+- **`/mem` 斜杠命令本身没有 restore**：宿主进程内的重建走工具的 `mem_admin restore_snapshot`
+  （见下一小节，恢复后同一进程立即可检索）；CLI 的 `restore` 是独立进程，恢复后需要（重新）启动宿主。
 
 stdout 是单个 JSON：
 `{file, codec, version, restored, active, archived, metadata_missing:{…}, fts_rows, entities:{rebuilt,deferred,skipped}, vectors:{restored:0,hint}}`。
@@ -628,6 +628,26 @@ stdout 是单个 JSON：
 > `restore <fact_id>`（纯整数、且当前目录没有同名文件）仍是"取消归档一条事实"。两条路都不会误伤：
 > 把文件路径误当 id 会找不到该 fact 并报错；把 id 误当文件会在文件不存在时报错；而重建只接受空库，
 > 所以任何一种误读都写不进一份已经存在的记忆库。
+
+#### 让 agent 在宿主进程内维护（`mem_admin` 的 list + 三个维护动作）
+
+不离开对话也能做备份与重建：模型的 `mem_admin` 只有 `list` / `export` / `import` / `restore_snapshot`
+四个动作（**模型面共 7 个工具**；诊断、策展、修复类动作只在 CLI / GUI / runtime）。`merge` 不再是一个
+模型动作——`import` 按**内容**识别文件类型：文件头是 SQLite 时按另一份 `memory.db` 合并（源库只读），
+其余按导出文档导入。CLI 仍保留独立的 `import` 与 `merge` 两个命令。
+
+| 动作 | 参数 | 做什么 |
+|---|---|---|
+| `export` | `{status?, file?}` | 把事实快照写成文件；不给 `file` 时落到 `<数据根>/backups/memory-YYYYMMDD-HHMMSS.json.br`（brotli，原子写）。结果只报告 `{file, codec, bytes, plain_bytes, counts, overwritten}`，**不含文档正文**。 |
+| `import` | `{file, dry_run?}` | 按内容并集导入数据根内的文件：文件头为 SQLite 时按另一份 `memory.db` 合并（源库只读），其余按导出文档导入（明文 / gzip / brotli 也按内容识别）。可重复执行，`dry_run` 零写入；报告带 `mode: 'json' \| 'db'`。 |
+| `restore_snapshot` | `{file, confirm: true, dry_run?}` | 把快照重建进**空 facts 表**（`confirm` 是强制字面量 `true`；非空库直接拒绝，零写入）。恢复后**同一宿主进程**的检索立即可用（内存向量索引已重载，FTS 由触发器写入），无需重启 dsh。 |
+
+**`merge` 仍是操作者动作**：CLI 的 `avantf-mem merge <db>`、`/mem merge` 与 GUI 的组合入口都调用
+runtime 的同一条只读 db 并集；对模型来说，`mem_admin import` 一个 `.db` 文件就是同一件事。
+
+**路径只允许本次运行的数据根**：相对路径按数据根解析，绝对路径逃逸、`..` 和指向根外的符号链接都会被拒绝；
+输入文件必须是普通文件且不超过 512 MiB。这是刻意的边界——mem 工具跑在宿主进程里，若接受任意路径就等于绕过
+agent 的文件沙箱。数据根之外的路径仍用 CLI（`avantf-mem export/import/merge/restore`）。
 
 #### 跨主机合并（两台机器的 `memory.db` 已经分叉）
 
@@ -661,7 +681,7 @@ avantf-mem merge /path/to/other/memory.db
 - 每条导入事实的来源写成 `merge:<源库绝对路径>`，可用 `--source-ref <text>` 覆盖。
 
 stdout 是单个 JSON：
-`{source, source_active, added, would_add, skipped_existing, skipped_archived, failed:[{source_fact_id,error}], new_ids:[{source_fact_id,new_fact_id}]}`。
+`{mode:'db', source, source_active, added, would_add, skipped_existing, skipped_archived, failed:[{source_fact_id,error}], new_ids:[{source_fact_id,new_fact_id}]}`。
 `source_active` 是源库 ACTIVE 行数；`--dry-run` 时 `added=0`、`would_add=待导入数`、`new_ids=[]`，
 零写入；非 dry-run 时 `would_add=0`（实际结果看 `added` / `failed`）。
 
@@ -707,7 +727,7 @@ agent 把任意可读文件拉进语料库"。放开后 `~/.ssh/id_rsa`、浏览
 
 - **包装脚本会被拦**：pnpm 10 / npm 默认阻止依赖的 install 脚本。放行方式见 profile 的
   `pnpm-workspace.yaml` 里的 `allowBuilds:`（本仓的 profile 把它列成 `true`）；不放行时原生模块不会编译，
-  插件仍能启动，但会退化为 FTS + 实体检索（`mem_admin stats` 与日志会说明）。
+  插件仍能启动，但会退化为 FTS + 实体检索（`avantf-mem stats` / GUI 检索健康度与日志会说明）。
 - **模型下载**：首次使用本地嵌入模型时需要能访问模型源（默认 `hf-mirror.com`，可用
   `AVANTF_MEM_MODEL_MIRROR`/`HF_ENDPOINT` 改）；拿不到就退化为 FTS + 实体检索。
 - **长路径（Windows）**：受管副本是 `<data_home>/knowledge/docs/<domain>/<source>/<title>.md`，每段截到 80 字符，

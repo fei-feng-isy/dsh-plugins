@@ -159,6 +159,25 @@ describe('CLI', () => {
     expect(Array.isArray(related)).toBe(true)
   })
 
+  it('operator-only actions stay callable after the model face narrowed: feedback, chain, archive/restore', () => {
+    // These are deliberately NOT model tools any more, but the CLI is an operator surface and
+    // validates against the FULL contract unions.
+    const fact = JSON.parse(run(['add', '反馈与归档的测试事实'], home)) as { fact_id: number }
+    expect(JSON.parse(run(['helpful', String(fact.fact_id)], home))).toBe(1)
+    expect(JSON.parse(run(['unhelpful', String(fact.fact_id)], home))).toBe(0)
+
+    JSON.parse(run(['add', '张伟管理李娜'], home))
+    const chain = JSON.parse(run(['chain', '张伟', '--pred', '管理'], home)) as { hits: unknown[] }
+    expect(Array.isArray(chain.hits)).toBe(true)
+
+    expect(JSON.parse(run(['archive', String(fact.fact_id)], home))).toBe(true)
+    const archived = JSON.parse(run(['list', '--status', 'archived', '--limit', '200'], home)) as { facts: { fact_id: number }[] }
+    expect(archived.facts.map((row) => row.fact_id)).toContain(fact.fact_id)
+    expect(JSON.parse(run(['restore', String(fact.fact_id)], home))).toBe(true)
+    const active = JSON.parse(run(['list', '--limit', '200'], home)) as { facts: { fact_id: number }[] }
+    expect(active.facts.map((row) => row.fact_id)).toContain(fact.fact_id)
+  })
+
   it('related honors --category (contract field was previously ignored)', () => {
     run(['add', '张伟管理支付网关', '--category', 'project'], home)
     run(['add', '张伟熟悉运维手册', '--category', 'tool'], home)

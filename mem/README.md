@@ -82,7 +82,7 @@
 | M9e 转换切到 pandoc 优先 + 依赖预装（`@avantf/mem-provision`：pandoc 钉版本装进 `~/.avantf/tools`，模型预热并入同一 sweep；删掉被取代的 mammoth/turndown/csv 内置） | ✅ |
 | M10 客户端知识页（`conversation.view` 标签页「知识」） | ✅（可构建；渲染需要 web bundle） |
 | M11 完整 CLI 子命令 | ✅（**需 repo checkout 运行**：`@avantf/mem-cli` 是 `private`，不进可发布集合——见下方"另外 5 个包"） |
-| M12 MCP 入口（stdio，复用契约） | ✅（`tools/list` 与 8 个工具的 `tools/call` 都在 CI 里真实派发过；**需 repo checkout 运行**：`@avantf/mem-mcp` 是 `private`，不进可发布集合） |
+| M12 MCP 入口（stdio，复用契约） | ✅（`tools/list` 与 7 个模型工具的 `tools/call` 都在 CI 里真实派发过；**需 repo checkout 运行**：`@avantf/mem-mcp` 是 `private`，不进可发布集合） |
 | M13 一致性回归 | ✅ |
 | M13b 发布（1.0 待 tag） | ⏳ 见 [docs/RELEASING.md](docs/RELEASING.md)：`pnpm release:check` + 打 tag，尚未切版本节 |
 
@@ -129,7 +129,7 @@ semantic:
   `v2/<backend>/<model>/<dim>@p=<pooling>;n=<0|1>;w=<配置截断窗口>;r=<模型旁车 sha>`；pooling / normalize /
   截断窗口 / 模型权重任一变化都必须让 id 不等）。换默认模型、换维度、改 `semantic.max_input_tokens`、换池化/归一化，甚至同一模型仓库换了权重，旧向量都属于**旧坐标**，语义腿对它们不可用，检索会**静默退化成词法+实体**——看起来仍有结果，只是答错。实测：默认模型 `bge-small-zh-v1.5`（512 维）→ `bge-base-zh-v1.5`（768 维）后，本机 80 条 ACTIVE 里 **78 条**被跳过、`indexed` 只剩 **2**，修前多条查询塌成同一条无关短事实。行为：
   - **检测 + 响亮告警**：启动时若存在旧空间向量，日志打一条 WARNING（条数 + 原因 + 手动入口）；`/mem` 状态面、`avantf-mem stats`、`avantf-mem vectors`（`vectors.{stale,space_stale}`）如实暴露计数。
-  - **自动自愈**：插件在启动预热之后**分批**重算（每批有界、逐批让出事件循环、不阻塞查询、可续跑、失败下轮重试）。手动入口 `avantf-mem vectors --fix`（先 `--dry-run` 预览计数；MCP/插件为 `mem_admin vectors_fix`）。
+  - **自动自愈**：插件在启动预热之后**分批**重算（每批有界、逐批让出事件循环、不阻塞查询、可续跑、失败下轮重试）。手动入口 `avantf-mem vectors --fix`（先 `--dry-run` 预览计数；GUI 设置页的「向量索引」也调用同一条 runtime 修复；模型面不再暴露 `vectors_fix`）。
   - **指纹格式换代 = 一次性全量重编码**：本次升级把空间 id 换成带版本前缀的表示指纹（`v2/…`），所以**每个**老库升级后第一次启动时全部向量都记为 `space_stale`（告警会写明 "written before the representation fingerprint — a ONE-TIME full re-encode"），随后由同一套有界后台迁移整库重算一遍（本机 80 条 ACTIVE 实测数秒级）。这是预期代价，不是故障；迁移必须
     **幂等**——再跑一次必须 `migrated: 0`。
   - **模型 revision 读不到时只降级**：没有家族旁车（`<模型缓存根>/.envinit/models--<owner>--<name>/record.json`）时指纹不含 revision；**权重已在本地**而旁车缺失时，启动日志会有一条 `semantic: no model revision …` 的 WARNING 说明"同名仓库换权重"这一盲区（首次安装进行中则不报，那时还没有可指纹化的东西）；绝不影响打开库或其余旋钮的检测。
@@ -139,6 +139,15 @@ semantic:
     项"不算）。
   - **关闭自动迁移**：`semantic.auto_migrate: false`（默认 `true`）；关掉后只剩告警 + 手动入口。知识库侧目前只有检测 + 手动 `kb_reindex` 提示。
 - agent 工具统一返回 `{ok:true,result}` / `{ok:false,error,violations}`（DSH 工具与 MCP server 一致）；`db.path` 里的 `~/` 展开为**用户 home**，留空则落在数据目录下。
+- **模型面是 7 个工具**：`mem_* 3 + kb_*` 4。`mem_admin` 只有 `list` / `export` / `import` /
+  `restore_snapshot`；诊断、策展（pin/archive/矛盾裁决）与修复动作只在 CLI / GUI / runtime，完整联合在
+  契约的 `AdminUnion` / `RecallUnion` / `RememberUnion` 里保留。`mem_remember` 只有 add/update/remove，
+  `mem_recall` 只有 search/ask/probe/reason/contradict；`kb_reindex` 不在模型面。
+  三个文件动作的 `file` 都**只允许本次运行的数据根内**（默认导出到
+  `<数据根>/backups/memory-YYYYMMDD-HHMMSS.json.br`，原子写；导出结果不含文档正文）。
+  `import` 按内容并集、可重复，并按**文件头**区分：SQLite → 只读合并另一份 `memory.db`（报告 `mode:'db'`），
+  其余 → 导出文档（`mode:'json'`）；`restore_snapshot` 只写入**空 facts 表**，必须显式 `confirm: true`，
+  恢复后同一宿主进程里的检索立即命中新库（无需重启）。数据根之外的路径用 CLI。
 
 ## 自定义系统提示词
 
@@ -209,8 +218,9 @@ trust:
 - **读 zod 内部别猜**：用 `def.shape` / `def.values` / `z.toJSONSchema(..., { io: 'input' })`（正本在根
   `AGENTS.md`「构建与门禁」）；形状断言在 `packages/contract/test/contract.spec.ts` 与
   `tool_schema.spec.ts`。
-- **工具面就是 8 个**：`TOOL_SPECS` 里的 `mem_*` 3 + `kb_*` 5；`kb_manage` 属 `KB_TOOL`（UI remote 与 CLI
-  用的内部引擎 API），**不在模型面**——按 `name:` 数会数成 9，挂载冒烟断言的就是 8。
+- **模型工具面就是 7 个**：`TOOL_SPECS` 里的 `mem_*` 3 + `kb_*` 4（`kb_add`/`kb_list`/`kb_remove`/`kb_query`）；
+  `kb_manage` 属 `KB_TOOL`、`kb_reindex` 属 `KB_REINDEX_TOOL`（UI remote 与 CLI 用的内部引擎 API），
+  **都不在模型面**——按 `name:` 数会数多，挂载冒烟断言的就是 7。
 - **类型检查顺序**：`pnpm -C mem typecheck` 也检查 `test/`，且必须在 `pnpm -C mem build` **之后**跑（包通过
   产出的 `lib/*.d.ts` 读依赖）；`pnpm -C mem typecheck:dsh` 覆盖插件 src + specs。
 - **中文评测集是精确断言**：`packages/core/test/eval_zh.spec.ts` 共 **41 条**（原 35 + 自指问句哨兵 6〔4 条表内
