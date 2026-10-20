@@ -139,6 +139,21 @@ pnpm add <AVANTF>/packages/plugin
 > 数据根里面，解析根时还没读到它。公共/分库配置放 `~/.avantf/configs/common.yaml` 与
 > `~/.avantf/configs/{memory,knowledge}.yaml`。
 
+> **`AVANTF_HOME` 是「家族根」，不是「数据根」。** 它同时决定数据根与受管资源的落点
+> （`$AVANTF_HOME/models`、`$AVANTF_HOME/tools`）。**只想换数据目录、不搬模型缓存**时用
+> `avantf-mem --data-home <path>`（全局参数，也支持 `--data-home=<path>`，第 ⑤ 层，写在命令前后都行）；
+> 缺值或空值直接报错，不会静默回落到默认根。
+>
+> **CLI 与 dsh 必须解析到同一个 `AVANTF_HOME`。** 表示指纹里的模型 revision 来自模型缓存根下的家族旁车
+> （`<模型缓存根>/.envinit/models--<owner>--<name>/record.json`）：两边指的缓存根不同，就会得到两个指纹，
+> CLI 写入的向量会被宿主判为旧空间（症状：`semantic: no model revision …` 与
+> `belong to an OLDER embedding space`，这些行在语义腿上被静默跳过）。只换数据根永远不会造成这一条——
+> 它不碰家族根。
+>
+> **只读命令不加载模型**：`stats` / `list` / `export` 等纯 DB 命令构造 runtime 时不再预热语义后端
+> （新机器上不会为了看一个计数下载模型）；`add` / `search` / `ask` / `import` / `merge`（非 `--dry-run`）
+> 仍会显式预热。
+
 > 该 profile 需要 `patchReload`（`web`/`headless` 等模板默认 `live`）。
 > 临时试装可以不改 profile：`dsh web --patch <overlay.yml>`，overlay 内容同上。
 

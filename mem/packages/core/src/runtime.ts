@@ -113,6 +113,22 @@ export interface RuntimeOptions {
    * eager constructor warm.
    */
   managedRoots?: { readonly tools?: string; readonly models?: string }
+  /**
+   * Skip the adapters' eager constructor warm even when the caller passes no {@link managedRoots}:
+   * the caller owns the warm schedule and will warm explicitly.
+   *
+   * There are exactly TWO ways to get a deferred warm, and both are requests of the same thing:
+   *
+   *   - {@link managedRoots} — the DSH plugin's path. The framework owns the model root and may still
+   *     be installing into it, so the backends must not warm themselves (that would race the install
+   *     and fetch a second copy).
+   *   - `deferWarm: true` — the CLI's path. The flag exists because the CLI is one-shot and its
+   *     READ-ONLY commands (`stats`, `list`, `export`, …) must not load or download the model at all;
+   *     it warms explicitly, and only from `needsModels` (the command table in `cli/src/index.ts`).
+   *
+   * A first `encode()` still warms lazily, so deferring never costs the commands that do encode.
+   */
+  deferWarm?: boolean
 }
 
 /**
@@ -309,12 +325,12 @@ export function buildRuntime(opts?: RuntimeOptions): AvantfRuntime {
     logger.info(`memory: ${describeMigrationOutcome(MEMORY_SCHEMA, memoryStore.migration)}`)
   }
   const db = memoryStore.db
-  // When the family framework owns the model root (`managedRoots`), the model files may still be
-  // being installed: warming in the constructor here would race that install and fetch a SECOND
-  // copy into the very same root. So the backends are resolved with their constructor warm
-  // deferred, and the plugin warms explicitly from the model item's `onSettled` (a first
-  // `encode()` would warm lazily too, so nothing is lost if the explicit warm never runs).
-  const deferWarm = opts?.managedRoots !== undefined
+  // Two callers own the warm schedule instead of the adapters (both named in `RuntimeOptions.deferWarm`):
+  // the plugin, because the family framework may still be installing into the managed model root
+  // (warming now would race that install and fetch a SECOND copy), and the CLI, whose read-only
+  // commands must not load or download the model at all. Either way the caller warms explicitly (a
+  // first `encode()` would warm lazily too, so nothing is lost if the explicit warm never runs).
+  const deferWarm = opts?.deferWarm === true || opts?.managedRoots !== undefined
   const semantic = opts?.semantic ?? resolveSemantic(config.common, { deferWarm })
   const vstore = resolveVStore(config.common)
   const kbVstore = resolveVStore(config.common)

@@ -24,6 +24,14 @@ All notable changes to `avantf-mem` are documented here.
   只要 `commands` 可用，`/mem` 仍会注册并报告与工具面相同的原因。
 
 ### Added（CLI）
+- **`avantf-mem --data-home <path>`（全局参数，也支持 `--data-home=<path>`）**：只把这一次调用的**数据根**
+  换掉（第 ⑤ 层，压过 `AVANTF_HOME`），模型/工具的**家族根不动**。以前想给 CLI 换一份记忆库只能设
+  `AVANTF_HOME`，而它是家族根——会把 `models` 一起搬走，CLI 与 dsh 的模型缓存根因此不同、表示指纹不同，
+  CLI 写入的向量被宿主判为旧空间（`semantic: no model revision …` + `belong to an OLDER embedding space`）。
+  缺值/空值直接报错，不会静默回落到默认根。
+- **只读命令不再加载嵌入模型**：`stats` / `list` / `export` 等纯 DB 命令在构造 runtime 时不再预热语义后端
+  （新机器上不会为了看一个计数就去下载整个嵌入模型）；`add` / `search` / `ask` / `import` / `merge`（非 `--dry-run`）
+  仍会显式预热。
 - **`avantf-mem merge <other-memory.db>`**：按**内容并集**合并另一台主机的记忆库（`--dry-run` 预览、
   `--source-ref` 指定来源），替代手工逐条 `add`。源库以只读打开，只导入 ACTIVE 事实；事实身份是
   NFC 规范化后的内容而不是 `fact_id`（两台机器会为不同事实分配同一个 id），目标已存在的内容（含归档行）

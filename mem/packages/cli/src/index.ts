@@ -62,6 +62,46 @@ function parseFlag(rest: string[], name: string): string | undefined {
   return next && !next.startsWith('--') ? next : 'true'
 }
 
+/**
+ * The ONE global flag: `--data-home <path>` / `--data-home=<path>`.
+ *
+ * Scanned across the WHOLE argv and REMOVED before dispatch, so it works before or after the command
+ * and can never leak into a positional (`add --data-home /x 张伟` must write the fact `张伟`, not the
+ * path). It is layer ⑤ of the data-root rule (explicit argument), so it outranks `AVANTF_HOME` while
+ * leaving the FAMILY root alone — the point of the flag: pick a data home without also moving the
+ * model/tools cache, which is what `AVANTF_HOME` does (see `LoadConfigOptions.managedRoots`).
+ *
+ * An omitted or blank value is a caller error, not "use the default": silently falling back is how a
+ * shell expansion like `--data-home "$UNSET"` would write into `~/.avantf` while the operator believes
+ * it wrote elsewhere. The same rule the base kit's `resolveDataHome` applies to its slots.
+ */
+function takeDataHome(argv: readonly string[]): { dataHome: string | undefined; argv: string[] } {
+  const name = '--data-home'
+  let dataHome: string | undefined
+  const rest: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i] as string
+    if (token !== name && !token.startsWith(`${name}=`)) {
+      rest.push(token)
+      continue
+    }
+    // Inline form: everything after the first `=`.
+    let value = token.startsWith(`${name}=`) ? token.slice(name.length + 1).trim() : undefined
+    if (value === undefined) {
+      const next = argv[i + 1]
+      i++ // the next token is this flag's value, never a positional
+      if (next === undefined || next.trim() === '' || next.startsWith('--')) {
+        throw new Error(`${name} requires a path (e.g. ${name} ~/.avantf)`)
+      }
+      value = next.trim()
+    }
+    if (value === '') throw new Error(`${name} requires a non-empty path`)
+    // Repeated occurrences: the last one wins, like every other single-valued flag here.
+    dataHome = value
+  }
+  return { dataHome, argv: rest }
+}
+
 function posTokens(rest: string[]): string[] {
   const out: string[] = []
   for (let i = 0; i < rest.length; i++) {
@@ -132,7 +172,9 @@ const RECALL_TEXT_CMDS: Record<string, { field: 'query' | 'entity'; category: bo
  *   - `kb-write`    — only the three writing subcommands (`ingest` / `import` / `reindex`);
  *   - `write-unless-dry-run` — the command writes through the store (and so indexes) unless
  *                     `--dry-run` makes it a plan-only read; today `merge` and `import`;
- *   - absent        — pure DB/graph commands, so `list`/`show`/`stats`/`related` pay no download.
+ *   - absent        — pure DB/graph commands, so `list`/`show`/`stats`/`related`/`export` pay no download.
+ *                     They load nothing either: the CLI builds the runtime with `deferWarm: true`, so
+ *                     the adapters' constructor warm cannot fire behind this table's back.
  */
 const COMMAND_MODEL_WARMUP: Readonly<Record<string, 'always' | 'vectors-fix' | 'kb-write' | 'write-unless-dry-run'>> = {
   add: 'always',
@@ -198,9 +240,15 @@ function exportCodecFlag(rest: string[]): FactsExportCodec | undefined {
 }
 
 async function main(): Promise<void> {
-  const [, , cmd, ...rest] = process.argv
+  // The global flag is pulled out FIRST, across the whole argv: it must not reach a positional and it
+  // has to be known before the runtime (and therefore the data root) is built.
+  const { dataHome, argv } = takeDataHome(process.argv.slice(2))
+  const [cmd, ...rest] = argv
   const sub = rest[0]
-  const rt = buildRuntime()
+  // `deferWarm: true` — the adapters must not warm in their constructor, because the CLI is one-shot
+  // and a READ-ONLY command (`stats`, `list`, `export`, …) must not load — let alone download — the
+  // model. Only `needsModels` below warms explicitly, and only for commands that actually encode.
+  const rt = buildRuntime({ dataHome, deferWarm: true })
   try {
     // The CLI is one-shot: a command that encodes or searches semantically must
     // await warmup, or the process exits while the model is still loading.
@@ -555,6 +603,7 @@ async function main(): Promise<void> {
 
       default:
         console.log('usage: avantf-mem <add|search|ask|probe|related|reason|chain|list|show|edit|remove|archive|restore|helpful|unhelpful|stats|contradict|merge|export|import|resolve [<id>]|maintenance|trust|pin|unpin|vectors|kb <sub>|query>')
+        console.log('global: --data-home <path> — data root for this invocation (layer ⑤, outranks AVANTF_HOME); the model/tools family root is NOT moved')
     }
   } finally {
     rt.shutdown()
