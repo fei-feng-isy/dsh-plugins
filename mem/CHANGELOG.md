@@ -4,6 +4,8 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-20
+
 ### Changed（模型工具面精简）
 - **模型只保留核心记忆 / 知识动作，CLI 与 GUI 不变**：`mem_remember` 只剩 add/update/remove，
   `mem_recall` 只剩 search/ask/probe/reason/contradict，`mem_admin` 只剩
