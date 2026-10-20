@@ -122,6 +122,10 @@ if (mount && problems.length === 0) {
       // The runtime externals an npm install would have put next to the package. Every `@avantf/*`
       // ENGINE name stays unlinked on purpose: a leaked engine import must fail to resolve.
       for (const name of Object.keys(production)) {
+        // The base is a PRODUCTION dependency AND has its own linked/absent variants just below:
+        // linking it here and again there is an EEXIST (the 0.7.0 `--mount` run failed on exactly
+        // that). The variant decides whether the base is resolvable; this loop leaves it alone.
+        if (name === '@avantf/dsh-plugin-base') continue
         const from = join(pluginDir, 'node_modules', name)
         if (!existsSync(from)) { note(`scratch: ${name} is not installed here — the mount may degrade`); continue }
         mkdirSync(dirname(join(scratch, 'node_modules', name)), { recursive: true })
