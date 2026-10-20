@@ -111,8 +111,12 @@ export function packageName(specifier) {
 export function specifiersIn(code) {
   const found = new Set()
   for (const pattern of [
-    /^\s*import\s[^;]*?from\s*["']([^"']+)["']/gm,
-    /^\s*export\s[^;]*?from\s*["']([^"']+)["']/gm,
+    // `\b` before `from` and `\s+` after it: a declaration such as
+    // `readonly ["valid_from", "valid_to"]` contains the text `from", "`, which a
+    // whitespace-tolerant pattern read as `from "…"` (the 0.7.0 pack gate failed on
+    // exactly that). A real `from` is word-bounded and separated from its specifier.
+    /^\s*import\s[^;]*?\bfrom\s+["']([^"']+)["']/gm,
+    /^\s*export\s[^;]*?\bfrom\s+["']([^"']+)["']/gm,
     /import\(\s*["']([^"']+)["']\s*\)/g,
     /require\(\s*["']([^"']+)["']\s*\)/g,
   ]) {

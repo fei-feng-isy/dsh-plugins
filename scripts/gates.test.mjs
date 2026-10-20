@@ -43,7 +43,7 @@ import {
 } from './lib/published-base.mjs'
 import { discoverPlugins } from './lib/plugins.mjs'
 import { execToolSync } from './lib/win-spawn.mjs'
-import { arrayEntries, cordisPatchProblems, documentedCountMismatches, exportedSymbolNames, insertedRowNames, shippedDeclarationNote, unconsumedExports, versionPackageNames } from './lib/pack-plugin.mjs'
+import { arrayEntries, cordisPatchProblems, documentedCountMismatches, exportedSymbolNames, insertedRowNames, shippedDeclarationNote, specifiersIn, unconsumedExports, versionPackageNames } from './lib/pack-plugin.mjs'
 import { groupWorkspaceTargets, workspaceTargets, withWorkspaceVersions } from './lib/versions.mjs'
 import { PUBLISHABLE, publishConfigProblems } from './prepublish-assert.mjs'
 
@@ -903,3 +903,17 @@ test('VERSION_PACKAGES: a real mission-style list parses to its declared entries
     assert.match(name, /^@deepseek-ai\/[a-z-]+$/u, `${name} is not a package specifier — the parse drifted`)
   }
 })
+
+// 0.7.0 release gate: a shipped declaration contains `readonly ["valid_from", "valid_to", …]`, and
+// the whitespace-tolerant `from\s*["']` pattern read the text `from", "` as an import specifier
+// (the pack failed with: imports ", " but no dependency/peer declares it). A real `from` is
+// word-bounded and separated from its specifier; both halves are asserted here.
+test('specifiersIn: string literals that contain "from" are not import specifiers', () => {
+  const code = [
+    'export declare const RESTORE_METADATA_FIELDS: readonly ["valid_from", "valid_to", "mirror_source"];',
+    "import type { FactsExportDocument } from '../facts_io.js';",
+    "export { helper } from './helper.js';",
+  ].join('\n')
+  assert.deepEqual(specifiersIn(code), ['../facts_io.js', './helper.js'])
+})
+
