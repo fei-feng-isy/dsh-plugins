@@ -307,6 +307,7 @@ cd <HARNESS> && pnpm dsh web
 [avantf-mem] INFO envinit: mem:model installed (installed <sha>) # flat 模型：<home>/models/<repo>/<file>
 [avantf-mem] INFO model bootstrap: warm start — model=... mirror=... cache=...
 [avantf-mem] INFO semantic: embedding model ready ... (dim=768, ...ms)
+[avantf-mem] INFO command registered: /mem (status, export, import, merge)   # commands 服务缺失时是 WARNING
 [avantf-mem] INFO tool registered: mem_remember / mem_recall / mem_admin / kb_add / kb_list / kb_remove / kb_reindex / kb_query
 [avantf-mem] INFO remote registered: avantfMem (client ctx.remote.avantfMem.*)
 [avantf-mem] INFO typert registered: avantfMem host face (5 invocations)
@@ -334,6 +335,38 @@ cd <HARNESS> && pnpm dsh web
    点该行的 **编辑** 能在你的编辑器里打开它，改完保存后点 **重新摄入**，徽标消失、检索到新内容。
 5. 用 `--uri` 摄入一个 **PDF**：返回的 `chunks` 不为 0，且检索 PDF 里某句话能命中（说明抽的是文本层而不是 `%PDF-` 语法）。
 6. 用 `--uri` 摄入一个 **`.docx` / `.csv`**：返回值里带版本化的 `converter`（如 `pandoc-3.11`），且检索文档里的标题或单元格内容能命中。
+
+## 6.1 斜杠命令：`/mem`
+
+插件把已经落地的导出 / 导入 / 合并能力也暴露成会话里的斜杠命令。**无参**输入 `/mem` 会显示
+活跃 / 归档计数、数据根、默认导出路径与三条子命令：
+
+```text
+/mem export [path] [--brotli|--gzip|--plain]
+/mem import <file> [--dry-run] [--source-ref <text>]
+/mem merge <db-path> [--dry-run] [--source-ref <text>]
+```
+
+| 命令 | 作用 |
+|---|---|
+| `/mem export [path] [--brotli|--gzip|--plain]` | 把**全部**事实（active + archived）导出为 `avantf-mem-facts` v1 快照。不带 `path` 时写到 `<数据根>/backups/memory-YYYYMMDD-HHMMSS.json.br`（本地时间、可按文件名排序，默认 **brotli** 压缩；`--gzip` → `.json.gz`，`--plain` → 明文 `.json`）。显式 `path` 按扩展名选编码（`.br` / `.gz`，否则明文 minified JSON），flag 可覆盖。导出前递归创建目录，写入是 **tmp + rename 原子替换**，覆盖已有文件也不会留下半截文件；结果报告 codec、文件字节、未压缩字节与压缩比。 |
+| `/mem import <file> [--dry-run] [--source-ref <text>]` | 读快照（明文 / gzip / brotli 按**内容**自动识别，不看扩展名）→ 校验 format/version → 按**内容**并集导入（目标已有的内容，含归档行，一律跳过）。`--dry-run` 只报告 `would_import`，零写入。 |
+| `/mem merge <db-path> [--dry-run] [--source-ref <text>]` | 合并另一台主机的 `memory.db`：源库只读，按内容求并集；`--dry-run` 只报告 `would_add`，零写入。 |
+
+- **路径**：`~` 按用户主目录展开（与 CLI 同一条 `expandHome`），相对路径按**进程当前目录**解析；
+  路径含空格时用引号包起来，例如 `/mem export "~/My Backups/facts.json.br"`。
+- **编码与体积**：默认 brotli 是主要收益——实测 233 条事实的导出体积：明文 pretty 340.7 KiB →
+  minified 300.0 KiB → gzip 92.3 KiB → brotli 70.6 KiB（约为原来的 1/5）。导出文档结构与 `version`
+  不变；**导入端三种形式都能读**，旧的 pretty JSON 快照照常导入。
+- **输出是人话多行**（不是 JSON）：`imported` / `would_import`、`skipped_existing`、
+  `skipped_archived`、`metadata_dropped` 摘要，以及 `failed` 的前几条（更多只报数量）。
+  文件不存在、format/version 不对、参数写错、写入失败都会给出可操作的原因，且**出错时零写入**。
+- **与 CLI 的关键差异是进程边界**：斜杠命令在**宿主进程内**执行，写入走当前 runtime 的同一条 add 路径，
+  所以导入 / 合并后**立即可检索，无需重启**。`avantf-mem import` / `merge` 是**独立进程**，
+  写入只落到数据库，运行中的宿主不会把新事实装进它的内存索引——详见 §7.0.1 的提示。日常补数据优先用 `/mem`。
+- **可用性**：`/mem` 通过宿主的 `commands` 服务注册，但该服务是**可选依赖**——宿主没有它时插件照常挂载
+  （工具、记忆服务、面板都正常），只在启动日志里打一条 WARNING。runtime 构建失败时，只要宿主有 `commands`
+  服务，`/mem` 仍会注册，并报告与工具面相同的原因。
 
 ---
 
@@ -369,7 +402,7 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
 
 - 启动日志会有一条**响亮 WARNING**：条数 + "属于更旧的嵌入空间" + 原因（另一个模型/表示，或指纹格式换代）+ 手动入口。这不是错误，是"需要一次迁移"。
 - 插件会在**启动预热之后**自动分批重算（每批有界、逐批让出事件循环、不阻塞查询、重启后接着搬、失败下轮心跳重试）。迁移期间查询照常返回，只是那批尚未搬完的事实暂时只能靠词法/实体命中。
-- 状态面可见：`/mem` 的检索健康度、`avantf-mem stats` 与 `avantf-mem vectors` 都会显示 `stale`/`space_stale`。
+- 状态面可见：「记忆」页的检索健康度、`avantf-mem stats` 与 `avantf-mem vectors` 都会显示 `stale`/`space_stale`（`/mem` 无参只报事实计数与用法）。
 - 手动入口（想在迁移前先看规模，或关掉了自动迁移）：`avantf-mem vectors --dry-run` 预览计数，`avantf-mem vectors --fix` 当场重算（MCP/插件：`mem_admin vectors_fix`）。
 - **关闭自动迁移**：在 `~/.avantf/configs/common.yaml` 写 `semantic:\n  auto_migrate: false`（默认 `true`）——之后只剩告警 + 手动入口。
 - 知识库侧（`doc_chunks`）目前**只检测 + 提示**，不会自动重算：按提示跑 `avantf-mem kb reindex`（MCP/插件 `kb_reindex`）。
@@ -389,6 +422,145 @@ pnpm build:dsh          # harness 自动发现；必要时 DSHHARNESS=<HARNESS> 
 
   `wal_checkpoint(TRUNCATE)` 把 WAL 内容回写进主库，并把 `-wal` **截断到 0 字节**（文件可能仍在，这是正常状态）。
 - `mem_admin stats` 的 `wal` 字段（面板「检索健康度」块同样显示）就地报告 `-wal` 是否存在、当前多少字节，非 0 时给出上面的提醒。它**只做一次 `statSync`**，不调用 git、不起子进程、离线可用——"这些瞬态文件有没有被版本化"由你按本节规则检查，不由运行期探测。
+
+#### 导出 / 导入（跨主机同步与备份）
+
+`export` 把本机记忆库写成一份与机器无关的 `avantf-mem-facts` v1 文档（默认 **brotli** 压缩）；
+`import` 在另一台机器上按**内容**求并集导入。`merge <other.db>` 是同一件事的「数据库文件」变体
+（见下一小节），与 `import` 共用同一条导入路径。
+
+```bash
+# 导出：默认 --status all。带 --out 时 stdout 是关于文件的 JSON 报告；不带时 stdout 就是导出文档本身。
+avantf-mem export --out ~/memory-facts.json.br          # .br → brotli（默认按扩展名，最小）
+avantf-mem export --out ~/memory-facts.json.gz          # .gz → gzip
+avantf-mem export --out ~/memory-facts.json --gzip      # flag 覆盖扩展名
+avantf-mem export --out ~/memory-facts.json --plain     # 明文 minified JSON
+avantf-mem export --status active > facts-active.json   # stdout 永远是明文 minified JSON（可管道）
+
+# 导入：三种形式都按内容自动识别；'-' 表示 stdin。先 --dry-run 看计划（零写入、不加载嵌入模型）。
+avantf-mem import ~/memory-facts.json.br --dry-run
+avantf-mem import ~/memory-facts.json.br
+avantf-mem import ~/memory-facts.json.br --source-ref tool:laptop
+cat facts-active.json | avantf-mem import -
+```
+
+> **进程边界（最容易踩的一处）**：`avantf-mem import` / `merge` 是**独立进程**。它们把新事实写进
+> `memory.db` 并正常生成向量，但**正在运行的 dsh 宿主不会把新写入的向量装进内存索引**——那份索引在
+> 启动时构建，之后只跟随宿主自己的写入。所以 CLI 导入后**需要重启 dsh** 才能检索到新条目；或者先停宿主
+> 再导入，下次启动时随库一起加载。要在对话里补数据、又不想重启，请用 [§6.1 的 `/mem`](#61-斜杠命令mem)
+> （它就在宿主进程内写，导入后立即可检索）。
+
+格式（单文件；默认 brotli，也可 gzip / 明文 minified；只依赖运行时自带的 `node:zlib`）：
+
+```json
+{
+  "format": "avantf-mem-facts",
+  "version": 1,
+  "exported_at": "2026-10-20T06:45:00.000Z",
+  "source": { "data_home": "...", "db": "...", "counts": { "active": 164, "archived": 69 } },
+  "facts": [{
+    "source_id": 234, "content": "...", "category": "project", "status": "active",
+    "created_at": "...", "updated_at": "...", "ttl_days": 0,
+    "pinned": false, "pinned_at": null, "trust_score": 0.5,
+    "assert_count": 1, "helpful_count": 0, "last_reinforced_at": null,
+    "sources": [{ "kind": "manual", "ref": "..." }],
+    "valid_from": null, "valid_to": null, "supersedes_source_id": null,
+    "archive": null
+  }]
+}
+```
+
+实测体积（2026-10-20，真实库 233 条事实；同一份导出文档，编码只换容器）：
+
+| 形式 | 体积 | 相对 pretty |
+|---|---|---|
+| pretty JSON（接口调试用，不是 CLI 默认） | 340.7 KiB | 100% |
+| minified JSON（`--plain`，以及 stdout） | 300.0 KiB | 88% |
+| gzip（`.json.gz`，level 9） | 92.3 KiB | 27% |
+| brotli（`.json.br`，quality 11） | 70.6 KiB | 21% |
+
+压缩是主要收益（约 1/5）；字段瘦身（去 null / 默认值）在压缩后只剩约 2%，因此**不做**——
+导出文档结构与 `version` 都不变。
+
+`source.counts` 是**源库整库**的 active/archived 计数，不随 `--status` 变化。向量、实体行、检索计数
+不导出（可重算或机器本地）。`source_id` 只用于报告/排错，**不是身份**。
+
+v1 导入语义（严格按此）：
+
+- **容器按内容识别，不看扩展名**：文件按字节读入——gzip magic（`1f 8b`）→ gunzip；否则先按 UTF-8
+  JSON 解析（**旧版 pretty JSON 快照走的就是这条路**）；JSON 解析失败才尝试 brotli；三者都不成立 →
+  非 0 退出并列出接受的三种形式（`.json` / `.json.gz` / `.json.br`），零写入。
+- **身份 = `content` 做 NFC 规范化后精确相等**（与 `add`/`findByContent` 的同一条 `normalizeWrite`
+  规则），**与 `source_id` 无关**。两个库可以为不同事实分配同一个 id；导入不覆盖、不串行。
+- **只导入 `status='active'` 的事实**；归档事实一律跳过并计入 `skipped_archived`（v1 不恢复归档态）。
+- 目标库已有同内容（**含归档行**，否则 `add` 会复活它）→ `skipped_existing`，绝不重复 `add`；
+  因此命令可重复执行，且不会抬高 `assert_count`。
+- 写入走正常 `add` 路径（向量 / 实体 / FTS / 来源照常生成）。单条失败进入 `failed`，其余继续。
+- 携带的元数据只有：`category`、`ttl_days`、来源、`valid_from → event_date`、`valid_to →
+  valid_until`。来源取该条 `sources[0].ref`；没有则用 `--source-ref`，再没有则
+  `import:<文件名>`（stdin 是 `import:stdin`）。v1 只传 `ref` 字符串，原 `kind` 不随行
+  （写入时按 `kind:` 前缀重新分类）。
+- **不恢复**：`created_at`/`updated_at`/`trust_score`/`assert_count`/`helpful_count`/`pinned`/
+  归档态/`supersedes` 链。报告里的 `metadata_dropped` 逐项给出「有多少条导入事实带着这个值却没能
+  恢复」，不静默假装恢复。
+- 格式 / 版本不对、`facts` 不是数组 → 直接非 0 退出，**零写入**。
+
+源码边界：导出以只读连接读取本机库；导入只经运行时写目标库，**不直接 SQL 插行**；目标库的比对集合
+包含归档行（`WHERE content = ?` 不分状态）。
+
+stdout 都是单个 JSON：
+
+- `export --out <file>` → `{out, codec, bytes, plain_bytes, ratio, counts}`（`ratio = bytes / plain_bytes`，
+  明文时是 1）；不带 `--out` → 导出文档本身（明文 minified JSON，不压缩；此时给 codec flag 是用法错误）。
+- `import` → `{file, version, total, imported, would_import?, skipped_existing, skipped_archived,
+  failed:[{source_id,error}], new_ids:[{source_id,new_fact_id}], metadata_dropped:{timestamps,trust,
+  assert_count,helpful_count,pinned,supersedes}}`。`--dry-run` 时 `imported=0`、有 `would_import`、
+  `new_ids=[]`。
+
+非目标（v1 不做）：admin/MCP 工具面、GUI、字段瘦身（压缩后收益约 2%）、归档态恢复与
+时间戳/信任度保真恢复（Phase 2 另开任务）。
+
+> 跨主机同步的最小用法就是把 `export --out` 的文件提交到 git，另一台机器 `import` 它；`memory.db`
+> 本身仍按上一小节的 WAL 纪律备份。
+
+#### 跨主机合并（两台机器的 `memory.db` 已经分叉）
+
+`memory.db` 用 git 在两台机器间同步时，只要两边都写过，两者就会分叉：`fact_id` 只是每个库自己的
+自增序号，两台机器会把它分配给**不同的事实**。实测一份真实库：同步后 162 个同名的 `fact_id` 里
+有 **78 个内容不同**。所以按 id 合并、整库覆盖、`INSERT OR REPLACE` 都会静默丢掉其中一台机器的
+记忆——**别用 id 判断"是不是同一条"**。
+
+把另一台机器的库取到本地（提交/复制前按上一节 checkpoint，且只取 `*.db`，不要带 `-wal`/`-shm`），
+然后：
+
+```bash
+# 先预览：源库只读、目标库只读，零写入；added=0，would_add 是待导入条数
+avantf-mem merge /path/to/other/memory.db --dry-run
+
+# 再执行：逐条走正常的 add 写入路径（向量 / 实体 / 来源 / 冲突检查照常生成）
+avantf-mem merge /path/to/other/memory.db
+```
+
+语义（严格按此）：
+
+- **源库只读**：以 `readOnly` 打开，绝不迁移、绝不 checkpoint、绝不写入；只读 `facts` 表与
+  `fact_sources` 表（导出文档所需的字段；更老的库缺少的列按 NULL/0 读）。
+- **只导入 `status='active'` 的事实**：源库的归档事实一律跳过，计入 `skipped_archived`。
+- **事实身份 = 内容的 NFC 规范化后精确相等**：复用写入路径的 `normalizeWrite`（也就是
+  `findByContent` 的 `WHERE content = ?`），**与 `fact_id` 无关**。目标库已有的内容——**含归档行**，
+  因为 `findByContent` 不分状态、`add` 会复活归档行——在写入前就被跳过，所以命令**可重复执行**，
+  也不会抬高 `assert_count`。
+- **源库自身重复的内容只导入一次**。单条导入失败收集进 `failed` 并继续处理其余行，不会中断整次合并；
+  参数/路径错误直接非 0 退出。
+- 每条导入事实的来源写成 `merge:<源库绝对路径>`，可用 `--source-ref <text>` 覆盖。
+
+stdout 是单个 JSON：
+`{source, source_active, added, would_add, skipped_existing, skipped_archived, failed:[{source_fact_id,error}], new_ids:[{source_fact_id,new_fact_id}]}`。
+`source_active` 是源库 ACTIVE 行数；`--dry-run` 时 `added=0`、`would_add=待导入数`、`new_ids=[]`，
+零写入；非 dry-run 时 `would_add=0`（实际结果看 `added` / `failed`）。
+
+> 合并只做**并集**：不删、不覆盖、不改目标库已有行；两条内容相近但不相等的记忆会各自保留（这就是
+> "身份是内容"的含义）。合并完成后建议跑一次 `avantf-mem vectors` 检查索引健康度。
 
 ---
 

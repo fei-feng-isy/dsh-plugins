@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs'
 const CLI_SOURCE = readFileSync(new URL('../../cli/src/index.ts', import.meta.url), 'utf8')
 
 /** What one command needs: the model always, the model conditionally, or never. */
-type WarmupRule = 'always' | 'vectors-fix' | 'kb-write' | 'never'
+type WarmupRule = 'always' | 'vectors-fix' | 'kb-write' | 'write-unless-dry-run' | 'never'
 
 /**
  * THE SPEC (hand-written on purpose — it is the requirement, not a copy of the implementation):
@@ -51,6 +51,12 @@ const SPEC: Readonly<Record<string, WarmupRule>> = {
   unpin: 'never',
   archive: 'never',
   kb: 'kb-write',
+  // `merge` writes every imported fact through the store's add path (which indexes when the model
+  // is available); `--dry-run` is a plan-only read and must not warm anything.
+  merge: 'write-unless-dry-run',
+  // `import` is the document variant of the same write path; `export` only reads stored rows.
+  export: 'never',
+  import: 'write-unless-dry-run',
   vectors: 'vectors-fix',
 }
 
@@ -114,5 +120,15 @@ describe('the CLI model-warmup table covers the advertised command surface', () 
 
   it('is the table `needsModels` actually applies (not a second list beside a switch)', () => {
     expect(slice('function needsModels(', '\n}\n')).toContain('COMMAND_MODEL_WARMUP[cmd]')
+  })
+
+  it('skips warmup for `merge`/`import --dry-run` only (the write path still needs the model)', () => {
+    const body = slice('function needsModels(', '\n}\n')
+    // The rule's application, not a restatement of the command list: both commands are classified
+    // above, and this is the one place that turns "write unless dry-run" into the actual boolean.
+    expect(SPEC.merge).toBe('write-unless-dry-run')
+    expect(SPEC.import).toBe('write-unless-dry-run')
+    expect(body).toContain("rule === 'write-unless-dry-run'")
+    expect(body).toContain("!rest.includes('--dry-run')")
   })
 })

@@ -79,6 +79,7 @@ import {
 import { parseToolsConfig, resolveToolsDir } from '@avantf/mem-provision'
 import { resetPandocResolution, setPandocProvisioning } from '@avantf/mem-convert'
 import { openDocumentPath } from './open.js'
+import { registerMemCommand } from './command.js'
 import { createVectorMigration } from './vectorMigration.js'
 import { browseDirectory, classifySource } from '@avantf/mem'
 import { flattenToolSpec } from './tool_schema.js'
@@ -561,10 +562,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       logger.info(`tool registered (DEGRADED): ${spec.name}`)
     }
     logger.warn('client tabs unavailable: no runtime to serve the `avantfMem` remote (fix the error above, then restart)')
+    // The command surface must not disappear just because the runtime could not open: that is exactly
+    // when the user types `/mem` to ask why. The SAME reason the tools report is passed through, and a
+    // host without a command service only logs a warning (registerMemCommand never throws).
+    registerMemCommand(ctx, undefined, logger, { degradedReason: reason })
     return
   }
   ctx.provide('avantfMemory', rt)
   logger.info('service registered: avantfMemory')
+  // Registered through the OPTIONAL `commands` service (ctx.get inside), never through `inject`:
+  // a host without it must still mount the tools, service, prompt and Remote face.
+  registerMemCommand(ctx, rt, logger)
 
   // ONE initialization path for everything this plugin must PROVIDE: the pandoc binary every
   // document conversion goes through, and the embedding model + tokenizer warm-up.

@@ -21,6 +21,15 @@ export * from './trustHeartbeat.js'
 export * from './runtime.js'
 export * from './store/memory.js'
 export * from './store/knowledge.js'
+// The ONE write-side normalization (well-formed + NFC + the trim the stores apply), exported for
+// callers that must compare fact CONTENT the same way the store does. The CLI's `merge` is the
+// first such caller: its identity for "the same fact" must not become a second normalization that
+// drifts from `MemoryStore.add`'s (see `store/common.ts`).
+export { normalizeWrite } from './store/common.js'
+// The machine-independent facts export/import document and the ONE content-identity import loop
+// behind `avantf-mem import` and `avantf-mem merge`. It lives here, not in the CLI, because the
+// plugin's `/mem` command must reach the same path without importing another tree's CLI (guard).
+export * from './facts_io.js'
 // The shared vector-space repair flow both stores run, and the driver the plugin mounts. Exported for
 // the same reason as the retrieval orchestration below: it is the pluggability point for a THIRD
 // store (write an adapter, do not copy the loop), and the plugin has to drive both stores through the

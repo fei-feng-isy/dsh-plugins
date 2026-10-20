@@ -1,4 +1,18 @@
-import { ENTITY_SWEEP_BATCH, buildRuntime, warmModels } from '@avantf/mem'
+import {
+  ENTITY_SWEEP_BATCH,
+  EXPORT_STATUSES,
+  buildRuntime,
+  codecForExportPath,
+  decodeFactsExport,
+  encodeFactsExport,
+  exportFacts,
+  importFacts,
+  mergeDb,
+  parseFactsExport,
+  serializeFactsExport,
+  warmModels,
+  type FactsExportCodec,
+} from '@avantf/mem'
 import {
   AdminUnion,
   CONTRADICTION_RESOLUTIONS,
@@ -12,7 +26,8 @@ import {
   RememberUnion,
   validationError,
 } from '@avantf/mem-contract'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { basename, resolve } from 'node:path'
 
 /** A contract union, seen only through the `safeParse` this file calls. */
 interface Validatable<T> {
@@ -115,9 +130,11 @@ const RECALL_TEXT_CMDS: Record<string, { field: 'query' | 'entity'; category: bo
  *   - `always`      — the command encodes a query or writes vectors unconditionally;
  *   - `vectors-fix` — only the explicit repair loads the model (a plain `vectors` is a read);
  *   - `kb-write`    — only the three writing subcommands (`ingest` / `import` / `reindex`);
+ *   - `write-unless-dry-run` — the command writes through the store (and so indexes) unless
+ *                     `--dry-run` makes it a plan-only read; today `merge` and `import`;
  *   - absent        — pure DB/graph commands, so `list`/`show`/`stats`/`related` pay no download.
  */
-const COMMAND_MODEL_WARMUP: Readonly<Record<string, 'always' | 'vectors-fix' | 'kb-write'>> = {
+const COMMAND_MODEL_WARMUP: Readonly<Record<string, 'always' | 'vectors-fix' | 'kb-write' | 'write-unless-dry-run'>> = {
   add: 'always',
   edit: 'always',
   search: 'always',
@@ -126,6 +143,8 @@ const COMMAND_MODEL_WARMUP: Readonly<Record<string, 'always' | 'vectors-fix' | '
   query: 'always',
   vectors: 'vectors-fix',
   kb: 'kb-write',
+  merge: 'write-unless-dry-run',
+  import: 'write-unless-dry-run',
 }
 
 /** {@link COMMAND_MODEL_WARMUP} applied: does THIS invocation need the embedding model? */
@@ -134,6 +153,10 @@ function needsModels(cmd: string | undefined, sub: string | undefined, rest: str
   if (rule === 'always') return true
   if (rule === 'vectors-fix') return rest.includes('--fix')
   if (rule === 'kb-write') return sub === 'ingest' || sub === 'import' || sub === 'reindex'
+  // `merge`/`import` write each imported fact through `rt.remember` (which indexes when the model
+  // is up), while `--dry-run` is a plan-only read and must not pay for a download/warmup. `export`
+  // is deliberately absent: it only reads rows that are already stored.
+  if (rule === 'write-unless-dry-run') return !rest.includes('--dry-run')
   return false
 }
 
@@ -159,6 +182,19 @@ function printDegradedLegNote(result: unknown): void {
   if (result === null || typeof result !== 'object') return
   if ((result as { degraded?: unknown }).degraded !== true) return
   console.error(DEGRADED_LEG_NOTE)
+}
+
+/**
+ * The one explicit codec flag: `--brotli`, `--gzip` or `--plain` (which means `none`, i.e. the
+ * canonical minified JSON). At most one, because "compress AND don't compress" has no meaning.
+ */
+function exportCodecFlag(rest: string[]): FactsExportCodec | undefined {
+  const chosen: FactsExportCodec[] = []
+  if (rest.includes('--brotli')) chosen.push('brotli')
+  if (rest.includes('--gzip')) chosen.push('gzip')
+  if (rest.includes('--plain')) chosen.push('none')
+  if (chosen.length > 1) throw new Error('--brotli / --gzip / --plain 只能给一个')
+  return chosen[0]
 }
 
 async function main(): Promise<void> {
@@ -287,6 +323,78 @@ async function main(): Promise<void> {
           resolution,
           loser_fact_id: numFlag(rest, '--loser'),
         })), null, 2))
+        break
+      }
+      case 'merge': {
+        // Content-identity union with another host's memory.db. The source is opened READ ONLY (the
+        // command never migrates or writes it); the target is *this* runtime, and every imported
+        // fact goes through `rt.remember` so vectors/entities/provenance are generated normally. The
+        // loop itself lives in @avantf/mem, shared with `import` (one add path, one failure rule).
+        const sourcePath = posTokens(rest)[0]
+        if (!sourcePath) throw new Error('usage: avantf-mem merge <path-to-other-memory.db> [--dry-run] [--source-ref <text>]')
+        const report = await mergeDb(rt, sourcePath, {
+          sourceRef: parseFlag(rest, '--source-ref'),
+          dryRun: rest.includes('--dry-run'),
+        })
+        console.log(JSON.stringify(report, null, 2))
+        break
+      }
+      case 'export': {
+        // Read-only snapshot of THIS host's facts. No model warmup: nothing here encodes a query.
+        const status = enumFlag(rest, '--status', EXPORT_STATUSES) ?? 'all'
+        const out = parseFlag(rest, '--out')
+        if (out === 'true') {
+          throw new Error('usage: avantf-mem export [--out <file>] [--status active|archived|all] [--brotli|--gzip|--plain]')
+        }
+        const explicitCodec = exportCodecFlag(rest)
+        const doc = exportFacts(rt, { status })
+        if (out === undefined) {
+          // Without --out the DOCUMENT ITSELF is stdout (not a wrapper) and stays UNCOMPRESSED: it can
+          // be piped straight into `import -`, `jq`, or a backup file. Compression is a file
+          // decision, so asking for a codec without --out is a usage error rather than a silent
+          // change of what stdout means.
+          if (explicitCodec !== undefined) {
+            throw new Error('--brotli / --gzip / --plain 需要配合 --out：stdout 始终是明文 minified JSON（可直接管道给 import -）')
+          }
+          process.stdout.write(serializeFactsExport(doc) + '\n')
+          break
+        }
+        const outPath = resolve(out)
+        // Explicit flag → extension (.br / .gz) → plain minified JSON. The rule lives in the engine
+        // (`codecForExportPath`) because /mem must apply the same one.
+        const codec = codecForExportPath(outPath, explicitCodec)
+        const bytes = encodeFactsExport(doc, { codec })
+        const plainBytes = encodeFactsExport(doc, { codec: 'none' }).length
+        writeFileSync(outPath, bytes)
+        console.log(JSON.stringify({
+          out: outPath,
+          codec,
+          bytes: bytes.length,
+          plain_bytes: plainBytes,
+          // bytes ÷ the uncompressed minified size. 1 for --plain, < 1 for a compressed file.
+          ratio: plainBytes === 0 ? 0 : Number((bytes.length / plainBytes).toFixed(3)),
+          counts: doc.source.counts,
+        }, null, 2))
+        break
+      }
+      case 'import': {
+        // Content-identity union from an export document: the file/stdin variant of `merge`. A broken
+        // format/version throws BEFORE any write; a single refused fact is collected by importFacts
+        // and the rest continue.
+        //
+        // A FILE is read as BYTES and sniffed (plain JSON / gzip / brotli, by content, never by
+        // extension); stdin stays TEXT, because that is what `export` wrote into the pipe.
+        const file = posTokens(rest)[0]
+        if (!file) throw new Error('usage: avantf-mem import <file|-> [--dry-run] [--source-ref <text>]')
+        const doc = file === '-'
+          ? parseFactsExport(readStdin())
+          : decodeFactsExport(readFileSync(file)).doc
+        const explicitRef = parseFlag(rest, '--source-ref')
+        if (explicitRef === '') throw new Error('--source-ref 不能为空')
+        // Provenance fallback only: a fact that carries `sources[0].ref` keeps it (importFacts).
+        const sourceRef = explicitRef ?? ('import:' + (file === '-' ? 'stdin' : basename(file)))
+        const report = await importFacts(rt, doc, { dryRun: rest.includes('--dry-run'), sourceRef })
+        console.log(JSON.stringify({ file, ...report }, null, 2))
         break
       }
       case 'maintenance': {
@@ -446,7 +554,7 @@ async function main(): Promise<void> {
       }
 
       default:
-        console.log('usage: avantf-mem <add|search|ask|probe|related|reason|chain|list|show|edit|remove|archive|restore|helpful|unhelpful|stats|contradict|resolve [<id>]|maintenance|trust|pin|unpin|vectors|kb <sub>|query>')
+        console.log('usage: avantf-mem <add|search|ask|probe|related|reason|chain|list|show|edit|remove|archive|restore|helpful|unhelpful|stats|contradict|merge|export|import|resolve [<id>]|maintenance|trust|pin|unpin|vectors|kb <sub>|query>')
     }
   } finally {
     rt.shutdown()

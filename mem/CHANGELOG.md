@@ -4,6 +4,39 @@ All notable changes to `avantf-mem` are documented here.
 
 ## [Unreleased]
 
+### Changed（导出默认压缩）
+- **导出的快照默认压缩，体积约为原来的 1/5**：`/mem export` 与 `avantf-mem export --out` 现在按
+  扩展名选编码——默认 brotli（`.json.br`；实测 233 条事实、同一份文档：pretty 340.7 KiB → minified
+  300.0 KiB → gzip 92.3 KiB → brotli 70.6 KiB），`--gzip` 得到 `.json.gz`，`--plain` 得到明文
+  minified JSON。不带 `--out` 的 stdout 仍是明文 minified JSON，可直接管道给 `import -`。
+  导入按**内容**自动识别明文 / gzip / brotli 三种形式（不看扩展名），旧的 pretty JSON 快照仍可直接
+  导入；导出文档结构与 `version` 不变。
+
+### Added（斜杠命令）
+- **`/mem` 斜杠命令**：在 DSH 会话里直接管理记忆事实，不必切到终端——`/mem` 无参显示活跃/归档计数、
+  数据根与用法；`/mem export [path]` 导出快照（默认 `<数据根>/backups/memory-YYYYMMDD-HHMMSS.json.br`，
+  原子写入）；`/mem import <file>` 按内容并集导入；`/mem merge <db-path>` 合并另一台主机的 `memory.db`。
+  导入/合并支持 `--dry-run`（零写入）与 `--source-ref`，结果以中文多行摘要报告 imported / would_import、
+  skipped_existing、skipped_archived、metadata_dropped 与失败条目。
+- **斜杠命令与 CLI 的差别是进程边界**：`/mem` 在宿主进程内写，导入/合并的事实**立即可检索、无需重启**；
+  `avantf-mem import` / `merge` 是独立进程，运行中的宿主不会把新写入的向量装进内存索引，导入后需重启 dsh。
+- **宿主没有 `commands` 服务时插件照常挂载**（只记一条 WARNING，`/mem` 不可用）；runtime 打不开时，
+  只要 `commands` 可用，`/mem` 仍会注册并报告与工具面相同的原因。
+
+### Added（CLI）
+- **`avantf-mem merge <other-memory.db>`**：按**内容并集**合并另一台主机的记忆库（`--dry-run` 预览、
+  `--source-ref` 指定来源），替代手工逐条 `add`。源库以只读打开，只导入 ACTIVE 事实；事实身份是
+  NFC 规范化后的内容而不是 `fact_id`（两台机器会为不同事实分配同一个 id），目标已存在的内容（含归档行）
+  在写入前跳过，因此可重复执行且不会抬高 `assert_count`。单条失败收集进 `failed` 后继续，stdout 输出
+  单个 JSON 报告。
+- **`avantf-mem export [--out <file>] [--status active|archived|all]`**：把记忆库导出成
+  `avantf-mem-facts` v1 JSON（无损覆盖时间戳、信任度、pin、assert/helpful 计数、来源、有效期与
+  supersedes 指针），用于跨主机同步与备份；不带 `--out` 时 stdout 就是导出文档本身。
+- **`avantf-mem import <file|-> [--dry-run] [--source-ref <text>]`**：按**内容**并集导入导出的 JSON，
+  与 `merge` 共用同一条写入路径。只导入 ACTIVE 事实，目标已有内容（含归档行）跳过，因此可重复执行、
+  不会抬高 `assert_count`；单条失败收集后继续。携带 category / ttl / 来源 / 有效期，其余元数据不恢复
+  并在 `metadata_dropped` 里如实计数。`--dry-run` 零写入且不加载嵌入模型。
+
 ## [0.6.4] - 2026-10-12
 
 ### Fixed（日志措辞）
